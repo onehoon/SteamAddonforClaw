@@ -22,6 +22,7 @@ using SteamInputAddonforClaw.Updates;
 using SteamInputAddonforClaw.ClawHud;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Shortcuts;
+using SteamInputAddonforClaw.Processes;
 using SteamInputAddonforClaw.Xbox.Session;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.ControllerVibration;
@@ -101,6 +102,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver;
     private readonly ShortcutStore _shortcutStore;
     private readonly ShortcutRuntime _shortcutRuntime;
+    private readonly UserProcessLauncher _userProcessLauncher = UserProcessLauncher.Shared;
     private readonly NirCmdScreenshotCapture _nircmdScreenshotCapture = new();
     private WindowsAcDcPowerNotificationSource? _acDcPowerSource;
     private TdpRuntime? _tdpRuntime;
@@ -193,7 +195,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             : Path.Combine(testOnlyDataRoot, "logs");
         _profileStore = new(profilePath);
         _shortcutStore = new(shortcutsPath);
-        _shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);
+        _shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,
+            userProcessLauncher: _userProcessLauncher);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
@@ -979,7 +982,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     // Full1902 Policy B (already merged, #473): Gamebar / WING custom delivery is live
                     // only while native Win+G suppression is proven armed for this Addon-authority
                     // lifetime -- bound to the existing guard seam, not a new authority boolean.
-                    nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed);
+                    nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed,
+                    launchBigPictureOverride: () => CenterM.Oem1BigPictureLauncher.Launch(_userProcessLauncher),
+                    launchXboxAppOverride: () => CenterM.FrontButtonXboxAppLauncher.Launch(_userProcessLauncher),
+                    launchApplicationOverride: application => CenterM.Oem1ApplicationLauncher.Launch(application, _userProcessLauncher));
             }
             catch (Exception exception)
             {

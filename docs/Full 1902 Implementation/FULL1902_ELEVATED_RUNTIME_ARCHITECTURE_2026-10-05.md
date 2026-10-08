@@ -382,24 +382,34 @@ Do not inline or remove a retained helper solely to reduce process count. In par
 
 ---
 
-## 8. Remaining external-process privilege boundary
+## 8. User-action process privilege boundary
 
-An elevated Runtime changes the token inherited by processes it directly launches.
+The Runtime remains High because the existing Full1902/WING suppression owner needs that token. User-launched actions use a separate, bounded policy implemented by one `UserProcessLauncher` instance shared through the existing Runtime host by Shortcut and front-button execution.
 
-The internal helper/worker cleanup is complete: retained Addon-owned helpers now inherit the Runtime's High token intentionally, and redundant feature-local `runas` paths have been removed.
+~~~text
+User EXE / Shortcut PowerShell, administrator option OFF
+=> validated same-user, same-session Medium token
 
-The remaining open privilege question is limited to **user-launched external actions**, including:
+User EXE / Shortcut PowerShell, administrator option ON
+=> existing High Runtime token
 
-- WING/OEM front-button `LaunchApplication`;
-- Shortcut executable actions;
-- Shortcut PowerShell actions;
-- URL/shell actions where their launch semantics are relevant.
+Steam URI / Xbox package
+=> Explorer launched with the validated Medium token
 
-Current behavior is accepted temporarily: a process launched directly by the High Runtime may inherit elevation.
+HTTP(S) URL
+=> `rundll32.exe url.dll,FileProtocolHandler` invokes the registered browser with the validated Medium token
 
-This is not a controller-safety blocker and must not be solved by introducing a new authority owner. A later focused change may establish a Medium user-action launch boundary if product testing confirms that arbitrary user-selected programs should not inherit Runtime High.
+Screenshot
+=> existing NirCmdScreenshotCapture path; unchanged
+~~~
 
-Do not pre-build a generic broker, Windows service, token manager, or shell-launch abstraction solely in anticipation.
+The Medium path validates the UAC-linked limited token's user SID, session, elevation type, and exact Medium integrity before process creation. It uses `CreateProcessAsUserW` so the existing EXE argument and encoded PowerShell command-line limits remain supported; `CreateProcessWithTokenW` has a lower documented command-line limit. It does not use `UseShellExecute` from the High Runtime for user actions. A missing/invalid Medium token or any launch failure remains a failure; there is no automatic retry using High. The explicit administrator option likewise uses the existing High token without another UAC prompt and does not retry at Medium.
+
+Shortcut EXE and PowerShell actions persist an optional per-action `runAsAdministrator` boolean; an absent legacy value means `false`. The front-button `LaunchApplication` binding uses an optional final `RunAsAdministrator` field with the same default. Built-in Steam, Big Picture, Xbox, and browser URL actions expose no administrator option and use the Medium shell route. Only literal `.exe` actions can use the direct-process path; PowerShell is restricted to the existing Shortcut PowerShell action.
+
+Steam URI and packaged-app requests are dispatched by starting Explorer as the interactive user's Medium process, preserving the existing Steam URI and Xbox AUMID. HTTP(S) URLs use the Windows `rundll32.exe url.dll,FileProtocolHandler` protocol-handler path with the complete escaped URI passed directly, avoiding both Explorer's second-layer parsing and command-interpreter expansion while retaining the validated Medium token. Neither path changes the integrity of an already-running target such as Steam. Cold-start Steam, Xbox activation, default-browser URL dispatch, and the no-normal-Explorer Windows/Steam FSE case still require physical validation before release; the implementation must not be described as proven for those cases until that matrix is completed.
+
+This policy does not introduce another controller authority, resident broker, service, token cache, or child-process lifetime owner. Shortcut retains its TileId-based authority and failure/Overlay-retirement behavior; the front-button executor retains its current action validation and caller-specific failure handling.
 
 ---
 
@@ -443,13 +453,14 @@ TDP helper consolidation is **not** an open item. It is intentionally retained b
 
 Remaining follow-up:
 
-1. decide the final user EXE / PowerShell / shell-action privilege boundary;
-2. complete the physical elevated-WING and power-lifecycle validation matrix;
-3. do not revisit helper inlining without concrete operational evidence.
+1. complete the physical user-action Medium/High token and Windows/Steam FSE activation matrix, plus the elevated-WING and power-lifecycle validation matrix;
+2. do not revisit helper inlining without concrete operational evidence.
 
 ---
 
 ## 10. Explicit non-goals of the first elevation implementation
+
+The following list records the scope of the original elevation implementation. Its former “external application de-elevation” item is superseded by the current user-action policy in sections 8 and 13; the historical scope decision itself is retained.
 
 Do not include these in the first implementation PR unless a strictly required compile/test fix forces a tiny mechanical change:
 
@@ -619,22 +630,21 @@ PR685
 => TDP helper remains separate, asInvoker, inherits High
 => Center M helper remains separate, asInvoker, inherits High
 => helper-local UAC semantics removed
+
+User-action process launch
+=> one Host-shared UserProcessLauncher
+=> default EXE / PowerShell / shell activation uses verified same-user Medium
+=> explicit EXE / PowerShell administrator option uses existing High Runtime token
+=> Shortcut and front-button preferences default to false and preserve existing data
+=> Frontend protocol v69 carries the Shortcut editor preference
+=> screenshot and controller authority remain unchanged
 ~~~
 
-The process architecture is therefore no longer in a "migration pending" state.
+The process architecture is therefore no longer in a "migration pending" state. The user-action launch code is implemented; actual Medium/High token, cold-start Steam/Xbox, and Windows/Steam FSE verification remains a release-validation item.
 
-### Remaining process-privilege work
+### Remaining process-privilege validation
 
-The only planned privilege-boundary design item is the user-launched external-action path:
-
-~~~text
-front-button LaunchApplication
-Shortcut executable
-Shortcut PowerShell
-relevant shell/URL launch semantics
-~~~
-
-Treat this as a separate user-process launch policy. It must not alter controller authority, helper fault-containment, HidHide/VIIPER ownership, or WING suppression.
+The user-launched external-action policy is implemented. Before release, physical validation must demonstrate the actual child integrity and supported shell behavior for Shortcut EXE/PowerShell, front-button EXE, Steam cold start, Xbox package activation, HTTP(S) browser launch, Windows desktop, and Windows/Steam FSE. Keep this validation separate from controller-authority changes.
 
 ### Separate Full1902 reliability work
 
@@ -707,10 +717,17 @@ Windows logon
     +-- CenterMStartupHelper [asInvoker; bounded mutation/readback retained]
     +-- setup/registration workers [existing transaction cleanup retained]
 
- External user actions
+External user actions
     |
-    +-- current behavior retained for this implementation
-    +-- final privilege boundary deferred to Phase B
+    +-- Shortcut / front-button EXE and PowerShell
+    |       +-- default: validated same-user Medium token
+    |       +-- explicit administrator option: existing Runtime High token
+    +-- Steam URI / Xbox package
+    |       +-- Explorer shell dispatch with validated Medium token
+    +-- HTTP(S) URL
+    |       +-- rundll32 URL protocol handler / registered browser with validated Medium token
+    +-- Screenshot
+            +-- existing NirCmdScreenshotCapture path
 ~~~
 
 The key simplification is:

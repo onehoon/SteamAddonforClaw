@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using SteamInputAddonforClaw.CenterM;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
+using SteamInputAddonforClaw.Processes;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -41,6 +43,28 @@ public sealed class FrontButtonActionExecutorLauncherTests
     }
 
     [Fact]
+    public void Application_adapter_passes_path_arguments_and_admin_choice_to_the_shared_launcher()
+    {
+        ProcessStartInfo? captured = null;
+        bool? requestedAdmin = null;
+        var launcher = new UserProcessLauncher((startInfo, runAsAdministrator) =>
+        {
+            captured = startInfo;
+            requestedAdmin = runAsAdministrator;
+            return true;
+        });
+        var binding = new FrontButtonLaunchApplicationBinding(@"C:\Tools\Tool.exe", "--example", true);
+
+        Oem1ApplicationLauncher.Launch(binding, launcher);
+
+        Assert.NotNull(captured);
+        Assert.Equal(@"C:\Tools\Tool.exe", captured!.FileName);
+        Assert.Equal("--example", captured.Arguments);
+        Assert.False(captured.UseShellExecute);
+        Assert.True(requestedAdmin);
+    }
+
+    [Fact]
     public void Xbox_app_activation_is_delegated_to_the_interactive_shell()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -48,9 +72,8 @@ public sealed class FrontButtonActionExecutorLauncherTests
         var launcher = File.ReadAllText(Path.Combine(dir!.FullName,
             "src/SteamInputAddonforClaw/CenterM/FrontButtonXboxAppLauncher.cs"));
 
-        Assert.Contains("FileName = \"explorer.exe\"", launcher, StringComparison.Ordinal);
-        Assert.Contains("shell:AppsFolder\\\\{XboxAppAumid}", launcher, StringComparison.Ordinal);
-        Assert.Contains("UseShellExecute = true", launcher, StringComparison.Ordinal);
+        Assert.Contains("LaunchXboxApp()", launcher, StringComparison.Ordinal);
+        Assert.Contains("userProcessLauncher ?? UserProcessLauncher.Shared", launcher, StringComparison.Ordinal);
         Assert.DoesNotContain("IApplicationActivationManager", launcher, StringComparison.Ordinal);
     }
 

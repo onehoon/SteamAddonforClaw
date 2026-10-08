@@ -113,7 +113,7 @@ Available actions depend on the assignment group:
 | **Steam Big Picture** | Opens Steam Big Picture. Available in Normal assignments. |
 | **Xbox** | Opens the Xbox app. Available in Normal assignments. |
 | **Keyboard/Hotkey** | Sends optional Ctrl, Shift, Alt, or Windows modifiers with one configured key. |
-| **Launch Application** | Starts a selected executable, optionally with arguments. |
+| **Launch Application** | Starts a selected executable, optionally with arguments. Its **Run as administrator** option is off by default; when enabled, the app uses the Runtime's existing administrator permission. |
 
 The first-install defaults are **Gamebar Button: Steam Big Picture** in Normal and **Steam Button** in Steam Game / Big Picture; **Center M Button: Quick Settings Overlay** in both groups. In each mode, **Gamebar Button** and **Center M Button** must use different actions.
 
@@ -163,6 +163,8 @@ Use **Shortcut** to add, edit, delete, and drag to reorder items shown in Quick 
 - Open a website URL.
 - Capture the primary display as a JPEG screenshot.
 - Open Steam Big Picture, the Steam client, or the Xbox app.
+
+The **Application (.exe)** and **PowerShell** Add/Edit panels include **Run as administrator**, off by default. When enabled, the action uses the Addon's existing administrator permission and does not show a second UAC prompt. With the option off, the Addon requests the same user's normal (Medium-integrity) token; if that token is unavailable, the action fails instead of running elevated. Steam, Big Picture, Xbox, and website actions always use this normal-user launch path and have no administrator option. Screenshot continues to use its existing capture path.
 
 The Screenshot action captures the primary display as a JPEG. Its save folder is configured inside that Screenshot Shortcut's Add/Edit dialog: choose a custom folder or use the default Windows `Pictures\Screenshots` folder. **Browse** stages a folder, **Use default** stages the default location, **Open folder** opens the currently selected location, and **Save** commits the folder with the Shortcut; **Cancel** discards staged changes. The normal editor allows at most one Screenshot Shortcut. A shortcut displayed in the Overlay runs the action you configured here; the Overlay receives only the tile and never the folder path.
 

@@ -162,7 +162,10 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // action parameters. The global Screenshot-folder snapshot/mutation RPC is
 // retired and the editor action/input contracts carry the configured folder.
 // A v67 peer must fail the handshake before using the changed contract.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 68; }
+// Version 69: Shortcut editor action/input contracts carry the optional
+// RunAsAdministrator preference for EXE and PowerShell actions.
+// A v68 peer must fail the handshake before using the changed contract.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 69; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

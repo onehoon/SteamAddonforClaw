@@ -176,8 +176,28 @@ public sealed partial class ShortcutPage : UserControl
         var executablePath = new TextBox { Header = "Executable path", PlaceholderText = @"C:\Path\Application.exe" };
         var executableBrowse = new Button { Content = "Browse…", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
         var executableArguments = new TextBox { Header = "Arguments", PlaceholderText = "Optional arguments" };
-        var executablePanel = new StackPanel { Spacing = 8, Children = { executablePath, executableBrowse, executableArguments } };
+        var executableRunAsAdministrator = new CheckBox
+        {
+            Content = "Run as administrator",
+            IsChecked = existing?.Action.Kind == FrontendShortcutEditorActionKind.Executable
+                && existing.Action.RunAsAdministrator
+        };
+        var executablePanel = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                executablePath, executableBrowse, executableArguments, executableRunAsAdministrator,
+                new TextBlock { Text = "Runs with administrator privileges; otherwise requests normal user privileges.", TextWrapping = TextWrapping.Wrap }
+            }
+        };
 
+        var powerShellRunAsAdministrator = new CheckBox
+        {
+            Content = "Run as administrator",
+            IsChecked = existing?.Action.Kind == FrontendShortcutEditorActionKind.PowerShell
+                && existing.Action.RunAsAdministrator
+        };
         var script = new TextBox
         {
             Header = "Script",
@@ -187,7 +207,15 @@ public sealed partial class ShortcutPage : UserControl
             MinHeight = 180,
             Text = existing?.Action.PowerShellScript ?? string.Empty
         };
-        var scriptPanel = new StackPanel { Spacing = 8, Children = { script } };
+        var scriptPanel = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                script, powerShellRunAsAdministrator,
+                new TextBlock { Text = "Runs with administrator privileges; otherwise requests normal user privileges.", TextWrapping = TextWrapping.Wrap }
+            }
+        };
 
         var url = new TextBox { Header = "URL", PlaceholderText = "https://…", Text = existing?.Action.Url ?? string.Empty };
         var urlPanel = new StackPanel { Spacing = 8, Children = { url } };
@@ -346,8 +374,12 @@ public sealed partial class ShortcutPage : UserControl
             : FrontendShortcutEditorActionKind.Unsupported;
         var action = selectedKind switch
         {
-            FrontendShortcutEditorActionKind.Executable => new FrontendShortcutActionInput(selectedKind, executablePath.Text, executableArguments.Text),
-            FrontendShortcutEditorActionKind.PowerShell => new FrontendShortcutActionInput(selectedKind, PowerShellScript: script.Text),
+            FrontendShortcutEditorActionKind.Executable => new FrontendShortcutActionInput(
+                selectedKind, executablePath.Text, executableArguments.Text,
+                RunAsAdministrator: executableRunAsAdministrator.IsChecked == true),
+            FrontendShortcutEditorActionKind.PowerShell => new FrontendShortcutActionInput(
+                selectedKind, PowerShellScript: script.Text,
+                RunAsAdministrator: powerShellRunAsAdministrator.IsChecked == true),
             FrontendShortcutEditorActionKind.Url => new FrontendShortcutActionInput(selectedKind, Url: url.Text),
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => new FrontendShortcutActionInput(selectedKind, ScreenshotFolder: stagedScreenshotFolder),
             FrontendShortcutEditorActionKind.SteamBigPicture => new FrontendShortcutActionInput(selectedKind),

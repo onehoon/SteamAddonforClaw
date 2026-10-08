@@ -146,6 +146,36 @@ public sealed class FrontButtonDispatchTests
     }
 
     [Fact]
+    public void Launch_application_admin_choice_is_preserved_for_both_buttons_in_both_domains()
+    {
+        foreach (var (kind, domain) in new[]
+        {
+            (FrontButtonKind.Gamebar, FrontButtonDomain.Normal),
+            (FrontButtonKind.CenterM, FrontButtonDomain.Normal),
+            (FrontButtonKind.Gamebar, FrontButtonDomain.Steam),
+            (FrontButtonKind.CenterM, FrontButtonDomain.Steam)
+        })
+        {
+            var binding = FrontButtonBinding.Of(FrontButtonAction.LaunchApplication) with
+            {
+                Launch = new FrontButtonLaunchApplicationBinding(@"C:\Tools\Tool.exe", "--example", true)
+            };
+            var mapping = FrontButtonMappingSettings.Default.With(kind, domain, binding);
+            var seams = new Seams();
+            var steamActive = domain == FrontButtonDomain.Steam;
+
+            if (kind == FrontButtonKind.Gamebar)
+                new WingActionDispatcher(() => mapping, () => steamActive, seams.Executor()).Dispatch(WingGesture.Single);
+            else
+                new Oem1ActionDispatcher(() => mapping, () => steamActive, seams.Executor())
+                    .Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
+
+            Assert.Equal(binding.Launch, seams.Launch);
+            Assert.True(seams.Launch!.RunAsAdministrator);
+        }
+    }
+
+    [Fact]
     public void A_gamebar_win_g_hotkey_binding_is_refused()
     {
         var mapping = FrontButtonMappingSettings.Default.With(

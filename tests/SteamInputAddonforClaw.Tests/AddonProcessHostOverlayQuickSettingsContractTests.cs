@@ -96,7 +96,8 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Contains("_overlayController.BindShortcutAuthority(", source, StringComparison.Ordinal);
         Assert.Contains("capture: _ => Task.FromResult(_shortcutRuntime.Capture())", source, StringComparison.Ordinal);
         Assert.Contains("execute: (tileId, token) => HandleOverlayShortcutExecutionAsync(tileId, token)", source, StringComparison.Ordinal);
-        Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);", source, StringComparison.Ordinal);
+        Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,", source, StringComparison.Ordinal);
+        Assert.Contains("userProcessLauncher: _userProcessLauncher);", source, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(source, "_shortcutRuntime = new("));
         Assert.Contains("Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive", execution, StringComparison.Ordinal);
         Assert.Contains("_shortcutRuntime.ExecuteAsync(tileId, token)", execution, StringComparison.Ordinal);

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using SteamInputAddonforClaw.Processes;
 
 namespace SteamInputAddonforClaw.CenterM;
 
@@ -9,12 +9,9 @@ namespace SteamInputAddonforClaw.CenterM;
 /// </summary>
 internal static class Oem1BigPictureLauncher
 {
-    internal static void Launch()
+    internal static void Launch(UserProcessLauncher? userProcessLauncher = null)
     {
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = "steam://open/bigpicture",
-            UseShellExecute = true
-        });
+        if (!(userProcessLauncher ?? UserProcessLauncher.Shared).LaunchUri("steam://open/bigpicture"))
+            throw new InvalidOperationException("Steam Big Picture could not be activated.");
     }
 }

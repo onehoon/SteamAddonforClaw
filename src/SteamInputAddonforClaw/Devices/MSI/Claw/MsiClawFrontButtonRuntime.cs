@@ -118,10 +118,10 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
         // pulses, hotkey, and application launcher.
         var actionExecutor = new CenterM.FrontButtonActionExecutor(
             requestOverlayToggle: requestOverlayToggle,
-            launchBigPicture: launchBigPictureOverride ?? Oem1BigPictureLauncher.Launch,
+            launchBigPicture: launchBigPictureOverride ?? (() => Oem1BigPictureLauncher.Launch()),
             tryRequestSteamPulse: tryRequestSteamPulse,
             tryRequestQuickAccessPulse: tryRequestQuickAccessPulse,
-            launchXboxApp: launchXboxAppOverride ?? FrontButtonXboxAppLauncher.Launch,
+            launchXboxApp: launchXboxAppOverride ?? (() => FrontButtonXboxAppLauncher.Launch()),
             sendHotkey: sendHotkeyOverride,
             launchApplication: launchApplicationOverride);
 
