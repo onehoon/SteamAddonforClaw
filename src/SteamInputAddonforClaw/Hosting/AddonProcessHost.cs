@@ -1481,7 +1481,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             ?? FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     }
 
-    private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync(CancellationToken cancellationToken)
+    private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync(
+        string? saveFolder,
+        CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0)
             return new(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
@@ -1523,12 +1525,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 }
             }
 
-            var settings = _runtimeStartupSettings;
-            if (settings is null)
-                return new(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
-
             return await _nircmdScreenshotCapture.CaptureAsync(
-                settings.ScreenshotSaveFolder,
+                saveFolder,
                 cancellationToken).ConfigureAwait(false);
         }
         finally

@@ -27,7 +27,7 @@ public sealed class OverlayTransportTests
     public void Active_profile_show_remains_a_narrow_overlay_command()
     {
         Assert.Equal(18, OverlayTransportProtocol.CurrentVersion);
-        Assert.Equal(67, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(68, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
             OverlayTransportProtocol.CurrentVersion,

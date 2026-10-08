@@ -545,15 +545,10 @@ public interface IAddonFrontendControl
 {
     event EventHandler? StateInvalidated;
     Task<FrontendShortcutEditorSnapshot> CaptureShortcutEditorAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendShortcutEditorSnapshot.Unavailable(
-            new FrontendScreenshotFolderSnapshot(true, string.Empty, null),
-            "Shortcut editing is unavailable."));
+        Task.FromResult(FrontendShortcutEditorSnapshot.Unavailable("Shortcut editing is unavailable."));
     Task<FrontendShortcutMutationResult> MutateShortcutAsync(FrontendShortcutMutationIntent intent, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendShortcutMutationResult(false, false, "Shortcut editing is unavailable.",
-            FrontendShortcutEditorSnapshot.Unavailable(new FrontendScreenshotFolderSnapshot(true, string.Empty, null), "Shortcut editing is unavailable.")));
-    Task<FrontendScreenshotFolderMutationResult> SetScreenshotSaveFolderAsync(string? folder, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendScreenshotFolderMutationResult(false, "Screenshot folder settings are unavailable.",
-            new FrontendScreenshotFolderSnapshot(true, string.Empty, null)));
+            FrontendShortcutEditorSnapshot.Unavailable("Shortcut editing is unavailable.")));
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);

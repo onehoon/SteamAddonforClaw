@@ -22,7 +22,6 @@ public sealed partial class ShortcutPage : UserControl
     private readonly DispatcherQueue _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
     private IAddonFrontendControl? _frontend;
     private Func<nint>? _windowHandleProvider;
-    private FrontendScreenshotFolderSnapshot? _screenshotFolder;
     private bool _active;
     private bool _operationInProgress;
     private bool _dialogOpen;
@@ -88,17 +87,11 @@ public sealed partial class ShortcutPage : UserControl
         _tiles.Clear();
         foreach (var tile in snapshot.Tiles)
             _tiles.Add(tile);
-        _screenshotFolder = snapshot.ScreenshotFolder;
-        ScreenshotFolderPathText.Text = snapshot.ScreenshotFolder.EffectiveFolder;
-        ScreenshotFolderModeText.Text = snapshot.ScreenshotFolder.UsingDefault ? "Using the default folder" : "Custom folder";
         ShortcutEmptyState.Visibility = snapshot.Available && _tiles.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ShortcutList.Visibility = snapshot.Available && _tiles.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         AddShortcutButton.IsEnabled = snapshot.Available && !_operationInProgress;
         ShortcutList.IsEnabled = snapshot.Available && _tiles.Count > 0 && !_operationInProgress;
         UpdateShortcutItemWidth();
-        UseDefaultFolderButton.IsEnabled = !snapshot.ScreenshotFolder.UsingDefault && !_operationInProgress;
-        BrowseScreenshotFolderButton.IsEnabled = !_operationInProgress;
-        OpenScreenshotFolderButton.IsEnabled = !_operationInProgress;
 
         if (!snapshot.Available)
             ShowMessage(snapshot.FailureMessage ?? "Shortcut editing is unavailable.", InfoBarSeverity.Warning);
@@ -119,7 +112,38 @@ public sealed partial class ShortcutPage : UserControl
 
     private async Task ShowEditorAsync(FrontendShortcutEditorTile? existing)
     {
-        if (_frontend is null || _operationInProgress || XamlRoot is null) return;
+        if (_frontend is null || _operationInProgress || _dialogOpen || XamlRoot is null) return;
+        _dialogOpen = true;
+        FrontendShortcutEditorSnapshot authoritativeSnapshot;
+        try
+        {
+            authoritativeSnapshot = await _frontend.CaptureShortcutEditorAsync();
+        }
+        catch
+        {
+            _dialogOpen = false;
+            ShowMessage("Shortcut settings could not be loaded.", InfoBarSeverity.Error);
+            return;
+        }
+
+        Render(authoritativeSnapshot);
+        if (!authoritativeSnapshot.Available)
+        {
+            _dialogOpen = false;
+            return;
+        }
+
+        var existingTileId = existing?.TileId;
+        existing = existingTileId is { } tileId
+            ? authoritativeSnapshot.Tiles.FirstOrDefault(tile => tile.TileId == tileId)
+            : null;
+        if (existingTileId is not null && existing is null)
+        {
+            _dialogOpen = false;
+            ShowMessage("Shortcut tile was not found.", InfoBarSeverity.Warning);
+            return;
+        }
+
         var titleBox = new TextBox
         {
             Header = "Title",
@@ -134,7 +158,12 @@ public sealed partial class ShortcutPage : UserControl
         AddActionChoice(actionPicker, "Steam Big Picture", FrontendShortcutEditorActionKind.SteamBigPicture);
         AddActionChoice(actionPicker, "Steam", FrontendShortcutEditorActionKind.SteamClient);
         AddActionChoice(actionPicker, "Xbox", FrontendShortcutEditorActionKind.XboxApp);
-        AddActionChoice(actionPicker, "Screenshot", FrontendShortcutEditorActionKind.ScreenshotFullscreen);
+        var existingScreenshot = existing?.Action.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen;
+        var screenshotAlreadyExists = authoritativeSnapshot.Tiles.Any(tile =>
+            tile.Action.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen
+            && tile.TileId != existing?.TileId);
+        if (existingScreenshot || !screenshotAlreadyExists)
+            AddActionChoice(actionPicker, "Screenshot", FrontendShortcutEditorActionKind.ScreenshotFullscreen);
         var closeOverlayToggle = new ToggleSwitch
         {
             Header = "Close Overlay after launch",
@@ -162,13 +191,74 @@ public sealed partial class ShortcutPage : UserControl
 
         var url = new TextBox { Header = "URL", PlaceholderText = "https://…", Text = existing?.Action.Url ?? string.Empty };
         var urlPanel = new StackPanel { Spacing = 8, Children = { url } };
+        string? stagedScreenshotFolder = existingScreenshot ? existing?.Action.ScreenshotFolder : null;
+        var screenshotFolderPath = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var browseScreenshotFolderButton = new Button { Content = "Browse…", HorizontalAlignment = HorizontalAlignment.Left };
+        var useDefaultFolderButton = new Button { Content = "Use default", HorizontalAlignment = HorizontalAlignment.Left };
+        var openScreenshotFolderButton = new Button { Content = "Open folder", HorizontalAlignment = HorizontalAlignment.Left };
+        void RenderScreenshotFolder()
+        {
+            screenshotFolderPath.Text = ResolveScreenshotFolder(stagedScreenshotFolder);
+            useDefaultFolderButton.IsEnabled = !string.IsNullOrWhiteSpace(stagedScreenshotFolder);
+        }
+
+        browseScreenshotFolderButton.Click += async (_, _) =>
+        {
+            try
+            {
+                var hwnd = _windowHandleProvider?.Invoke() ?? 0;
+                if (hwnd == 0) throw new InvalidOperationException("The Main App window is unavailable.");
+                var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+                var picker = new FolderPicker(windowId);
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder is null) return;
+                stagedScreenshotFolder = folder.Path;
+                RenderScreenshotFolder();
+            }
+            catch
+            {
+                ShowMessage("The folder picker could not be opened.", InfoBarSeverity.Error);
+            }
+        };
+        useDefaultFolderButton.Click += (_, _) =>
+        {
+            stagedScreenshotFolder = null;
+            RenderScreenshotFolder();
+        };
+        openScreenshotFolderButton.Click += (_, _) =>
+        {
+            var folder = ResolveScreenshotFolder(stagedScreenshotFolder);
+            if (string.IsNullOrWhiteSpace(folder))
+            {
+                ShowMessage("The effective Screenshot folder is unavailable.", InfoBarSeverity.Warning);
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(folder);
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+            }
+            catch
+            {
+                ShowMessage("The Screenshot folder could not be opened.", InfoBarSeverity.Error);
+            }
+        };
+        RenderScreenshotFolder();
         var screenshotPanel = new StackPanel
         {
             Spacing = 8,
             Children =
             {
                 new TextBlock { Text = "Captures the primary display as JPEG.", TextWrapping = TextWrapping.Wrap },
-                new TextBlock { Text = "The save folder is configured on this Shortcut page.", Opacity = 0.7, TextWrapping = TextWrapping.Wrap }
+                new TextBlock { Text = "Save folder", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                screenshotFolderPath,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    Children = { browseScreenshotFolderButton, useDefaultFolderButton, openScreenshotFolderButton }
+                }
             }
         };
         var steamBigPicturePanel = CreateBuiltInActionPanel("Opens Steam Big Picture.");
@@ -259,7 +349,7 @@ public sealed partial class ShortcutPage : UserControl
             FrontendShortcutEditorActionKind.Executable => new FrontendShortcutActionInput(selectedKind, executablePath.Text, executableArguments.Text),
             FrontendShortcutEditorActionKind.PowerShell => new FrontendShortcutActionInput(selectedKind, PowerShellScript: script.Text),
             FrontendShortcutEditorActionKind.Url => new FrontendShortcutActionInput(selectedKind, Url: url.Text),
-            FrontendShortcutEditorActionKind.ScreenshotFullscreen => new FrontendShortcutActionInput(selectedKind),
+            FrontendShortcutEditorActionKind.ScreenshotFullscreen => new FrontendShortcutActionInput(selectedKind, ScreenshotFolder: stagedScreenshotFolder),
             FrontendShortcutEditorActionKind.SteamBigPicture => new FrontendShortcutActionInput(selectedKind),
             FrontendShortcutEditorActionKind.SteamClient => new FrontendShortcutActionInput(selectedKind),
             FrontendShortcutEditorActionKind.XboxApp => new FrontendShortcutActionInput(selectedKind),
@@ -576,82 +666,13 @@ public sealed partial class ShortcutPage : UserControl
         if (_active) await CaptureAndRenderAsync();
     }
 
-    private async void BrowseScreenshotFolderButton_Click(object sender, RoutedEventArgs e)
+    private static string ResolveScreenshotFolder(string? configuredFolder)
     {
-        if (_frontend is null || _operationInProgress) return;
-        try
-        {
-            _dialogOpen = true;
-            var hwnd = _windowHandleProvider?.Invoke() ?? 0;
-            var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
-            var picker = new FolderPicker(windowId);
-            var folder = await picker.PickSingleFolderAsync();
-            _dialogOpen = false;
-            if (folder is not null) await SetScreenshotFolderAsync(folder.Path);
-        }
-        catch
-        {
-            ShowMessage("The folder picker could not be opened.", InfoBarSeverity.Error);
-        }
-        finally
-        {
-            _dialogOpen = false;
-        }
-    }
-
-    private async void UseDefaultFolderButton_Click(object sender, RoutedEventArgs e) =>
-        await SetScreenshotFolderAsync(null);
-
-    private async Task SetScreenshotFolderAsync(string? folder)
-    {
-        if (_frontend is null || _operationInProgress) return;
-        if (!FrontendShortcutEditorPayloadPolicy.IsScreenshotFolderRequestWithinLimit(folder))
-        {
-            ShowMessage("Screenshot folder path exceeds the supported size.", InfoBarSeverity.Warning);
-            return;
-        }
-
-        SetBusy(true);
-        try
-        {
-            var result = await _frontend.SetScreenshotSaveFolderAsync(folder);
-            _screenshotFolder = result.Snapshot;
-            ScreenshotFolderPathText.Text = result.Snapshot.EffectiveFolder;
-            ScreenshotFolderModeText.Text = result.Snapshot.UsingDefault ? "Using the default folder" : "Custom folder";
-            UseDefaultFolderButton.IsEnabled = !result.Snapshot.UsingDefault;
-            if (!result.Succeeded)
-                ShowMessage(result.FailureMessage ?? "Screenshot folder could not be saved.", InfoBarSeverity.Error);
-            else
-                ShortcutInfoBar.IsOpen = false;
-        }
-        catch
-        {
-            ShowMessage("Screenshot folder could not be saved.", InfoBarSeverity.Error);
-        }
-        finally
-        {
-            SetBusy(false);
-        }
-    }
-
-    private void OpenScreenshotFolderButton_Click(object sender, RoutedEventArgs e)
-    {
-        var folder = _screenshotFolder?.EffectiveFolder;
-        if (string.IsNullOrWhiteSpace(folder))
-        {
-            ShowMessage("The effective Screenshot folder is unavailable.", InfoBarSeverity.Warning);
-            return;
-        }
-
-        try
-        {
-            Directory.CreateDirectory(folder);
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
-        }
-        catch
-        {
-            ShowMessage("The Screenshot folder could not be opened.", InfoBarSeverity.Error);
-        }
+        if (!string.IsNullOrWhiteSpace(configuredFolder)) return configuredFolder;
+        var pictures = Environment.GetFolderPath(
+            Environment.SpecialFolder.MyPictures,
+            Environment.SpecialFolderOption.DoNotVerify);
+        return string.IsNullOrWhiteSpace(pictures) ? string.Empty : Path.Combine(pictures, "Screenshots");
     }
 
     private void SetBusy(bool busy)
@@ -659,9 +680,6 @@ public sealed partial class ShortcutPage : UserControl
         _operationInProgress = busy;
         AddShortcutButton.IsEnabled = !busy && _editorAvailable;
         ShortcutList.IsEnabled = !busy && _editorAvailable && _tiles.Count > 0;
-        BrowseScreenshotFolderButton.IsEnabled = !busy;
-        OpenScreenshotFolderButton.IsEnabled = !busy;
-        UseDefaultFolderButton.IsEnabled = !busy && _screenshotFolder?.UsingDefault == false;
     }
 
     private void ShowMessage(string message, InfoBarSeverity severity)

@@ -722,6 +722,7 @@ Overlay
 Shortcut
  └ Runtime-owned user Shortcut definitions
     └ Screenshot save folder is configured inside the Screenshot Shortcut editor
+       └ Folder changes are staged with the Shortcut; Cancel discards them and Save persists the complete action.
 
 How to Use
 

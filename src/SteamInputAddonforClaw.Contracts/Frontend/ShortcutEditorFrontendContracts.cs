@@ -33,7 +33,8 @@ public sealed record FrontendShortcutEditorAction(
     string? PowerShellScript = null,
     string? Url = null,
     bool ConfigurationValid = true,
-    string? ValidationMessage = null);
+    string? ValidationMessage = null,
+    string? ScreenshotFolder = null);
 
 public sealed record FrontendShortcutEditorTile(
     Guid TileId,
@@ -42,20 +43,12 @@ public sealed record FrontendShortcutEditorTile(
     bool CloseOverlayAfterLaunch,
     FrontendShortcutEditorAction Action);
 
-public sealed record FrontendScreenshotFolderSnapshot(
-    bool UsingDefault,
-    string EffectiveFolder,
-    string? ConfiguredFolder);
-
 public sealed record FrontendShortcutEditorSnapshot(
     bool Available,
     IReadOnlyList<FrontendShortcutEditorTile> Tiles,
-    FrontendScreenshotFolderSnapshot ScreenshotFolder,
     string? FailureMessage = null)
 {
-    public static FrontendShortcutEditorSnapshot Unavailable(
-        FrontendScreenshotFolderSnapshot screenshotFolder,
-        string? message = null) => new(false, [], screenshotFolder, message);
+    public static FrontendShortcutEditorSnapshot Unavailable(string? message = null) => new(false, [], message);
 }
 
 public sealed record FrontendShortcutActionInput(
@@ -63,7 +56,8 @@ public sealed record FrontendShortcutActionInput(
     string? ExecutablePath = null,
     string? ExecutableArguments = null,
     string? PowerShellScript = null,
-    string? Url = null);
+    string? Url = null,
+    string? ScreenshotFolder = null);
 
 public sealed record FrontendShortcutMutationIntent(
     FrontendShortcutMutationKind Kind,
@@ -78,11 +72,6 @@ public sealed record FrontendShortcutMutationResult(
     bool Changed,
     string? FailureMessage,
     FrontendShortcutEditorSnapshot Snapshot);
-
-public sealed record FrontendScreenshotFolderMutationResult(
-    bool Succeeded,
-    string? FailureMessage,
-    FrontendScreenshotFolderSnapshot Snapshot);
 
 /// <summary>Shared size limits for the Main App Shortcut editor contract.</summary>
 public static class FrontendShortcutEditorPayloadPolicy
@@ -105,17 +94,11 @@ public static class FrontendShortcutEditorPayloadPolicy
         return IsWithinSerializedLimit(intent, MaxMutationBytes);
     }
 
-    public static bool IsScreenshotFolderRequestWithinLimit(string? folder) =>
-        IsFieldWithinLimit(folder) && IsWithinSerializedLimit(new ScreenshotFolderRequest(folder), MaxMutationBytes);
-
     public static bool IsSnapshotWithinLimit(FrontendShortcutEditorSnapshot? snapshot) =>
         snapshot is not null && IsWithinSerializedLimit(snapshot, MaxSnapshotBytes);
 
     public static bool IsMutationResultWithinLimit(FrontendShortcutMutationResult? result) =>
         result is not null && IsSnapshotWithinLimit(result.Snapshot) && IsWithinSerializedLimit(result, MaxSnapshotBytes);
-
-    public static bool IsScreenshotFolderResultWithinLimit(FrontendScreenshotFolderMutationResult? result) =>
-        result is not null && IsWithinSerializedLimit(result, MaxSnapshotBytes);
 
     private static bool MutationFieldsWithinLimit(FrontendShortcutMutationIntent intent) =>
         IsFieldWithinLimit(intent.Title)
@@ -123,7 +106,8 @@ public static class FrontendShortcutEditorPayloadPolicy
             || IsFieldWithinLimit(intent.Action.ExecutablePath)
             && IsFieldWithinLimit(intent.Action.ExecutableArguments)
             && IsFieldWithinLimit(intent.Action.PowerShellScript)
-            && IsFieldWithinLimit(intent.Action.Url));
+            && IsFieldWithinLimit(intent.Action.Url)
+            && IsFieldWithinLimit(intent.Action.ScreenshotFolder));
 
     private static bool IsWithinSerializedLimit<T>(T value, int limit)
     {
@@ -137,5 +121,4 @@ public static class FrontendShortcutEditorPayloadPolicy
         }
     }
 
-    private sealed record ScreenshotFolderRequest(string? Folder);
 }

@@ -164,7 +164,7 @@ Use **Shortcut** to add, edit, delete, and drag to reorder items shown in Quick 
 - Capture the primary display as a JPEG screenshot.
 - Open Steam Big Picture, the Steam client, or the Xbox app.
 
-For screenshots, choose a custom save folder or use the default Windows `Pictures\Screenshots` folder. **Browse** selects a folder, **Open folder** opens it in File Explorer, and **Use default** returns to the default location. A shortcut displayed in the Overlay runs the action you configured here; edit its details in the Main App.
+The Screenshot action captures the primary display as a JPEG. Its save folder is configured inside that Screenshot Shortcut's Add/Edit dialog: choose a custom folder or use the default Windows `Pictures\Screenshots` folder. **Browse** stages a folder, **Use default** stages the default location, **Open folder** opens the currently selected location, and **Save** commits the folder with the Shortcut; **Cancel** discards staged changes. The normal editor allows at most one Screenshot Shortcut. A shortcut displayed in the Overlay runs the action you configured here; the Overlay receives only the tile and never the folder path.
 
 ### Settings
 

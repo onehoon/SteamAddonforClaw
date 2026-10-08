@@ -46,8 +46,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Equal("Shortcut storage is unavailable.", (await runtime.ExecuteAsync(tileId)).FailureMessage);
         var edit = runtime.MutateEditor(
             new FrontendShortcutMutationIntent(FrontendShortcutMutationKind.Create, Title: "New",
-                Action: new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.Url, Url: "https://example.com")),
-            new FrontendScreenshotFolderSnapshot(true, @"C:\Users\Test\Pictures\Screenshots", null));
+                Action: new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.Url, Url: "https://example.com")));
         Assert.False(edit.Succeeded);
         Assert.Equal(json, File.ReadAllText(ShortcutsPath));
     }
@@ -327,8 +326,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); }, _ => true);
 
         var dashboardTile = Assert.Single(runtime.Capture().Tiles);
-        var editorAction = Assert.Single(runtime.CaptureEditor(
-            new FrontendScreenshotFolderSnapshot(true, @"C:\Users\Test\Pictures\Screenshots", null)).Tiles).Action;
+        var editorAction = Assert.Single(runtime.CaptureEditor().Tiles).Action;
         var execution = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.True(runtime.Capture().Available);
@@ -352,8 +350,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); });
 
         var dashboardTile = Assert.Single(runtime.Capture().Tiles);
-        var editorAction = Assert.Single(runtime.CaptureEditor(
-            new FrontendScreenshotFolderSnapshot(true, @"C:\Users\Test\Pictures\Screenshots", null)).Tiles).Action;
+        var editorAction = Assert.Single(runtime.CaptureEditor().Tiles).Action;
         var execution = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.True(runtime.Capture().Available);
@@ -542,11 +539,13 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{}"));
         Save([tile]);
         var callbackCount = 0;
+        string? callbackFolder = "not-called";
         var callbackResult = new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded,
             RetireOverlayAfterExecution: true);
-        var runtime = CreateRuntime(screenshotAction: _ =>
+        var runtime = CreateRuntime(screenshotAction: (folder, _) =>
         {
             callbackCount++;
+            callbackFolder = folder;
             return Task.FromResult(callbackResult);
         });
 
@@ -557,26 +556,57 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Equal(FrontendShortcutTileState.Neutral, projected.State);
         Assert.Null(projected.StatusText);
         Assert.Equal(1, callbackCount);
+        Assert.Null(callbackFolder);
         Assert.NotSame(callbackResult, result);
         Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
         Assert.False(result.RetireOverlayAfterExecution);
     }
 
     [Fact]
-    public async Task Screenshot_schema_one_rejects_any_parameter_property_without_callback()
+    public async Task Screenshot_custom_folder_is_projected_and_passed_to_the_capture_callback()
     {
-        var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{\"folder\":\"C:\\\\Temp\"}"));
+        const string folder = @"C:\Captures";
+        var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen,
+            Parameters("{\"folder\":\"C:\\\\Captures\"}"));
+        Save([tile]);
+        string? callbackFolder = null;
+        var runtime = CreateRuntime(screenshotAction: (configuredFolder, _) =>
+        {
+            callbackFolder = configuredFolder;
+            return Task.FromResult(new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded));
+        });
+
+        var editorAction = Assert.Single(runtime.CaptureEditor().Tiles).Action;
+        var projected = Assert.Single(runtime.Capture().Tiles);
+        var result = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.True(editorAction.ConfigurationValid);
+        Assert.Equal(folder, editorAction.ScreenshotFolder);
+        Assert.True(projected.Enabled);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(folder, callbackFolder);
+    }
+
+    [Theory]
+    [InlineData("{\"folder\":\"relative\"}")]
+    [InlineData("{\"folder\":\"   \"}")]
+    [InlineData("{\"folder\":\"C:\\\\Temp\",\"extra\":true}")]
+    public async Task Screenshot_schema_one_rejects_invalid_custom_parameters_without_callback(string json)
+    {
+        var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters(json));
         Save([tile]);
         var callbackCount = 0;
-        var runtime = CreateRuntime(screenshotAction: _ =>
+        var runtime = CreateRuntime(screenshotAction: (_, _) =>
         {
             callbackCount++;
             return Task.FromResult(new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded));
         });
 
+        var editorAction = Assert.Single(runtime.CaptureEditor().Tiles).Action;
         var projected = Assert.Single(runtime.Capture().Tiles);
         var result = await runtime.ExecuteAsync(tile.TileId);
 
+        Assert.False(editorAction.ConfigurationValid);
         Assert.False(projected.Enabled);
         Assert.Equal("Invalid configuration", projected.StatusText);
         Assert.Equal(ShortcutExecutionOutcome.InvalidConfiguration, result.Outcome);
@@ -608,7 +638,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{}"));
         Save([tile]);
         var callbackCount = 0;
-        var runtime = CreateRuntime(screenshotAction: _ =>
+        var runtime = CreateRuntime(screenshotAction: (_, _) =>
         {
             callbackCount++;
             return Task.FromResult(new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded));
@@ -631,7 +661,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(
             _ => { launchCount++; return new Process(); },
             _ => true,
-            _ => Task.FromResult(new ShortcutExecutionResult(ShortcutExecutionOutcome.Failed, "Screenshot could not be saved.")));
+            (_, _) => Task.FromResult(new ShortcutExecutionResult(ShortcutExecutionOutcome.Failed, "Screenshot could not be saved.")));
 
         Assert.Equal(ShortcutExecutionOutcome.Failed, (await runtime.ExecuteAsync(screenshot.TileId)).Outcome);
         Assert.Equal(ShortcutExecutionOutcome.Succeeded, (await runtime.ExecuteAsync(executable.TileId)).Outcome);
@@ -642,7 +672,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     private ShortcutRuntime CreateRuntime(
         Func<ProcessStartInfo, Process?>? startProcess = null,
         Func<string, bool>? fileExists = null,
-        Func<CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null) =>
+        Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null) =>
         new(new ShortcutStore(ShortcutsPath), startProcess, fileExists, screenshotAction);
 
     private void Save(IReadOnlyList<ShortcutTileDefinition> tiles) =>
