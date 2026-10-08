@@ -2,10 +2,10 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using SteamInputAddonforClaw.WindowsGaming;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Shortcuts;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Processes;
 
 namespace SteamInputAddonforClaw.Shortcuts;
 
@@ -47,7 +47,7 @@ internal sealed class ShortcutRuntime
     private readonly ShortcutStore _store;
     private readonly Action<ShortcutDocument>? _saveDocument;
     private ShortcutDocument _document;
-    private readonly Func<ProcessStartInfo, Process?> _startProcess;
+    private readonly UserProcessLauncher _userProcessLauncher;
     private readonly Func<string, bool> _fileExists;
     private readonly Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? _screenshotAction;
     private readonly bool _available;
@@ -57,11 +57,20 @@ internal sealed class ShortcutRuntime
         Func<ProcessStartInfo, Process?>? startProcess = null,
         Func<string, bool>? fileExists = null,
         Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null,
-        Action<ShortcutDocument>? saveDocument = null)
+        Action<ShortcutDocument>? saveDocument = null,
+        UserProcessLauncher? userProcessLauncher = null)
     {
         ArgumentNullException.ThrowIfNull(store);
 
-        _startProcess = startProcess ?? Process.Start;
+        if (startProcess is not null && userProcessLauncher is not null)
+            throw new ArgumentException("Only one process launch test seam may be supplied.", nameof(userProcessLauncher));
+        _userProcessLauncher = userProcessLauncher ?? (startProcess is null
+            ? UserProcessLauncher.Shared
+            : new UserProcessLauncher((startInfo, _) =>
+            {
+                using var process = startProcess(startInfo);
+                return process is not null;
+            }));
         _fileExists = fileExists ?? File.Exists;
         _screenshotAction = screenshotAction;
         _store = store;
@@ -268,8 +277,8 @@ internal sealed class ShortcutRuntime
         var screenshotParametersValid = TryReadScreenshotParameters(action.Parameters, out var screenshotFolder);
         var valid = kind.Value switch
         {
-            FrontendShortcutEditorActionKind.Executable => TryReadExecutableParameters(action.Parameters, out _, out _),
-            FrontendShortcutEditorActionKind.PowerShell => TryReadPowerShellParameters(action.Parameters, out _),
+            FrontendShortcutEditorActionKind.Executable => TryReadExecutableParameters(action.Parameters, out _, out _, out _),
+            FrontendShortcutEditorActionKind.PowerShell => TryReadPowerShellParameters(action.Parameters, out _, out _),
             FrontendShortcutEditorActionKind.Url => TryReadUrlParameters(action.Parameters, out _),
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => screenshotParametersValid,
             FrontendShortcutEditorActionKind.SteamBigPicture or
@@ -277,6 +286,11 @@ internal sealed class ShortcutRuntime
             FrontendShortcutEditorActionKind.XboxApp => HasEmptyObjectParameters(action.Parameters),
             _ => false
         };
+        var runAsAdministrator = false;
+        if (kind == FrontendShortcutEditorActionKind.Executable)
+            TryReadExecutableParameters(action.Parameters, out _, out _, out runAsAdministrator);
+        else if (kind == FrontendShortcutEditorActionKind.PowerShell)
+            TryReadPowerShellParameters(action.Parameters, out _, out runAsAdministrator);
 
         return new(kind.Value, action.TypeId, action.SchemaVersion, true,
             kind == FrontendShortcutEditorActionKind.Executable ? executablePath : null,
@@ -287,7 +301,8 @@ internal sealed class ShortcutRuntime
             valid ? null : "Needs attention. Review this action's configuration.",
             kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen && screenshotParametersValid
                 ? screenshotFolder
-                : null);
+                : null,
+            runAsAdministrator);
     }
 
     private static FrontendShortcutEditorActionKind? GetEditorActionKind(string typeId) => typeId switch
@@ -360,9 +375,10 @@ internal sealed class ShortcutRuntime
             var parameters = JsonSerializer.SerializeToElement(new
             {
                 path = input.ExecutablePath,
-                arguments = input.ExecutableArguments
+                arguments = input.ExecutableArguments,
+                runAsAdministrator = input.RunAsAdministrator
             });
-            if (!TryReadExecutableParameters(parameters, out _, out _))
+            if (!TryReadExecutableParameters(parameters, out _, out _, out _))
             {
                 failureMessage = ExecutableTooLongMessage;
                 return false;
@@ -377,8 +393,12 @@ internal sealed class ShortcutRuntime
             && input.ExecutablePath is null && input.ExecutableArguments is null && input.Url is null
             && !string.IsNullOrWhiteSpace(input.PowerShellScript))
         {
-            var parameters = JsonSerializer.SerializeToElement(new { script = input.PowerShellScript });
-            if (!TryReadPowerShellParameters(parameters, out _))
+            var parameters = JsonSerializer.SerializeToElement(new
+            {
+                script = input.PowerShellScript,
+                runAsAdministrator = input.RunAsAdministrator
+            });
+            if (!TryReadPowerShellParameters(parameters, out _, out _))
             {
                 failureMessage = PowerShellTooLongMessage;
                 return false;
@@ -391,6 +411,7 @@ internal sealed class ShortcutRuntime
 
         if (input.Kind == FrontendShortcutEditorActionKind.Url
             && input.ExecutablePath is null && input.ExecutableArguments is null && input.PowerShellScript is null
+            && !input.RunAsAdministrator
             && TryReadUrlInput(input.Url, out var uri))
         {
             action = new(ShortcutActionTypeIds.Url, SupportedActionSchemaVersion,
@@ -400,7 +421,7 @@ internal sealed class ShortcutRuntime
 
         if (input.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen
             && input.ExecutablePath is null && input.ExecutableArguments is null
-            && input.PowerShellScript is null && input.Url is null)
+            && input.PowerShellScript is null && input.Url is null && !input.RunAsAdministrator)
         {
             if (!string.IsNullOrWhiteSpace(input.ScreenshotFolder)
                 && (!FrontendShortcutEditorPayloadPolicy.IsFieldWithinLimit(input.ScreenshotFolder)
@@ -422,7 +443,7 @@ internal sealed class ShortcutRuntime
                 || input.Kind == FrontendShortcutEditorActionKind.SteamClient
                 || input.Kind == FrontendShortcutEditorActionKind.XboxApp)
             && input.ExecutablePath is null && input.ExecutableArguments is null
-            && input.PowerShellScript is null && input.Url is null)
+            && input.PowerShellScript is null && input.Url is null && !input.RunAsAdministrator)
         {
             var typeId = input.Kind switch
             {
@@ -512,16 +533,11 @@ internal sealed class ShortcutRuntime
             ShortcutActionTypeIds.PowerShell => ExecutePowerShell(tile, cancellationToken),
             ShortcutActionTypeIds.Url => ExecuteUrl(tile, cancellationToken),
             ShortcutActionTypeIds.SteamBigPicture => ExecuteParameterlessBuiltIn(tile,
-                new ProcessStartInfo { FileName = "steam://open/bigpicture", UseShellExecute = true }, cancellationToken),
+                () => _userProcessLauncher.LaunchUri("steam://open/bigpicture"), cancellationToken),
             ShortcutActionTypeIds.SteamClient => ExecuteParameterlessBuiltIn(tile,
-                new ProcessStartInfo { FileName = "steam://open/main", UseShellExecute = true }, cancellationToken),
+                () => _userProcessLauncher.LaunchUri("steam://open/main"), cancellationToken),
             ShortcutActionTypeIds.XboxApp => ExecuteParameterlessBuiltIn(tile,
-                new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = $"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}",
-                    UseShellExecute = true
-                }, cancellationToken),
+                _userProcessLauncher.LaunchXboxApp, cancellationToken),
             _ => new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage)
         };
 
@@ -636,7 +652,7 @@ internal sealed class ShortcutRuntime
         if (!IsSupportedAction(tile.Action))
             return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage);
 
-        if (!TryReadExecutableParameters(tile.Action.Parameters, out var path, out var arguments))
+        if (!TryReadExecutableParameters(tile.Action.Parameters, out var path, out var arguments, out var runAsAdministrator))
             return InvalidConfiguration();
 
         if (!_fileExists(path))
@@ -652,7 +668,7 @@ internal sealed class ShortcutRuntime
             WorkingDirectory = Path.GetDirectoryName(path) ?? string.Empty
         };
 
-        return StartExternal(tile, startInfo, cancellationToken);
+        return StartExternal(tile, startInfo, cancellationToken, runAsAdministrator);
     }
 
     private ShortcutExecutionResult ExecutePowerShell(ShortcutTileDefinition tile, CancellationToken cancellationToken)
@@ -660,7 +676,7 @@ internal sealed class ShortcutRuntime
         if (!IsSupportedAction(tile.Action))
             return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage);
 
-        if (!TryReadPowerShellParameters(tile.Action.Parameters, out var script))
+        if (!TryReadPowerShellParameters(tile.Action.Parameters, out var script, out var runAsAdministrator))
             return InvalidConfiguration();
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -680,7 +696,7 @@ internal sealed class ShortcutRuntime
         startInfo.ArgumentList.Add("-EncodedCommand");
         startInfo.ArgumentList.Add(encodedScript);
 
-        return StartExternal(tile, startInfo, cancellationToken);
+        return StartExternal(tile, startInfo, cancellationToken, runAsAdministrator);
     }
 
     private ShortcutExecutionResult ExecuteUrl(ShortcutTileDefinition tile, CancellationToken cancellationToken)
@@ -693,18 +709,12 @@ internal sealed class ShortcutRuntime
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = url,
-            UseShellExecute = true
-        };
-
-        return StartExternal(tile, startInfo, cancellationToken);
+        return StartExternal(tile, () => _userProcessLauncher.LaunchUri(url), cancellationToken);
     }
 
     private ShortcutExecutionResult ExecuteParameterlessBuiltIn(
         ShortcutTileDefinition tile,
-        ProcessStartInfo startInfo,
+        Func<bool> launch,
         CancellationToken cancellationToken)
     {
         if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
@@ -712,20 +722,26 @@ internal sealed class ShortcutRuntime
         if (!HasEmptyObjectParameters(tile.Action.Parameters))
             return InvalidConfiguration();
 
-        return StartExternal(tile, startInfo, cancellationToken);
+        return StartExternal(tile, launch, cancellationToken);
     }
 
     private ShortcutExecutionResult StartExternal(
         ShortcutTileDefinition tile,
         ProcessStartInfo startInfo,
+        CancellationToken cancellationToken,
+        bool runAsAdministrator = false) =>
+        StartExternal(tile, () => _userProcessLauncher.Launch(startInfo, runAsAdministrator), cancellationToken);
+
+    private ShortcutExecutionResult StartExternal(
+        ShortcutTileDefinition tile,
+        Func<bool> launch,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         try
         {
-            using var process = _startProcess(startInfo);
-            return process is null
+            return !launch()
                 ? LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, null)
                 : new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded);
         }
@@ -777,14 +793,14 @@ internal sealed class ShortcutRuntime
 
     private TileResolution ResolveExecutable(JsonElement parameters)
     {
-        if (!TryReadExecutableParameters(parameters, out var path, out _))
+        if (!TryReadExecutableParameters(parameters, out var path, out _, out _))
             return TileResolution.Invalid;
 
         return _fileExists(path) ? TileResolution.Available : TileResolution.NotFound;
     }
 
     private static TileResolution ResolvePowerShell(JsonElement parameters) =>
-        TryReadPowerShellParameters(parameters, out _) ? TileResolution.Available : TileResolution.Invalid;
+        TryReadPowerShellParameters(parameters, out _, out _) ? TileResolution.Available : TileResolution.Invalid;
 
     private static TileResolution ResolveUrl(JsonElement parameters) =>
         TryReadUrlParameters(parameters, out _) ? TileResolution.Available : TileResolution.Invalid;
@@ -796,13 +812,15 @@ internal sealed class ShortcutRuntime
     private static bool IsParameterlessBuiltIn(string typeId) =>
         typeId is ShortcutActionTypeIds.SteamBigPicture or ShortcutActionTypeIds.SteamClient or ShortcutActionTypeIds.XboxApp;
 
-    private static bool TryReadExecutableParameters(JsonElement parameters, out string path, out string arguments)
+    private static bool TryReadExecutableParameters(JsonElement parameters, out string path, out string arguments, out bool runAsAdministrator)
     {
         path = string.Empty;
         arguments = string.Empty;
+        runAsAdministrator = false;
 
         if (!TryReadRequiredString(parameters, "path", out path)
-            || !IsValidExecutablePath(path))
+            || !IsValidExecutablePath(path)
+            || !TryReadRunAsAdministrator(parameters, out runAsAdministrator))
         {
             return false;
         }
@@ -818,10 +836,12 @@ internal sealed class ShortcutRuntime
         return FitsExecutableCommandLine(path, arguments);
     }
 
-    private static bool TryReadPowerShellParameters(JsonElement parameters, out string script)
+    private static bool TryReadPowerShellParameters(JsonElement parameters, out string script, out bool runAsAdministrator)
     {
         script = string.Empty;
+        runAsAdministrator = false;
         return TryReadRequiredString(parameters, "script", out script)
+            && TryReadRunAsAdministrator(parameters, out runAsAdministrator)
             && FitsPowerShellCommandLine(script);
     }
 
@@ -847,7 +867,9 @@ internal sealed class ShortcutRuntime
     private static bool TryReadUrlParameters(JsonElement parameters, out string url)
     {
         url = string.Empty;
-        if (!TryReadRequiredString(parameters, "url", out url)
+        if (parameters.ValueKind != JsonValueKind.Object
+            || parameters.TryGetProperty("runAsAdministrator", out _)
+            || !TryReadRequiredString(parameters, "url", out url)
             || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
             || string.IsNullOrWhiteSpace(uri.Host)
             || (!string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase)
@@ -859,10 +881,26 @@ internal sealed class ShortcutRuntime
         return true;
     }
 
+    private static bool TryReadRunAsAdministrator(JsonElement parameters, out bool runAsAdministrator)
+    {
+        runAsAdministrator = false;
+        if (parameters.ValueKind != JsonValueKind.Object
+            || !parameters.TryGetProperty("runAsAdministrator", out var value))
+            return parameters.ValueKind == JsonValueKind.Object;
+
+        if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return false;
+
+        runAsAdministrator = value.GetBoolean();
+        return true;
+    }
+
     private static bool TryReadRequiredString(JsonElement parameters, string propertyName, out string value)
     {
         value = string.Empty;
-        if (!parameters.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.String)
+        if (parameters.ValueKind != JsonValueKind.Object
+            || !parameters.TryGetProperty(propertyName, out var element)
+            || element.ValueKind != JsonValueKind.String)
             return false;
 
         value = element.GetString() ?? string.Empty;

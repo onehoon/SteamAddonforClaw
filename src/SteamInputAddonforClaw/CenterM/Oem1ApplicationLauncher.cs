@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using System.IO;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
+using SteamInputAddonforClaw.Processes;
 
 namespace SteamInputAddonforClaw.CenterM;
 
@@ -22,7 +22,7 @@ namespace SteamInputAddonforClaw.CenterM;
 /// </remarks>
 internal static class Oem1ApplicationLauncher
 {
-    internal static void Launch(FrontButtonLaunchApplicationBinding application)
+    internal static void Launch(FrontButtonLaunchApplicationBinding application, UserProcessLauncher? userProcessLauncher = null)
     {
         ArgumentNullException.ThrowIfNull(application);
         // An unfinished configuration is not a failure -- there is simply nothing to launch.
@@ -31,13 +31,14 @@ internal static class Oem1ApplicationLauncher
         if (!string.Equals(Path.GetExtension(application.ExecutablePath), ".exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The OEM1 application action requires an .exe target.");
 
-        var startInfo = new ProcessStartInfo
+        var startInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = application.ExecutablePath,
             Arguments = application.Arguments ?? string.Empty,
             UseShellExecute = false
         };
 
-        Process.Start(startInfo);
+        if (!(userProcessLauncher ?? UserProcessLauncher.Shared).Launch(startInfo, application.RunAsAdministrator))
+            throw new InvalidOperationException("The configured application could not be launched.");
     }
 }

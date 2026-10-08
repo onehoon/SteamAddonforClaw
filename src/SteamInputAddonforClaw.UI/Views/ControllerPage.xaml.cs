@@ -501,6 +501,7 @@ public sealed partial class ControllerPage : UserControl
         private readonly StackPanel _launchPanel;
         private readonly TextBox _path = new() { PlaceholderText = "Application path", MinWidth = 320 };
         private readonly TextBox _arguments = new() { PlaceholderText = "Arguments (optional)", MinWidth = 320 };
+        private readonly CheckBox _runAsAdministrator = new() { Content = "Run as administrator" };
 
         internal BindingEditor(FrontButtonKind kind, FrontButtonDomain domain, ComboBox actionComboBox, SettingsCard configCard, StackPanel configPanel, ControllerPage page, Func<nint> windowHandleProvider)
         {
@@ -537,7 +538,9 @@ public sealed partial class ControllerPage : UserControl
                 Children =
                 {
                     new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _path, browse } },
-                    _arguments
+                    _arguments,
+                    _runAsAdministrator,
+                    new TextBlock { Text = "Runs with administrator privileges; otherwise requests normal user privileges.", TextWrapping = TextWrapping.Wrap }
                 }
             };
 
@@ -556,6 +559,8 @@ public sealed partial class ControllerPage : UserControl
             _key.SelectionChanged += (_, _) => page.OnEditorConfigurationChanged(this);
             _path.TextChanged += (_, _) => page.OnEditorConfigurationChanged(this);
             _arguments.TextChanged += (_, _) => page.OnEditorConfigurationChanged(this);
+            _runAsAdministrator.Checked += (_, _) => page.OnEditorConfigurationChanged(this);
+            _runAsAdministrator.Unchecked += (_, _) => page.OnEditorConfigurationChanged(this);
         }
 
         internal FrontButtonKind Kind { get; }
@@ -576,6 +581,7 @@ public sealed partial class ControllerPage : UserControl
             RefreshHotkeyAvailability();
             _path.Text = binding.Launch.ExecutablePath;
             _arguments.Text = binding.Launch.Arguments;
+            _runAsAdministrator.IsChecked = binding.Launch.RunAsAdministrator;
             ShowConfigurationFor(binding.Action);
         }
 
@@ -583,7 +589,10 @@ public sealed partial class ControllerPage : UserControl
         {
             Action = SelectedAction,
             Hotkey = new FrontButtonHotkeyBinding(CaptureModifiers(), CaptureKey()),
-            Launch = new FrontButtonLaunchApplicationBinding(_path.Text ?? string.Empty, _arguments.Text ?? string.Empty)
+            Launch = new FrontButtonLaunchApplicationBinding(
+                _path.Text ?? string.Empty,
+                _arguments.Text ?? string.Empty,
+                _runAsAdministrator.IsChecked == true)
         };
 
         internal void SetExecutablePath(string path) => _path.Text = path;

@@ -34,7 +34,8 @@ public sealed record FrontendShortcutEditorAction(
     string? Url = null,
     bool ConfigurationValid = true,
     string? ValidationMessage = null,
-    string? ScreenshotFolder = null);
+    string? ScreenshotFolder = null,
+    bool RunAsAdministrator = false);
 
 public sealed record FrontendShortcutEditorTile(
     Guid TileId,
@@ -57,7 +58,8 @@ public sealed record FrontendShortcutActionInput(
     string? ExecutableArguments = null,
     string? PowerShellScript = null,
     string? Url = null,
-    string? ScreenshotFolder = null);
+    string? ScreenshotFolder = null,
+    bool RunAsAdministrator = false);
 
 public sealed record FrontendShortcutMutationIntent(
     FrontendShortcutMutationKind Kind,

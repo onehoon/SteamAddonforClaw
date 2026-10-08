@@ -44,6 +44,32 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void Legacy_launch_bindings_without_privilege_flag_load_as_medium_and_round_trip_new_choice()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName,
+            """{"FrontButtonMapping":{"Normal":{"Gamebar":{"Action":"SteamBigPicture","Hotkey":{},"Launch":{"ExecutablePath":"","Arguments":""}},"CenterM":{"Action":"QuickSettingsOverlay","Hotkey":{},"Launch":{"ExecutablePath":"","Arguments":""}}},"Steam":{"Gamebar":{"Action":"SteamButton","Hotkey":{},"Launch":{"ExecutablePath":"","Arguments":""}},"CenterM":{"Action":"QuickSettingsOverlay","Hotkey":{},"Launch":{"ExecutablePath":"","Arguments":""}}}},"LogLevel":"Info"}""");
+
+        var legacy = new SettingsStore(PathName).Load().FrontButtonMapping;
+        Assert.All(new[]
+        {
+            legacy.Normal.Gamebar.Launch,
+            legacy.Normal.CenterM.Launch,
+            legacy.Steam.Gamebar.Launch,
+            legacy.Steam.CenterM.Launch
+        }, launch => Assert.False(launch.RunAsAdministrator));
+
+        var coordinator = NewCoordinator();
+        var highBinding = FrontButtonBinding.Of(FrontButtonAction.LaunchApplication) with
+        {
+            Launch = new FrontButtonLaunchApplicationBinding(@"C:\Tools\Tool.exe", "--example", true)
+        };
+        Assert.True(coordinator.ChangeFrontButtonMapping(
+            coordinator.FrontButtonMapping.With(FrontButtonKind.Gamebar, FrontButtonDomain.Normal, highBinding)));
+        Assert.True(new SettingsStore(PathName).Load().FrontButtonMapping.Normal.Gamebar.Launch.RunAsAdministrator);
+    }
+
+    [Fact]
     public void Mapping_diagnostics_log_fallback_load_and_successful_save_with_all_four_slots()
     {
         AppLog.DirectoryOverride = _directory;

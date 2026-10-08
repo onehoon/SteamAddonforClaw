@@ -6,6 +6,7 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Shortcuts;
 using SteamInputAddonforClaw.Shortcuts;
 using SteamInputAddonforClaw.WindowsGaming;
+using SteamInputAddonforClaw.Processes;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -116,13 +117,14 @@ public sealed class ShortcutRuntimeTests : IDisposable
         });
         Assert.All(results, result => Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome));
         Assert.All(results, result => Assert.True(result.RetireOverlayAfterExecution));
-        Assert.Equal("steam://open/bigpicture", started[0].FileName);
-        Assert.True(started[0].UseShellExecute);
-        Assert.Equal("steam://open/main", started[1].FileName);
-        Assert.True(started[1].UseShellExecute);
-        Assert.Equal("explorer.exe", started[2].FileName);
-        Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", started[2].Arguments);
-        Assert.True(started[2].UseShellExecute);
+        Assert.All(started, info =>
+        {
+            Assert.EndsWith("explorer.exe", info.FileName, StringComparison.OrdinalIgnoreCase);
+            Assert.False(info.UseShellExecute);
+        });
+        Assert.Equal("steam://open/bigpicture", started[0].ArgumentList.Single());
+        Assert.Equal("steam://open/main", started[1].ArgumentList.Single());
+        Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", started[2].ArgumentList.Single());
     }
 
     [Fact]
@@ -444,8 +446,9 @@ public sealed class ShortcutRuntimeTests : IDisposable
 
         Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
         Assert.NotNull(captured);
-        Assert.Equal(url, captured!.FileName);
-        Assert.True(captured.UseShellExecute);
+        Assert.EndsWith("explorer.exe", captured!.FileName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(url, captured.ArgumentList.Single());
+        Assert.False(captured.UseShellExecute);
     }
 
     [Theory]
@@ -528,8 +531,12 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Contains("private readonly ShortcutRuntime _shortcutRuntime", source, StringComparison.Ordinal);
         Assert.Contains("AddonDataPaths.ShortcutsPath", source, StringComparison.Ordinal);
         Assert.Contains("Path.Combine(testOnlyDataRoot, \"shortcuts.json\")", source, StringComparison.Ordinal);
-        Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);", source, StringComparison.Ordinal);
-        Assert.True(source.IndexOf("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);", StringComparison.Ordinal)
+        Assert.Contains("userProcessLauncher: _userProcessLauncher", source, StringComparison.Ordinal);
+        Assert.Contains("launchBigPictureOverride: () => CenterM.Oem1BigPictureLauncher.Launch(_userProcessLauncher)", source, StringComparison.Ordinal);
+        Assert.Contains("launchXboxAppOverride: () => CenterM.FrontButtonXboxAppLauncher.Launch(_userProcessLauncher)", source, StringComparison.Ordinal);
+        Assert.Contains("launchApplicationOverride: application => CenterM.Oem1ApplicationLauncher.Launch(application, _userProcessLauncher)", source, StringComparison.Ordinal);
+        Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,", source, StringComparison.Ordinal);
+        Assert.True(source.IndexOf("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,", StringComparison.Ordinal)
             < source.IndexOf("AddonRuntimeCompositionFactory.Create(", StringComparison.Ordinal));
     }
 
@@ -672,8 +679,10 @@ public sealed class ShortcutRuntimeTests : IDisposable
     private ShortcutRuntime CreateRuntime(
         Func<ProcessStartInfo, Process?>? startProcess = null,
         Func<string, bool>? fileExists = null,
-        Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null) =>
-        new(new ShortcutStore(ShortcutsPath), startProcess, fileExists, screenshotAction);
+        Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null,
+        UserProcessLauncher? userProcessLauncher = null) =>
+        new(new ShortcutStore(ShortcutsPath), startProcess, fileExists, screenshotAction,
+            userProcessLauncher: userProcessLauncher);
 
     private void Save(IReadOnlyList<ShortcutTileDefinition> tiles) =>
         new ShortcutStore(ShortcutsPath).Save(new ShortcutDocument

@@ -99,7 +99,10 @@ public sealed record FrontButtonHotkeyBinding(
 
 /// <summary>Executable path plus optional arguments. No process monitoring / toggle / lifecycle
 /// ownership is implied -- pressing the button launches it, and that is all.</summary>
-public sealed record FrontButtonLaunchApplicationBinding(string ExecutablePath = "", string Arguments = "")
+public sealed record FrontButtonLaunchApplicationBinding(
+    string ExecutablePath = "",
+    string Arguments = "",
+    bool RunAsAdministrator = false)
 {
     public bool IsConfigured => !string.IsNullOrWhiteSpace(ExecutablePath);
 

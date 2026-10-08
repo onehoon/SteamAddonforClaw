@@ -36,7 +36,8 @@ public sealed class AddonProcessHostScreenshotContractTests
     {
         var source = ReadHostSource();
 
-        Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);", source, StringComparison.Ordinal);
+        Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,", source, StringComparison.Ordinal);
+        Assert.Contains("userProcessLauncher: _userProcessLauncher);", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ScreenshotManager", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ScreenshotCoordinator", source, StringComparison.Ordinal);
     }

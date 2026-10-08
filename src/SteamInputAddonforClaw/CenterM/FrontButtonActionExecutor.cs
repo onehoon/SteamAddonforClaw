@@ -38,9 +38,9 @@ internal sealed class FrontButtonActionExecutor
         _launchBigPicture = launchBigPicture ?? throw new ArgumentNullException(nameof(launchBigPicture));
         _tryRequestSteamPulse = tryRequestSteamPulse ?? throw new ArgumentNullException(nameof(tryRequestSteamPulse));
         _tryRequestQuickAccessPulse = tryRequestQuickAccessPulse ?? throw new ArgumentNullException(nameof(tryRequestQuickAccessPulse));
-        _launchXboxApp = launchXboxApp ?? FrontButtonXboxAppLauncher.Launch;
+        _launchXboxApp = launchXboxApp ?? (() => FrontButtonXboxAppLauncher.Launch());
         _sendHotkey = sendHotkey ?? Oem1KeyboardHotkeyExecutor.Send;
-        _launchApplication = launchApplication ?? Oem1ApplicationLauncher.Launch;
+        _launchApplication = launchApplication ?? (application => Oem1ApplicationLauncher.Launch(application));
     }
 
     /// <summary>
