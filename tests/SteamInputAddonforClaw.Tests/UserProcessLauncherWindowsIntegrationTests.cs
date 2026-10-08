@@ -30,7 +30,14 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
 
         try
         {
-            Assert.True(UserProcessLauncher.Shared.LaunchUri(url));
+            var launcher = new UserProcessLauncher((startInfo, runAsAdministrator) =>
+            {
+                Assert.False(runAsAdministrator);
+                using var process = Process.Start(startInfo);
+                return process is not null;
+            });
+
+            Assert.True(launcher.LaunchUri(url));
             var requestLine = await requestTask.WaitAsync(TimeSpan.FromSeconds(20));
             Assert.Equal($"GET /shortcut?q=claw&equals=a=b&next=two HTTP/1.1", requestLine);
         }
