@@ -8,14 +8,12 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using WinRT.Interop;
-using Windows.Foundation;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class ShortcutPage : UserControl
 {
-    internal readonly record struct ShortcutItemBounds(int Index, double Left, double Top, double Width, double Height);
-
     private const int ShortcutColumnCount = 3;
     private const double ShortcutCardHorizontalGap = 12;
     private readonly ObservableCollection<FrontendShortcutEditorTile> _tiles = [];
@@ -28,10 +26,9 @@ public sealed partial class ShortcutPage : UserControl
     private bool _refreshInProgress;
     private bool _editorAvailable;
     private ItemsWrapGrid? _shortcutItemsPanel;
-    private Guid? _draggedShortcutTileId;
-    private uint? _dragPointerId;
-    private int _dragStartIndex;
-    private int _dragTargetIndex;
+    private FrontendShortcutEditorTile[]? _pendingDragOriginalTiles;
+    private Guid? _pendingDragTileId;
+    private string? _lastPointerDeviceType;
 
     public ShortcutPage()
     {
@@ -453,164 +450,148 @@ public sealed partial class ShortcutPage : UserControl
             itemsPanel.ItemWidth = itemWidth;
     }
 
-    private void ShortcutDragHandle_PointerPressed(object sender, PointerRoutedEventArgs e)
+    private void ShortcutList_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (_operationInProgress || _refreshInProgress || _draggedShortcutTileId is not null
-            || sender is not FrameworkElement handle
-            || handle.Tag is not Guid tileId)
+        _lastPointerDeviceType = e.Pointer.PointerDeviceType.ToString();
+    }
+
+    private void ShortcutList_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        if (_operationInProgress || _refreshInProgress || _pendingDragOriginalTiles is not null
+            || e.Items.Count != 1 || e.Items[0] is not FrontendShortcutEditorTile tile)
+        {
+            e.Cancel = true;
+            AppLog.Debug("Shortcut", "Native Shortcut drag start was rejected.",
+                ("Stage", "DragItemsStarting"), ("ItemCount", e.Items.Count),
+                ("OperationInProgress", _operationInProgress), ("RefreshInProgress", _refreshInProgress));
             return;
-
-        var startIndex = -1;
-        for (var index = 0; index < _tiles.Count; index++)
-        {
-            if (_tiles[index].TileId != tileId) continue;
-            startIndex = index;
-            break;
         }
 
-        if (startIndex < 0 || !handle.CapturePointer(e.Pointer)) return;
-
-        _draggedShortcutTileId = tileId;
-        _dragPointerId = e.Pointer.PointerId;
-        _dragStartIndex = startIndex;
-        _dragTargetIndex = startIndex;
-        e.Handled = true;
-    }
-
-    private void ShortcutDragHandle_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (!OwnsShortcutDragPointer(e)) return;
-
-        var position = e.GetCurrentPoint(ShortcutList).Position;
-        if (ResolveShortcutDropTargetIndex(CaptureRealizedShortcutItemBounds(), position.X, position.Y, _tiles.Count, _dragStartIndex)
-            is { } targetIndex)
-            _dragTargetIndex = targetIndex;
-
-        e.Handled = true;
-    }
-
-    private async void ShortcutDragHandle_PointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (!OwnsShortcutDragPointer(e)) return;
-
-        var position = e.GetCurrentPoint(ShortcutList).Position;
-        var targetIndex = ResolveShortcutDropTargetIndex(
-            CaptureRealizedShortcutItemBounds(), position.X, position.Y, _tiles.Count, _dragStartIndex) ?? _dragTargetIndex;
-        var tileId = _draggedShortcutTileId;
-        var pointerId = _dragPointerId;
-        ClearShortcutDrag();
-        if (pointerId == e.Pointer.PointerId && sender is UIElement handle)
-            handle.ReleasePointerCapture(e.Pointer);
-        e.Handled = true;
-
-        if (tileId is { } movedTileId && _tiles.Any(tile => tile.TileId == movedTileId))
-            await ApplyMutationAsync(new FrontendShortcutMutationIntent(
-                FrontendShortcutMutationKind.Move,
-                TileId: movedTileId,
-                TargetIndex: targetIndex));
-    }
-
-    private void ShortcutDragHandle_PointerCanceled(object sender, PointerRoutedEventArgs e)
-    {
-        if (!OwnsShortcutDragPointer(e)) return;
-
-        ClearShortcutDrag();
-        if (sender is UIElement handle) handle.ReleasePointerCapture(e.Pointer);
-        e.Handled = true;
-    }
-
-    private void ShortcutDragHandle_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-    {
-        if (OwnsShortcutDragPointer(e)) ClearShortcutDrag();
-    }
-
-    private bool OwnsShortcutDragPointer(PointerRoutedEventArgs e) =>
-        _draggedShortcutTileId is not null && _dragPointerId == e.Pointer.PointerId;
-
-    private void ClearShortcutDrag()
-    {
-        _draggedShortcutTileId = null;
-        _dragPointerId = null;
-        _dragStartIndex = 0;
-        _dragTargetIndex = 0;
-    }
-
-    private IReadOnlyList<ShortcutItemBounds> CaptureRealizedShortcutItemBounds()
-    {
-        var bounds = new List<ShortcutItemBounds>();
-        for (var index = 0; index < _tiles.Count; index++)
+        var sourceIndex = IndexOfTile(_tiles, tile.TileId);
+        if (sourceIndex < 0)
         {
-            if (ShortcutList.ContainerFromIndex(index) is not ListViewItem container
-                || container.ActualWidth <= 0 || container.ActualHeight <= 0)
-                continue;
-
-            var origin = container.TransformToVisual(ShortcutList).TransformPoint(new Point(0, 0));
-            bounds.Add(new ShortcutItemBounds(index, origin.X, origin.Y, container.ActualWidth, container.ActualHeight));
+            e.Cancel = true;
+            AppLog.Warn("Shortcut", "Native Shortcut drag start did not match the current item source.", null,
+                ("Stage", "DragItemsStarting"), ("TileId", tile.TileId));
+            return;
         }
 
-        return bounds;
+        _pendingDragOriginalTiles = _tiles.ToArray();
+        _pendingDragTileId = tile.TileId;
+        AppLog.Debug("Shortcut", "Native Shortcut drag started.",
+            ("TileId", tile.TileId), ("SourceIndex", sourceIndex),
+            ("PointerDeviceType", _lastPointerDeviceType ?? "Unknown"),
+            ("CaptureOwner", "ListViewBase"), ("CustomCaptureAttempted", false),
+            ("NativeDragStartAccepted", true));
     }
 
-    internal static int? ResolveShortcutDropTargetIndex(
-        IReadOnlyList<ShortcutItemBounds> realizedItems,
-        double pointerX,
-        double pointerY,
-        int itemCount,
-        int draggedItemIndex)
+    private async void ShortcutList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs e)
     {
-        if (itemCount <= 0 || draggedItemIndex < 0 || draggedItemIndex >= itemCount
-            || !double.IsFinite(pointerX) || !double.IsFinite(pointerY))
-            return null;
-
-        var items = realizedItems
-            .Where(item => item.Index >= 0 && item.Index < itemCount
-                && double.IsFinite(item.Left) && double.IsFinite(item.Top)
-                && double.IsFinite(item.Width) && double.IsFinite(item.Height)
-                && item.Width > 0 && item.Height > 0)
-            .OrderBy(item => item.Top)
-            .ThenBy(item => item.Left)
-            .ToArray();
-        if (items.Length == 0) return null;
-
-        var rows = new List<List<ShortcutItemBounds>>();
-        foreach (var item in items)
+        if (_pendingDragOriginalTiles is not { } originalTiles || _pendingDragTileId is not { } tileId)
         {
-            if (rows.Count == 0 || item.Top >= rows[^1].Max(rowItem => rowItem.Top + rowItem.Height))
-                rows.Add([item]);
+            AppLog.Debug("Shortcut", "Native Shortcut drag completed without an active matching start.",
+                ("Stage", "DragItemsCompleted"), ("DropResult", e.DropResult));
+            return;
+        }
+
+        var reorderedTiles = _tiles.ToArray();
+        var completedItemsMatch = e.Items.Count == 1
+            && e.Items[0] is FrontendShortcutEditorTile completedTile
+            && completedTile.TileId == tileId;
+        RestoreShortcutTiles(originalTiles);
+        ClearPendingShortcutDrag();
+
+        if (e.DropResult != DataPackageOperation.Move || !completedItemsMatch)
+        {
+            AppLog.Debug("Shortcut", "Native Shortcut drag was canceled or did not complete as a single-item move.",
+                ("TileId", tileId), ("DropResult", e.DropResult),
+                ("Aborted", e.DropResult != DataPackageOperation.Move), ("ItemsMatch", completedItemsMatch),
+                ("OrderRestored", true));
+            return;
+        }
+
+        if (!TryResolveShortcutMove(originalTiles.Select(tile => tile.TileId).ToArray(),
+            reorderedTiles.Select(tile => tile.TileId).ToArray(), tileId, out var sourceIndex, out var targetIndex))
+        {
+            var unchanged = originalTiles.Select(tile => tile.TileId)
+                .SequenceEqual(reorderedTiles.Select(tile => tile.TileId));
+            if (!unchanged)
+                AppLog.Warn("Shortcut", "Native Shortcut drag produced an unexpected item order.", null,
+                    ("Stage", "DragItemsCompleted"), ("TileId", tileId), ("OrderRestored", true));
             else
-                rows[^1].Add(item);
+                AppLog.Debug("Shortcut", "Native Shortcut drag completed without changing order.",
+                    ("TileId", tileId), ("DropResult", e.DropResult), ("OrderRestored", true));
+            return;
         }
 
-        var insertionIndex = items[^1].Index + 1;
-        List<ShortcutItemBounds>? previousRow = null;
-        foreach (var row in rows)
+        AppLog.Debug("Shortcut", "Native Shortcut drop resolved to a Runtime move.",
+            ("TileId", tileId), ("SourceIndex", sourceIndex), ("TargetIndex", targetIndex),
+            ("DropResult", e.DropResult), ("OrderRestoredBeforeMutation", true));
+        await ApplyMutationAsync(new FrontendShortcutMutationIntent(
+            FrontendShortcutMutationKind.Move,
+            TileId: tileId,
+            TargetIndex: targetIndex));
+    }
+
+    internal static bool TryResolveShortcutMove(
+        IReadOnlyList<Guid> originalOrder,
+        IReadOnlyList<Guid> reorderedOrder,
+        Guid draggedTileId,
+        out int sourceIndex,
+        out int targetIndex)
+    {
+        sourceIndex = -1;
+        targetIndex = -1;
+        if (originalOrder.Count == 0 || originalOrder.Count != reorderedOrder.Count
+            || originalOrder.Distinct().Count() != originalOrder.Count
+            || reorderedOrder.Distinct().Count() != reorderedOrder.Count
+            || !originalOrder.Order().SequenceEqual(reorderedOrder.Order()))
+            return false;
+
+        sourceIndex = IndexOfTile(originalOrder, draggedTileId);
+        targetIndex = IndexOfTile(reorderedOrder, draggedTileId);
+        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex)
+            return false;
+
+        var expectedOrder = originalOrder.ToList();
+        var draggedTile = expectedOrder[sourceIndex];
+        expectedOrder.RemoveAt(sourceIndex);
+        expectedOrder.Insert(targetIndex, draggedTile);
+        return expectedOrder.SequenceEqual(reorderedOrder);
+    }
+
+    private static int IndexOfTile(IReadOnlyList<FrontendShortcutEditorTile> tiles, Guid tileId)
+    {
+        for (var index = 0; index < tiles.Count; index++)
         {
-            var rowTop = row.Min(item => item.Top);
-            var rowBottom = row.Max(item => item.Top + item.Height);
-            if (pointerY < rowTop)
-            {
-                insertionIndex = previousRow is null
-                    ? row.Min(item => item.Index)
-                    : previousRow.Max(item => item.Index) + 1;
-                break;
-            }
-
-            if (pointerY <= rowBottom)
-            {
-                var itemBeforePointer = row
-                    .OrderBy(item => item.Left)
-                    .FirstOrDefault(item => pointerX < item.Left + item.Width / 2);
-                insertionIndex = itemBeforePointer.Width > 0
-                    ? itemBeforePointer.Index
-                    : row.Max(item => item.Index) + 1;
-                break;
-            }
-
-            previousRow = row;
+            if (tiles[index].TileId == tileId) return index;
         }
 
-        var targetIndex = insertionIndex > draggedItemIndex ? insertionIndex - 1 : insertionIndex;
-        return Math.Clamp(targetIndex, 0, itemCount - 1);
+        return -1;
+    }
+
+    private static int IndexOfTile(IReadOnlyList<Guid> tileIds, Guid tileId)
+    {
+        for (var index = 0; index < tileIds.Count; index++)
+        {
+            if (tileIds[index] == tileId) return index;
+        }
+
+        return -1;
+    }
+
+    private void RestoreShortcutTiles(IReadOnlyList<FrontendShortcutEditorTile> originalTiles)
+    {
+        _tiles.Clear();
+        foreach (var tile in originalTiles)
+            _tiles.Add(tile);
+    }
+
+    private void ClearPendingShortcutDrag()
+    {
+        _pendingDragOriginalTiles = null;
+        _pendingDragTileId = null;
+        _lastPointerDeviceType = null;
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
@@ -677,6 +658,20 @@ public sealed partial class ShortcutPage : UserControl
         try
         {
             var result = await _frontend.MutateShortcutAsync(intent);
+            if (intent.Kind == FrontendShortcutMutationKind.Move)
+            {
+                var fields = new (string Key, object? Value)[]
+                {
+                    ("TileId", intent.TileId), ("TargetIndex", intent.TargetIndex),
+                    ("Outcome", result.Succeeded ? "Succeeded" : "Rejected"),
+                    ("FailureCategory", result.Succeeded ? "None" : "RuntimeRejected"),
+                    ("OrderedTileCount", result.Snapshot.Tiles.Count)
+                };
+                if (result.Succeeded)
+                    AppLog.Debug("Shortcut", "Runtime Shortcut move response received.", fields);
+                else
+                    AppLog.Warn("Shortcut", "Runtime rejected the Shortcut move request.", null, fields);
+            }
             Render(result.Snapshot);
             if (!result.Succeeded)
                 ShowMessage(result.FailureMessage ?? "Shortcut changes could not be saved.", InfoBarSeverity.Error);
@@ -685,6 +680,10 @@ public sealed partial class ShortcutPage : UserControl
         }
         catch
         {
+            if (intent.Kind == FrontendShortcutMutationKind.Move)
+                AppLog.Warn("Shortcut", "Runtime Shortcut move request failed.", null,
+                    ("Stage", "RuntimeMutation"), ("TileId", intent.TileId),
+                    ("TargetIndex", intent.TargetIndex), ("Outcome", "Exception"));
             ShowMessage("Shortcut changes could not be saved.", InfoBarSeverity.Error);
         }
         finally

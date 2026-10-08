@@ -572,7 +572,7 @@ public sealed class UiArchitectureTests
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
         Assert.Contains("Add Shortcut", shortcutXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("CanReorderItems", shortcutXaml, StringComparison.Ordinal);
+        Assert.Contains("CanReorderItems=\"True\"", shortcutXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Screenshot", shortcutXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("BrowseScreenshotFolderButton", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("FolderPicker(windowId)", shortcutCode, StringComparison.Ordinal);
@@ -627,10 +627,12 @@ public sealed class UiArchitectureTests
         Assert.Equal("3", (string?)wrapGrid.Attribute("MaximumRowsOrColumns"));
         Assert.Equal("0", (string?)list.Attribute("Padding"));
         Assert.Equal("ShortcutList_SizeChanged", (string?)list.Attribute("SizeChanged"));
-        Assert.Null(list.Attribute("CanReorderItems"));
-        Assert.Null(list.Attribute("CanDragItems"));
-        Assert.Null(list.Attribute("AllowDrop"));
-        Assert.Null(list.Attribute("DragItemsCompleted"));
+        Assert.Equal("True", (string?)list.Attribute("CanReorderItems"));
+        Assert.Equal("True", (string?)list.Attribute("CanDragItems"));
+        Assert.Equal("True", (string?)list.Attribute("AllowDrop"));
+        Assert.Equal("ShortcutList_DragItemsStarting", (string?)list.Attribute("DragItemsStarting"));
+        Assert.Equal("ShortcutList_DragItemsCompleted", (string?)list.Attribute("DragItemsCompleted"));
+        Assert.Equal("ShortcutList_PointerPressed", (string?)list.Attribute("PointerPressed"));
         Assert.Equal("ListViewItem", (string?)itemContainerStyle.Attribute("TargetType"));
         Assert.Equal("Stretch", (string?)horizontalContentAlignment.Attribute("Value"));
         Assert.Equal("Transparent", containerSetters["Background"]);
@@ -654,6 +656,9 @@ public sealed class UiArchitectureTests
         Assert.All(actionButtons, button => Assert.Equal("Stretch", (string?)button.Attribute("HorizontalAlignment")));
         Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerPressed")));
         Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerMoved")));
+        var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon");
+        Assert.Equal("Drag to reorder this Shortcut", (string?)dragGlyph.Attribute("AutomationProperties.Name"));
+        Assert.Null(dragGlyph.Attribute("PointerPressed"));
         Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("private const double ShortcutCardHorizontalGap = 12;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("itemsPanel.ItemWidth = itemWidth", shortcutCode, StringComparison.Ordinal);
@@ -663,9 +668,16 @@ public sealed class UiArchitectureTests
         Assert.Equal(392, ShortcutPage.GetShortcutItemWidth(1200));
         Assert.Equal(1, ShortcutPage.GetShortcutItemWidth(24));
         Assert.Contains("ShortcutList.ItemsSource = _tiles;", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("ShortcutList_DragItemsCompleted", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("Windows.ApplicationModel.DataTransfer", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("Windows.ApplicationModel.DataTransfer", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("CaptureOwner", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("PointerDeviceType", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("OrderRestoredBeforeMutation", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("Runtime Shortcut move response received.", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("FailureCategory", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("RestoreShortcutTiles(originalTiles);", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("await ApplyMutationAsync(new FrontendShortcutMutationIntent(", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("_tiles.Move(", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("CapturePointer(e.Pointer)", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("RowIndex", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("ColumnIndex", shortcutCode, StringComparison.Ordinal);
 
@@ -681,64 +693,53 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Main_app_shortcut_drag_handle_sends_one_move_on_release_and_cancels_without_mutation()
+    public void Main_app_shortcut_native_drag_sends_one_runtime_move_and_restores_local_order_first()
     {
         var root = FindRepositoryRoot();
         var shortcutXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml"));
         var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
-        var handle = shortcutXaml.Descendants().Single(element => element.Name.LocalName == "FontIcon"
-            && (string?)element.Attribute("PointerPressed") == "ShortcutDragHandle_PointerPressed");
+        var list = shortcutXaml.Descendants().Single(element => (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "ShortcutList");
+        Assert.Equal("True", (string?)list.Attribute("CanReorderItems"));
+        Assert.Equal("True", (string?)list.Attribute("CanDragItems"));
+        Assert.Equal("True", (string?)list.Attribute("AllowDrop"));
 
-        Assert.Equal("{x:Bind TileId}", (string?)handle.Attribute("Tag"));
-        Assert.Equal("ShortcutDragHandle_PointerPressed", (string?)handle.Attribute("PointerPressed"));
-        Assert.Equal("ShortcutDragHandle_PointerMoved", (string?)handle.Attribute("PointerMoved"));
-        Assert.Equal("ShortcutDragHandle_PointerReleased", (string?)handle.Attribute("PointerReleased"));
-        Assert.Equal("ShortcutDragHandle_PointerCanceled", (string?)handle.Attribute("PointerCanceled"));
-        Assert.Equal("ShortcutDragHandle_PointerCaptureLost", (string?)handle.Attribute("PointerCaptureLost"));
-
-        var movedStart = shortcutCode.IndexOf("private void ShortcutDragHandle_PointerMoved", StringComparison.Ordinal);
-        var releaseStart = shortcutCode.IndexOf("private async void ShortcutDragHandle_PointerReleased", StringComparison.Ordinal);
-        var cancelStart = shortcutCode.IndexOf("private void ShortcutDragHandle_PointerCanceled", StringComparison.Ordinal);
-        var captureLostStart = shortcutCode.IndexOf("private void ShortcutDragHandle_PointerCaptureLost", StringComparison.Ordinal);
-        var ownsPointerStart = shortcutCode.IndexOf("private bool OwnsShortcutDragPointer", StringComparison.Ordinal);
-        Assert.True(movedStart >= 0 && releaseStart > movedStart && cancelStart > releaseStart
-            && captureLostStart > cancelStart && ownsPointerStart > captureLostStart);
-        var movedHandler = shortcutCode[movedStart..releaseStart];
-        var releaseHandler = shortcutCode[releaseStart..cancelStart];
-        var cancelHandler = shortcutCode[cancelStart..captureLostStart];
-        var captureLostHandler = shortcutCode[captureLostStart..ownsPointerStart];
-
-        Assert.Contains("CapturePointer(e.Pointer)", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("CaptureRealizedShortcutItemBounds()", movedHandler, StringComparison.Ordinal);
-        Assert.Contains("ResolveShortcutDropTargetIndex(", movedHandler, StringComparison.Ordinal);
-        Assert.DoesNotContain("ApplyMutationAsync(", movedHandler, StringComparison.Ordinal);
-        Assert.Equal(1, releaseHandler.Split("ApplyMutationAsync(", StringSplitOptions.None).Length - 1);
-        Assert.Contains("FrontendShortcutMutationKind.Move", releaseHandler, StringComparison.Ordinal);
-        Assert.Contains("TileId: movedTileId", releaseHandler, StringComparison.Ordinal);
-        Assert.Contains("TargetIndex: targetIndex", releaseHandler, StringComparison.Ordinal);
-        Assert.Contains("ReleasePointerCapture(e.Pointer)", releaseHandler, StringComparison.Ordinal);
-        Assert.Contains("ClearShortcutDrag();", cancelHandler, StringComparison.Ordinal);
-        Assert.DoesNotContain("ApplyMutationAsync(", cancelHandler, StringComparison.Ordinal);
-        Assert.DoesNotContain("ApplyMutationAsync(", captureLostHandler, StringComparison.Ordinal);
+        var completionStart = shortcutCode.IndexOf("private async void ShortcutList_DragItemsCompleted", StringComparison.Ordinal);
+        var resolverStart = shortcutCode.IndexOf("internal static bool TryResolveShortcutMove", completionStart, StringComparison.Ordinal);
+        Assert.True(completionStart >= 0 && resolverStart > completionStart);
+        var completionHandler = shortcutCode[completionStart..resolverStart];
+        Assert.Contains("e.DropResult != DataPackageOperation.Move", completionHandler, StringComparison.Ordinal);
+        Assert.Contains("RestoreShortcutTiles(originalTiles);", completionHandler, StringComparison.Ordinal);
+        Assert.Contains("await ApplyMutationAsync(new FrontendShortcutMutationIntent(", completionHandler, StringComparison.Ordinal);
+        Assert.Equal(1, completionHandler.Split("await ApplyMutationAsync(", StringSplitOptions.None).Length - 1);
+        Assert.Contains("FrontendShortcutMutationKind.Move", completionHandler, StringComparison.Ordinal);
+        Assert.Contains("TileId: tileId", completionHandler, StringComparison.Ordinal);
+        Assert.Contains("TargetIndex: targetIndex", completionHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyMutationAsync(", shortcutCode[shortcutCode.IndexOf("private void ShortcutList_DragItemsStarting", StringComparison.Ordinal)..completionStart], StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Main_app_shortcut_drop_target_uses_real_row_major_container_geometry()
+    public void Main_app_shortcut_native_move_resolver_accepts_only_one_valid_item_move()
     {
-        ShortcutPage.ShortcutItemBounds[] items =
-        [
-            new(0, 0, 0, 100, 60),
-            new(1, 110, 0, 100, 60),
-            new(2, 220, 0, 100, 60),
-            new(3, 0, 70, 100, 60),
-            new(4, 110, 70, 100, 60)
-        ];
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var third = Guid.NewGuid();
+        var fourth = Guid.NewGuid();
+        var original = new[] { first, second, third, fourth };
 
-        Assert.Equal(0, ShortcutPage.ResolveShortcutDropTargetIndex(items, 20, 30, 5, 4));
-        Assert.Equal(2, ShortcutPage.ResolveShortcutDropTargetIndex(items, 270, 30, 5, 0));
-        Assert.Equal(2, ShortcutPage.ResolveShortcutDropTargetIndex(items, 200, 65, 5, 0));
-        Assert.Equal(4, ShortcutPage.ResolveShortcutDropTargetIndex(items, 190, 100, 5, 1));
-        Assert.Null(ShortcutPage.ResolveShortcutDropTargetIndex([], 0, 0, 0, 0));
+        Assert.True(ShortcutPage.TryResolveShortcutMove(original, [second, third, fourth, first], first,
+            out var sourceIndex, out var targetIndex));
+        Assert.Equal(0, sourceIndex);
+        Assert.Equal(3, targetIndex);
+
+        Assert.True(ShortcutPage.TryResolveShortcutMove(original, [third, first, second, fourth], third,
+            out sourceIndex, out targetIndex));
+        Assert.Equal(2, sourceIndex);
+        Assert.Equal(0, targetIndex);
+
+        Assert.False(ShortcutPage.TryResolveShortcutMove(original, original, first, out _, out _));
+        Assert.False(ShortcutPage.TryResolveShortcutMove(original, [second, first, fourth, third], first, out _, out _));
+        Assert.False(ShortcutPage.TryResolveShortcutMove(original, [second, third, first], first, out _, out _));
+        Assert.False(ShortcutPage.TryResolveShortcutMove([first, first], [first, first], first, out _, out _));
     }
 
     [Fact]
