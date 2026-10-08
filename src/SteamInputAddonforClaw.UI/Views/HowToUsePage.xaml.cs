@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml;
 using System.Globalization;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 
 namespace SteamInputAddonforClaw.Views;
@@ -185,7 +186,7 @@ public sealed partial class HowToUsePage : UserControl
     {
         var coreWebView = webView.CoreWebView2
             ?? throw new InvalidOperationException("CoreWebView2 is not initialized.");
-        var pending = new PendingHtmlNavigation();
+        var pending = new PendingHtmlNavigation(html);
         _pendingHtmlNavigation = pending;
         AppLog.Debug("HowToUse", "Generated document navigation requested.",
             ("Language", language), ("HtmlLength", html.Length));
@@ -216,6 +217,68 @@ public sealed partial class HowToUsePage : UserControl
         return !string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool ShouldAllowWebViewNavigation(string? uriText, bool matchedPendingDocument) =>
+        matchedPendingDocument || !ShouldCancelWebViewNavigation(uriText);
+
+    internal static bool IsExpectedGeneratedHtmlNavigationUri(string? uriText, string expectedHtml)
+    {
+        if (string.IsNullOrWhiteSpace(uriText)
+            || string.IsNullOrEmpty(expectedHtml)
+            || !uriText.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var commaIndex = uriText.IndexOf(',');
+        if (commaIndex < "data:".Length)
+            return false;
+
+        var metadata = uriText["data:".Length..commaIndex].Split(';');
+        if (!metadata[0].Trim().Equals("text/html", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var isBase64 = false;
+        var hasCharset = false;
+        for (var index = 1; index < metadata.Length; index++)
+        {
+            var parameter = metadata[index].Trim();
+            if (parameter.Equals("base64", StringComparison.OrdinalIgnoreCase) && !isBase64)
+            {
+                isBase64 = true;
+                continue;
+            }
+
+            const string charsetPrefix = "charset=";
+            if (parameter.StartsWith(charsetPrefix, StringComparison.OrdinalIgnoreCase) && !hasCharset)
+            {
+                var charset = parameter[charsetPrefix.Length..].Trim().Trim('"');
+                if (!charset.Equals("utf-8", StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                hasCharset = true;
+                continue;
+            }
+
+            return false;
+        }
+
+        try
+        {
+            var payload = Uri.UnescapeDataString(uriText[(commaIndex + 1)..]);
+            var generatedHtml = isBase64
+                ? new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
+                    .GetString(Convert.FromBase64String(payload))
+                : payload;
+            return string.Equals(generatedHtml, expectedHtml, StringComparison.Ordinal);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+    }
+
     private void ConfigureWebView(WebView2 webView)
     {
         if (_webViewConfigured)
@@ -233,9 +296,9 @@ public sealed partial class HowToUsePage : UserControl
         object? sender,
         CoreWebView2NavigationStartingEventArgs e)
     {
-        e.Cancel = ShouldCancelWebViewNavigation(e.Uri);
-        var matchedPendingDocument = !e.Cancel
-            && _pendingHtmlNavigation?.Correlation.TryCaptureNavigationStart(e.NavigationId, e.Uri) == true;
+        var matchedPendingDocument = _pendingHtmlNavigation?.Correlation.TryCaptureNavigationStart(
+            e.NavigationId, e.Uri, e.IsUserInitiated) == true;
+        e.Cancel = !ShouldAllowWebViewNavigation(e.Uri, matchedPendingDocument);
         AppLog.Debug("HowToUse", "WebView navigation starting.",
             ("NavigationId", e.NavigationId), ("UriKind", ClassifyNavigationUri(e.Uri)),
             ("IsUserInitiated", e.IsUserInitiated), ("Decision", e.Cancel ? "Cancel" : "Allow"),
@@ -256,6 +319,8 @@ public sealed partial class HowToUsePage : UserControl
 
     private static string ClassifyNavigationUri(string? uriText)
     {
+        if (uriText?.StartsWith("data:", StringComparison.OrdinalIgnoreCase) == true)
+            return "data";
         if (!Uri.TryCreate(uriText, UriKind.Absolute, out var uri)) return "Invalid";
         if (string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase)) return "GeneratedDocument";
         if (uri.Scheme is "http" or "https") return "ExternalHttp";
@@ -313,9 +378,9 @@ public sealed partial class HowToUsePage : UserControl
         }
     }
 
-    private sealed class PendingHtmlNavigation
+    private sealed class PendingHtmlNavigation(string expectedHtml)
     {
-        internal HowToUseNavigationCorrelation Correlation { get; } = new();
+        internal HowToUseNavigationCorrelation Correlation { get; } = new(expectedHtml);
         internal TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
@@ -323,13 +388,19 @@ public sealed partial class HowToUsePage : UserControl
 
 internal sealed class HowToUseNavigationCorrelation
 {
+    private readonly string _expectedHtml;
     private ulong? _navigationId;
+
+    internal HowToUseNavigationCorrelation(string expectedHtml)
+        => _expectedHtml = expectedHtml ?? throw new ArgumentNullException(nameof(expectedHtml));
 
     internal ulong? NavigationId => _navigationId;
 
-    internal bool TryCaptureNavigationStart(ulong navigationId, string? uriText)
+    internal bool TryCaptureNavigationStart(ulong navigationId, string? uriText, bool isUserInitiated)
     {
-        if (_navigationId is not null || HowToUsePage.ShouldCancelWebViewNavigation(uriText))
+        if (_navigationId is not null
+            || isUserInitiated
+            || !HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(uriText, _expectedHtml))
             return false;
 
         _navigationId = navigationId;

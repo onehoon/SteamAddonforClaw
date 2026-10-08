@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using SteamInputAddonforClaw.Views;
 using Xunit;
 
@@ -36,11 +37,61 @@ public sealed class HowToUsePageDocumentationRoutingTests
     [InlineData("https://example.com", true)]
     [InlineData("file:///C:/Windows/win.ini", true)]
     [InlineData("javascript:alert(1)", true)]
+    [InlineData("data:text/html;charset=utf-8,%3C!doctype%20html%3E", true)]
     public void WebView_navigation_is_cancelled_except_for_the_generated_blank_document(
         string uri,
         bool shouldCancel)
     {
         Assert.Equal(shouldCancel, HowToUsePage.ShouldCancelWebViewNavigation(uri));
+    }
+
+    [Fact]
+    public void Generated_html_uri_accepts_exact_percent_encoded_and_base64_documents()
+    {
+        var percentEncoded = CreateDataUri("text/html;charset=utf-8", GeneratedHtml);
+        var base64 = CreateBase64DataUri("text/html;charset=utf-8;base64", GeneratedHtml);
+        var base64WithoutCharset = CreateBase64DataUri("text/html;base64", GeneratedHtml);
+
+        Assert.True(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(percentEncoded, GeneratedHtml));
+        Assert.True(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(base64, GeneratedHtml));
+        Assert.True(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(base64WithoutCharset, GeneratedHtml));
+    }
+
+    [Fact]
+    public void Generated_html_uri_rejects_unrelated_content_and_unapproved_metadata()
+    {
+        var unrelatedDocument = CreateBase64DataUri("text/html;charset=utf-8;base64", "<!doctype html><html>other</html>");
+
+        Assert.False(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(unrelatedDocument, GeneratedHtml));
+        Assert.False(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(
+            CreateDataUri("text/plain", GeneratedHtml), GeneratedHtml));
+        Assert.False(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(
+            CreateDataUri("text/html;charset=iso-8859-1", GeneratedHtml), GeneratedHtml));
+        Assert.False(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(
+            CreateDataUri("text/html;foo=bar", GeneratedHtml), GeneratedHtml));
+        Assert.False(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(
+            "data:text/html;base64,not-base64!", GeneratedHtml));
+        Assert.False(HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(
+            "https://example.com/" + Uri.EscapeDataString(GeneratedHtml), GeneratedHtml));
+    }
+
+    [Fact]
+    public void Only_a_pending_non_user_generated_document_is_allowed_as_data_navigation()
+    {
+        var generatedUri = CreateBase64DataUri("text/html;charset=utf-8;base64", GeneratedHtml);
+        var unrelatedUri = CreateBase64DataUri("text/html;charset=utf-8;base64", "<!doctype html><html>unrelated</html>");
+        var correlation = new HowToUseNavigationCorrelation(GeneratedHtml);
+
+        Assert.False(correlation.TryCaptureNavigationStart(4, generatedUri, isUserInitiated: true));
+        Assert.False(correlation.TryCaptureNavigationStart(5, "data:text/plain,hello", isUserInitiated: false));
+        Assert.False(correlation.TryCaptureNavigationStart(6, unrelatedUri, isUserInitiated: false));
+        Assert.True(correlation.TryCaptureNavigationStart(8, generatedUri, isUserInitiated: false));
+        Assert.False(correlation.TryCaptureNavigationStart(9, generatedUri, isUserInitiated: false));
+        Assert.Equal(8ul, correlation.NavigationId);
+        Assert.False(HowToUsePage.ShouldAllowWebViewNavigation(generatedUri, matchedPendingDocument: false));
+        Assert.True(HowToUsePage.ShouldAllowWebViewNavigation(generatedUri, matchedPendingDocument: true));
+        Assert.True(HowToUsePage.ShouldAllowWebViewNavigation("about:blank", matchedPendingDocument: false));
+        Assert.False(HowToUsePage.ShouldAllowWebViewNavigation("https://example.com", matchedPendingDocument: false));
     }
 
     [Fact]
@@ -51,7 +102,11 @@ public sealed class HowToUsePageDocumentationRoutingTests
         Assert.Contains("coreWebView.NavigateToString(html)", code, StringComparison.Ordinal);
         Assert.Contains("NavigationStarting += DocumentationWebView_NavigationStarting", code, StringComparison.Ordinal);
         Assert.Contains("NavigationCompleted += DocumentationWebView_NavigationCompleted", code, StringComparison.Ordinal);
-        Assert.Contains("e.Cancel = ShouldCancelWebViewNavigation(e.Uri)", code, StringComparison.Ordinal);
+        Assert.Contains("e.Cancel = !ShouldAllowWebViewNavigation(e.Uri, matchedPendingDocument)", code, StringComparison.Ordinal);
+        Assert.Contains("e.IsUserInitiated", code, StringComparison.Ordinal);
+        Assert.Contains("IsExpectedGeneratedHtmlNavigationUri(uriText, _expectedHtml)", code, StringComparison.Ordinal);
+        Assert.Contains("new PendingHtmlNavigation(html)", code, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(generatedHtml, expectedHtml, StringComparison.Ordinal)", code, StringComparison.Ordinal);
         Assert.Contains("WebMessageReceived += DocumentationWebView_WebMessageReceived", code, StringComparison.Ordinal);
         Assert.Contains("catch (Exception exception)", code, StringComparison.Ordinal);
         Assert.Contains("Windows.System.Launcher.LaunchUriAsync(uri)", code, StringComparison.Ordinal);
@@ -62,15 +117,16 @@ public sealed class HowToUsePageDocumentationRoutingTests
     [Fact]
     public void How_to_use_navigation_completion_requires_the_pending_generated_document_id()
     {
-        var correlation = new HowToUseNavigationCorrelation();
+        var correlation = new HowToUseNavigationCorrelation(GeneratedHtml);
 
         Assert.False(correlation.MatchesCompleted(4));
-        Assert.False(correlation.TryCaptureNavigationStart(5, "https://example.com"));
-        Assert.True(correlation.TryCaptureNavigationStart(8, "about:blank"));
+        var generatedHtml = CreateDataUri("text/html;charset=utf-8", GeneratedHtml);
+        Assert.False(correlation.TryCaptureNavigationStart(5, "https://example.com", isUserInitiated: false));
+        Assert.True(correlation.TryCaptureNavigationStart(8, generatedHtml, isUserInitiated: false));
         Assert.Equal(8ul, correlation.NavigationId);
         Assert.False(correlation.MatchesCompleted(7));
         Assert.True(correlation.MatchesCompleted(8));
-        Assert.False(correlation.TryCaptureNavigationStart(9, "about:blank"));
+        Assert.False(correlation.TryCaptureNavigationStart(9, generatedHtml, isUserInitiated: false));
     }
 
     [Fact]
@@ -146,6 +202,14 @@ public sealed class HowToUsePageDocumentationRoutingTests
 
     private static string ReadPageCode() => File.ReadAllText(Path.Combine(
         RepoRoot(), "src", "SteamInputAddonforClaw.UI", "Views", "HowToUsePage.xaml.cs"));
+
+    private const string GeneratedHtml = "<!doctype html><html><body><p>한글 + English</p></body></html>";
+
+    private static string CreateDataUri(string metadata, string html)
+        => $"data:{metadata},{Uri.EscapeDataString(html)}";
+
+    private static string CreateBase64DataUri(string metadata, string html)
+        => $"data:{metadata},{Convert.ToBase64String(Encoding.UTF8.GetBytes(html))}";
 
     private static string RepoRoot()
     {

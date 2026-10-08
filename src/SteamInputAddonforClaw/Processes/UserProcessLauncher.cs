@@ -11,13 +11,9 @@ namespace SteamInputAddonforClaw.Processes;
 /// <summary>Starts user-requested processes without changing the Runtime's controller-authority token.</summary>
 internal sealed class UserProcessLauncher
 {
-    private const uint TokenAssignPrimary = 0x0001;
-    private const uint TokenDuplicate = 0x0002;
     private const uint TokenQuery = 0x0008;
     private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint CreateNoWindow = 0x08000000;
-    private const int SecurityImpersonation = 2;
-    private const int TokenPrimary = 1;
     private const int MediumIntegrityRid = 0x2000;
     private const int HighIntegrityRid = 0x3000;
     private const int MaxCommandLineChars = 32_766;
@@ -27,6 +23,12 @@ internal sealed class UserProcessLauncher
     {
         CreateProcessAsUserW,
         CreateProcessWithTokenW
+    }
+
+    internal enum MediumLaunchRoute
+    {
+        DirectProcessCreation,
+        DesktopShellDispatch
     }
 
     private readonly Func<ProcessStartInfo, bool, bool>? _launchOverride;
@@ -45,6 +47,14 @@ internal sealed class UserProcessLauncher
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         return LaunchCore(startInfo, runAsAdministrator, MediumProcessCreationApi.CreateProcessAsUserW);
+    }
+
+    internal bool LaunchViaDesktopShell(ProcessStartInfo startInfo)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        ValidateExecutableStartInfo(startInfo);
+        using var currentToken = OpenCurrentProcessToken(TokenQuery, "OpenProcessToken.Current");
+        return StartThroughDesktopShell(startInfo, currentToken);
     }
 
     /// <summary>Dispatches a supported HTTP(S) or Steam URI for the interactive user.</summary>
@@ -90,10 +100,7 @@ internal sealed class UserProcessLauncher
         MediumProcessCreationApi mediumProcessCreationApi)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
-        if (string.IsNullOrWhiteSpace(startInfo.FileName)
-            || startInfo.UseShellExecute
-            || !string.Equals(Path.GetExtension(startInfo.FileName), ".exe", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("User process launch requires a literal .exe with shell execution disabled.");
+        ValidateExecutableStartInfo(startInfo);
 
         if (_launchOverride is not null)
             return _launchOverride(startInfo, runAsAdministrator);
@@ -102,6 +109,14 @@ internal sealed class UserProcessLauncher
             return StartWithCurrentHighToken(startInfo);
 
         return StartWithMediumUserToken(startInfo, mediumProcessCreationApi);
+    }
+
+    private static void ValidateExecutableStartInfo(ProcessStartInfo startInfo)
+    {
+        if (string.IsNullOrWhiteSpace(startInfo.FileName)
+            || startInfo.UseShellExecute
+            || !string.Equals(Path.GetExtension(startInfo.FileName), ".exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("User process launch requires a literal .exe with shell execution disabled.");
     }
 
     private bool LaunchWebUrl(string url)
@@ -136,7 +151,7 @@ internal sealed class UserProcessLauncher
         ProcessStartInfo startInfo,
         MediumProcessCreationApi processCreationApi)
     {
-        using var currentToken = OpenCurrentProcessToken(TokenQuery | TokenDuplicate, "OpenProcessToken.Current");
+        using var currentToken = OpenCurrentProcessToken(TokenQuery, "OpenProcessToken.Current");
         var currentIntegrity = GetTokenIntegrityRid(currentToken);
         if (currentIntegrity == MediumIntegrityRid)
         {
@@ -156,8 +171,12 @@ internal sealed class UserProcessLauncher
             throw new InvalidOperationException("A verified Medium user token is unavailable.");
 
         using var linkedToken = GetLinkedToken(currentToken);
-        ValidateMediumLinkedToken(currentToken, linkedToken, currentIntegrity, currentElevationType);
-        using var primaryToken = DuplicateAsPrimary(linkedToken);
+        var linkedTokenType = ValidateMediumLinkedToken(currentToken, linkedToken, currentIntegrity, currentElevationType);
+        var launchRoute = GetMediumLaunchRoute((int)linkedTokenType);
+        if (launchRoute == MediumLaunchRoute.DesktopShellDispatch)
+            return StartThroughDesktopShell(startInfo, currentToken);
+
+        var processToken = linkedToken;
 
         var commandLineText = BuildCommandLine(startInfo);
         if (processCreationApi == MediumProcessCreationApi.CreateProcessWithTokenW
@@ -173,7 +192,7 @@ internal sealed class UserProcessLauncher
         var creationFlags = CreateUnicodeEnvironment
             | (startInfo.CreateNoWindow ? CreateNoWindow : 0);
 
-        if (!NativeMethods.CreateEnvironmentBlock(out var environment, primaryToken, false))
+        if (!NativeMethods.CreateEnvironmentBlock(out var environment, processToken, false))
             throw LastWin32Exception("CreateEnvironmentBlock", "The Medium user environment could not be created.");
 
         try
@@ -187,7 +206,7 @@ internal sealed class UserProcessLauncher
             if (processCreationApi == MediumProcessCreationApi.CreateProcessWithTokenW)
             {
                 created = NativeMethods.CreateProcessWithTokenW(
-                    primaryToken,
+                    processToken,
                     0,
                     Path.GetFullPath(startInfo.FileName),
                     commandLine,
@@ -200,7 +219,7 @@ internal sealed class UserProcessLauncher
             else
             {
                 created = NativeMethods.CreateProcessAsUserW(
-                    primaryToken,
+                    processToken,
                     Path.GetFullPath(startInfo.FileName),
                     commandLine,
                     IntPtr.Zero,
@@ -231,7 +250,7 @@ internal sealed class UserProcessLauncher
         }
     }
 
-    private static void ValidateMediumLinkedToken(
+    private static TokenType ValidateMediumLinkedToken(
         SafeTokenHandle currentToken,
         SafeTokenHandle linkedToken,
         int currentIntegrity,
@@ -239,21 +258,196 @@ internal sealed class UserProcessLauncher
     {
         var linkedElevationType = GetTokenElevationType(linkedToken);
         var linkedIntegrity = GetTokenIntegrityRid(linkedToken);
+        var linkedTokenType = GetTokenType(linkedToken);
+        var linkedImpersonationLevel = linkedTokenType == TokenType.Impersonation
+            ? GetTokenImpersonationLevel(linkedToken)
+            : (SecurityImpersonationLevel?)null;
         var sameSession = GetTokenSessionId(currentToken) == GetTokenSessionId(linkedToken);
         var sameUser = HasSameUser(currentToken, linkedToken);
-        var valid = linkedElevationType == TokenElevationType.Limited
+        var identityValid = linkedElevationType == TokenElevationType.Limited
             && linkedIntegrity == MediumIntegrityRid
             && sameSession
             && sameUser;
+        var supportedTokenType = linkedTokenType is TokenType.Primary or TokenType.Impersonation;
         AppLog.Debug("UserProcessLauncher", "Linked Medium token validation completed.",
             ("CurrentIntegrity", GetIntegrityCategory(currentIntegrity)),
             ("CurrentElevation", GetElevationCategory(currentElevationType)),
             ("LinkedIntegrity", GetIntegrityCategory(linkedIntegrity)),
             ("LinkedElevation", GetElevationCategory(linkedElevationType)),
-            ("SameUser", sameUser), ("SameSession", sameSession), ("ValidationSucceeded", valid));
-        if (!valid)
+            ("LinkedTokenType", GetTokenTypeCategory(linkedTokenType)),
+            ("LinkedImpersonationLevel", linkedImpersonationLevel is { } diagnosticLevel
+                ? GetImpersonationLevelCategory(diagnosticLevel)
+                : linkedTokenType == TokenType.Primary ? "NotApplicable" : "NotQueried"),
+            ("SameUser", sameUser), ("SameSession", sameSession),
+            ("ValidationSucceeded", identityValid && supportedTokenType));
+        if (!identityValid)
             throw new InvalidOperationException("The linked token is not the same user's interactive Medium token.");
+        if (!supportedTokenType)
+        {
+            throw new InvalidOperationException(
+                $"The linked Medium token type is unsupported (TokenType={GetTokenTypeCategory(linkedTokenType)}).");
+        }
+
+        return linkedTokenType;
     }
+
+    internal static MediumLaunchRoute GetMediumLaunchRoute(int tokenType) => tokenType switch
+    {
+        (int)TokenType.Primary => MediumLaunchRoute.DirectProcessCreation,
+        (int)TokenType.Impersonation => MediumLaunchRoute.DesktopShellDispatch,
+        _ => throw new InvalidOperationException("The linked Medium token type is unsupported.")
+    };
+
+    private static bool StartThroughDesktopShell(ProcessStartInfo startInfo, SafeTokenHandle currentToken)
+    {
+        const int csidlDesktop = 0;
+        const int swcDesktop = 8;
+        const int swfoNeedDispatch = 1;
+        const int svgIoBackground = 0;
+        const int swShowNormal = 1;
+        const int swHide = 0;
+        var shellWindowsClsid = new Guid("9BA05972-F6A8-11CF-A442-00A0C90A8F39");
+        var serviceGuid = new Guid("4C96BE40-915C-11CF-99D3-00AA004AE837");
+
+        object? shellWindowsObject = null;
+        object? desktopWindowObject = null;
+        object? shellBrowserObject = null;
+        object? shellViewObject = null;
+        object? folderViewObject = null;
+        object? shellDispatchObject = null;
+        var stage = "CreateShellWindows";
+        try
+        {
+            var shellWindowsType = Type.GetTypeFromCLSID(shellWindowsClsid, throwOnError: true)
+                ?? throw new InvalidOperationException("The Windows ShellWindows class is unavailable.");
+            shellWindowsObject = Activator.CreateInstance(shellWindowsType)
+                ?? throw new InvalidOperationException("The Windows ShellWindows object could not be created.");
+            var shellWindows = (IShellWindows)shellWindowsObject;
+
+            stage = "FindDesktopWindow";
+            object location = csidlDesktop;
+            object locationRoot = new();
+            desktopWindowObject = shellWindows.FindWindowSW(
+                ref location, ref locationRoot, swcDesktop, out var desktopHwnd, swfoNeedDispatch);
+            if (desktopHwnd == 0 || desktopWindowObject is not IComServiceProvider serviceProvider)
+                throw new InvalidOperationException("The current user's desktop Shell dispatch is unavailable.");
+
+            stage = "ResolveDesktopShellBrowser";
+            var shellBrowserIid = typeof(IShellBrowser).GUID;
+            shellBrowserObject = serviceProvider.QueryService(ref serviceGuid, ref shellBrowserIid);
+            if (shellBrowserObject is not IShellBrowser shellBrowser)
+                throw new InvalidOperationException("The desktop Shell browser interface is unavailable.");
+
+            stage = "ResolveDesktopFolderView";
+            shellViewObject = shellBrowser.QueryActiveShellView();
+            if (shellViewObject is not IShellView shellView)
+                throw new InvalidOperationException("The desktop Shell view is unavailable.");
+            var folderViewIid = new Guid("00020400-0000-0000-C000-000000000046");
+            folderViewObject = shellView.GetItemObject(svgIoBackground, ref folderViewIid);
+            if (folderViewObject is not IShellFolderViewDual folderView)
+                throw new InvalidOperationException("The desktop folder view dispatch is unavailable.");
+
+            stage = "ResolveDesktopShellApplication";
+            shellDispatchObject = folderView.Application;
+            if (shellDispatchObject is not IShellDispatch2 shellDispatch)
+                throw new InvalidOperationException("The desktop IShellDispatch2 interface is unavailable.");
+
+            stage = "ValidateDesktopShellToken";
+            var desktopThreadId = NativeMethods.GetWindowThreadProcessId(desktopHwnd, out var desktopProcessId);
+            if (desktopThreadId == 0 || desktopProcessId == 0)
+                throw new InvalidOperationException("The desktop Shell process could not be identified.");
+
+            using (var desktopProcess = Process.GetProcessById(checked((int)desktopProcessId)))
+            using (var desktopToken = OpenProcessToken(desktopProcess.Handle, "OpenProcessToken.DesktopShell"))
+            {
+                var sameUser = HasSameUser(currentToken, desktopToken);
+                var sameSession = GetTokenSessionId(currentToken) == GetTokenSessionId(desktopToken);
+                var desktopIntegrity = GetTokenIntegrityRid(desktopToken);
+                var mediumDesktop = desktopIntegrity == MediumIntegrityRid;
+                var desktopElevation = GetTokenElevationType(desktopToken);
+                var validDesktop = sameUser && sameSession && mediumDesktop;
+                AppLog.Debug("UserProcessLauncher", "Desktop Shell token validation completed.",
+                    ("DesktopIntegrity", GetIntegrityCategory(desktopIntegrity)),
+                    ("DesktopElevation", GetElevationCategory(desktopElevation)),
+                    ("SameUser", sameUser), ("SameSession", sameSession),
+                    ("ValidationSucceeded", validDesktop));
+                if (!validDesktop)
+                    throw new InvalidOperationException("The desktop Shell is not the same user's interactive Medium process.");
+            }
+
+            _ = BuildCommandLine(startInfo);
+            var arguments = BuildShellArguments(startInfo);
+            var workingDirectory = string.IsNullOrWhiteSpace(startInfo.WorkingDirectory)
+                ? string.Empty
+                : startInfo.WorkingDirectory;
+            var showCommand = startInfo.CreateNoWindow || startInfo.WindowStyle == ProcessWindowStyle.Hidden
+                ? swHide
+                : swShowNormal;
+
+            stage = "DesktopShellExecute";
+            shellDispatch.ShellExecute(Path.GetFullPath(startInfo.FileName), arguments,
+                workingDirectory, "open", showCommand);
+            AppLog.Debug("UserProcessLauncher", "Medium launch was accepted by the desktop Shell.",
+                ("Stage", stage), ("DispatchAccepted", true), ("TargetVisibility", "Unverified"),
+                ("RequestedPrivilegeMode", "Medium"));
+            return true;
+        }
+        catch (COMException exception)
+        {
+            AppLog.Warn("UserProcessLauncher", "Desktop Shell launch dispatch failed.", exception,
+                ("Stage", stage), ("HResult", $"0x{exception.HResult:X8}"),
+                ("DispatchAccepted", false));
+            throw new COMException($"Desktop Shell launch failed during {stage}.", exception.ErrorCode);
+        }
+        finally
+        {
+            ReleaseComObject(shellDispatchObject);
+            ReleaseComObject(folderViewObject);
+            ReleaseComObject(shellViewObject);
+            ReleaseComObject(shellBrowserObject);
+            ReleaseComObject(desktopWindowObject);
+            ReleaseComObject(shellWindowsObject);
+        }
+    }
+
+    internal static string BuildShellArguments(ProcessStartInfo startInfo)
+    {
+        if (startInfo.ArgumentList.Count != 0 && !string.IsNullOrEmpty(startInfo.Arguments))
+            throw new InvalidOperationException("Process arguments cannot use both argument representations.");
+
+        return startInfo.ArgumentList.Count == 0
+            ? startInfo.Arguments
+            : string.Join(' ', startInfo.ArgumentList.Select(QuoteArgument));
+    }
+
+    private static void ReleaseComObject(object? value)
+    {
+        if (value is not null && Marshal.IsComObject(value))
+            Marshal.ReleaseComObject(value);
+    }
+
+    private static SafeTokenHandle OpenProcessToken(IntPtr processHandle, string stage)
+    {
+        if (!NativeMethods.OpenProcessToken(processHandle, TokenQuery, out var token))
+            throw LastWin32Exception(stage, "The desktop Shell process token could not be opened.");
+        return token;
+    }
+
+    private static string GetTokenTypeCategory(TokenType tokenType) => tokenType switch
+    {
+        TokenType.Primary => "Primary",
+        TokenType.Impersonation => "Impersonation",
+        _ => "Unknown"
+    };
+
+    private static string GetImpersonationLevelCategory(SecurityImpersonationLevel level) => level switch
+    {
+        SecurityImpersonationLevel.Anonymous => "Anonymous",
+        SecurityImpersonationLevel.Identification => "Identification",
+        SecurityImpersonationLevel.Impersonation => "Impersonation",
+        SecurityImpersonationLevel.Delegation => "Delegation",
+        _ => "Unknown"
+    };
 
     private static string GetIntegrityCategory(int integrityRid) => integrityRid switch
     {
@@ -288,15 +482,6 @@ internal sealed class UserProcessLauncher
         return new SafeTokenHandle(linkedHandle);
     }
 
-    private static SafeTokenHandle DuplicateAsPrimary(SafeTokenHandle token)
-    {
-        var desiredAccess = TokenQuery | TokenDuplicate | TokenAssignPrimary;
-        if (!NativeMethods.DuplicateTokenEx(token, desiredAccess, IntPtr.Zero, SecurityImpersonation,
-                TokenPrimary, out var primaryToken))
-            throw LastWin32Exception("DuplicateTokenEx", "The Medium user token could not be prepared for process creation.");
-        return primaryToken;
-    }
-
     private static TokenElevationType GetTokenElevationType(SafeTokenHandle token)
     {
         using var information = GetTokenInformation(token, TokenInformationClass.ElevationType);
@@ -307,6 +492,18 @@ internal sealed class UserProcessLauncher
     {
         using var information = GetTokenInformation(token, TokenInformationClass.SessionId);
         return Marshal.ReadInt32(information.DangerousGetHandle());
+    }
+
+    private static TokenType GetTokenType(SafeTokenHandle token)
+    {
+        using var information = GetTokenInformation(token, TokenInformationClass.Type);
+        return (TokenType)Marshal.ReadInt32(information.DangerousGetHandle());
+    }
+
+    private static SecurityImpersonationLevel GetTokenImpersonationLevel(SafeTokenHandle token)
+    {
+        using var information = GetTokenInformation(token, TokenInformationClass.ImpersonationLevel);
+        return (SecurityImpersonationLevel)Marshal.ReadInt32(information.DangerousGetHandle());
     }
 
     private static int GetTokenIntegrityRid(SafeTokenHandle token)
@@ -421,6 +618,8 @@ internal sealed class UserProcessLauncher
     private enum TokenInformationClass
     {
         User = 1,
+        Type = 8,
+        ImpersonationLevel = 9,
         SessionId = 12,
         ElevationType = 18,
         LinkedToken = 19,
@@ -432,6 +631,20 @@ internal sealed class UserProcessLauncher
         Default = 1,
         Full = 2,
         Limited = 3
+    }
+
+    private enum TokenType
+    {
+        Primary = 1,
+        Impersonation = 2
+    }
+
+    private enum SecurityImpersonationLevel
+    {
+        Anonymous = 0,
+        Identification = 1,
+        Impersonation = 2,
+        Delegation = 3
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -491,6 +704,92 @@ internal sealed class UserProcessLauncher
         internal int ThreadId;
     }
 
+    [ComImport]
+    [Guid("85CB6900-4D95-11CF-960C-0080C7F4EE85")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
+    private interface IShellWindows
+    {
+        [return: MarshalAs(UnmanagedType.IDispatch)]
+        object FindWindowSW(
+            [MarshalAs(UnmanagedType.Struct)] ref object location,
+            [MarshalAs(UnmanagedType.Struct)] ref object locationRoot,
+            int shellWindowClass,
+            out int windowHandle,
+            int options);
+    }
+
+    [ComImport]
+    [Guid("6D5140C1-7436-11CE-8034-00AA006009FA")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IComServiceProvider
+    {
+        [return: MarshalAs(UnmanagedType.Interface)]
+        object QueryService(ref Guid serviceGuid, ref Guid interfaceGuid);
+    }
+
+    [ComImport]
+    [Guid("000214E2-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellBrowser
+    {
+        void VTableGap01();
+        void VTableGap02();
+        void VTableGap03();
+        void VTableGap04();
+        void VTableGap05();
+        void VTableGap06();
+        void VTableGap07();
+        void VTableGap08();
+        void VTableGap09();
+        void VTableGap10();
+        void VTableGap11();
+        void VTableGap12();
+        IShellView QueryActiveShellView();
+    }
+
+    [ComImport]
+    [Guid("000214E3-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellView
+    {
+        void VTableGap01();
+        void VTableGap02();
+        void VTableGap03();
+        void VTableGap04();
+        void VTableGap05();
+        void VTableGap06();
+        void VTableGap07();
+        void VTableGap08();
+        void VTableGap09();
+        void VTableGap10();
+        void VTableGap11();
+        void VTableGap12();
+
+        [return: MarshalAs(UnmanagedType.Interface)]
+        object GetItemObject(uint item, ref Guid interfaceGuid);
+    }
+
+    [ComImport]
+    [Guid("E7A1AF80-4D96-11CF-960C-0080C7F4EE85")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
+    private interface IShellFolderViewDual
+    {
+        object Application { [return: MarshalAs(UnmanagedType.IDispatch)] get; }
+    }
+
+    [ComImport]
+    [Guid("A4C6892C-3BA9-11D2-9DEA-00C04FB16162")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
+    private interface IShellDispatch2
+    {
+        void ShellExecute(
+            [MarshalAs(UnmanagedType.BStr)] string file,
+            [MarshalAs(UnmanagedType.Struct)] object arguments,
+            [MarshalAs(UnmanagedType.Struct)] object directory,
+            [MarshalAs(UnmanagedType.Struct)] object operation,
+            [MarshalAs(UnmanagedType.Struct)] object showCommand);
+    }
+
     private sealed class SafeTokenHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
         internal SafeTokenHandle() : base(ownsHandle: true) { }
@@ -518,11 +817,6 @@ internal sealed class UserProcessLauncher
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetTokenInformation(SafeTokenHandle tokenHandle, TokenInformationClass informationClass,
             IntPtr information, uint informationLength, out uint returnLength);
-
-        [DllImport("advapi32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool DuplicateTokenEx(SafeTokenHandle existingToken, uint desiredAccess, IntPtr tokenAttributes,
-            int impersonationLevel, int tokenType, out SafeTokenHandle newToken);
 
         [DllImport("advapi32.dll", EntryPoint = "CreateProcessAsUserW", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -558,6 +852,9 @@ internal sealed class UserProcessLauncher
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("user32.dll")]
+        internal static extern uint GetWindowThreadProcessId(IntPtr windowHandle, out uint processId);
     }
 }
 
