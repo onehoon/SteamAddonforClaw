@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Xml.Linq;
 using Microsoft.UI.Xaml;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -640,9 +639,19 @@ public sealed class UiArchitectureTests
         Assert.Equal("0", containerSetters["Padding"]);
         Assert.Equal("Stretch", containerSetters["VerticalContentAlignment"]);
         Assert.Equal("False", containerSetters["UseSystemFocusVisuals"]);
-        Assert.DoesNotContain(itemContainerStyle.Elements(), element => element.Name.LocalName == "Setter"
+        var itemTemplateSetter = itemContainerStyle.Elements().Single(element => element.Name.LocalName == "Setter"
             && (string?)element.Attribute("Property") == "Template");
-        Assert.DoesNotContain(shortcutXaml.Descendants(), element => element.Name.LocalName == "ControlTemplate");
+        var itemControlTemplate = itemTemplateSetter.Elements().Single(element => element.Name.LocalName == "Setter.Value")
+            .Elements().Single(element => element.Name.LocalName == "ControlTemplate");
+        var itemContentPresenter = itemControlTemplate.Elements().Single(element => element.Name.LocalName == "ContentPresenter");
+        Assert.Equal("ListViewItem", (string?)itemControlTemplate.Attribute("TargetType"));
+        Assert.Equal("{TemplateBinding Content}", (string?)itemContentPresenter.Attribute("Content"));
+        Assert.Equal("{TemplateBinding ContentTemplate}", (string?)itemContentPresenter.Attribute("ContentTemplate"));
+        Assert.Equal("{TemplateBinding ContentTransitions}", (string?)itemContentPresenter.Attribute("ContentTransitions"));
+        Assert.Equal("{TemplateBinding HorizontalContentAlignment}", (string?)itemContentPresenter.Attribute("HorizontalAlignment"));
+        Assert.Equal("{TemplateBinding VerticalContentAlignment}", (string?)itemContentPresenter.Attribute("VerticalAlignment"));
+        Assert.DoesNotContain(itemControlTemplate.Descendants(), element => element.Name.LocalName is "VisualState" or "ListViewItemPresenter" or "ThemeShadow");
+        Assert.DoesNotContain(shortcutXaml.Descendants(), element => element.Name.LocalName == "ThemeShadow");
         Assert.Equal("Auto,*,Auto", (string?)cardGrid.Attribute("ColumnDefinitions"));
         Assert.Equal("{x:Bind TileId}", (string?)card.Attribute("Tag"));
         Assert.Equal("ShortcutTile_PointerPressed", (string?)card.Attribute("PointerPressed"));
