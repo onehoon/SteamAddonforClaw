@@ -1,7 +1,10 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Contracts.Shortcuts;
 using SteamInputAddonforClaw.Processes;
 using SteamInputAddonforClaw.Shortcuts;
@@ -29,6 +32,7 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
             Assert.False(string.IsNullOrWhiteSpace(currentUserSid));
             var currentIntegritySid = GetCurrentIntegritySid();
             var currentIntegrityRid = ParseIntegrityRid(currentIntegritySid);
+            var currentElevationType = GetCurrentElevationType();
 
             var powershellActionOutput = Path.Combine(testDirectory, "powershell-action.txt");
             var executableActionOutput = Path.Combine(testDirectory, "executable-action.txt");
@@ -73,13 +77,27 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
 
             var powershellResult = await runtime.ExecuteAsync(powershellTile.TileId);
             var executableResult = await runtime.ExecuteAsync(executableTile.TileId);
-            Assert.Equal(ShortcutExecutionOutcome.Succeeded, powershellResult.Outcome);
-            Assert.Equal(ShortcutExecutionOutcome.Succeeded, executableResult.Outcome);
-            AssertChildIdentity(await WaitForIdentityAsync(powershellActionOutput), currentUserSid!, "S-1-16-8192");
-            AssertChildIdentity(await WaitForIdentityAsync(executableActionOutput), currentUserSid!, "S-1-16-8192");
+            // Medium hosts can launch directly; elevated Full hosts must use the validated linked token.
+            var hasSupportedMediumToken = currentIntegrityRid == 0x2000 || currentElevationType == TokenElevationType.Full;
+            if (hasSupportedMediumToken)
+            {
+                Assert.True(powershellResult.Outcome == ShortcutExecutionOutcome.Succeeded,
+                    $"Medium PowerShell launch failed. Caller integrity={currentIntegritySid}, elevation={currentElevationType}, result={powershellResult.Outcome}.");
+                Assert.True(executableResult.Outcome == ShortcutExecutionOutcome.Succeeded,
+                    $"Medium EXE launch failed. Caller integrity={currentIntegritySid}, elevation={currentElevationType}, result={executableResult.Outcome}.");
+                AssertChildIdentity(await WaitForIdentityAsync(powershellActionOutput), currentUserSid!, "S-1-16-8192");
+                AssertChildIdentity(await WaitForIdentityAsync(executableActionOutput), currentUserSid!, "S-1-16-8192");
+            }
+            else
+            {
+                Assert.Equal(ShortcutExecutionOutcome.Failed, powershellResult.Outcome);
+                Assert.Equal(ShortcutExecutionOutcome.Failed, executableResult.Outcome);
+                Assert.False(File.Exists(powershellActionOutput));
+                Assert.False(File.Exists(executableActionOutput));
+            }
 
             var administratorResult = await runtime.ExecuteAsync(administratorTile.TileId);
-            if (currentIntegrityRid >= 0x3000)
+            if (currentIntegrityRid >= 0x3000 && currentElevationType == TokenElevationType.Full)
             {
                 Assert.Equal(ShortcutExecutionOutcome.Succeeded, administratorResult.Outcome);
                 AssertChildIdentity(await WaitForIdentityAsync(administratorActionOutput), currentUserSid!, currentIntegritySid);
@@ -162,6 +180,28 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
     private static int ParseIntegrityRid(string integritySid) =>
         int.Parse(integritySid[(integritySid.LastIndexOf('-') + 1)..], System.Globalization.CultureInfo.InvariantCulture);
 
+    private static TokenElevationType GetCurrentElevationType()
+    {
+        using var process = Process.GetCurrentProcess();
+        if (!NativeMethods.OpenProcessToken(process.Handle, 0x0008, out var token))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "The current process token could not be opened.");
+        using (token)
+        {
+            var information = Marshal.AllocHGlobal(sizeof(int));
+            try
+            {
+                if (!NativeMethods.GetTokenInformation(token, TokenInformationClass.ElevationType,
+                        information, sizeof(int), out _))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "The current token elevation type could not be read.");
+                return (TokenElevationType)Marshal.ReadInt32(information);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(information);
+            }
+        }
+    }
+
     private static void AssertChildIdentity(string identityText, string expectedUserSid, string expectedIntegritySid)
     {
         var parts = identityText.Split('|', 2);
@@ -187,5 +227,29 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
 
         Assert.Fail($"The launched child did not write its token identity in time: {outputPath}");
         return string.Empty;
+    }
+
+    private enum TokenInformationClass
+    {
+        ElevationType = 18
+    }
+
+    private enum TokenElevationType
+    {
+        Default = 1,
+        Full = 2,
+        Limited = 3
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out SafeAccessTokenHandle tokenHandle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetTokenInformation(SafeAccessTokenHandle tokenHandle, TokenInformationClass informationClass,
+            IntPtr information, uint informationLength, out uint returnLength);
     }
 }
