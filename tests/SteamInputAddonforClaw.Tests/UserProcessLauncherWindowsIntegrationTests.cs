@@ -56,7 +56,7 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
     }
 
     [Fact]
-    public async Task Desktop_shell_dispatch_launches_a_long_command_as_the_same_medium_user()
+    public async Task Desktop_shell_dispatches_a_long_command_or_fails_closed_without_an_eligible_shell()
     {
         Assert.True(OperatingSystem.IsWindows());
 
@@ -76,9 +76,18 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
             Assert.True(UserProcessLauncher.BuildShellArguments(startInfo).Length > 1_024);
 
             var launcher = new UserProcessLauncher();
-            Assert.True(launcher.LaunchViaDesktopShell(startInfo));
-
-            AssertChildIdentity(await WaitForIdentityAsync(outputPath), currentUserSid!, "S-1-16-8192");
+            try
+            {
+                Assert.True(launcher.LaunchViaDesktopShell(startInfo));
+                AssertChildIdentity(await WaitForIdentityAsync(outputPath), currentUserSid!, "S-1-16-8192");
+            }
+            catch (InvalidOperationException exception) when (
+                exception.Message == "The desktop Shell is not the same user's interactive Medium process.")
+            {
+                // Hosted runners may expose a desktop Shell owned by a different or non-interactive token.
+                // That environment is unsupported for this route and must fail before dispatching a child.
+                Assert.False(File.Exists(outputPath));
+            }
         }
         finally
         {
