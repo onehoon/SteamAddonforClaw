@@ -495,13 +495,28 @@ public sealed partial class ShortcutPage : UserControl
         if (candidates.Length == 0)
             return null;
 
+        var firstOccupiedRowTop = candidates.Min(card => card.Bounds.Top);
+        var lastOccupiedRowBottom = candidates.Max(card => card.Bounds.Bottom);
+        const double rowGapToleranceDip = 12;
+        if (releasePosition.Y < firstOccupiedRowTop - rowGapToleranceDip
+            || releasePosition.Y > lastOccupiedRowBottom + rowGapToleranceDip)
+            return null;
+
         var containingCard = candidates.FirstOrDefault(card => card.Bounds.Contains(releasePosition));
         if (containingCard.Bounds.Width > 0 && containingCard.Bounds.Height > 0)
             return containingCard.Index;
 
+        var nearestRowCenterY = candidates
+            .Select(card => card.Bounds.Y + card.Bounds.Height / 2)
+            .OrderBy(centerY => Math.Abs(releasePosition.Y - centerY))
+            .First();
+        var nearestRow = candidates
+            .Where(card => Math.Abs(card.Bounds.Y + card.Bounds.Height / 2 - nearestRowCenterY) < 0.5)
+            .ToArray();
+
         var nearestIndex = -1;
         var nearestDistanceSquared = double.PositiveInfinity;
-        foreach (var card in candidates)
+        foreach (var card in nearestRow)
         {
             var centerX = card.Bounds.X + card.Bounds.Width / 2;
             var centerY = card.Bounds.Y + card.Bounds.Height / 2;
@@ -552,6 +567,9 @@ public sealed partial class ShortcutPage : UserControl
         var sourceIndex = IndexOfTile(_tiles, tileId);
         if (sourceIndex < 0)
             return;
+
+        if (!isMouse)
+            surface.CancelDirectManipulations();
 
         if (!surface.CapturePointer(e.Pointer))
         {

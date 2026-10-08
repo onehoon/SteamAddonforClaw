@@ -65,6 +65,7 @@
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             BorderThickness="1"
                             CornerRadius="8"
+                            ManipulationMode="None"
                             PointerPressed="ShortcutTile_PointerPressed"
                             PointerMoved="ShortcutTile_PointerMoved"
                             PointerReleased="ShortcutTile_PointerReleased"

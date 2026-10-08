@@ -659,6 +659,7 @@ public sealed class UiArchitectureTests
         Assert.Equal("ShortcutTile_PointerReleased", (string?)card.Attribute("PointerReleased"));
         Assert.Equal("ShortcutTile_PointerCanceled", (string?)card.Attribute("PointerCanceled"));
         Assert.Equal("ShortcutTile_PointerCaptureLost", (string?)card.Attribute("PointerCaptureLost"));
+        Assert.Equal("None", (string?)card.Attribute("ManipulationMode"));
         Assert.Equal("0,0,12,12", (string?)card.Attribute("Margin"));
         Assert.Equal("1", (string?)card.Attribute("BorderThickness"));
         Assert.Equal("8", (string?)card.Attribute("CornerRadius"));
@@ -739,8 +740,13 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("ApplyMutationAsync", shortcutCode[canceledStart..unloadedStart], StringComparison.Ordinal);
         var pointerPressedStart = shortcutCode.IndexOf("private void ShortcutTile_PointerPressed", StringComparison.Ordinal);
         var pointerMovedStart = shortcutCode.IndexOf("private void ShortcutTile_PointerMoved", pointerPressedStart, StringComparison.Ordinal);
+        var pointerPressedHandler = shortcutCode[pointerPressedStart..pointerMovedStart].Replace("\r\n", "\n", StringComparison.Ordinal);
         Assert.Contains("IsPointerSourceInsideButton(e.OriginalSource as DependencyObject, surface)",
-            shortcutCode[pointerPressedStart..pointerMovedStart], StringComparison.Ordinal);
+            pointerPressedHandler, StringComparison.Ordinal);
+        Assert.Contains("if (!isMouse)\n            surface.CancelDirectManipulations();",
+            pointerPressedHandler, StringComparison.Ordinal);
+        Assert.True(shortcutCode.IndexOf("surface.CancelDirectManipulations();", pointerPressedStart, StringComparison.Ordinal)
+            < shortcutCode.IndexOf("surface.CapturePointer(e.Pointer)", pointerPressedStart, StringComparison.Ordinal));
         Assert.Contains("ClearShortcutReorder(\"Canceled\", releaseCapture: true)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("ClearShortcutReorder(\"Unavailable\", releaseCapture: true)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("IsPointerSourceInsideButton", shortcutCode, StringComparison.Ordinal);
@@ -772,6 +778,12 @@ public sealed class UiArchitectureTests
         Assert.Null(ShortcutPage.ResolveShortcutDropIndex(new Point(50, 40), [], gridBounds));
         Assert.Null(ShortcutPage.ResolveShortcutDropIndex(new Point(50, 40),
             [(0, new Rect(0, 0, 0, 80))], gridBounds));
+
+        var tallListViewport = new Rect(0, 0, 336, 600);
+        Assert.Null(ShortcutPage.ResolveShortcutDropIndex(new Point(50, 450), fourCards, tallListViewport));
+        Assert.Equal(3, ShortcutPage.ResolveShortcutDropIndex(new Point(50, 132), fourCards, tallListViewport));
+        Assert.Equal(3, ShortcutPage.ResolveShortcutDropIndex(new Point(250, 132), fourCards, tallListViewport));
+        Assert.Equal(4, ShortcutPage.ResolveShortcutDropIndex(new Point(250, 132), fiveCards, tallListViewport));
     }
 
     [Fact]
