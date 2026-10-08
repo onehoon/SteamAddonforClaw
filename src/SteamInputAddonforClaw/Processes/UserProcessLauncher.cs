@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.WindowsGaming;
 
 namespace SteamInputAddonforClaw.Processes;
@@ -20,6 +21,13 @@ internal sealed class UserProcessLauncher
     private const int MediumIntegrityRid = 0x2000;
     private const int HighIntegrityRid = 0x3000;
     private const int MaxCommandLineChars = 32_766;
+    private const int MaxCreateProcessWithTokenCommandLineChars = 1_024;
+
+    internal enum MediumProcessCreationApi
+    {
+        CreateProcessAsUserW,
+        CreateProcessWithTokenW
+    }
 
     private readonly Func<ProcessStartInfo, bool, bool>? _launchOverride;
 
@@ -36,18 +44,7 @@ internal sealed class UserProcessLauncher
     internal bool Launch(ProcessStartInfo startInfo, bool runAsAdministrator = false)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
-        if (string.IsNullOrWhiteSpace(startInfo.FileName)
-            || startInfo.UseShellExecute
-            || !string.Equals(Path.GetExtension(startInfo.FileName), ".exe", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("User process launch requires a literal .exe with shell execution disabled.");
-
-        if (_launchOverride is not null)
-            return _launchOverride(startInfo, runAsAdministrator);
-
-        if (runAsAdministrator)
-            return StartWithCurrentHighToken(startInfo);
-
-        return StartWithMediumUserToken(startInfo);
+        return LaunchCore(startInfo, runAsAdministrator, MediumProcessCreationApi.CreateProcessAsUserW);
     }
 
     /// <summary>Dispatches a supported HTTP(S) or Steam URI for the interactive user.</summary>
@@ -84,7 +81,27 @@ internal sealed class UserProcessLauncher
         };
         startInfo.ArgumentList.Add(target);
 
-        return Launch(startInfo);
+        return LaunchCore(startInfo, runAsAdministrator: false, MediumProcessCreationApi.CreateProcessWithTokenW);
+    }
+
+    private bool LaunchCore(
+        ProcessStartInfo startInfo,
+        bool runAsAdministrator,
+        MediumProcessCreationApi mediumProcessCreationApi)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        if (string.IsNullOrWhiteSpace(startInfo.FileName)
+            || startInfo.UseShellExecute
+            || !string.Equals(Path.GetExtension(startInfo.FileName), ".exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("User process launch requires a literal .exe with shell execution disabled.");
+
+        if (_launchOverride is not null)
+            return _launchOverride(startInfo, runAsAdministrator);
+
+        if (runAsAdministrator)
+            return StartWithCurrentHighToken(startInfo);
+
+        return StartWithMediumUserToken(startInfo, mediumProcessCreationApi);
     }
 
     private bool LaunchWebUrl(string url)
@@ -100,33 +117,54 @@ internal sealed class UserProcessLauncher
 
     private static bool StartWithCurrentHighToken(ProcessStartInfo startInfo)
     {
-        using var currentToken = OpenCurrentProcessToken(TokenQuery);
-        if (GetTokenElevationType(currentToken) != TokenElevationType.Full
-            || GetTokenIntegrityRid(currentToken) < HighIntegrityRid)
+        using var currentToken = OpenCurrentProcessToken(TokenQuery, "OpenProcessToken.CurrentHigh");
+        var elevationType = GetTokenElevationType(currentToken);
+        var integrity = GetTokenIntegrityRid(currentToken);
+        var valid = elevationType == TokenElevationType.Full && integrity >= HighIntegrityRid;
+        AppLog.Debug("UserProcessLauncher", "Current High token validation completed.",
+            ("CurrentIntegrity", GetIntegrityCategory(integrity)),
+            ("CurrentElevation", GetElevationCategory(elevationType)),
+            ("ValidationSucceeded", valid), ("RequestedPrivilegeMode", "High"));
+        if (!valid)
             throw new InvalidOperationException("Administrator launch requires the existing High Runtime token.");
 
         using var process = Process.Start(startInfo);
         return process is not null;
     }
 
-    private static bool StartWithMediumUserToken(ProcessStartInfo startInfo)
+    private static bool StartWithMediumUserToken(
+        ProcessStartInfo startInfo,
+        MediumProcessCreationApi processCreationApi)
     {
-        using var currentToken = OpenCurrentProcessToken(TokenQuery | TokenDuplicate);
+        using var currentToken = OpenCurrentProcessToken(TokenQuery | TokenDuplicate, "OpenProcessToken.Current");
         var currentIntegrity = GetTokenIntegrityRid(currentToken);
         if (currentIntegrity == MediumIntegrityRid)
         {
+            AppLog.Debug("UserProcessLauncher", "Current process already has a Medium token.",
+                ("CurrentIntegrity", "Medium"), ("LinkedTokenChecked", false),
+                ("RequestedPrivilegeMode", "Medium"));
             using var process = Process.Start(startInfo);
             return process is not null;
         }
 
-        if (currentIntegrity < HighIntegrityRid || GetTokenElevationType(currentToken) != TokenElevationType.Full)
+        var currentElevationType = GetTokenElevationType(currentToken);
+        AppLog.Debug("UserProcessLauncher", "Current token inspected for Medium process creation.",
+            ("CurrentIntegrity", GetIntegrityCategory(currentIntegrity)),
+            ("CurrentElevation", GetElevationCategory(currentElevationType)),
+            ("RequestedPrivilegeMode", "Medium"));
+        if (currentIntegrity < HighIntegrityRid || currentElevationType != TokenElevationType.Full)
             throw new InvalidOperationException("A verified Medium user token is unavailable.");
 
         using var linkedToken = GetLinkedToken(currentToken);
-        ValidateMediumLinkedToken(currentToken, linkedToken);
+        ValidateMediumLinkedToken(currentToken, linkedToken, currentIntegrity, currentElevationType);
         using var primaryToken = DuplicateAsPrimary(linkedToken);
 
-        var commandLine = new StringBuilder(BuildCommandLine(startInfo));
+        var commandLineText = BuildCommandLine(startInfo);
+        if (processCreationApi == MediumProcessCreationApi.CreateProcessWithTokenW
+            && !IsWithinCreateProcessWithTokenCommandLineLimit(commandLineText))
+            throw new InvalidOperationException("The shell activation command exceeds the selected Windows API limit.");
+
+        var commandLine = new StringBuilder(commandLineText);
         var startupInfo = new StartupInfo
         {
             Size = Marshal.SizeOf<StartupInfo>(),
@@ -136,13 +174,32 @@ internal sealed class UserProcessLauncher
             | (startInfo.CreateNoWindow ? CreateNoWindow : 0);
 
         if (!NativeMethods.CreateEnvironmentBlock(out var environment, primaryToken, false))
-            throw LastWin32Exception("The Medium user environment could not be created.");
+            throw LastWin32Exception("CreateEnvironmentBlock", "The Medium user environment could not be created.");
 
         try
         {
-            // CreateProcessWithTokenW caps lpCommandLine at 1,024 characters. This path must
-            // preserve the existing Shortcut EXE / encoded PowerShell command-line limit.
-            if (!NativeMethods.CreateProcessAsUserW(
+            AppLog.Debug("UserProcessLauncher", "Creating a same-session Medium user process.",
+                ("ProcessCreationApi", processCreationApi), ("CommandLineLength", commandLine.Length),
+                ("CurrentDirectoryPresent", !string.IsNullOrWhiteSpace(startInfo.WorkingDirectory)),
+                ("RequestedPrivilegeMode", "Medium"));
+            ProcessInformation processInformation;
+            bool created;
+            if (processCreationApi == MediumProcessCreationApi.CreateProcessWithTokenW)
+            {
+                created = NativeMethods.CreateProcessWithTokenW(
+                    primaryToken,
+                    0,
+                    Path.GetFullPath(startInfo.FileName),
+                    commandLine,
+                    creationFlags,
+                    environment,
+                    string.IsNullOrWhiteSpace(startInfo.WorkingDirectory) ? null : startInfo.WorkingDirectory,
+                    ref startupInfo,
+                    out processInformation);
+            }
+            else
+            {
+                created = NativeMethods.CreateProcessAsUserW(
                     primaryToken,
                     Path.GetFullPath(startInfo.FileName),
                     commandLine,
@@ -153,8 +210,13 @@ internal sealed class UserProcessLauncher
                     environment,
                     string.IsNullOrWhiteSpace(startInfo.WorkingDirectory) ? null : startInfo.WorkingDirectory,
                     ref startupInfo,
-                    out var processInformation))
-                throw LastWin32Exception("The process could not be started with the Medium user token.");
+                    out processInformation);
+            }
+            if (!created)
+            {
+                var stage = processCreationApi.ToString();
+                throw LastWin32Exception(stage, "The process could not be started with the Medium user token.");
+            }
 
             try { return true; }
             finally
@@ -169,20 +231,51 @@ internal sealed class UserProcessLauncher
         }
     }
 
-    private static void ValidateMediumLinkedToken(SafeTokenHandle currentToken, SafeTokenHandle linkedToken)
+    private static void ValidateMediumLinkedToken(
+        SafeTokenHandle currentToken,
+        SafeTokenHandle linkedToken,
+        int currentIntegrity,
+        TokenElevationType currentElevationType)
     {
-        if (GetTokenElevationType(linkedToken) != TokenElevationType.Limited
-            || GetTokenIntegrityRid(linkedToken) != MediumIntegrityRid
-            || GetTokenSessionId(currentToken) != GetTokenSessionId(linkedToken)
-            || !HasSameUser(currentToken, linkedToken))
+        var linkedElevationType = GetTokenElevationType(linkedToken);
+        var linkedIntegrity = GetTokenIntegrityRid(linkedToken);
+        var sameSession = GetTokenSessionId(currentToken) == GetTokenSessionId(linkedToken);
+        var sameUser = HasSameUser(currentToken, linkedToken);
+        var valid = linkedElevationType == TokenElevationType.Limited
+            && linkedIntegrity == MediumIntegrityRid
+            && sameSession
+            && sameUser;
+        AppLog.Debug("UserProcessLauncher", "Linked Medium token validation completed.",
+            ("CurrentIntegrity", GetIntegrityCategory(currentIntegrity)),
+            ("CurrentElevation", GetElevationCategory(currentElevationType)),
+            ("LinkedIntegrity", GetIntegrityCategory(linkedIntegrity)),
+            ("LinkedElevation", GetElevationCategory(linkedElevationType)),
+            ("SameUser", sameUser), ("SameSession", sameSession), ("ValidationSucceeded", valid));
+        if (!valid)
             throw new InvalidOperationException("The linked token is not the same user's interactive Medium token.");
     }
 
-    private static SafeTokenHandle OpenCurrentProcessToken(uint desiredAccess)
+    private static string GetIntegrityCategory(int integrityRid) => integrityRid switch
+    {
+        >= HighIntegrityRid => "HighOrAbove",
+        >= MediumIntegrityRid => "Medium",
+        > 0 => "Low",
+        _ => "Unknown"
+    };
+
+    private static string GetElevationCategory(TokenElevationType elevationType) => elevationType switch
+    {
+        TokenElevationType.Full => "Full",
+        TokenElevationType.Limited => "Limited",
+        TokenElevationType.Default => "Default",
+        _ => "Unknown"
+    };
+
+    private static SafeTokenHandle OpenCurrentProcessToken(uint desiredAccess, string stage)
     {
         using var currentProcess = Process.GetCurrentProcess();
         if (!NativeMethods.OpenProcessToken(currentProcess.Handle, desiredAccess, out var token))
-            throw LastWin32Exception("The Runtime process token could not be opened.");
+            throw LastWin32Exception(stage, "The Runtime process token could not be opened.");
         return token;
     }
 
@@ -200,7 +293,7 @@ internal sealed class UserProcessLauncher
         var desiredAccess = TokenQuery | TokenDuplicate | TokenAssignPrimary;
         if (!NativeMethods.DuplicateTokenEx(token, desiredAccess, IntPtr.Zero, SecurityImpersonation,
                 TokenPrimary, out var primaryToken))
-            throw LastWin32Exception("The Medium user token could not be prepared for process creation.");
+            throw LastWin32Exception("DuplicateTokenEx", "The Medium user token could not be prepared for process creation.");
         return primaryToken;
     }
 
@@ -243,13 +336,14 @@ internal sealed class UserProcessLauncher
         NativeMethods.GetTokenInformation(token, informationClass, IntPtr.Zero, 0, out var requiredLength);
         var error = Marshal.GetLastWin32Error();
         if (requiredLength == 0)
-            throw new Win32Exception(error, "Token information size could not be queried.");
+            throw new UserProcessLaunchException($"GetTokenInformation.{informationClass}.Size", error,
+                "Token information size could not be queried.");
 
         var buffer = new SafeLocalBuffer(Marshal.AllocHGlobal(checked((int)requiredLength)));
         if (!NativeMethods.GetTokenInformation(token, informationClass, buffer.DangerousGetHandle(), requiredLength, out _))
         {
             buffer.Dispose();
-            throw LastWin32Exception("Token information could not be read.");
+            throw LastWin32Exception($"GetTokenInformation.{informationClass}", "Token information could not be read.");
         }
         return buffer;
     }
@@ -305,8 +399,24 @@ internal sealed class UserProcessLauncher
         return result.ToString();
     }
 
-    private static Win32Exception LastWin32Exception(string message)
-        => new(Marshal.GetLastWin32Error(), message);
+    internal static UserProcessLaunchException CaptureNativeFailure(
+        string stage,
+        Func<int> getLastError,
+        string? message = null)
+    {
+        ArgumentNullException.ThrowIfNull(getLastError);
+        var errorCode = getLastError();
+        return new UserProcessLaunchException(stage, errorCode, message ?? $"{stage} failed.");
+    }
+
+    internal static bool IsWithinCreateProcessWithTokenCommandLineLimit(string commandLine)
+    {
+        ArgumentNullException.ThrowIfNull(commandLine);
+        return commandLine.Length < MaxCreateProcessWithTokenCommandLineChars;
+    }
+
+    private static UserProcessLaunchException LastWin32Exception(string stage, string message)
+        => CaptureNativeFailure(stage, Marshal.GetLastWin32Error, message);
 
     private enum TokenInformationClass
     {
@@ -421,6 +531,12 @@ internal sealed class UserProcessLauncher
             [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint creationFlags, IntPtr environment,
             string? currentDirectory, ref StartupInfo startupInfo, out ProcessInformation processInformation);
 
+        [DllImport("advapi32.dll", EntryPoint = "CreateProcessWithTokenW", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CreateProcessWithTokenW(SafeTokenHandle token, uint logonFlags,
+            string applicationName, StringBuilder commandLine, uint creationFlags, IntPtr environment,
+            string? currentDirectory, ref StartupInfo startupInfo, out ProcessInformation processInformation);
+
         [DllImport("userenv.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool CreateEnvironmentBlock(out IntPtr environment, SafeTokenHandle token, [MarshalAs(UnmanagedType.Bool)] bool inherit);
@@ -443,4 +559,10 @@ internal sealed class UserProcessLauncher
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool CloseHandle(IntPtr handle);
     }
+}
+
+internal sealed class UserProcessLaunchException(string stage, int nativeErrorCode, string message)
+    : Win32Exception(nativeErrorCode, message)
+{
+    internal string Stage { get; } = stage;
 }

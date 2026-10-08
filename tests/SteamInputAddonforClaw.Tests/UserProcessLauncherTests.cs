@@ -61,6 +61,46 @@ public sealed class UserProcessLauncherTests
         Assert.Equal("steam://open/bigpicture", requests[1].StartInfo.ArgumentList.Single());
         Assert.Equal("steam://open/main", requests[2].StartInfo.ArgumentList.Single());
         Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", requests[3].StartInfo.ArgumentList.Single());
+        Assert.All(requests.Skip(1), request =>
+            Assert.True(UserProcessLauncher.IsWithinCreateProcessWithTokenCommandLineLimit(
+                UserProcessLauncher.BuildCommandLine(request.StartInfo))));
+
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw", "Processes", "UserProcessLauncher.cs"));
+        Assert.Contains("LaunchCore(startInfo, runAsAdministrator: false, MediumProcessCreationApi.CreateProcessWithTokenW)", source, StringComparison.Ordinal);
+        Assert.Contains("StartWithMediumUserToken(startInfo, mediumProcessCreationApi)", source, StringComparison.Ordinal);
+        Assert.Contains("CreateProcessWithTokenW", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Native_failure_capture_preserves_the_api_stage_and_error_code_immediately()
+    {
+        var getLastErrorCalls = 0;
+        var failure = UserProcessLauncher.CaptureNativeFailure("CreateProcessWithTokenW", () =>
+        {
+            getLastErrorCalls++;
+            return 1314;
+        });
+
+        Assert.Equal(1, getLastErrorCalls);
+        Assert.Equal("CreateProcessWithTokenW", failure.Stage);
+        Assert.Equal(1314, failure.NativeErrorCode);
+    }
+
+    [Fact]
+    public void CreateProcessWithToken_command_line_limit_does_not_change_the_long_command_line_path()
+    {
+        var shortShellCommand = new ProcessStartInfo(@"C:\Windows\explorer.exe") { UseShellExecute = false };
+        shortShellCommand.ArgumentList.Add("steam://open/main");
+        var longPowerShellCommand = new ProcessStartInfo(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+        {
+            UseShellExecute = false
+        };
+        longPowerShellCommand.ArgumentList.Add(new string('x', 1_100));
+
+        Assert.True(UserProcessLauncher.IsWithinCreateProcessWithTokenCommandLineLimit(
+            UserProcessLauncher.BuildCommandLine(shortShellCommand)));
+        Assert.False(UserProcessLauncher.IsWithinCreateProcessWithTokenCommandLineLimit(
+            UserProcessLauncher.BuildCommandLine(longPowerShellCommand)));
     }
 
     [Theory]
@@ -111,5 +151,14 @@ public sealed class UserProcessLauncherTests
             UseShellExecute = false
         };
         Assert.Equal("\"C:\\Tools\\Tool.exe\" --flag \"existing value\"", UserProcessLauncher.BuildCommandLine(raw));
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "README.md")))
+            directory = directory.Parent;
+
+        return directory?.FullName ?? throw new DirectoryNotFoundException("Repository root was not found.");
     }
 }

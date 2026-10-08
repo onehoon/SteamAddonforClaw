@@ -23,6 +23,12 @@
             <ListView
                 x:Name="ShortcutList"
                 Padding="0"
+                CanDragItems="True"
+                CanReorderItems="True"
+                AllowDrop="True"
+                DragItemsStarting="ShortcutList_DragItemsStarting"
+                DragItemsCompleted="ShortcutList_DragItemsCompleted"
+                PointerPressed="ShortcutList_PointerPressed"
                 SizeChanged="ShortcutList_SizeChanged">
                 <ListView.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -70,13 +76,7 @@
                                     VerticalAlignment="Center"
                                     Glyph="&#xE7C3;"
                                     Opacity="0.65"
-                                    Tag="{x:Bind TileId}"
-                                    PointerPressed="ShortcutDragHandle_PointerPressed"
-                                    PointerMoved="ShortcutDragHandle_PointerMoved"
-                                    PointerReleased="ShortcutDragHandle_PointerReleased"
-                                    PointerCanceled="ShortcutDragHandle_PointerCanceled"
-                                    PointerCaptureLost="ShortcutDragHandle_PointerCaptureLost"
-                                    AutomationProperties.Name="Drag to reorder" />
+                                    AutomationProperties.Name="Drag to reorder this Shortcut" />
                                 <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
                                     <TextBlock FontSize="16" FontWeight="SemiBold" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Opacity="0.75" Text="{x:Bind TargetSummary}" TextTrimming="CharacterEllipsis" />

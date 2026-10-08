@@ -15,6 +15,7 @@ public sealed partial class HowToUsePage : UserControl
     };
 
     private WebView2? _documentationWebView;
+    private PendingHtmlNavigation? _pendingHtmlNavigation;
     private bool _loading;
     private bool _loaded;
     private bool _webViewConfigured;
@@ -123,11 +124,14 @@ public sealed partial class HowToUsePage : UserControl
             AppLog.Info("HowToUse", "CoreWebView2 initialization completed.");
 
             stage = "HtmlNavigation";
-            AppLog.Debug("HowToUse", "HTML navigation started.", ("HtmlLength", html.Length));
-            var navigation = await NavigateToStringAsync(webView, html);
+            var language = culture.TwoLetterISOLanguageName;
+            AppLog.Debug("HowToUse", "HTML navigation started.", ("Language", language), ("HtmlLength", html.Length));
+            var navigation = await NavigateToStringAsync(webView, html, language);
             AppLog.Info(
                 "HowToUse",
                 "HTML navigation completed.",
+                ("Language", language),
+                ("NavigationId", navigation.NavigationId),
                 ("NavigationSuccess", navigation.IsSuccess),
                 ("WebErrorStatus", navigation.WebErrorStatus));
 
@@ -138,8 +142,10 @@ public sealed partial class HowToUsePage : UserControl
                     "Documentation load failed.",
                     null,
                     ("Stage", stage),
+                    ("NavigationId", navigation.NavigationId),
                     ("NavigationSuccess", navigation.IsSuccess),
-                    ("WebErrorStatus", navigation.WebErrorStatus));
+                    ("WebErrorStatus", navigation.WebErrorStatus),
+                    ("RetryAvailable", true));
                 ShowFailure();
                 return;
             }
@@ -155,7 +161,8 @@ public sealed partial class HowToUsePage : UserControl
                 "Documentation load failed.",
                 exception,
                 ("Stage", stage),
-                ("SourceUrl", sourceUrl ?? "Unavailable"));
+                ("SourceUrl", sourceUrl ?? "Unavailable"),
+                ("RetryAvailable", true));
             ShowFailure();
         }
         finally
@@ -171,31 +178,34 @@ public sealed partial class HowToUsePage : UserControl
         FailurePanel.Visibility = Visibility.Visible;
     }
 
-    private static Task<CoreWebView2NavigationCompletedEventArgs> NavigateToStringAsync(
+    private async Task<CoreWebView2NavigationCompletedEventArgs> NavigateToStringAsync(
         WebView2 webView,
-        string html)
+        string html,
+        string language)
     {
-        var completion = new TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-
-        void OnCompleted(WebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
-        {
-            sender.NavigationCompleted -= OnCompleted;
-            completion.TrySetResult(args);
-        }
-
-        webView.NavigationCompleted += OnCompleted;
+        var coreWebView = webView.CoreWebView2
+            ?? throw new InvalidOperationException("CoreWebView2 is not initialized.");
+        var pending = new PendingHtmlNavigation();
+        _pendingHtmlNavigation = pending;
+        AppLog.Debug("HowToUse", "Generated document navigation requested.",
+            ("Language", language), ("HtmlLength", html.Length));
         try
         {
-            webView.NavigateToString(html);
+            coreWebView.NavigateToString(html);
+            return await pending.Completion.Task.WaitAsync(DocumentationClient.Timeout);
         }
-        catch
+        catch (TimeoutException)
         {
-            webView.NavigationCompleted -= OnCompleted;
+            AppLog.Warn("HowToUse", "Generated document navigation timed out.", null,
+                ("Stage", "HtmlNavigation"), ("Language", language),
+                ("NavigationId", pending.Correlation.NavigationId), ("RetryAvailable", true));
             throw;
         }
-
-        return completion.Task;
+        finally
+        {
+            if (ReferenceEquals(_pendingHtmlNavigation, pending))
+                _pendingHtmlNavigation = null;
+        }
     }
 
     internal static bool ShouldCancelWebViewNavigation(string? uriText)
@@ -214,6 +224,7 @@ public sealed partial class HowToUsePage : UserControl
         var coreWebView = webView.CoreWebView2
             ?? throw new InvalidOperationException("CoreWebView2 initialization completed without a core instance.");
         coreWebView.NavigationStarting += DocumentationWebView_NavigationStarting;
+        coreWebView.NavigationCompleted += DocumentationWebView_NavigationCompleted;
         coreWebView.WebMessageReceived += DocumentationWebView_WebMessageReceived;
         _webViewConfigured = true;
     }
@@ -223,6 +234,33 @@ public sealed partial class HowToUsePage : UserControl
         CoreWebView2NavigationStartingEventArgs e)
     {
         e.Cancel = ShouldCancelWebViewNavigation(e.Uri);
+        var matchedPendingDocument = !e.Cancel
+            && _pendingHtmlNavigation?.Correlation.TryCaptureNavigationStart(e.NavigationId, e.Uri) == true;
+        AppLog.Debug("HowToUse", "WebView navigation starting.",
+            ("NavigationId", e.NavigationId), ("UriKind", ClassifyNavigationUri(e.Uri)),
+            ("IsUserInitiated", e.IsUserInitiated), ("Decision", e.Cancel ? "Cancel" : "Allow"),
+            ("MatchedPendingDocument", matchedPendingDocument));
+    }
+
+    private void DocumentationWebView_NavigationCompleted(
+        object? sender,
+        CoreWebView2NavigationCompletedEventArgs e)
+    {
+        var matchedPendingDocument = _pendingHtmlNavigation?.Correlation.MatchesCompleted(e.NavigationId) == true;
+        AppLog.Debug("HowToUse", "WebView navigation completed.",
+            ("NavigationId", e.NavigationId), ("IsSuccess", e.IsSuccess),
+            ("WebErrorStatus", e.WebErrorStatus), ("MatchedPendingDocument", matchedPendingDocument));
+        if (matchedPendingDocument)
+            _pendingHtmlNavigation?.Completion.TrySetResult(e);
+    }
+
+    private static string ClassifyNavigationUri(string? uriText)
+    {
+        if (!Uri.TryCreate(uriText, UriKind.Absolute, out var uri)) return "Invalid";
+        if (string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase)) return "GeneratedDocument";
+        if (uri.Scheme is "http" or "https") return "ExternalHttp";
+        if (uri.Scheme.Equals("file", StringComparison.OrdinalIgnoreCase)) return "ExternalFile";
+        return uri.Scheme;
     }
 
     private void DocumentationWebView_WebMessageReceived(
@@ -274,4 +312,29 @@ public sealed partial class HowToUsePage : UserControl
             AppLog.Warn("HowToUse", "External documentation link could not be launched.", exception);
         }
     }
+
+    private sealed class PendingHtmlNavigation
+    {
+        internal HowToUseNavigationCorrelation Correlation { get; } = new();
+        internal TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+}
+
+internal sealed class HowToUseNavigationCorrelation
+{
+    private ulong? _navigationId;
+
+    internal ulong? NavigationId => _navigationId;
+
+    internal bool TryCaptureNavigationStart(ulong navigationId, string? uriText)
+    {
+        if (_navigationId is not null || HowToUsePage.ShouldCancelWebViewNavigation(uriText))
+            return false;
+
+        _navigationId = navigationId;
+        return true;
+    }
+
+    internal bool MatchesCompleted(ulong navigationId) => _navigationId == navigationId;
 }

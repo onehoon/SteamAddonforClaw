@@ -403,7 +403,7 @@ Screenshot
 => existing NirCmdScreenshotCapture path; unchanged
 ~~~
 
-The Medium path validates the UAC-linked limited token's user SID, session, elevation type, and exact Medium integrity before process creation. It uses `CreateProcessAsUserW` so the existing EXE argument and encoded PowerShell command-line limits remain supported; `CreateProcessWithTokenW` has a lower documented command-line limit. It does not use `UseShellExecute` from the High Runtime for user actions. A missing/invalid Medium token or any launch failure remains a failure; there is no automatic retry using High. The explicit administrator option likewise uses the existing High token without another UAC prompt and does not retry at Medium.
+The Medium path validates the UAC-linked limited token's user SID, session, elevation type, and exact Medium integrity before process creation. Literal user EXE / encoded PowerShell actions and HTTP(S) browser dispatch continue to use `CreateProcessAsUserW`, preserving the existing long command-line support. The fixed Explorer shell activations for Steam URI and Xbox package requests use `CreateProcessWithTokenW`; their command lines are bounded below that API's documented 1,024-character limit, and the validated token is required to belong to the caller's interactive session. The API choice is limited to these short shell targets; it is not a general fallback. The 0.1.342 logs recorded `Win32Exception` without the failing native stage or error code, so they do not establish `ERROR_PRIVILEGE_NOT_HELD` (1314) or any other specific cause. The implementation records the failing API stage and numeric Win32 code on failure. It does not use `UseShellExecute` from the High Runtime for user actions. A missing/invalid Medium token or any launch failure remains a failure; there is no automatic retry using High. The explicit administrator option likewise uses the existing High token without another UAC prompt and does not retry at Medium.
 
 Shortcut EXE and PowerShell actions persist an optional per-action `runAsAdministrator` boolean; an absent legacy value means `false`. The front-button `LaunchApplication` binding uses an optional final `RunAsAdministrator` field with the same default. Built-in Steam, Big Picture, Xbox, and browser URL actions expose no administrator option and use the Medium shell route. Only literal `.exe` actions can use the direct-process path; PowerShell is restricted to the existing Shortcut PowerShell action.
 
@@ -640,11 +640,11 @@ User-action process launch
 => screenshot and controller authority remain unchanged
 ~~~
 
-The process architecture is therefore no longer in a "migration pending" state. The user-action launch code is implemented; actual Medium/High token, cold-start Steam/Xbox, and Windows/Steam FSE verification remains a release-validation item.
+The process architecture is therefore no longer in a "migration pending" state. The user-action launch code is implemented, including the bounded `CreateProcessWithTokenW` route for fixed Steam/Xbox Explorer activations and stage/error diagnostics; the 0.1.342 failure's native cause remains unproven. Actual Medium/High token, cold-start Steam/Xbox, and Windows/Steam FSE verification remains a release-validation item.
 
 ### Remaining process-privilege validation
 
-The user-launched external-action policy is implemented. Before release, physical validation must demonstrate the actual child integrity and supported shell behavior for Shortcut EXE/PowerShell, front-button EXE, Steam cold start, Xbox package activation, HTTP(S) browser launch, Windows desktop, and Windows/Steam FSE. Keep this validation separate from controller-authority changes.
+The user-launched external-action policy is implemented. Fixed Steam/Xbox Explorer shell dispatch uses the validated same-session Medium token through `CreateProcessWithTokenW`; long EXE/PowerShell and HTTP(S) commands retain `CreateProcessAsUserW`. Unit tests cover API-stage/error propagation and prohibit a High retry, but do not prove that an elevated Claw Runtime's token satisfies the selected API requirements. Before release, physical validation must demonstrate the actual child integrity and supported shell behavior for Shortcut EXE/PowerShell, front-button EXE, Steam cold start, Xbox package activation, HTTP(S) browser launch, Windows desktop, and Windows/Steam FSE. Keep this validation separate from controller-authority changes.
 
 ### Separate Full1902 reliability work
 
