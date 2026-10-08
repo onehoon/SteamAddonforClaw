@@ -125,11 +125,15 @@ internal sealed class UserProcessLauncher
 
         try
         {
-            if (!NativeMethods.CreateProcessWithTokenW(
+            // CreateProcessWithTokenW caps lpCommandLine at 1,024 characters. This path must
+            // preserve the existing Shortcut EXE / encoded PowerShell command-line limit.
+            if (!NativeMethods.CreateProcessAsUserW(
                     primaryToken,
-                    0,
                     Path.GetFullPath(startInfo.FileName),
                     commandLine,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    false,
                     creationFlags,
                     environment,
                     string.IsNullOrWhiteSpace(startInfo.WorkingDirectory) ? null : startInfo.WorkingDirectory,
@@ -395,11 +399,12 @@ internal sealed class UserProcessLauncher
         internal static extern bool DuplicateTokenEx(SafeTokenHandle existingToken, uint desiredAccess, IntPtr tokenAttributes,
             int impersonationLevel, int tokenType, out SafeTokenHandle newToken);
 
-        [DllImport("advapi32.dll", SetLastError = true)]
+        [DllImport("advapi32.dll", EntryPoint = "CreateProcessAsUserW", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool CreateProcessWithTokenW(SafeTokenHandle token, uint logonFlags, string applicationName,
-            StringBuilder commandLine, uint creationFlags, IntPtr environment, string? currentDirectory,
-            ref StartupInfo startupInfo, out ProcessInformation processInformation);
+        internal static extern bool CreateProcessAsUserW(SafeTokenHandle token, string applicationName,
+            StringBuilder commandLine, IntPtr processAttributes, IntPtr threadAttributes,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint creationFlags, IntPtr environment,
+            string? currentDirectory, ref StartupInfo startupInfo, out ProcessInformation processInformation);
 
         [DllImport("userenv.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

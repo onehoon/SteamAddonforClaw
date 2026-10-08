@@ -400,7 +400,7 @@ Screenshot
 => existing NirCmdScreenshotCapture path; unchanged
 ~~~
 
-The Medium path validates the UAC-linked limited token's user SID, session, elevation type, and exact Medium integrity before process creation. It does not use `UseShellExecute` from the High Runtime for user actions. A missing/invalid Medium token or any launch failure remains a failure; there is no automatic retry using High. The explicit administrator option likewise uses the existing High token without another UAC prompt and does not retry at Medium.
+The Medium path validates the UAC-linked limited token's user SID, session, elevation type, and exact Medium integrity before process creation. It uses `CreateProcessAsUserW` so the existing EXE argument and encoded PowerShell command-line limits remain supported; `CreateProcessWithTokenW` has a lower documented command-line limit. It does not use `UseShellExecute` from the High Runtime for user actions. A missing/invalid Medium token or any launch failure remains a failure; there is no automatic retry using High. The explicit administrator option likewise uses the existing High token without another UAC prompt and does not retry at Medium.
 
 Shortcut EXE and PowerShell actions persist an optional per-action `runAsAdministrator` boolean; an absent legacy value means `false`. The front-button `LaunchApplication` binding uses an optional final `RunAsAdministrator` field with the same default. Built-in Steam, Big Picture, Xbox, and browser URL actions expose no administrator option and use the Medium shell route. Only literal `.exe` actions can use the direct-process path; PowerShell is restricted to the existing Shortcut PowerShell action.
 
