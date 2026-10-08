@@ -11,13 +11,9 @@ namespace SteamInputAddonforClaw.Processes;
 /// <summary>Starts user-requested processes without changing the Runtime's controller-authority token.</summary>
 internal sealed class UserProcessLauncher
 {
-    private const uint TokenAssignPrimary = 0x0001;
-    private const uint TokenDuplicate = 0x0002;
     private const uint TokenQuery = 0x0008;
     private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint CreateNoWindow = 0x08000000;
-    private const int SecurityImpersonation = 2;
-    private const int TokenPrimary = 1;
     private const int MediumIntegrityRid = 0x2000;
     private const int HighIntegrityRid = 0x3000;
     private const int MaxCommandLineChars = 32_766;
@@ -136,7 +132,7 @@ internal sealed class UserProcessLauncher
         ProcessStartInfo startInfo,
         MediumProcessCreationApi processCreationApi)
     {
-        using var currentToken = OpenCurrentProcessToken(TokenQuery | TokenDuplicate, "OpenProcessToken.Current");
+        using var currentToken = OpenCurrentProcessToken(TokenQuery, "OpenProcessToken.Current");
         var currentIntegrity = GetTokenIntegrityRid(currentToken);
         if (currentIntegrity == MediumIntegrityRid)
         {
@@ -157,7 +153,7 @@ internal sealed class UserProcessLauncher
 
         using var linkedToken = GetLinkedToken(currentToken);
         ValidateMediumLinkedToken(currentToken, linkedToken, currentIntegrity, currentElevationType);
-        using var primaryToken = DuplicateAsPrimary(linkedToken);
+        var processToken = linkedToken;
 
         var commandLineText = BuildCommandLine(startInfo);
         if (processCreationApi == MediumProcessCreationApi.CreateProcessWithTokenW
@@ -173,7 +169,7 @@ internal sealed class UserProcessLauncher
         var creationFlags = CreateUnicodeEnvironment
             | (startInfo.CreateNoWindow ? CreateNoWindow : 0);
 
-        if (!NativeMethods.CreateEnvironmentBlock(out var environment, primaryToken, false))
+        if (!NativeMethods.CreateEnvironmentBlock(out var environment, processToken, false))
             throw LastWin32Exception("CreateEnvironmentBlock", "The Medium user environment could not be created.");
 
         try
@@ -187,7 +183,7 @@ internal sealed class UserProcessLauncher
             if (processCreationApi == MediumProcessCreationApi.CreateProcessWithTokenW)
             {
                 created = NativeMethods.CreateProcessWithTokenW(
-                    primaryToken,
+                    processToken,
                     0,
                     Path.GetFullPath(startInfo.FileName),
                     commandLine,
@@ -200,7 +196,7 @@ internal sealed class UserProcessLauncher
             else
             {
                 created = NativeMethods.CreateProcessAsUserW(
-                    primaryToken,
+                    processToken,
                     Path.GetFullPath(startInfo.FileName),
                     commandLine,
                     IntPtr.Zero,
@@ -239,21 +235,57 @@ internal sealed class UserProcessLauncher
     {
         var linkedElevationType = GetTokenElevationType(linkedToken);
         var linkedIntegrity = GetTokenIntegrityRid(linkedToken);
+        var linkedTokenType = GetTokenType(linkedToken);
+        var linkedImpersonationLevel = linkedTokenType == TokenType.Impersonation
+            ? GetTokenImpersonationLevel(linkedToken)
+            : (SecurityImpersonationLevel?)null;
         var sameSession = GetTokenSessionId(currentToken) == GetTokenSessionId(linkedToken);
         var sameUser = HasSameUser(currentToken, linkedToken);
-        var valid = linkedElevationType == TokenElevationType.Limited
+        var identityValid = linkedElevationType == TokenElevationType.Limited
             && linkedIntegrity == MediumIntegrityRid
             && sameSession
             && sameUser;
+        var primaryTokenType = IsPrimaryTokenType((int)linkedTokenType);
         AppLog.Debug("UserProcessLauncher", "Linked Medium token validation completed.",
             ("CurrentIntegrity", GetIntegrityCategory(currentIntegrity)),
             ("CurrentElevation", GetElevationCategory(currentElevationType)),
             ("LinkedIntegrity", GetIntegrityCategory(linkedIntegrity)),
             ("LinkedElevation", GetElevationCategory(linkedElevationType)),
-            ("SameUser", sameUser), ("SameSession", sameSession), ("ValidationSucceeded", valid));
-        if (!valid)
+            ("LinkedTokenType", GetTokenTypeCategory(linkedTokenType)),
+            ("LinkedImpersonationLevel", linkedImpersonationLevel is { } diagnosticLevel
+                ? GetImpersonationLevelCategory(diagnosticLevel)
+                : linkedTokenType == TokenType.Primary ? "NotApplicable" : "NotQueried"),
+            ("SameUser", sameUser), ("SameSession", sameSession),
+            ("ValidationSucceeded", identityValid && primaryTokenType));
+        if (!identityValid)
             throw new InvalidOperationException("The linked token is not the same user's interactive Medium token.");
+        if (!primaryTokenType)
+        {
+            var level = linkedImpersonationLevel is { } impersonationLevel
+                ? GetImpersonationLevelCategory(impersonationLevel)
+                : "NotApplicable";
+            throw new InvalidOperationException(
+                $"The linked Medium token is not a primary process token (TokenType={GetTokenTypeCategory(linkedTokenType)}, ImpersonationLevel={level}).");
+        }
     }
+
+    internal static bool IsPrimaryTokenType(int tokenType) => tokenType == (int)TokenType.Primary;
+
+    private static string GetTokenTypeCategory(TokenType tokenType) => tokenType switch
+    {
+        TokenType.Primary => "Primary",
+        TokenType.Impersonation => "Impersonation",
+        _ => "Unknown"
+    };
+
+    private static string GetImpersonationLevelCategory(SecurityImpersonationLevel level) => level switch
+    {
+        SecurityImpersonationLevel.Anonymous => "Anonymous",
+        SecurityImpersonationLevel.Identification => "Identification",
+        SecurityImpersonationLevel.Impersonation => "Impersonation",
+        SecurityImpersonationLevel.Delegation => "Delegation",
+        _ => "Unknown"
+    };
 
     private static string GetIntegrityCategory(int integrityRid) => integrityRid switch
     {
@@ -288,15 +320,6 @@ internal sealed class UserProcessLauncher
         return new SafeTokenHandle(linkedHandle);
     }
 
-    private static SafeTokenHandle DuplicateAsPrimary(SafeTokenHandle token)
-    {
-        var desiredAccess = TokenQuery | TokenDuplicate | TokenAssignPrimary;
-        if (!NativeMethods.DuplicateTokenEx(token, desiredAccess, IntPtr.Zero, SecurityImpersonation,
-                TokenPrimary, out var primaryToken))
-            throw LastWin32Exception("DuplicateTokenEx", "The Medium user token could not be prepared for process creation.");
-        return primaryToken;
-    }
-
     private static TokenElevationType GetTokenElevationType(SafeTokenHandle token)
     {
         using var information = GetTokenInformation(token, TokenInformationClass.ElevationType);
@@ -307,6 +330,18 @@ internal sealed class UserProcessLauncher
     {
         using var information = GetTokenInformation(token, TokenInformationClass.SessionId);
         return Marshal.ReadInt32(information.DangerousGetHandle());
+    }
+
+    private static TokenType GetTokenType(SafeTokenHandle token)
+    {
+        using var information = GetTokenInformation(token, TokenInformationClass.Type);
+        return (TokenType)Marshal.ReadInt32(information.DangerousGetHandle());
+    }
+
+    private static SecurityImpersonationLevel GetTokenImpersonationLevel(SafeTokenHandle token)
+    {
+        using var information = GetTokenInformation(token, TokenInformationClass.ImpersonationLevel);
+        return (SecurityImpersonationLevel)Marshal.ReadInt32(information.DangerousGetHandle());
     }
 
     private static int GetTokenIntegrityRid(SafeTokenHandle token)
@@ -421,6 +456,8 @@ internal sealed class UserProcessLauncher
     private enum TokenInformationClass
     {
         User = 1,
+        Type = 8,
+        ImpersonationLevel = 9,
         SessionId = 12,
         ElevationType = 18,
         LinkedToken = 19,
@@ -432,6 +469,20 @@ internal sealed class UserProcessLauncher
         Default = 1,
         Full = 2,
         Limited = 3
+    }
+
+    private enum TokenType
+    {
+        Primary = 1,
+        Impersonation = 2
+    }
+
+    private enum SecurityImpersonationLevel
+    {
+        Anonymous = 0,
+        Identification = 1,
+        Impersonation = 2,
+        Delegation = 3
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -518,11 +569,6 @@ internal sealed class UserProcessLauncher
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetTokenInformation(SafeTokenHandle tokenHandle, TokenInformationClass informationClass,
             IntPtr information, uint informationLength, out uint returnLength);
-
-        [DllImport("advapi32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool DuplicateTokenEx(SafeTokenHandle existingToken, uint desiredAccess, IntPtr tokenAttributes,
-            int impersonationLevel, int tokenType, out SafeTokenHandle newToken);
 
         [DllImport("advapi32.dll", EntryPoint = "CreateProcessAsUserW", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

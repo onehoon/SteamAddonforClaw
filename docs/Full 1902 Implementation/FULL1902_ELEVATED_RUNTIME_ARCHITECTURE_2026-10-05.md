@@ -640,7 +640,7 @@ User-action process launch
 => screenshot and controller authority remain unchanged
 ~~~
 
-The process architecture is therefore no longer in a "migration pending" state. The user-action launch code is implemented, including the bounded `CreateProcessWithTokenW` route for fixed Steam/Xbox Explorer activations and stage/error diagnostics; the 0.1.342 failure's native cause remains unproven. Actual Medium/High token, cold-start Steam/Xbox, and Windows/Steam FSE verification remains a release-validation item.
+The process architecture is therefore no longer in a "migration pending" state. The v0.1.343 logs identify the failing token-preparation operation as `DuplicateTokenEx` with error 1346; they do not identify the linked token's actual type or access rights. The launcher now reads `TokenType`, uses a verified linked Primary token directly for environment/process creation, and fails closed with categorical token-type and impersonation-level diagnostics if the linked token is not Primary. It does not attempt an unconditional duplicate. The selected `CreateProcessWithTokenW` route for fixed Steam/Xbox Explorer activations and `CreateProcessAsUserW` route for long commands remain unchanged. Actual token type, token-handle rights, child integrity, cold-start Steam/Xbox, and Windows/Steam FSE behavior still require runtime validation.
 
 ### Remaining process-privilege validation
 

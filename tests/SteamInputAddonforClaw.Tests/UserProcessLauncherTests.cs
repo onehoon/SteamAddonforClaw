@@ -86,6 +86,37 @@ public sealed class UserProcessLauncherTests
         Assert.Equal(1314, failure.NativeErrorCode);
     }
 
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    [InlineData(0, false)]
+    [InlineData(99, false)]
+    public void Only_a_primary_linked_token_is_accepted_for_direct_process_creation(
+        int tokenType,
+        bool expected)
+    {
+        Assert.Equal(expected, UserProcessLauncher.IsPrimaryTokenType(tokenType));
+    }
+
+    [Fact]
+    public void Medium_process_creation_uses_the_validated_linked_primary_without_duplicate_token_ex()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "SteamInputAddonforClaw", "Processes", "UserProcessLauncher.cs"));
+        var startIndex = source.IndexOf("private static bool StartWithMediumUserToken(", StringComparison.Ordinal);
+        var validateIndex = source.IndexOf("private static void ValidateMediumLinkedToken(", startIndex, StringComparison.Ordinal);
+        Assert.True(startIndex >= 0 && validateIndex > startIndex);
+        var mediumPath = source[startIndex..validateIndex];
+
+        Assert.Contains("using var linkedToken = GetLinkedToken(currentToken);", mediumPath, StringComparison.Ordinal);
+        Assert.Contains("ValidateMediumLinkedToken(currentToken, linkedToken", mediumPath, StringComparison.Ordinal);
+        Assert.Contains("var processToken = linkedToken;", mediumPath, StringComparison.Ordinal);
+        Assert.Contains("CreateEnvironmentBlock(out var environment, processToken, false)", mediumPath, StringComparison.Ordinal);
+        Assert.Contains("CreateProcessWithTokenW(\n                    processToken", mediumPath, StringComparison.Ordinal);
+        Assert.Contains("CreateProcessAsUserW(\n                    processToken", mediumPath, StringComparison.Ordinal);
+        Assert.DoesNotContain("DuplicateTokenEx", source, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void CreateProcessWithToken_command_line_limit_does_not_change_the_long_command_line_path()
     {
