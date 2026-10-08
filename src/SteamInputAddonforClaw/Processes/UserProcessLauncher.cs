@@ -50,7 +50,7 @@ internal sealed class UserProcessLauncher
         return StartWithMediumUserToken(startInfo);
     }
 
-    /// <summary>Dispatches a supported URI through Explorer running as the interactive user.</summary>
+    /// <summary>Dispatches a supported HTTP(S) or Steam URI for the interactive user.</summary>
     internal bool LaunchUri(string uri)
     {
         if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
@@ -63,36 +63,38 @@ internal sealed class UserProcessLauncher
 
         var isWebUrl = parsed.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
             || parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
-        return LaunchShellTarget(isWebUrl ? parsed.AbsoluteUri : uri, useCommandShell: isWebUrl);
+        return isWebUrl
+            ? LaunchWebUrl(parsed.AbsoluteUri)
+            : LaunchShellTarget(uri);
     }
 
     /// <summary>Activates the product's fixed Xbox gaming-home package for the interactive user.</summary>
     internal bool LaunchXboxApp()
         => LaunchShellTarget($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}");
 
-    private bool LaunchShellTarget(string target, bool useCommandShell = false)
+    private bool LaunchShellTarget(string target)
     {
         var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         if (string.IsNullOrWhiteSpace(windowsDirectory))
             throw new InvalidOperationException("The Windows directory is unavailable.");
 
-        var startInfo = useCommandShell
-            ? new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"))
-            {
-                Arguments = $"/d /c start \"\" \"{target}\"",
-                CreateNoWindow = true,
-                UseShellExecute = false
-            }
-            : new ProcessStartInfo(Path.Combine(windowsDirectory, "explorer.exe"))
-            {
-                UseShellExecute = false
-            };
-
-        if (!useCommandShell)
+        var startInfo = new ProcessStartInfo(Path.Combine(windowsDirectory, "explorer.exe"))
         {
-            startInfo.ArgumentList.Add(target);
-        }
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(target);
 
+        return Launch(startInfo);
+    }
+
+    private bool LaunchWebUrl(string url)
+    {
+        var startInfo = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "rundll32.exe"))
+        {
+            Arguments = $"url.dll,FileProtocolHandler \"{url}\"",
+            CreateNoWindow = true,
+            UseShellExecute = false
+        };
         return Launch(startInfo);
     }
 

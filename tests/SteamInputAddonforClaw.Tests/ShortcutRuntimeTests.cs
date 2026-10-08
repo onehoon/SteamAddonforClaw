@@ -446,8 +446,8 @@ public sealed class ShortcutRuntimeTests : IDisposable
 
         Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
         Assert.NotNull(captured);
-        Assert.EndsWith("cmd.exe", captured!.FileName, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal($"/d /c start \"\" \"{new Uri(url).AbsoluteUri}\"", captured.Arguments);
+        Assert.EndsWith("rundll32.exe", captured!.FileName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal($"url.dll,FileProtocolHandler \"{new Uri(url).AbsoluteUri}\"", captured.Arguments);
         Assert.Empty(captured.ArgumentList);
         Assert.True(captured.CreateNoWindow);
         Assert.False(captured.UseShellExecute);

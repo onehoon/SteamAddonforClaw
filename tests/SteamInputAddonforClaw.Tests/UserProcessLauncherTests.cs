@@ -51,8 +51,8 @@ public sealed class UserProcessLauncherTests
             Assert.False(request.RunAsAdministrator);
             Assert.False(request.StartInfo.UseShellExecute);
         });
-        Assert.Equal(Path.Combine(Environment.SystemDirectory, "cmd.exe"), requests[0].StartInfo.FileName);
-        Assert.Equal("/d /c start \"\" \"https://example.com/path?q=1\"", requests[0].StartInfo.Arguments);
+        Assert.Equal(Path.Combine(Environment.SystemDirectory, "rundll32.exe"), requests[0].StartInfo.FileName);
+        Assert.Equal("url.dll,FileProtocolHandler \"https://example.com/path?q=1\"", requests[0].StartInfo.Arguments);
         Assert.Empty(requests[0].StartInfo.ArgumentList);
         Assert.True(requests[0].StartInfo.CreateNoWindow);
         Assert.All(requests.Skip(1), request =>

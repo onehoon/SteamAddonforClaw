@@ -26,7 +26,7 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var requestTask = ReceiveHttpRequestLineAsync(listener, timeout.Token);
-        var url = $"http://127.0.0.1:{endpoint.Port}/shortcut?q=claw&equals=a=b&next=two";
+        var url = $"http://127.0.0.1:{endpoint.Port}/shortcut?q=one%20two%20three&equals=a=b&next=two";
 
         try
         {
@@ -39,7 +39,7 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
 
             Assert.True(launcher.LaunchUri(url));
             var requestLine = await requestTask.WaitAsync(TimeSpan.FromSeconds(20));
-            Assert.Equal($"GET /shortcut?q=claw&equals=a=b&next=two HTTP/1.1", requestLine);
+            Assert.Equal("GET /shortcut?q=one%20two%20three&equals=a=b&next=two HTTP/1.1", requestLine);
         }
         finally
         {
