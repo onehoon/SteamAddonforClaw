@@ -1,8 +1,8 @@
-using System.Collections.ObjectModel;
 using System.Xml.Linq;
 using Microsoft.UI.Xaml;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Views;
+using Windows.Foundation;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -573,7 +573,8 @@ public sealed class UiArchitectureTests
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
         Assert.Contains("Add Shortcut", shortcutXaml, StringComparison.Ordinal);
-        Assert.Contains("CanReorderItems=\"True\"", shortcutXaml, StringComparison.Ordinal);
+        Assert.Contains("PointerReleased=\"ShortcutTile_PointerReleased\"", shortcutXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CanReorderItems", shortcutXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Screenshot", shortcutXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("BrowseScreenshotFolderButton", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("FolderPicker(windowId)", shortcutCode, StringComparison.Ordinal);
@@ -600,7 +601,7 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Main_app_shortcut_editor_uses_three_equal_native_wrap_slots_and_keeps_collection_order()
+    public void Main_app_shortcut_editor_uses_three_equal_pointer_reorder_slots_and_keeps_collection_order()
     {
         var root = FindRepositoryRoot();
         var shortcutXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml"));
@@ -624,12 +625,12 @@ public sealed class UiArchitectureTests
         Assert.Equal("3", (string?)wrapGrid.Attribute("MaximumRowsOrColumns"));
         Assert.Equal("0", (string?)list.Attribute("Padding"));
         Assert.Equal("ShortcutList_SizeChanged", (string?)list.Attribute("SizeChanged"));
-        Assert.Equal("True", (string?)list.Attribute("CanReorderItems"));
-        Assert.Equal("True", (string?)list.Attribute("CanDragItems"));
-        Assert.Equal("True", (string?)list.Attribute("AllowDrop"));
-        Assert.Equal("ShortcutList_DragItemsStarting", (string?)list.Attribute("DragItemsStarting"));
-        Assert.Equal("ShortcutList_DragItemsCompleted", (string?)list.Attribute("DragItemsCompleted"));
-        Assert.Equal("ShortcutList_PointerPressed", (string?)list.Attribute("PointerPressed"));
+        Assert.Equal("None", (string?)list.Attribute("SelectionMode"));
+        Assert.Null(list.Attribute("CanReorderItems"));
+        Assert.Null(list.Attribute("CanDragItems"));
+        Assert.Null(list.Attribute("AllowDrop"));
+        Assert.Null(list.Attribute("DragItemsStarting"));
+        Assert.Null(list.Attribute("DragItemsCompleted"));
         Assert.Equal("ListViewItem", (string?)itemContainerStyle.Attribute("TargetType"));
         Assert.Equal("Stretch", (string?)horizontalContentAlignment.Attribute("Value"));
         Assert.Equal("Transparent", containerSetters["Background"]);
@@ -638,10 +639,27 @@ public sealed class UiArchitectureTests
         Assert.Equal("0", containerSetters["Padding"]);
         Assert.Equal("Stretch", containerSetters["VerticalContentAlignment"]);
         Assert.Equal("False", containerSetters["UseSystemFocusVisuals"]);
-        Assert.DoesNotContain(itemContainerStyle.Elements(), element => element.Name.LocalName == "Setter"
+        var itemTemplateSetter = itemContainerStyle.Elements().Single(element => element.Name.LocalName == "Setter"
             && (string?)element.Attribute("Property") == "Template");
-        Assert.DoesNotContain(shortcutXaml.Descendants(), element => element.Name.LocalName == "ControlTemplate");
+        var itemControlTemplate = itemTemplateSetter.Elements().Single(element => element.Name.LocalName == "Setter.Value")
+            .Elements().Single(element => element.Name.LocalName == "ControlTemplate");
+        var itemContentPresenter = itemControlTemplate.Elements().Single(element => element.Name.LocalName == "ContentPresenter");
+        Assert.Equal("ListViewItem", (string?)itemControlTemplate.Attribute("TargetType"));
+        Assert.Equal("{TemplateBinding Content}", (string?)itemContentPresenter.Attribute("Content"));
+        Assert.Equal("{TemplateBinding ContentTemplate}", (string?)itemContentPresenter.Attribute("ContentTemplate"));
+        Assert.Equal("{TemplateBinding ContentTransitions}", (string?)itemContentPresenter.Attribute("ContentTransitions"));
+        Assert.Equal("{TemplateBinding HorizontalContentAlignment}", (string?)itemContentPresenter.Attribute("HorizontalAlignment"));
+        Assert.Equal("{TemplateBinding VerticalContentAlignment}", (string?)itemContentPresenter.Attribute("VerticalAlignment"));
+        Assert.DoesNotContain(itemControlTemplate.Descendants(), element => element.Name.LocalName is "VisualState" or "ListViewItemPresenter" or "ThemeShadow");
+        Assert.DoesNotContain(shortcutXaml.Descendants(), element => element.Name.LocalName == "ThemeShadow");
         Assert.Equal("Auto,*,Auto", (string?)cardGrid.Attribute("ColumnDefinitions"));
+        Assert.Equal("{x:Bind TileId}", (string?)card.Attribute("Tag"));
+        Assert.Equal("ShortcutTile_PointerPressed", (string?)card.Attribute("PointerPressed"));
+        Assert.Equal("ShortcutTile_PointerMoved", (string?)card.Attribute("PointerMoved"));
+        Assert.Equal("ShortcutTile_PointerReleased", (string?)card.Attribute("PointerReleased"));
+        Assert.Equal("ShortcutTile_PointerCanceled", (string?)card.Attribute("PointerCanceled"));
+        Assert.Equal("ShortcutTile_PointerCaptureLost", (string?)card.Attribute("PointerCaptureLost"));
+        Assert.Equal("None", (string?)card.Attribute("ManipulationMode"));
         Assert.Equal("0,0,12,12", (string?)card.Attribute("Margin"));
         Assert.Equal("1", (string?)card.Attribute("BorderThickness"));
         Assert.Equal("8", (string?)card.Attribute("CornerRadius"));
@@ -652,9 +670,9 @@ public sealed class UiArchitectureTests
         Assert.All(actionButtons, button => Assert.Equal("Stretch", (string?)button.Attribute("HorizontalAlignment")));
         Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerPressed")));
         Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerMoved")));
+        Assert.All(actionButtons, button => Assert.NotNull(button.Attribute("Click")));
         var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon");
         Assert.Equal("Drag to reorder this Shortcut", (string?)dragGlyph.Attribute("AutomationProperties.Name"));
-        Assert.Null(dragGlyph.Attribute("PointerPressed"));
         Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("private const double ShortcutCardHorizontalGap = 12;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("itemsPanel.ItemWidth = itemWidth", shortcutCode, StringComparison.Ordinal);
@@ -664,16 +682,20 @@ public sealed class UiArchitectureTests
         Assert.Equal(392, ShortcutPage.GetShortcutItemWidth(1200));
         Assert.Equal(1, ShortcutPage.GetShortcutItemWidth(24));
         Assert.Contains("ShortcutList.ItemsSource = _tiles;", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("Windows.ApplicationModel.DataTransfer", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("CaptureOwner", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("PointerDeviceType", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("OrderRestoredBeforeMutation", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("CapturePointer(e.Pointer)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("GetCurrentPoint(ShortcutList)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ContainerFromIndex(index)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("TransformBounds", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("PointerCanceled=\"ShortcutTile_PointerCanceled\"", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml")), StringComparison.Ordinal);
+        Assert.Contains("Unloaded=\"ShortcutPage_Unloaded\"", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml")), StringComparison.Ordinal);
+        Assert.DoesNotContain("DragItemsCompleted", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("DragItemsStarting", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartDragAsync", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("Windows.ApplicationModel.DataTransfer", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("Runtime Shortcut move response received.", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("FailureCategory", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("TryRestoreAndClearPendingShortcutDrag", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("await ApplyMutationAsync(moveIntent);", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("await ApplyMutationAsync(intent);", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("_tiles.Move(", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("CapturePointer(e.Pointer)", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("RowIndex", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("ColumnIndex", shortcutCode, StringComparison.Ordinal);
 
@@ -689,161 +711,108 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Main_app_shortcut_native_drag_sends_one_runtime_move_and_restores_local_order_first()
+    public void Main_app_shortcut_pointer_release_sends_one_authoritative_move_without_local_reordering()
     {
         var root = FindRepositoryRoot();
         var shortcutXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml"));
         var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
         var list = shortcutXaml.Descendants().Single(element => (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "ShortcutList");
-        Assert.Equal("True", (string?)list.Attribute("CanReorderItems"));
-        Assert.Equal("True", (string?)list.Attribute("CanDragItems"));
-        Assert.Equal("True", (string?)list.Attribute("AllowDrop"));
-
-        var completionStart = shortcutCode.IndexOf("private async void ShortcutList_DragItemsCompleted", StringComparison.Ordinal);
-        var resolverStart = shortcutCode.IndexOf("internal static bool TryResolveShortcutMove", completionStart, StringComparison.Ordinal);
-        Assert.True(completionStart >= 0 && resolverStart > completionStart);
-        var completionHandler = shortcutCode[completionStart..resolverStart];
-        Assert.Contains("e.DropResult != DataPackageOperation.Move", completionHandler, StringComparison.Ordinal);
-        Assert.Contains("TryRestoreAndClearPendingShortcutDrag(\"DragItemsCompleted\")", completionHandler, StringComparison.Ordinal);
-        Assert.Contains("TryCreateShortcutMoveIntent(", completionHandler, StringComparison.Ordinal);
-        Assert.Contains("await ApplyMutationAsync(moveIntent);", completionHandler, StringComparison.Ordinal);
-        Assert.Equal(1, completionHandler.Split("await ApplyMutationAsync(", StringSplitOptions.None).Length - 1);
-        Assert.DoesNotContain("ApplyMutationAsync(", shortcutCode[shortcutCode.IndexOf("private void ShortcutList_DragItemsStarting", StringComparison.Ordinal)..completionStart], StringComparison.Ordinal);
-        Assert.Contains("var reorderedTiles = _tiles.ToArray();", completionHandler, StringComparison.Ordinal);
-        Assert.Contains("finally", completionHandler, StringComparison.Ordinal);
-        var restorationIndex = completionHandler.IndexOf("TryRestoreAndClearPendingShortcutDrag(\"DragItemsCompleted\")", StringComparison.Ordinal);
-        var mutationIndex = completionHandler.IndexOf("await ApplyMutationAsync(moveIntent)", StringComparison.Ordinal);
-        Assert.True(restorationIndex >= 0 && mutationIndex > restorationIndex);
-    }
-
-    [Theory]
-    [InlineData(false, false, true, true)]
-    [InlineData(true, false, true, false)]
-    [InlineData(false, true, true, false)]
-    [InlineData(false, false, false, false)]
-    public void Main_app_shortcut_recovers_an_abandoned_drag_only_when_the_page_is_idle(
-        bool operationInProgress,
-        bool refreshInProgress,
-        bool hasPendingDrag,
-        bool expectedRecovery)
-    {
-        Assert.Equal(expectedRecovery, ShortcutPage.ShouldRecoverAbandonedDrag(
-            operationInProgress, refreshInProgress, hasPendingDrag));
-
-        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
-            "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
-        var startIndex = source.IndexOf("private void ShortcutList_DragItemsStarting", StringComparison.Ordinal);
-        var completedIndex = source.IndexOf("private async void ShortcutList_DragItemsCompleted", startIndex, StringComparison.Ordinal);
-        var startHandler = source[startIndex..completedIndex];
-        Assert.Contains("ShouldRecoverAbandonedDrag(_operationInProgress, _refreshInProgress", startHandler, StringComparison.Ordinal);
-        Assert.Contains("TryRestoreAndClearPendingShortcutDrag(\"NewDragStart\")", startHandler, StringComparison.Ordinal);
-        Assert.Contains("var abandonedTileId = _pendingDragTileId", startHandler, StringComparison.Ordinal);
-        Assert.Contains("(\"PreviousTileId\", abandonedTileId)", startHandler, StringComparison.Ordinal);
-        Assert.Contains("AbandonedGestureRecovered", startHandler, StringComparison.Ordinal);
-        Assert.Contains("abandonedOrderChanged", startHandler, StringComparison.Ordinal);
-        Assert.Contains("if (abandonedOrderChanged)", startHandler, StringComparison.Ordinal);
-        Assert.Contains("RestoreShortcutTilesIfOrderChanged", source, StringComparison.Ordinal);
-        Assert.Contains("RejectShortcutDragStart(e, \"Busy\")", startHandler, StringComparison.Ordinal);
-        Assert.Contains("RejectShortcutDragStart(e, \"Refresh\")", startHandler, StringComparison.Ordinal);
-
-        var cancellationIndex = startHandler.IndexOf("e.Cancel = true;", startHandler.IndexOf("if (abandonedOrderChanged)", StringComparison.Ordinal), StringComparison.Ordinal);
-        var recoveryIndex = startHandler.IndexOf("TryRestoreAndClearPendingShortcutDrag(\"NewDragStart\")", cancellationIndex, StringComparison.Ordinal);
-        Assert.True(cancellationIndex >= 0 && recoveryIndex > cancellationIndex);
+        var releaseHandlerStart = shortcutCode.IndexOf("private async void ShortcutTile_PointerReleased", StringComparison.Ordinal);
+        var releaseHandlerEnd = shortcutCode.IndexOf("private void ShortcutTile_PointerCanceled", releaseHandlerStart, StringComparison.Ordinal);
+        Assert.True(releaseHandlerStart >= 0 && releaseHandlerEnd > releaseHandlerStart);
+        var releaseHandler = shortcutCode[releaseHandlerStart..releaseHandlerEnd];
+        Assert.Equal(1, releaseHandler.Split("await ApplyMutationAsync(intent)", StringSplitOptions.None).Length - 1);
+        Assert.Contains("ClearShortcutReorder(outcome, releaseCapture: true)", releaseHandler, StringComparison.Ordinal);
+        Assert.Contains("TryCreatePointerMoveIntent", releaseHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("_tiles.Clear()", releaseHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("_tiles.Add(", releaseHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("_tiles.Move(", releaseHandler, StringComparison.Ordinal);
+        Assert.True(releaseHandler.IndexOf("ClearShortcutReorder(outcome, releaseCapture: true)", StringComparison.Ordinal)
+            < releaseHandler.IndexOf("await ApplyMutationAsync(intent)", StringComparison.Ordinal));
+        Assert.Contains("private void ShortcutTile_PointerCanceled", shortcutCode, StringComparison.Ordinal);
+        var canceledStart = shortcutCode.IndexOf("private void ShortcutTile_PointerCanceled", StringComparison.Ordinal);
+        var captureLostStart = shortcutCode.IndexOf("private void ShortcutTile_PointerCaptureLost", canceledStart, StringComparison.Ordinal);
+        var unloadedStart = shortcutCode.IndexOf("private void ShortcutPage_Unloaded", captureLostStart, StringComparison.Ordinal);
+        Assert.True(canceledStart >= 0 && captureLostStart > canceledStart && unloadedStart > captureLostStart);
+        Assert.Contains("ClearShortcutReorder(\"Canceled\", releaseCapture: false)", shortcutCode[canceledStart..captureLostStart], StringComparison.Ordinal);
+        Assert.Contains("private void ShortcutTile_PointerCaptureLost", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ClearShortcutReorder(\"CaptureLost\", releaseCapture: false)", shortcutCode[captureLostStart..unloadedStart], StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyMutationAsync", shortcutCode[canceledStart..unloadedStart], StringComparison.Ordinal);
+        var pointerPressedStart = shortcutCode.IndexOf("private void ShortcutTile_PointerPressed", StringComparison.Ordinal);
+        var pointerMovedStart = shortcutCode.IndexOf("private void ShortcutTile_PointerMoved", pointerPressedStart, StringComparison.Ordinal);
+        var pointerPressedHandler = shortcutCode[pointerPressedStart..pointerMovedStart].Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("IsPointerSourceInsideButton(e.OriginalSource as DependencyObject, surface)",
+            pointerPressedHandler, StringComparison.Ordinal);
+        Assert.Contains("if (!isMouse)\n            surface.CancelDirectManipulations();",
+            pointerPressedHandler, StringComparison.Ordinal);
+        Assert.True(shortcutCode.IndexOf("surface.CancelDirectManipulations();", pointerPressedStart, StringComparison.Ordinal)
+            < shortcutCode.IndexOf("surface.CapturePointer(e.Pointer)", pointerPressedStart, StringComparison.Ordinal));
+        Assert.Contains("ClearShortcutReorder(\"Canceled\", releaseCapture: true)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ClearShortcutReorder(\"Unavailable\", releaseCapture: true)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("IsPointerSourceInsideButton", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("Shortcut pointer reorder armed.", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("Shortcut pointer reorder released.", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ShortcutPage_Unloaded", shortcutCode, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Main_app_shortcut_stale_start_with_unchanged_order_does_not_reset_the_bound_collection()
+    public void Main_app_shortcut_pointer_drop_resolver_handles_rows_gaps_and_outside_release()
     {
-        static FrontendShortcutEditorTile Tile(Guid id) => new(
-            id, "Shortcut", "", CloseOverlayAfterLaunch: false,
-            Action: new FrontendShortcutEditorAction(FrontendShortcutEditorActionKind.Executable,
-                "system.executable", 1, Editable: true));
-
-        var first = Tile(Guid.NewGuid());
-        var second = Tile(Guid.NewGuid());
-        var tiles = new ObservableCollection<FrontendShortcutEditorTile> { first, second };
-        var collectionChangedCount = 0;
-        var resetCount = 0;
-        tiles.CollectionChanged += (_, args) =>
+        var fourCards = new (int Index, Rect Bounds)[]
         {
-            collectionChangedCount++;
-            if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
-                resetCount++;
+            (0, new Rect(0, 0, 100, 80)),
+            (1, new Rect(112, 0, 100, 80)),
+            (2, new Rect(224, 0, 100, 80)),
+            (3, new Rect(0, 92, 100, 80))
         };
+        var fiveCards = fourCards.Append((4, new Rect(112, 92, 100, 80))).ToArray();
+        var gridBounds = new Rect(0, 0, 336, 184);
 
-        Assert.True(ShortcutPage.HasSameShortcutTileOrder(tiles, [first, second]));
-        Assert.False(ShortcutPage.RestoreShortcutTilesIfOrderChanged(tiles, [first, second]));
-        Assert.Equal(0, collectionChangedCount);
-        Assert.Equal(0, resetCount);
+        Assert.Equal(0, ShortcutPage.ResolveShortcutDropIndex(new Point(50, 40), fourCards, gridBounds));
+        Assert.Equal(1, ShortcutPage.ResolveShortcutDropIndex(new Point(162, 40), fourCards, gridBounds));
+        Assert.Equal(2, ShortcutPage.ResolveShortcutDropIndex(new Point(274, 40), fourCards, gridBounds));
+        Assert.Equal(3, ShortcutPage.ResolveShortcutDropIndex(new Point(50, 132), fourCards, gridBounds));
+        Assert.Equal(4, ShortcutPage.ResolveShortcutDropIndex(new Point(162, 132), fiveCards, gridBounds));
+        Assert.Equal(1, ShortcutPage.ResolveShortcutDropIndex(new Point(110, 40), fourCards, gridBounds));
+        Assert.Null(ShortcutPage.ResolveShortcutDropIndex(new Point(-1, 40), fourCards, gridBounds));
+        Assert.Null(ShortcutPage.ResolveShortcutDropIndex(new Point(50, 40), [], gridBounds));
+        Assert.Null(ShortcutPage.ResolveShortcutDropIndex(new Point(50, 40),
+            [(0, new Rect(0, 0, 0, 80))], gridBounds));
 
-        var changedTiles = new ObservableCollection<FrontendShortcutEditorTile> { second, first };
-        Assert.False(ShortcutPage.HasSameShortcutTileOrder(changedTiles, [first, second]));
-        Assert.True(ShortcutPage.RestoreShortcutTilesIfOrderChanged(changedTiles, [first, second]));
-        Assert.Equal(new[] { first.TileId, second.TileId }, changedTiles.Select(tile => tile.TileId));
-
-        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
-            "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
-        var startIndex = source.IndexOf("private void ShortcutList_DragItemsStarting", StringComparison.Ordinal);
-        var completionIndex = source.IndexOf("private async void ShortcutList_DragItemsCompleted", startIndex, StringComparison.Ordinal);
-        var startHandler = source[startIndex..completionIndex];
-        Assert.Contains("RestoreShortcutTilesIfOrderChanged(_tiles, originalTiles)", source, StringComparison.Ordinal);
-        Assert.Contains("if (abandonedOrderChanged)", startHandler, StringComparison.Ordinal);
-        Assert.Contains("TryRestoreAndClearPendingShortcutDrag(\"NewDragStart\")", startHandler, StringComparison.Ordinal);
+        var tallListViewport = new Rect(0, 0, 336, 600);
+        Assert.Null(ShortcutPage.ResolveShortcutDropIndex(new Point(50, 450), fourCards, tallListViewport));
+        Assert.Equal(3, ShortcutPage.ResolveShortcutDropIndex(new Point(50, 132), fourCards, tallListViewport));
+        Assert.Equal(3, ShortcutPage.ResolveShortcutDropIndex(new Point(250, 132), fourCards, tallListViewport));
+        Assert.Equal(4, ShortcutPage.ResolveShortcutDropIndex(new Point(250, 132), fiveCards, tallListViewport));
     }
 
     [Fact]
-    public void Main_app_shortcut_native_move_resolver_accepts_only_one_valid_item_move()
+    public void Main_app_shortcut_pointer_move_intent_requires_a_deliberate_valid_index_change()
     {
-        var first = Guid.NewGuid();
-        var second = Guid.NewGuid();
-        var third = Guid.NewGuid();
-        var fourth = Guid.NewGuid();
-        var fifth = Guid.NewGuid();
-        var original = new[] { first, second, third, fourth };
+        var tileId = Guid.NewGuid();
 
-        var moveIntent = ShortcutPage.TryCreateShortcutMoveIntent(
-            original, [second, third, fourth, first], first, moveAccepted: true, completedItemsMatch: true,
-            out var sourceIndex, out var targetIndex);
-        Assert.NotNull(moveIntent);
-        Assert.Equal(FrontendShortcutMutationKind.Move, moveIntent!.Kind);
-        Assert.Equal(first, moveIntent.TileId);
-        Assert.Equal(3, moveIntent.TargetIndex);
-        Assert.Equal(0, sourceIndex);
-        Assert.Equal(3, targetIndex);
+        var moveToLast = ShortcutPage.TryCreatePointerMoveIntent(tileId, 0, 3, tileCount: 4, thresholdPassed: true);
+        Assert.NotNull(moveToLast);
+        Assert.Equal(FrontendShortcutMutationKind.Move, moveToLast!.Kind);
+        Assert.Equal(tileId, moveToLast.TileId);
+        Assert.Equal(3, moveToLast.TargetIndex);
 
-        Assert.Null(ShortcutPage.TryCreateShortcutMoveIntent(
-            original, [second, third, fourth, first], first, moveAccepted: false, completedItemsMatch: true,
-            out _, out _));
-        Assert.Null(ShortcutPage.TryCreateShortcutMoveIntent(
-            original, [second, third, fourth, first], first, moveAccepted: true, completedItemsMatch: false,
-            out _, out _));
-        Assert.Null(ShortcutPage.TryCreateShortcutMoveIntent(
-            original, original, first, moveAccepted: true, completedItemsMatch: true,
-            out _, out _));
-        Assert.Null(ShortcutPage.TryCreateShortcutMoveIntent(
-            original, [second, first, fourth, third], first, moveAccepted: true, completedItemsMatch: true,
-            out _, out _));
+        var moveToFirst = ShortcutPage.TryCreatePointerMoveIntent(tileId, 3, 0, tileCount: 4, thresholdPassed: true);
+        Assert.NotNull(moveToFirst);
+        Assert.Equal(0, moveToFirst!.TargetIndex);
+        Assert.Equal(2, ShortcutPage.TryCreatePointerMoveIntent(tileId, 1, 2, tileCount: 4, thresholdPassed: true)!.TargetIndex);
+        var incompleteRowMove = ShortcutPage.TryCreatePointerMoveIntent(tileId, 4, 1, tileCount: 5, thresholdPassed: true);
+        Assert.NotNull(incompleteRowMove);
+        Assert.Equal(1, incompleteRowMove!.TargetIndex);
+        Assert.Equal(4, ShortcutPage.TryCreatePointerMoveIntent(tileId, 0, 4, tileCount: 5, thresholdPassed: true)!.TargetIndex);
+        Assert.Null(ShortcutPage.TryCreatePointerMoveIntent(tileId, 4, 1, tileCount: 5, thresholdPassed: false));
+        Assert.Null(ShortcutPage.TryCreatePointerMoveIntent(tileId, 1, 1, tileCount: 5, thresholdPassed: true));
+        Assert.Null(ShortcutPage.TryCreatePointerMoveIntent(tileId, 0, null, tileCount: 5, thresholdPassed: true));
+        Assert.Null(ShortcutPage.TryCreatePointerMoveIntent(tileId, 0, 5, tileCount: 5, thresholdPassed: true));
+        Assert.Null(ShortcutPage.TryCreatePointerMoveIntent(Guid.Empty, 0, 1, tileCount: 2, thresholdPassed: true));
 
-        Assert.True(ShortcutPage.TryResolveShortcutMove(original, [second, third, fourth, first], first,
-            out sourceIndex, out targetIndex));
-        Assert.Equal(0, sourceIndex);
-        Assert.Equal(3, targetIndex);
-
-        Assert.True(ShortcutPage.TryResolveShortcutMove(original, [third, first, second, fourth], third,
-            out sourceIndex, out targetIndex));
-        Assert.Equal(2, sourceIndex);
-        Assert.Equal(0, targetIndex);
-
-        var incompleteFinalRow = new[] { first, second, third, fourth, fifth };
-        Assert.True(ShortcutPage.TryResolveShortcutMove(incompleteFinalRow,
-            [first, fifth, second, third, fourth], fifth, out sourceIndex, out targetIndex));
-        Assert.Equal(4, sourceIndex);
-        Assert.Equal(1, targetIndex);
-
-        Assert.False(ShortcutPage.TryResolveShortcutMove(original, original, first, out _, out _));
-        Assert.False(ShortcutPage.TryResolveShortcutMove(original, [second, first, fourth, third], first, out _, out _));
-        Assert.False(ShortcutPage.TryResolveShortcutMove(original, [second, third, first], first, out _, out _));
-        Assert.False(ShortcutPage.TryResolveShortcutMove([first, first], [first, first], first, out _, out _));
+        Assert.False(ShortcutPage.HasPassedShortcutReorderThreshold(new Point(10, 10), new Point(15, 15)));
+        Assert.True(ShortcutPage.HasPassedShortcutReorderThreshold(new Point(10, 10), new Point(18, 10)));
     }
 
     [Fact]
