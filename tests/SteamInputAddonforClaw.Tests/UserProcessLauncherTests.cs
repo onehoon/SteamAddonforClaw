@@ -87,35 +87,62 @@ public sealed class UserProcessLauncherTests
     }
 
     [Theory]
-    [InlineData(1, true)]
-    [InlineData(2, false)]
-    [InlineData(0, false)]
-    [InlineData(99, false)]
-    public void Only_a_primary_linked_token_is_accepted_for_direct_process_creation(
+    [InlineData(1, (int)UserProcessLauncher.MediumLaunchRoute.DirectProcessCreation)]
+    [InlineData(2, (int)UserProcessLauncher.MediumLaunchRoute.DesktopShellDispatch)]
+    public void Medium_launch_uses_direct_creation_only_for_a_primary_linked_token(
         int tokenType,
-        bool expected)
+        int expectedRoute)
     {
-        Assert.Equal(expected, UserProcessLauncher.IsPrimaryTokenType(tokenType));
+        Assert.Equal((UserProcessLauncher.MediumLaunchRoute)expectedRoute,
+            UserProcessLauncher.GetMediumLaunchRoute(tokenType));
     }
 
     [Fact]
-    public void Medium_process_creation_uses_the_validated_linked_primary_without_duplicate_token_ex()
+    public void Medium_launch_fails_closed_for_an_unknown_linked_token_type()
+    {
+        Assert.Throws<InvalidOperationException>(() => UserProcessLauncher.GetMediumLaunchRoute(99));
+    }
+
+    [Fact]
+    public void Medium_launch_uses_the_verified_linked_token_route_and_desktop_shell_for_impersonation()
     {
         var source = File.ReadAllText(Path.Combine(
             FindRepositoryRoot(), "src", "SteamInputAddonforClaw", "Processes", "UserProcessLauncher.cs"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
         var startIndex = source.IndexOf("private static bool StartWithMediumUserToken(", StringComparison.Ordinal);
-        var validateIndex = source.IndexOf("private static void ValidateMediumLinkedToken(", startIndex, StringComparison.Ordinal);
+        var validateIndex = source.IndexOf("private static TokenType ValidateMediumLinkedToken(", startIndex, StringComparison.Ordinal);
         Assert.True(startIndex >= 0 && validateIndex > startIndex);
         var mediumPath = source[startIndex..validateIndex];
 
         Assert.Contains("using var linkedToken = GetLinkedToken(currentToken);", mediumPath, StringComparison.Ordinal);
         Assert.Contains("ValidateMediumLinkedToken(currentToken, linkedToken", mediumPath, StringComparison.Ordinal);
+        Assert.Contains("GetMediumLaunchRoute((int)linkedTokenType)", mediumPath, StringComparison.Ordinal);
+        Assert.Contains("StartThroughDesktopShell(startInfo, currentToken)", mediumPath, StringComparison.Ordinal);
         Assert.Contains("var processToken = linkedToken;", mediumPath, StringComparison.Ordinal);
         Assert.Contains("CreateEnvironmentBlock(out var environment, processToken, false)", mediumPath, StringComparison.Ordinal);
         Assert.Contains("CreateProcessWithTokenW(\n                    processToken", mediumPath, StringComparison.Ordinal);
         Assert.Contains("CreateProcessAsUserW(\n                    processToken", mediumPath, StringComparison.Ordinal);
+        Assert.Contains("shellWindows.FindWindowSW(", source, StringComparison.Ordinal);
+        Assert.Contains("shellDispatch.ShellExecute(", source, StringComparison.Ordinal);
+        Assert.Contains("sameUser && sameSession && mediumDesktop", source, StringComparison.Ordinal);
+        Assert.Contains("(\"TargetVisibility\", \"Unverified\")", source, StringComparison.Ordinal);
         Assert.DoesNotContain("DuplicateTokenEx", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Desktop_shell_argument_formatting_preserves_argument_list_quoting_and_long_payloads()
+    {
+        var startInfo = new ProcessStartInfo(@"C:\Tools\Tool.exe") { UseShellExecute = false };
+        startInfo.ArgumentList.Add("--script");
+        startInfo.ArgumentList.Add("two words");
+        var longValue = new string('x', 8_000);
+        startInfo.ArgumentList.Add(longValue);
+
+        var arguments = UserProcessLauncher.BuildShellArguments(startInfo);
+
+        Assert.StartsWith("\"--script\" \"two words\" ", arguments, StringComparison.Ordinal);
+        Assert.EndsWith($"\"{longValue}\"", arguments, StringComparison.Ordinal);
+        Assert.True(arguments.Length > 1_024);
     }
 
     [Fact]

@@ -388,13 +388,16 @@ The Runtime remains High because the existing Full1902/WING suppression owner ne
 
 ~~~text
 User EXE / Shortcut PowerShell, administrator option OFF
-=> validated same-user, same-session Medium token
+=> validate the UAC-linked token's user, session, elevation, integrity, and type
+   => Primary: direct Medium process creation
+   => Impersonation: validated desktop ShellExecute
+   => unavailable/unsupported: fail closed
 
 User EXE / Shortcut PowerShell, administrator option ON
 => existing High Runtime token
 
 Steam URI / Xbox package
-=> Explorer launched with the validated Medium token
+=> normal-user shell activation through the validated Medium route
 
 HTTP(S) URL
 => `rundll32.exe url.dll,FileProtocolHandler` invokes the registered browser with the validated Medium token
@@ -403,11 +406,11 @@ Screenshot
 => existing NirCmdScreenshotCapture path; unchanged
 ~~~
 
-The Medium path validates the UAC-linked limited token's user SID, session, elevation type, and exact Medium integrity before process creation. Literal user EXE / encoded PowerShell actions and HTTP(S) browser dispatch continue to use `CreateProcessAsUserW`, preserving the existing long command-line support. The fixed Explorer shell activations for Steam URI and Xbox package requests use `CreateProcessWithTokenW`; their command lines are bounded below that API's documented 1,024-character limit, and the validated token is required to belong to the caller's interactive session. The API choice is limited to these short shell targets; it is not a general fallback. The 0.1.342 logs recorded `Win32Exception` without the failing native stage or error code, so they do not establish `ERROR_PRIVILEGE_NOT_HELD` (1314) or any other specific cause. The implementation records the failing API stage and numeric Win32 code on failure. It does not use `UseShellExecute` from the High Runtime for user actions. A missing/invalid Medium token or any launch failure remains a failure; there is no automatic retry using High. The explicit administrator option likewise uses the existing High token without another UAC prompt and does not retry at Medium.
+The Medium path validates the UAC-linked limited token's user SID, session, elevation type, and exact Medium integrity, then reads its actual token type. A linked Primary token uses the existing direct process APIs: literal EXE / encoded PowerShell and HTTP(S) browser dispatch use `CreateProcessAsUserW`, while the fixed short Steam/Xbox Explorer activations use `CreateProcessWithTokenW`. When Windows returns a linked Impersonation token, the launcher does not pass it to a process-creation API. It resolves the current desktop through `IShellWindows::FindWindowSW(SWC_DESKTOP)`, obtains the desktop-hosted `IShellDispatch2`, verifies the desktop window owner is the same user/session at exact Medium integrity, and asks that shell to execute the validated literal EXE request. This shell route preserves long command arguments without `CreateProcessWithTokenW`'s 1,024-character limit. If the desktop shell or its identity checks are unavailable, the Medium request fails closed; it never falls back to the High Runtime token. A successful ShellExecute call means dispatch was accepted, not that the target UI became visible or that an already-running target such as Steam changed integrity. The 0.1.342 logs recorded `Win32Exception` without the failing native stage or error code, so they do not establish `ERROR_PRIVILEGE_NOT_HELD` (1314) or any other specific cause. The implementation records native API stage/error or COM stage/HRESULT on failure. It does not use `UseShellExecute` from the High Runtime for user actions. The explicit administrator option uses the existing High token without another UAC prompt and does not retry at Medium.
 
 Shortcut EXE and PowerShell actions persist an optional per-action `runAsAdministrator` boolean; an absent legacy value means `false`. The front-button `LaunchApplication` binding uses an optional final `RunAsAdministrator` field with the same default. Built-in Steam, Big Picture, Xbox, and browser URL actions expose no administrator option and use the Medium shell route. Only literal `.exe` actions can use the direct-process path; PowerShell is restricted to the existing Shortcut PowerShell action.
 
-Steam URI and packaged-app requests are dispatched by starting Explorer as the interactive user's Medium process, preserving the existing Steam URI and Xbox AUMID. HTTP(S) URLs use the Windows `rundll32.exe url.dll,FileProtocolHandler` protocol-handler path with the complete escaped URI passed directly, avoiding both Explorer's second-layer parsing and command-interpreter expansion while retaining the validated Medium token. Neither path changes the integrity of an already-running target such as Steam. Cold-start Steam, Xbox activation, default-browser URL dispatch, and the no-normal-Explorer Windows/Steam FSE case still require physical validation before release; the implementation must not be described as proven for those cases until that matrix is completed.
+For a linked Primary token, Steam and packaged-app requests retain their fixed Explorer activation and HTTP(S) retains the `rundll32.exe url.dll,FileProtocolHandler` protocol-handler path. For a linked Impersonation token, the verified desktop `IShellDispatch2` executes those same fixed Explorer/rundll32 requests as the interactive Medium shell. Both paths preserve the existing Steam URI, Xbox AUMID, and escaped URL behavior without command-interpreter expansion. Neither path changes the integrity of an already-running target such as Steam. Cold-start Steam, Xbox activation, default-browser URL dispatch, and the no-normal-Explorer Windows/Steam FSE case still require physical validation before release; when the desktop shell is unavailable the current Impersonation-token route fails closed, and the implementation must not be described as FSE-proven until that matrix is completed.
 
 This policy does not introduce another controller authority, resident broker, service, token cache, or child-process lifetime owner. Shortcut retains its TileId-based authority and failure/Overlay-retirement behavior; the front-button executor retains its current action validation and caller-specific failure handling.
 
@@ -640,11 +643,11 @@ User-action process launch
 => screenshot and controller authority remain unchanged
 ~~~
 
-The process architecture is therefore no longer in a "migration pending" state. The v0.1.343 logs identify the failing token-preparation operation as `DuplicateTokenEx` with error 1346; they do not identify the linked token's actual type or access rights. The launcher now reads `TokenType`, uses a verified linked Primary token directly for environment/process creation, and fails closed with categorical token-type and impersonation-level diagnostics if the linked token is not Primary. It does not attempt an unconditional duplicate. The selected `CreateProcessWithTokenW` route for fixed Steam/Xbox Explorer activations and `CreateProcessAsUserW` route for long commands remain unchanged. Actual token type, token-handle rights, child integrity, cold-start Steam/Xbox, and Windows/Steam FSE behavior still require runtime validation.
+The process architecture is therefore no longer in a "migration pending" state. The v0.1.343 logs identify the failing token-preparation operation as `DuplicateTokenEx` with error 1346; they do not identify the linked token's actual type or access rights. The launcher now reads `TokenType`: a verified linked Primary token follows the existing direct process APIs, while a linked Impersonation token uses the desktop-hosted `IShellDispatch2` only after same-user/session/Medium validation. Unknown token types and an unavailable or invalid desktop shell fail closed. No unconditional duplication or High fallback is used. Actual elevated-Runtime token type, child integrity, cold-start Steam/Xbox, and Windows/Steam FSE behavior still require runtime validation.
 
 ### Remaining process-privilege validation
 
-The user-launched external-action policy is implemented. Fixed Steam/Xbox Explorer shell dispatch uses the validated same-session Medium token through `CreateProcessWithTokenW`; long EXE/PowerShell and HTTP(S) commands retain `CreateProcessAsUserW`. Unit tests cover API-stage/error propagation and prohibit a High retry, but do not prove that an elevated Claw Runtime's token satisfies the selected API requirements. Before release, physical validation must demonstrate the actual child integrity and supported shell behavior for Shortcut EXE/PowerShell, front-button EXE, Steam cold start, Xbox package activation, HTTP(S) browser launch, Windows desktop, and Windows/Steam FSE. Keep this validation separate from controller-authority changes.
+The user-launched external-action policy is implemented. A linked Primary token uses the validated direct process APIs; a linked Impersonation token dispatches through the validated desktop Shell and reports COM stage/HRESULT failures. Automated Windows integration verifies the desktop dispatch with a long PowerShell command and confirms the child is same-user/Medium in the current desktop session. This does not prove that an elevated Claw Runtime receives the same token type, that a shell exists in Windows/Steam FSE, or that Steam/Xbox/browser UI becomes visible. Before release, physical validation must demonstrate actual elevated-Runtime child integrity and supported shell behavior for Shortcut EXE/PowerShell, front-button EXE, Steam cold start, Xbox package activation, HTTP(S) browser launch, Windows desktop, and Windows/Steam FSE. Keep this validation separate from controller-authority changes.
 
 ### Separate Full1902 reliability work
 
@@ -721,11 +724,13 @@ External user actions
     |
     +-- Shortcut / front-button EXE and PowerShell
     |       +-- default: validated same-user Medium token
+    |               +-- Primary: direct process creation
+    |               +-- Impersonation: validated desktop ShellExecute
     |       +-- explicit administrator option: existing Runtime High token
     +-- Steam URI / Xbox package
-    |       +-- Explorer shell dispatch with validated Medium token
+    |       +-- fixed activation through direct Medium token or validated desktop ShellExecute
     +-- HTTP(S) URL
-    |       +-- rundll32 URL protocol handler / registered browser with validated Medium token
+    |       +-- rundll32 URL protocol handler through direct Medium token or desktop ShellExecute
     +-- Screenshot
             +-- existing NirCmdScreenshotCapture path
 ~~~

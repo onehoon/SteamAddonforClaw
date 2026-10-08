@@ -56,6 +56,37 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
     }
 
     [Fact]
+    public async Task Desktop_shell_dispatch_launches_a_long_command_as_the_same_medium_user()
+    {
+        Assert.True(OperatingSystem.IsWindows());
+
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var powerShellPath = Path.Combine(windowsDirectory, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+        Assert.True(File.Exists(powerShellPath), $"Windows PowerShell was not found: {powerShellPath}");
+
+        var testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.DesktopShell.{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDirectory);
+        try
+        {
+            using var currentIdentity = WindowsIdentity.GetCurrent();
+            var currentUserSid = currentIdentity.User?.Value;
+            Assert.False(string.IsNullOrWhiteSpace(currentUserSid));
+            var outputPath = Path.Combine(testDirectory, "identity.txt");
+            var startInfo = CreatePowerShellActionStartInfo(powerShellPath, Encode(CreateIdentityScript(outputPath)));
+            Assert.True(UserProcessLauncher.BuildShellArguments(startInfo).Length > 1_024);
+
+            var launcher = new UserProcessLauncher();
+            Assert.True(launcher.LaunchViaDesktopShell(startInfo));
+
+            AssertChildIdentity(await WaitForIdentityAsync(outputPath), currentUserSid!, "S-1-16-8192");
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Shortcut_medium_launches_preserve_long_commands_and_child_integrity()
     {
         Assert.True(OperatingSystem.IsWindows());
