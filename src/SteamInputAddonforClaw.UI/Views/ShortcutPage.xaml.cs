@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.Windows.Storage.Pickers;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using WinRT.Interop;
@@ -32,8 +33,11 @@ public sealed partial class ShortcutPage : UserControl
     private Guid? _reorderTileId;
     private int _reorderSourceIndex = -1;
     private Point _reorderStartPosition;
+    private Point _reorderStartPositionInDragLayer;
+    private Rect _reorderSourceBoundsInDragLayer;
     private bool _reorderThresholdPassed;
     private int? _reorderTargetIndex;
+    private Storyboard? _shortcutDragLiftStoryboard;
 
     public ShortcutPage()
     {
@@ -112,6 +116,7 @@ public sealed partial class ShortcutPage : UserControl
 
     private async void EditTileButton_Click(object sender, RoutedEventArgs e)
     {
+        if (IsShortcutDragPreviewElement(sender as DependencyObject)) return;
         if ((sender as FrameworkElement)?.Tag is not Guid tileId) return;
         var tile = _tiles.FirstOrDefault(candidate => candidate.TileId == tileId);
         if (tile is null || !tile.Action.Editable) return;
@@ -478,6 +483,10 @@ public sealed partial class ShortcutPage : UserControl
         return deltaX * deltaX + deltaY * deltaY >= ShortcutReorderThresholdDip * ShortcutReorderThresholdDip;
     }
 
+    internal static Point GetShortcutDragPreviewOrigin(Rect sourceBounds, Point pressPoint, Point currentPoint) =>
+        new(sourceBounds.X + currentPoint.X - pressPoint.X,
+            sourceBounds.Y + currentPoint.Y - pressPoint.Y);
+
     internal static int? ResolveShortcutDropIndex(
         Point releasePosition,
         IReadOnlyList<(int Index, Rect Bounds)> realizedCards,
@@ -571,6 +580,12 @@ public sealed partial class ShortcutPage : UserControl
         if (!isMouse)
             surface.CancelDirectManipulations();
 
+        if (!TryGetShortcutItemBoundsInDragLayer(sourceIndex, out var sourceBounds))
+        {
+            LogShortcutReorderReleased(tileId, sourceIndex, null, "Unavailable");
+            return;
+        }
+
         if (!surface.CapturePointer(e.Pointer))
         {
             LogShortcutReorderReleased(tileId, sourceIndex, null, "Unavailable");
@@ -582,6 +597,8 @@ public sealed partial class ShortcutPage : UserControl
         _reorderTileId = tileId;
         _reorderSourceIndex = sourceIndex;
         _reorderStartPosition = pointerPoint.Position;
+        _reorderStartPositionInDragLayer = e.GetCurrentPoint(ShortcutDragLayer).Position;
+        _reorderSourceBoundsInDragLayer = sourceBounds;
         _reorderThresholdPassed = false;
         _reorderTargetIndex = sourceIndex;
         AppLog.Debug("Shortcut", "Shortcut pointer reorder armed.",
@@ -602,11 +619,28 @@ public sealed partial class ShortcutPage : UserControl
         }
 
         var position = e.GetCurrentPoint(ShortcutList).Position;
-        if (!_reorderThresholdPassed && !HasPassedShortcutReorderThreshold(_reorderStartPosition, position))
-            return;
+        var positionInDragLayer = e.GetCurrentPoint(ShortcutDragLayer).Position;
+        if (!_reorderThresholdPassed)
+        {
+            if (!HasPassedShortcutReorderThreshold(_reorderStartPosition, position))
+                return;
 
-        _reorderThresholdPassed = true;
-        _reorderTargetIndex = ResolveCurrentShortcutDropIndex(position);
+            _reorderThresholdPassed = true;
+            if (!ShowShortcutDragPreview(positionInDragLayer))
+            {
+                ClearShortcutReorder("Unavailable", releaseCapture: true);
+                return;
+            }
+        }
+        else
+        {
+            UpdateShortcutDragPreviewPosition(positionInDragLayer);
+        }
+
+        var targetIndex = ResolveCurrentShortcutDropIndex(position);
+        if (targetIndex != _reorderTargetIndex)
+            UpdateShortcutDropIndicator(targetIndex);
+        _reorderTargetIndex = targetIndex;
         e.Handled = true;
     }
 
@@ -660,6 +694,122 @@ public sealed partial class ShortcutPage : UserControl
 
         if (intent is not null)
             await ApplyMutationAsync(intent);
+    }
+
+    private bool ShowShortcutDragPreview(Point currentPositionInDragLayer)
+    {
+        if (_reorderTileId is not { } tileId || _reorderSurface is null
+            || !IsUsableBounds(_reorderSourceBoundsInDragLayer))
+            return false;
+
+        var tile = _tiles.FirstOrDefault(candidate => candidate.TileId == tileId);
+        if (tile is null)
+            return false;
+
+        ShortcutDragPreview.Content = tile;
+        ShortcutDragPreview.Width = _reorderSourceBoundsInDragLayer.Width;
+        ShortcutDragPreview.Height = _reorderSourceBoundsInDragLayer.Height;
+        ShortcutDragPreviewTransform.ScaleX = 1;
+        ShortcutDragPreviewTransform.ScaleY = 1;
+        ShortcutDragPreview.Opacity = 0.95;
+        UpdateShortcutDragPreviewPosition(currentPositionInDragLayer);
+        ShortcutDragPreview.Visibility = Visibility.Visible;
+        _reorderSurface.Opacity = 0.35;
+        BeginShortcutDragLiftAnimation();
+        return true;
+    }
+
+    private void UpdateShortcutDragPreviewPosition(Point currentPositionInDragLayer)
+    {
+        var origin = GetShortcutDragPreviewOrigin(
+            _reorderSourceBoundsInDragLayer,
+            _reorderStartPositionInDragLayer,
+            currentPositionInDragLayer);
+        Canvas.SetLeft(ShortcutDragPreview, origin.X);
+        Canvas.SetTop(ShortcutDragPreview, origin.Y);
+    }
+
+    private void UpdateShortcutDropIndicator(int? targetIndex)
+    {
+        if (targetIndex is not { } index || index == _reorderSourceIndex
+            || index < 0 || index >= _tiles.Count
+            || !TryGetShortcutCardBoundsInDragLayer(index, out var targetBounds))
+        {
+            ShortcutDropIndicator.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        Canvas.SetLeft(ShortcutDropIndicator, targetBounds.X);
+        Canvas.SetTop(ShortcutDropIndicator, targetBounds.Y);
+        ShortcutDropIndicator.Width = targetBounds.Width;
+        ShortcutDropIndicator.Height = targetBounds.Height;
+        ShortcutDropIndicator.Visibility = Visibility.Visible;
+    }
+
+    private void BeginShortcutDragLiftAnimation()
+    {
+        var storyboard = new Storyboard();
+        AddShortcutDragScaleAnimation(storyboard, nameof(CompositeTransform.ScaleX));
+        AddShortcutDragScaleAnimation(storyboard, nameof(CompositeTransform.ScaleY));
+        _shortcutDragLiftStoryboard = storyboard;
+        storyboard.Begin();
+    }
+
+    private void AddShortcutDragScaleAnimation(Storyboard storyboard, string propertyName)
+    {
+        var animation = new DoubleAnimation
+        {
+            From = 1,
+            To = 1.05,
+            Duration = new Duration(TimeSpan.FromMilliseconds(120)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(animation, ShortcutDragPreviewTransform);
+        Storyboard.SetTargetProperty(animation, propertyName);
+        storyboard.Children.Add(animation);
+    }
+
+    private bool TryGetShortcutItemBoundsInDragLayer(int index, out Rect bounds)
+    {
+        bounds = default;
+        if (index < 0 || index >= _tiles.Count
+            || ShortcutList.ContainerFromIndex(index) is not ListViewItem item
+            || item.ActualWidth <= 0 || item.ActualHeight <= 0)
+            return false;
+
+        try
+        {
+            bounds = item.TransformToVisual(ShortcutDragLayer)
+                .TransformBounds(new Rect(0, 0, item.ActualWidth, item.ActualHeight));
+            return IsUsableBounds(bounds);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private bool TryGetShortcutCardBoundsInDragLayer(int index, out Rect bounds)
+    {
+        bounds = default;
+        if (index < 0 || index >= _tiles.Count
+            || ShortcutList.ContainerFromIndex(index) is not ListViewItem item
+            || FindVisualChild<Border>(item) is not { } cardSurface
+            || cardSurface.Tag is not Guid tileId
+            || tileId != _tiles[index].TileId
+            || cardSurface.ActualWidth <= 0 || cardSurface.ActualHeight <= 0)
+            return false;
+
+        try
+        {
+            bounds = cardSurface.TransformToVisual(ShortcutDragLayer)
+                .TransformBounds(new Rect(0, 0, cardSurface.ActualWidth, cardSurface.ActualHeight));
+            return IsUsableBounds(bounds);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private void ShortcutTile_PointerCanceled(object sender, PointerRoutedEventArgs e)
@@ -728,11 +878,22 @@ public sealed partial class ShortcutPage : UserControl
         return false;
     }
 
+    private bool IsShortcutDragPreviewElement(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (ReferenceEquals(source, ShortcutDragPreview))
+                return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return false;
+    }
+
     private void ClearShortcutReorder(string outcome, bool releaseCapture)
     {
-        if (_reorderPointer is not { } pointer || _reorderTileId is not { } tileId)
-            return;
-
+        var pointer = _reorderPointer;
+        var tileId = _reorderTileId;
         var surface = _reorderSurface;
         var sourceIndex = _reorderSourceIndex;
         var targetIndex = _reorderTargetIndex;
@@ -741,13 +902,35 @@ public sealed partial class ShortcutPage : UserControl
         _reorderTileId = null;
         _reorderSourceIndex = -1;
         _reorderStartPosition = default;
+        _reorderStartPositionInDragLayer = default;
+        _reorderSourceBoundsInDragLayer = default;
         _reorderThresholdPassed = false;
         _reorderTargetIndex = null;
 
-        if (releaseCapture)
+        _shortcutDragLiftStoryboard?.Stop();
+        _shortcutDragLiftStoryboard = null;
+        if (surface is not null)
+            surface.Opacity = 1.0;
+        ShortcutDragPreview.Visibility = Visibility.Collapsed;
+        ShortcutDragPreview.Content = null;
+        ShortcutDragPreview.Width = 0;
+        ShortcutDragPreview.Height = 0;
+        ShortcutDragPreview.Opacity = 0.95;
+        ShortcutDragPreviewTransform.ScaleX = 1;
+        ShortcutDragPreviewTransform.ScaleY = 1;
+        Canvas.SetLeft(ShortcutDragPreview, 0);
+        Canvas.SetTop(ShortcutDragPreview, 0);
+        ShortcutDropIndicator.Visibility = Visibility.Collapsed;
+        ShortcutDropIndicator.Width = 0;
+        ShortcutDropIndicator.Height = 0;
+        Canvas.SetLeft(ShortcutDropIndicator, 0);
+        Canvas.SetTop(ShortcutDropIndicator, 0);
+
+        if (releaseCapture && pointer is not null)
             surface?.ReleasePointerCapture(pointer);
 
-        LogShortcutReorderReleased(tileId, sourceIndex, targetIndex, outcome);
+        if (tileId is { } completedTileId)
+            LogShortcutReorderReleased(completedTileId, sourceIndex, targetIndex, outcome);
     }
 
     private static void LogShortcutReorderReleased(Guid tileId, int sourceIndex, int? targetIndex, string outcome) =>
@@ -795,6 +978,7 @@ public sealed partial class ShortcutPage : UserControl
 
     private async void DeleteTileButton_Click(object sender, RoutedEventArgs e)
     {
+        if (IsShortcutDragPreviewElement(sender as DependencyObject)) return;
         if ((sender as FrameworkElement)?.Tag is not Guid tileId || _frontend is null || XamlRoot is null) return;
         var tile = _tiles.FirstOrDefault(candidate => candidate.TileId == tileId);
         if (tile is null) return;
