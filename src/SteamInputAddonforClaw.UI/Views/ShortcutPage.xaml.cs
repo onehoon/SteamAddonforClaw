@@ -50,7 +50,17 @@ public sealed partial class ShortcutPage : UserControl
         RequestRefresh();
     }
 
-    public void Deactivate() => _active = false;
+    public void Deactivate()
+    {
+        _active = false;
+        if (_pendingDragOriginalTiles is null && _pendingDragTileId is null)
+            return;
+
+        AppLog.Debug("Shortcut", "Page deactivated before native drag completion.",
+            ("TileId", _pendingDragTileId), ("Stage", "Deactivate"));
+        if (!TryRestoreAndClearPendingShortcutDrag("Deactivate"))
+            RequestRefresh();
+    }
 
     public void RequestRefresh()
     {
@@ -80,6 +90,13 @@ public sealed partial class ShortcutPage : UserControl
 
     private void Render(FrontendShortcutEditorSnapshot snapshot)
     {
+        if (_pendingDragOriginalTiles is not null || _pendingDragTileId is not null)
+        {
+            AppLog.Debug("Shortcut", "Runtime snapshot superseded an unfinished native drag.",
+                ("TileId", _pendingDragTileId), ("Stage", "AuthoritativeSnapshotRebind"));
+            ClearPendingShortcutDrag();
+        }
+
         _editorAvailable = snapshot.Available;
         _tiles.Clear();
         foreach (var tile in snapshot.Tiles)
@@ -424,6 +441,12 @@ public sealed partial class ShortcutPage : UserControl
     internal static double GetShortcutItemWidth(double availableWidth) =>
         Math.Max(1, (availableWidth - (ShortcutColumnCount - 1) * ShortcutCardHorizontalGap) / ShortcutColumnCount);
 
+    internal static bool ShouldRecoverAbandonedDrag(
+        bool operationInProgress,
+        bool refreshInProgress,
+        bool hasPendingDrag) =>
+        !operationInProgress && !refreshInProgress && hasPendingDrag;
+
     private static void UpdateEditorPanel(ComboBox picker, IReadOnlyDictionary<FrontendShortcutEditorActionKind, UIElement> panels)
     {
         foreach (var panel in panels.Values) panel.Visibility = Visibility.Collapsed;
@@ -457,22 +480,56 @@ public sealed partial class ShortcutPage : UserControl
 
     private void ShortcutList_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
     {
-        if (_operationInProgress || _refreshInProgress || _pendingDragOriginalTiles is not null
-            || e.Items.Count != 1 || e.Items[0] is not FrontendShortcutEditorTile tile)
+        if (_operationInProgress)
         {
-            e.Cancel = true;
-            AppLog.Debug("Shortcut", "Native Shortcut drag start was rejected.",
-                ("Stage", "DragItemsStarting"), ("ItemCount", e.Items.Count),
-                ("OperationInProgress", _operationInProgress), ("RefreshInProgress", _refreshInProgress));
+            RejectShortcutDragStart(e, "Busy");
+            return;
+        }
+
+        if (_refreshInProgress)
+        {
+            RejectShortcutDragStart(e, "Refresh");
+            return;
+        }
+
+        if (ShouldRecoverAbandonedDrag(_operationInProgress, _refreshInProgress,
+                _pendingDragOriginalTiles is not null || _pendingDragTileId is not null))
+        {
+            var abandonedTileId = _pendingDragTileId;
+            var pointerDeviceType = _lastPointerDeviceType;
+            AppLog.Debug("Shortcut", "Recovering an abandoned drag before a new start.",
+                ("TileId", abandonedTileId), ("Stage", "DragItemsStarting"), ("RecoveryOutcome", "Attempting"));
+            if (!TryRestoreAndClearPendingShortcutDrag("NewDragStart"))
+            {
+                RejectShortcutDragStart(e, "StaleRecoveryFailed");
+                RequestRefresh();
+                return;
+            }
+
+            _lastPointerDeviceType = pointerDeviceType;
+            AppLog.Debug("Shortcut", "Abandoned drag recovered before the new start.",
+                ("PreviousTileId", abandonedTileId), ("Stage", "DragItemsStarting"),
+                ("AbandonedGestureRecovered", true));
+        }
+
+        if (e.Items.Count != 1)
+        {
+            RejectShortcutDragStart(e, e.Items.Count == 0 ? "MissingItem" : "MultipleItems");
+            return;
+        }
+
+        if (e.Items[0] is not FrontendShortcutEditorTile tile)
+        {
+            RejectShortcutDragStart(e, "InvalidItem");
             return;
         }
 
         var sourceIndex = IndexOfTile(_tiles, tile.TileId);
         if (sourceIndex < 0)
         {
-            e.Cancel = true;
             AppLog.Warn("Shortcut", "Native Shortcut drag start did not match the current item source.", null,
-                ("Stage", "DragItemsStarting"), ("TileId", tile.TileId));
+                ("Stage", "DragItemsStarting"), ("TileId", tile.TileId), ("RejectReason", "MissingTile"));
+            e.Cancel = true;
             return;
         }
 
@@ -491,46 +548,72 @@ public sealed partial class ShortcutPage : UserControl
         {
             AppLog.Debug("Shortcut", "Native Shortcut drag completed without an active matching start.",
                 ("Stage", "DragItemsCompleted"), ("DropResult", e.DropResult));
+            if (!TryRestoreAndClearPendingShortcutDrag("UnmatchedCompletion"))
+                RequestRefresh();
             return;
         }
 
-        var reorderedTiles = _tiles.ToArray();
-        var completedItemsMatch = e.Items.Count == 1
-            && e.Items[0] is FrontendShortcutEditorTile completedTile
-            && completedTile.TileId == tileId;
-        RestoreShortcutTiles(originalTiles);
-        ClearPendingShortcutDrag();
-
-        if (e.DropResult != DataPackageOperation.Move || !completedItemsMatch)
+        FrontendShortcutMutationIntent? moveIntent = null;
+        var restoreSucceeded = true;
+        try
         {
-            AppLog.Debug("Shortcut", "Native Shortcut drag was canceled or did not complete as a single-item move.",
-                ("TileId", tileId), ("DropResult", e.DropResult),
-                ("Aborted", e.DropResult != DataPackageOperation.Move), ("ItemsMatch", completedItemsMatch),
-                ("OrderRestored", true));
-            return;
-        }
+            // DragItemsCompleted fires after the native ListView reorder has updated its item source.
+            var reorderedTiles = _tiles.ToArray();
+            var completedItemsMatch = e.Items.Count == 1
+                && e.Items[0] is FrontendShortcutEditorTile completedTile
+                && completedTile.TileId == tileId;
+            moveIntent = TryCreateShortcutMoveIntent(
+                originalTiles.Select(tile => tile.TileId).ToArray(),
+                reorderedTiles.Select(tile => tile.TileId).ToArray(),
+                tileId,
+                e.DropResult == DataPackageOperation.Move,
+                completedItemsMatch,
+                out var sourceIndex,
+                out var targetIndex);
+            if (moveIntent is null)
+            {
+                var unchanged = originalTiles.Select(tile => tile.TileId)
+                    .SequenceEqual(reorderedTiles.Select(tile => tile.TileId));
+                if (e.DropResult != DataPackageOperation.Move || !completedItemsMatch)
+                    AppLog.Debug("Shortcut", "Native Shortcut drag was canceled or did not complete as a single-item move.",
+                        ("TileId", tileId), ("DropResult", e.DropResult),
+                        ("Aborted", e.DropResult != DataPackageOperation.Move), ("ItemsMatch", completedItemsMatch));
+                else if (!unchanged)
+                    AppLog.Warn("Shortcut", "Native Shortcut drag produced an unexpected item order.", null,
+                        ("Stage", "DragItemsCompleted"), ("TileId", tileId),
+                        ("OrderChanged", !unchanged));
+                else
+                    AppLog.Debug("Shortcut", "Native Shortcut drag completed without changing order.",
+                        ("TileId", tileId), ("DropResult", e.DropResult), ("OrderChanged", false));
+                return;
+            }
 
-        if (!TryResolveShortcutMove(originalTiles.Select(tile => tile.TileId).ToArray(),
-            reorderedTiles.Select(tile => tile.TileId).ToArray(), tileId, out var sourceIndex, out var targetIndex))
+            AppLog.Debug("Shortcut", "Native Shortcut drop resolved to a Runtime move.",
+                ("TileId", tileId), ("SourceIndex", sourceIndex), ("TargetIndex", targetIndex),
+                ("DropResult", e.DropResult));
+        }
+        catch (Exception exception)
         {
-            var unchanged = originalTiles.Select(tile => tile.TileId)
-                .SequenceEqual(reorderedTiles.Select(tile => tile.TileId));
-            if (!unchanged)
-                AppLog.Warn("Shortcut", "Native Shortcut drag produced an unexpected item order.", null,
-                    ("Stage", "DragItemsCompleted"), ("TileId", tileId), ("OrderRestored", true));
-            else
-                AppLog.Debug("Shortcut", "Native Shortcut drag completed without changing order.",
-                    ("TileId", tileId), ("DropResult", e.DropResult), ("OrderRestored", true));
-            return;
+            AppLog.Warn("Shortcut", "Native Shortcut drag completion could not be processed.", exception,
+                ("Stage", "DragItemsCompleted"), ("TileId", tileId), ("DropResult", e.DropResult));
+        }
+        finally
+        {
+            restoreSucceeded = TryRestoreAndClearPendingShortcutDrag("DragItemsCompleted");
+            if (!restoreSucceeded)
+                RequestRefresh();
         }
 
-        AppLog.Debug("Shortcut", "Native Shortcut drop resolved to a Runtime move.",
-            ("TileId", tileId), ("SourceIndex", sourceIndex), ("TargetIndex", targetIndex),
-            ("DropResult", e.DropResult), ("OrderRestoredBeforeMutation", true));
-        await ApplyMutationAsync(new FrontendShortcutMutationIntent(
-            FrontendShortcutMutationKind.Move,
-            TileId: tileId,
-            TargetIndex: targetIndex));
+        if (!restoreSucceeded)
+            return;
+
+        if (moveIntent is null)
+            return;
+
+        AppLog.Debug("Shortcut", "Runtime Shortcut move request is starting after local order restoration.",
+            ("TileId", moveIntent.TileId), ("TargetIndex", moveIntent.TargetIndex),
+            ("OrderRestoredBeforeMutation", true));
+        await ApplyMutationAsync(moveIntent);
     }
 
     internal static bool TryResolveShortcutMove(
@@ -560,6 +643,30 @@ public sealed partial class ShortcutPage : UserControl
         return expectedOrder.SequenceEqual(reorderedOrder);
     }
 
+    internal static FrontendShortcutMutationIntent? TryCreateShortcutMoveIntent(
+        IReadOnlyList<Guid> originalOrder,
+        IReadOnlyList<Guid> reorderedOrder,
+        Guid draggedTileId,
+        bool moveAccepted,
+        bool completedItemsMatch,
+        out int sourceIndex,
+        out int targetIndex)
+    {
+        if (!moveAccepted || !completedItemsMatch
+            || !TryResolveShortcutMove(originalOrder, reorderedOrder, draggedTileId,
+                out sourceIndex, out targetIndex))
+        {
+            sourceIndex = -1;
+            targetIndex = -1;
+            return null;
+        }
+
+        return new FrontendShortcutMutationIntent(
+            FrontendShortcutMutationKind.Move,
+            TileId: draggedTileId,
+            TargetIndex: targetIndex);
+    }
+
     private static int IndexOfTile(IReadOnlyList<FrontendShortcutEditorTile> tiles, Guid tileId)
     {
         for (var index = 0; index < tiles.Count; index++)
@@ -585,6 +692,38 @@ public sealed partial class ShortcutPage : UserControl
         _tiles.Clear();
         foreach (var tile in originalTiles)
             _tiles.Add(tile);
+    }
+
+    private bool TryRestoreAndClearPendingShortcutDrag(string stage)
+    {
+        var originalTiles = _pendingDragOriginalTiles;
+        var tileId = _pendingDragTileId;
+        try
+        {
+            if (originalTiles is not null)
+                RestoreShortcutTiles(originalTiles);
+            AppLog.Debug("Shortcut", "Pending native drag order was restored and cleared.",
+                ("Stage", stage), ("TileId", tileId), ("OrderRestored", true));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Shortcut", "Pending native drag order could not be restored.", exception,
+                ("Stage", stage), ("TileId", tileId));
+            return false;
+        }
+        finally
+        {
+            ClearPendingShortcutDrag();
+        }
+    }
+
+    private void RejectShortcutDragStart(DragItemsStartingEventArgs e, string reason)
+    {
+        e.Cancel = true;
+        AppLog.Debug("Shortcut", "Native Shortcut drag start was rejected.",
+            ("Stage", "DragItemsStarting"), ("RejectReason", reason), ("ItemCount", e.Items.Count),
+            ("OperationInProgress", _operationInProgress), ("RefreshInProgress", _refreshInProgress));
     }
 
     private void ClearPendingShortcutDrag()
