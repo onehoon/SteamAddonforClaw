@@ -730,20 +730,27 @@ internal sealed class ShortcutRuntime
         ProcessStartInfo startInfo,
         CancellationToken cancellationToken,
         bool runAsAdministrator = false) =>
-        StartExternal(tile, () => _userProcessLauncher.Launch(startInfo, runAsAdministrator), cancellationToken);
+        StartExternal(tile, () => _userProcessLauncher.Launch(startInfo, runAsAdministrator), cancellationToken,
+            runAsAdministrator ? "High" : "Medium");
 
     private ShortcutExecutionResult StartExternal(
         ShortcutTileDefinition tile,
         Func<bool> launch,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string requestedPrivilegeMode = "Medium")
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         try
         {
-            return !launch()
-                ? LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, null)
-                : new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded);
+            if (!launch())
+                return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, null, requestedPrivilegeMode);
+
+            AppLog.Info("Shortcuts", "Shortcut action dispatch accepted.",
+                ("TileId", tile.TileId), ("TypeId", tile.Action.TypeId),
+                ("RequestedPrivilegeMode", requestedPrivilegeMode), ("Outcome", "DispatchAccepted"),
+                ("TargetVisibility", "NotObserved"));
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded);
         }
         catch (OperationCanceledException)
         {
@@ -751,40 +758,56 @@ internal sealed class ShortcutRuntime
         }
         catch (FileNotFoundException exception)
         {
-            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Unavailable, exception);
+            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Unavailable, exception, requestedPrivilegeMode);
         }
         catch (DirectoryNotFoundException exception)
         {
-            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Unavailable, exception);
+            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Unavailable, exception, requestedPrivilegeMode);
         }
         catch (UnauthorizedAccessException exception)
         {
-            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, exception);
+            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, exception, requestedPrivilegeMode);
         }
         catch (Win32Exception exception)
         {
-            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, exception);
+            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, exception, requestedPrivilegeMode);
         }
         catch (InvalidOperationException exception)
         {
-            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, exception);
+            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, exception, requestedPrivilegeMode);
         }
         catch (Exception exception)
         {
-            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, exception);
+            return LogLaunchFailure(tile, ShortcutExecutionOutcome.Failed, exception, requestedPrivilegeMode);
         }
     }
 
     private ShortcutExecutionResult LogLaunchFailure(
         ShortcutTileDefinition tile,
         ShortcutExecutionOutcome outcome,
-        Exception? exception)
+        Exception? exception,
+        string requestedPrivilegeMode)
     {
+        var nativeException = exception as Win32Exception;
+        var stage = exception switch
+        {
+            UserProcessLaunchException launchException => launchException.Stage,
+            Win32Exception => "ManagedProcessStart",
+            null => "LaunchReturnedFalse",
+            _ => "ManagedLaunch"
+        };
         AppLog.Warn("Shortcuts", "Shortcut action launch failed.", null,
             ("TileId", tile.TileId),
             ("TypeId", tile.Action.TypeId),
             ("Outcome", outcome),
-            ("ExceptionType", exception?.GetType().Name ?? "None"));
+            ("RequestedPrivilegeMode", requestedPrivilegeMode),
+            ("Stage", stage),
+            ("ExceptionType", exception?.GetType().Name ?? "None"),
+            ("NativeErrorCode", nativeException?.NativeErrorCode),
+            ("NativeErrorCodeHex", nativeException is null ? "None" : $"0x{nativeException.NativeErrorCode:X8}"),
+            ("NativeErrorMessage", exception is UserProcessLaunchException userProcessLaunchException
+                ? userProcessLaunchException.Message
+                : "Unavailable"));
 
         return new ShortcutExecutionResult(
             outcome,
