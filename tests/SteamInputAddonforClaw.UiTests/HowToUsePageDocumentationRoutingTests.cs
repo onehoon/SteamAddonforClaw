@@ -48,13 +48,29 @@ public sealed class HowToUsePageDocumentationRoutingTests
     {
         var code = ReadPageCode();
 
-        Assert.Contains("webView.NavigateToString(html)", code, StringComparison.Ordinal);
+        Assert.Contains("coreWebView.NavigateToString(html)", code, StringComparison.Ordinal);
         Assert.Contains("NavigationStarting += DocumentationWebView_NavigationStarting", code, StringComparison.Ordinal);
+        Assert.Contains("NavigationCompleted += DocumentationWebView_NavigationCompleted", code, StringComparison.Ordinal);
         Assert.Contains("e.Cancel = ShouldCancelWebViewNavigation(e.Uri)", code, StringComparison.Ordinal);
         Assert.Contains("WebMessageReceived += DocumentationWebView_WebMessageReceived", code, StringComparison.Ordinal);
         Assert.Contains("catch (Exception exception)", code, StringComparison.Ordinal);
         Assert.Contains("Windows.System.Launcher.LaunchUriAsync(uri)", code, StringComparison.Ordinal);
+        Assert.Contains("(\"Decision\", e.Cancel ? \"Cancel\" : \"Allow\")", code, StringComparison.Ordinal);
         Assert.DoesNotContain("webView.Source", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void How_to_use_navigation_completion_requires_the_pending_generated_document_id()
+    {
+        var correlation = new HowToUseNavigationCorrelation();
+
+        Assert.False(correlation.MatchesCompleted(4));
+        Assert.False(correlation.TryCaptureNavigationStart(5, "https://example.com"));
+        Assert.True(correlation.TryCaptureNavigationStart(8, "about:blank"));
+        Assert.Equal(8ul, correlation.NavigationId);
+        Assert.False(correlation.MatchesCompleted(7));
+        Assert.True(correlation.MatchesCompleted(8));
+        Assert.False(correlation.TryCaptureNavigationStart(9, "about:blank"));
     }
 
     [Fact]
@@ -81,17 +97,22 @@ public sealed class HowToUsePageDocumentationRoutingTests
     {
         var code = ReadPageCode();
 
-        var navigationAwait = code.IndexOf("var navigation = await NavigateToStringAsync(webView, html);", StringComparison.Ordinal);
+        var navigationAwait = code.IndexOf("var navigation = await NavigateToStringAsync(webView, html, language);", StringComparison.Ordinal);
         var failedNavigationCheck = code.IndexOf("if (!navigation.IsSuccess)", navigationAwait, StringComparison.Ordinal);
         var loadedCommit = code.IndexOf("_loaded = true;", failedNavigationCheck, StringComparison.Ordinal);
 
         Assert.True(navigationAwait >= 0);
         Assert.True(failedNavigationCheck > navigationAwait);
         Assert.True(loadedCommit > failedNavigationCheck);
-        var eventSubscription = code.IndexOf("webView.NavigationCompleted += OnCompleted", StringComparison.Ordinal);
-        var navigateCall = code.IndexOf("webView.NavigateToString(html)", StringComparison.Ordinal);
-        Assert.True(eventSubscription >= 0 && navigateCall > eventSubscription);
-        Assert.Contains("completion.TrySetResult(args)", code, StringComparison.Ordinal);
+        var eventSubscription = code.IndexOf("coreWebView.NavigationCompleted += DocumentationWebView_NavigationCompleted", StringComparison.Ordinal);
+        var navigateCall = code.IndexOf("coreWebView.NavigateToString(html)", StringComparison.Ordinal);
+        var configureCall = code.IndexOf("ConfigureWebView(webView);", StringComparison.Ordinal);
+        Assert.True(eventSubscription >= 0 && navigateCall >= 0 && configureCall >= 0 && configureCall < navigationAwait);
+        Assert.Contains("if (matchedPendingDocument)", code, StringComparison.Ordinal);
+        Assert.Contains("Completion.TrySetResult(e)", code, StringComparison.Ordinal);
+        Assert.Contains("WaitAsync(DocumentationClient.Timeout)", code, StringComparison.Ordinal);
+        Assert.Contains("Generated document navigation timed out.", code, StringComparison.Ordinal);
+        Assert.Contains("if (ReferenceEquals(_pendingHtmlNavigation, pending))", code, StringComparison.Ordinal);
         Assert.Contains("FailurePanel.Visibility = Visibility.Visible", code, StringComparison.Ordinal);
     }
 
@@ -117,6 +138,9 @@ public sealed class HowToUsePageDocumentationRoutingTests
         Assert.Contains("(\"MarkdownLength\", markdown.Length)", code, StringComparison.Ordinal);
         Assert.Contains("(\"HtmlLength\", html.Length)", code, StringComparison.Ordinal);
         Assert.Contains("(\"WebErrorStatus\", navigation.WebErrorStatus)", code, StringComparison.Ordinal);
+        Assert.Contains("(\"NavigationId\", navigation.NavigationId)", code, StringComparison.Ordinal);
+        Assert.Contains("(\"MatchedPendingDocument\", matchedPendingDocument)", code, StringComparison.Ordinal);
+        Assert.Contains("(\"RetryAvailable\", true)", code, StringComparison.Ordinal);
         Assert.Contains("RetryButton_Click", code, StringComparison.Ordinal);
     }
 
