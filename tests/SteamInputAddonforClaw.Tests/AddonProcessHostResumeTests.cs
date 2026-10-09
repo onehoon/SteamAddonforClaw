@@ -37,11 +37,15 @@ public sealed class AddonProcessHostResumeTests
         Assert.DoesNotContain("class AddonProcessHost : IAsyncDisposable, ", host); // host does not itself implement the participant
 
         // A.2: the quiesce callback null-guards the CURRENT presentation field at execution time.
-        var quiesce = host[host.IndexOf("private Task<bool> QuiesceFull1902PresentationForSuspendAsync", StringComparison.Ordinal)..];
+        var quiesce = host[host.IndexOf("private async Task<bool> QuiesceFull1902PresentationForSuspendAsync", StringComparison.Ordinal)..];
         quiesce = quiesce[..quiesce.IndexOf("private sealed class Full1902SuspendParticipant", StringComparison.Ordinal)];
         Assert.Contains("var presentation = _presentationOwnership;", quiesce);
         Assert.Contains("if (presentation is null)", quiesce);
         Assert.Contains("PauseForSuspendAsync", quiesce);
+        Assert.True(
+            quiesce.IndexOf("PauseForSuspendAsync", StringComparison.Ordinal)
+            < quiesce.IndexOf("await StopMotionSourceAsync(\"Suspend\")", StringComparison.Ordinal),
+            "the presentation safety pause must complete before joining potentially blocked sensor readers");
 
         // B.1: in the reconcile entrypoint the suspend-release pre-step comes AFTER the source and
         // Win+G suppression guards, and ResetLatestStateToNeutral only runs inside that block.

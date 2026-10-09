@@ -184,16 +184,19 @@ No continuous polling from a UI/control read path.
 
 In **AddonProcessHost.TryStartDisabledModeControllerAsync**:
 - Require exact Center M Disabled authority and successful DisabledBootAdmission; ordinary Full1902 startup already checks these.
-- Only construct/start MotionSource after **owner.AcquireAsync** reports Owned and **LiveInputSource.IsRunning** is true. Provide resolved exact HardwareDeviceModel; unsupported models have no motion.
+- Only construct the supported-model MotionSource after **owner.AcquireAsync** reports Owned and **LiveInputSource.IsRunning** is true. Provide resolved exact HardwareDeviceModel; unsupported models have no motion. Do not start sensor readers at this point.
+- Start readers only after `AttachInitialAsync` successfully commits the actual Steam Deck presentation. The single start predicate is healthy Full1902 physical ownership, `ActivePresentation == SteamDeck`, and `IsSuspendPaused == false`.
+- Therefore normal desktop/Xbox360 presentation keeps readers off; BPM-only Steam Deck presentation keeps them on even with `RunningAppId == 0`; an active Steam game also keeps them on. Steam Input's per-game gyro mapping does not gate physical sensor acquisition.
+- Reconcile reader start/stop after each completed Xbox360↔Steam Deck presentation transition and after the same-publisher suspend-resume path. Use the existing `IMsiClawAddonPresentation.ActivePresentation` and physical-health facts; add no Steam/BPM watcher, AppID-specific gate, polling loop, controller authority or manager.
 - Motion start failure logs a rate-limited warning, publishes unavailable snapshot and **does not** fail VIIPER readiness, controller startup, physical mode, routing or WING suppression.
-- Motion lives across X360 ↔ SteamDeck attachment changes without being stopped/restarted; this is a **source** for either future output presentation.
+- Steam Input's per-game gyro mapping ON/OFF is not an acquisition gate; the physical source is available to a committed Steam Deck presentation independently of the mapping choice.
 - Add only a small owned field in AddonProcessHost (not a new process- or route-wide authority). No new startup task.
 
 ### 7.2 Suspend / Hibernate
 
 Follow **the existing Full1902SuspendParticipant / QuiesceFull1902PresentationForSuspendAsync**:
-- Invalidate latest motion **before** returning from suspend quiesce so pre-suspend gyro cannot be mistaken for valid on resume.
-- Stop/quiesce readers and ensure old sensor handles are not reused. If COM GetData blocks, cancellation may be observed only after it returns; release the COM object on its owning worker, using bounded teardown/deferred cleanup rather than forcing cross-thread release.
+- Invalidate/cancel motion immediately so pre-suspend gyro cannot be mistaken for valid on resume, but do not join sensor readers yet.
+- Complete the existing presentation safety pause (neutral publication, rumble STOP and publisher pause) before awaiting the potentially bounded sensor-reader stop. Drain readers in `finally` after that pause attempt, including when presentation is absent or pause fails. If COM GetData blocks, cancellation may be observed only after it returns; release the COM object on its owning worker, using bounded teardown/deferred cleanup rather than forcing cross-thread release.
 - Preserve existing physical DirectInput, presentation neutral, rumble STOP, VIIPER, power gate and HidHide invariants.
 - Do not create a second power participant, extra resume state machine, retry watchdog or global coordinator.
 
@@ -201,7 +204,7 @@ Follow **the existing Full1902SuspendParticipant / QuiesceFull1902PresentationFo
 
 Use **AddonProcessHost.OnPowerResumeObserved** as the existing power boundary, but respect that existing Full1902 presentation recovery may still be reconciling:
 - Set motion unavailable until re-acquired.
-- Acquire **fresh** WinRT/COM handles only when current Full1902 physical ownership is proven healthy; otherwise allow existing recovery to finish.
+- Acquire **fresh** WinRT/COM handles only after the existing presentation resume/reconcile completes and the same reader gate proves healthy Full1902 ownership, active Steam Deck presentation and not suspend-paused. This includes the same-publisher resume path and BPM with no active game; Xbox360 resume stays off.
 - Clear timestamps and startup reader state, then accept only new fresh samples.
 - A sensor failure remains feature-local. The user can still operate the ordinary physical/virtual gamepad.
 
@@ -209,7 +212,7 @@ Use **AddonProcessHost.OnPowerResumeObserved** as the existing power boundary, b
 
 Use **OnOwnedControllerPhysicalInputCompleted** and **RecoverOwnedControllerPhysicalInputAsync** as existing notification/repair facts:
 - Immediately invalidate motion after real owned DirectInput loss.
-- On successful real same-device physical recovery, re-acquire motion sources; do not perform a mode switch or PID check from the motion reader itself.
+- On successful real same-device physical recovery, run the same motion-reader gate; re-acquisition occurs only if the actual active presentation is Steam Deck and is not suspend-paused. Do not perform a mode switch or PID check from the motion reader itself.
 - If sensors independently disappear without DirectInput loss, failed reads invalidate their role. A small bounded source-local retry/reopen after a meaningful real error is okay; never rescan all devices in a tight loop or construct a second PnP/physical-owner watcher.
 - Motion failure never triggers PID1901 restoration, HidHide mutation, VIIPER detach or physical input recovery.
 
@@ -261,9 +264,11 @@ Use fake source/read results and a fake monotonic clock, not Windows sensors or 
 
 **Lifecycle**
 - Disabled-boot denied/Center M Enabled/model unsupported does not start any sensor.
-- Valid ownership starts one source regardless of active X360 or SteamDeck presentation; no new device or native output.
+- Valid ownership alone does not start readers. The committed Steam Deck presentation starts them; normal desktop/Xbox360, missing presentation and suspend-paused states keep them off.
+- BPM-only Steam Deck (`RunningAppId == 0`) and active-game Steam Deck both start readers; Steam Input gyro mapping ON/OFF does not change the gate.
+- Completed SteamDeck→Xbox360 transition stops readers; completed Xbox360→SteamDeck transition starts them only after attach commits.
 - Start failure does not fail physical controller/presentation.
-- Suspend resets freshness; resume reopens handles, only new samples become valid.
+- Suspend invalidates immediately, pauses the live presentation before bounded reader drain; resume reopens handles only after presentation resume/reconcile and the gate, and only new samples become valid.
 - Physical input loss invalidates; successful physical owner recovery allows motion re-acquisition; failed recovery stays unavailable.
 - Controlled stock enable/shutdown stops/disposes readers; no unsafe cross-worker pointer release; repeated stop is safe.
 

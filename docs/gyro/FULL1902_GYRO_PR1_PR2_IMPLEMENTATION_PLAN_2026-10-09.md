@@ -39,7 +39,7 @@ Exact Center M Disabled / supported MSI Claw / admitted Full1902 physical owner
 
 The gyro feature is a **subordinate motion capability**, not another controller, ownership mode, HidHide client, VIIPER publisher, route decision or authority. It must not alter PID1901/PID1902 restoration, rumble, WinG suppression, QAM, controller buttons/triggers/sticks, or normal route-switch behavior.
 
-Physical motion acquisition remains active and independent of the **currently attached virtual presentation** when Full1902 physical ownership is active. This lets future Xbox360 motion consume the same snapshots without starting a second sensor service.
+Physical motion readers are a subordinate capability gated by both healthy Full1902 physical ownership and the **actual active Steam Deck presentation**. Readers are off for normal desktop/Xbox360 presentation and while suspend-paused; they are on for Steam Deck presentation in BPM even when `RunningAppId == 0`, and for an active Steam game. Steam Input's per-game gyro mapping does not control sensor acquisition. Xbox360 gyro behavior remains a separate deferred product decision.
 
 ## 3. Concrete hardware and reference evidence
 
@@ -116,7 +116,7 @@ Implement in one focused PR:
 3. One small Runtime-owned motion service (no new controller authority). It owns its two sensor reader lifetimes and one atomic latest-snapshot handoff; use independent reader work so blocking accel/gyro calls cannot hold each other or the controller publisher.
 4. Apply the HHC-current common gyro and accel sensor-to-application coordinate transform **once**, in the motion normalization boundary.
 5. Preserve fresh/duplicate semantics, independent timestamps and bounded staleness; never replay stale nonzero rate or manufacture gravity. Require **both valid physical gyro and physical acceleration** for PR2's usable Steam Deck IMU capability.
-6. Lifecycle: initialize only after admitted/owned Full1902 controller startup; remain independent of Steam/BPM virtual switching; invalidate on suspend, motion source loss and relevant PnP/physical recovery; reacquire fresh sensor objects after resume; dispose/stop before controller-owner teardown. Motion failures remain feature-local and leave ordinary controls working.
+6. Lifecycle: create the source only after admitted/healthy Full1902 ownership, but start its readers only after a successful initial Steam Deck presentation attach. Reconcile start/stop after each completed Xbox360↔Steam Deck transition and after the same-publisher suspend-resume path. Gate physical recovery and resume reacquisition on the same healthy-ownership + active-Steam-Deck + not-suspend-paused facts. Invalidate immediately on device loss, suspend, and shutdown; dispose/stop before controller-owner teardown. Motion failures remain feature-local and leave ordinary controls working.
 7. Prefer minimal, evidence-backed bias subtraction only if the existing stationary captures and clean deterministic implementation support it. No hard-coded calibration offsets, persistence, synthetic gravity, generic sensor fusion or configurable motion curves. Do not make uncertain EX bias calibration a PR1 blocker.
 8. Unit tests for selection, axis/sign, units assumptions, coherent concurrent snapshots, independent freshness, failed reads/stalls, start/stop/restart and lifecycle invalidation using simulated sensor readers. Existing probe/Full1902 tests must remain passing.
 

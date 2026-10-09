@@ -61,7 +61,7 @@ public sealed class ControllerVibrationLifecycleContractTests
         var host = ReadHost();
         var presentation = Method(host,
             "private async Task ReconcileControllerPresentationAsync(",
-            "private Task<bool> QuiesceFull1902PresentationForSuspendAsync(");
+            "private async Task<bool> QuiesceFull1902PresentationForSuspendAsync(");
         var apply = Method(host,
             "private async Task<bool> ApplyOwnedControllerVibrationSettingsAsync(",
             "private async Task StartOverlayWarmupAsync()");

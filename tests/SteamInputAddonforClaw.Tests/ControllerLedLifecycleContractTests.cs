@@ -40,7 +40,7 @@ public sealed class ControllerLedLifecycleContractTests
     public void Presentation_reconcile_stays_led_free_and_power_resume_schedules_one_reapply()
     {
         var host = ReadHost();
-        var presentation = Method(host, "private async Task ReconcileControllerPresentationAsync(", "private Task<bool> QuiesceFull1902PresentationForSuspendAsync(");
+        var presentation = Method(host, "private async Task ReconcileControllerPresentationAsync(", "private async Task<bool> QuiesceFull1902PresentationForSuspendAsync(");
         var resume = Method(host, "private void OnPowerResumeObserved()", "internal static async Task ReconcilePerformanceAfterResumeAsync(");
 
         Assert.DoesNotContain("ApplyOwnedControllerLedSettingsAsync", presentation, StringComparison.Ordinal);

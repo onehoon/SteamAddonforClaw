@@ -136,6 +136,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // PR5: the process-lifetime Full PID1902 physical owner. Non-null only after an exact Disabled
     // boot; owns one live DirectInput session which PR6 consumes.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? _physicalOwnership;
+    private MsiClawMotionSource? _motionSource;
+    private HandheldDeviceModelId? _motionModel;
     private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawLedController? _controllerLedController;
     private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationStrengthClient? _controllerVibrationStrengthClient;
     // The command-HID GamepadMode client is shared by the Disabled-mode physical owner and its
@@ -516,6 +518,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", []);
                 }
             }
+
+            await DisposeMotionSourceAsync("CenterMAuthorityRelease").ConfigureAwait(false);
 
             if (_physicalOwnership is { } owner)
                 return await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false);
@@ -978,6 +982,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return;
             }
 
+            if (startupResult.HardwareDeviceModel is { } motionModel && MsiClawMotionSource.IsSupportedModel(motionModel))
+            {
+                _motionModel = motionModel;
+                _motionSource = new MsiClawMotionSource(motionModel);
+            }
+
             // The LED is part of physical PID1902 ownership, not VIIPER presentation. Apply the
             // persisted state once as soon as the normal owned DirectInput session is healthy,
             // including the default Off state.
@@ -1007,6 +1017,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var presentationResult = await presentation.AttachInitialAsync(source, snapshot, _startupCancellationTokenSource.Token).ConfigureAwait(false);
             AppLog.Info("ControllerPresentation", "First presentation attach completed.",
                 ("Succeeded", presentationResult.Succeeded), ("Presentation", presentationResult.Presentation?.ToString() ?? "None"), ("Reason", presentationResult.Reason));
+            await ReconcileMotionReadersAsync("StartupPresentation").ConfigureAwait(false);
 
             // Full1902 A2 section 7: the feature-local OEM1/WING front-button action path is composed
             // against the now-existing Full1902 presentation owner -- never AddonRoutingRuntime. Pulse
@@ -1190,6 +1201,117 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             gamepadModeClient: gamepadModeClient);
     }
 
+    private async Task StartMotionSourceAsync(string trigger)
+    {
+        if (!ShouldRunMotionReaders())
+            return;
+
+        if (_motionModel is not { } model
+            || !MsiClawMotionSource.IsSupportedModel(model)
+            || _motionSource is not { } source)
+            return;
+
+        try
+        {
+            if (!await source.StartAsync(trigger).ConfigureAwait(false))
+            {
+                AppLog.Warn("ControllerMotion", "Motion source did not accept a reader start; controller ownership is unaffected.", null,
+                    ("Event", "MotionSourceStartFailed"), ("Model", model.Value), ("Trigger", trigger));
+                return;
+            }
+
+            AppLog.Info("ControllerMotion", "Motion reader start was accepted for the active Steam Deck presentation.",
+                ("Event", "MotionSourceStartAccepted"), ("Model", model.Value), ("Trigger", trigger));
+            if (!ShouldRunMotionReaders())
+                await StopMotionSourceAsync("MotionReaderGateClosed").ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerMotion", "Motion source start failed; controller ownership is unaffected.", exception,
+                ("Event", "MotionSourceStartFailed"), ("Model", model.Value), ("Trigger", trigger));
+        }
+    }
+
+    private async Task StopMotionSourceAsync(string trigger)
+    {
+        var source = _motionSource;
+        source?.InvalidateAndCancel();
+        if (source is null)
+            return;
+
+        try
+        {
+            if (!await source.StopAsync(trigger).ConfigureAwait(false))
+            {
+                AppLog.Warn("ControllerMotion", "Motion reader shutdown remains deferred; controller ownership is unaffected.", null,
+                    ("Event", "MotionReaderShutdownDeferred"), ("Trigger", trigger));
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerMotion", "Motion reader shutdown failed; controller ownership is unaffected.", exception,
+                ("Event", "MotionReaderShutdownFailed"), ("Trigger", trigger));
+        }
+    }
+
+    private async Task DisposeMotionSourceAsync(string trigger)
+    {
+        var source = _motionSource;
+        source?.InvalidateAndCancel();
+        try
+        {
+            if (source is not null)
+            {
+                await source.DisposeAsync().ConfigureAwait(false);
+                if (ReferenceEquals(_motionSource, source))
+                    _motionSource = null;
+            }
+
+            _motionModel = null;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerMotion", "Motion source disposal failed; controller ownership is unaffected.", exception,
+                ("Event", "MotionSourceDisposeFailed"), ("Trigger", trigger));
+        }
+    }
+
+    private bool IsHealthyOwnedMotionSession()
+    {
+        var physical = _physicalOwnership;
+        if (physical is null
+            || Volatile.Read(ref _processShutdownStarted) != 0
+            || _centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+            || physical.LiveInputSource is not { IsRunning: true }
+            || physical.OwnedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong }
+            || physical is not IMsiClawPhysicalInputIdentityProvider { CurrentIdentity: not null })
+            return false;
+
+        return true;
+    }
+
+    private bool ShouldRunMotionReaders()
+    {
+        var presentation = _presentationOwnership;
+        return ShouldRunMotionReaders(
+            IsHealthyOwnedMotionSession(),
+            presentation?.ActivePresentation,
+            presentation?.IsSuspendPaused ?? false);
+    }
+
+    internal static bool ShouldRunMotionReaders(
+        bool hasHealthyOwnedMotionSession,
+        Devices.MSI.Claw.AddonPresentationKind? activePresentation,
+        bool isSuspendPaused) =>
+        hasHealthyOwnedMotionSession
+        && !isSuspendPaused
+        && activePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck;
+
+    private Task ReconcileMotionReadersAsync(string trigger) =>
+        ShouldRunMotionReaders()
+            ? StartMotionSourceAsync(trigger)
+            : StopMotionSourceAsync(trigger);
+
     private SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator GetMsiControllerDevices() =>
         _msiControllerDevices ??= new SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator();
 
@@ -1222,6 +1344,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (source is null) return;
         // The source recovered/stayed healthy between finalization and this callback.
         if (source.IsRunning) return;
+
+        _motionSource?.InvalidateAndCancel();
+        _ = StopMotionSourceAsync("UnexpectedDirectInputCompletion");
 
         AppLog.Warn("ControllerOwnership", "Owned physical DirectInput session terminated unexpectedly.", null,
             ("Event", "OwnedPhysicalInputLost"), ("StopReason", summary.StopReason),
@@ -1278,6 +1403,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // A live owned session is healthy -- an unrelated arrival must not cause native/HidHide/DI work.
         if (physical.LiveInputSource is { IsRunning: true }) return;
 
+        _motionSource?.InvalidateAndCancel();
+        _ = StopMotionSourceAsync("DeviceArrival");
+
         AppLog.Info("ControllerOwnership", "Controller device arrival observed.", ("Event", "ControllerDeviceArrivalObserved"));
         RequestOwnedControllerRecovery(physical, "DeviceArrival");
     }
@@ -1317,6 +1445,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Info("ControllerOwnership", "Owned physical input recovery request completed.",
                 ("Trigger", trigger), ("Result", logResult), ("Reason", result.Reason),
                 ("PrimaryHiddenTarget", result.PrimaryHiddenTarget ?? "None"), ("HiddenTargetCount", result.HiddenTargets.Count));
+            if (result.IsOwned)
+                _ = ReconcileMotionReadersAsync("PhysicalRecovery");
+
             // 11: raw Steam/BPM state may have changed while input was down and PR7 correctly refused
             // forward mutation on a non-running source. Re-run the existing reconcile exactly once.
             if (result.IsOwned && result.Reason != "RecoveryNotNeeded")
@@ -2332,6 +2463,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal void BeginProcessShutdown()
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
+        _motionSource?.InvalidateAndCancel();
+        _ = StopMotionSourceAsync("ProcessShutdown");
         StopMsiQuickSettingsProcessStartWatcher();
         if (_clawHudProcessController is not null)
             _clawHudShutdown = StopClawHudForProcessShutdownAsync();
@@ -2430,6 +2563,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Presentation teardown failed during shutdown.", exception); }
             _presentationOwnership = null;
         }
+        await DisposeMotionSourceAsync("ProcessShutdown").ConfigureAwait(false);
         if (_physicalOwnership is not null)
         {
             // PR5 section 17: release the process-owned DirectInput session only. PID1902 and the
@@ -2786,6 +2920,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Error("ControllerPresentation", "Runtime presentation reconcile threw; Runtime remains available.", exception, ("Trigger", trigger));
         }
+        finally
+        {
+            await ReconcileMotionReadersAsync("PresentationReconcile:" + trigger).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Full1902 Suspend/Resume section 5 / review addendum A.2: the one narrow host-side
@@ -2793,23 +2931,29 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// field at execution time -- a missing presentation (stock runtime, or a Disabled boot whose
     /// controller startup has not committed) is a legitimate no-op success, not a suspend failure.
     /// No attach/detach/recovery is ever attempted from here.</summary>
-    private Task<bool> QuiesceFull1902PresentationForSuspendAsync(CancellationToken cancellationToken)
+    private async Task<bool> QuiesceFull1902PresentationForSuspendAsync(CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0)
-            return Task.FromResult(true);
+            return true;
 
-        var presentation = _presentationOwnership;
-        if (presentation is null)
-            return Task.FromResult(true);
-
-        return QuiesceCoreAsync();
-
-        async Task<bool> QuiesceCoreAsync()
+        _motionSource?.InvalidateAndCancel();
+        try
         {
+            if (Volatile.Read(ref _processShutdownStarted) != 0)
+                return true;
+
+            var presentation = _presentationOwnership;
+            if (presentation is null)
+                return true;
+
             var pause = await presentation.PauseForSuspendAsync(cancellationToken).ConfigureAwait(false);
             AppLog.Info("ControllerPresentation", "Full1902 suspend participant quiesced.",
                 ("Event", "PresentationSuspendPauseParticipant"), ("Outcome", pause.Outcome), ("Reason", pause.Reason), ("Safe", pause.Safe));
             return pause.Safe;
+        }
+        finally
+        {
+            await StopMotionSourceAsync("Suspend").ConfigureAwait(false);
         }
     }
 
@@ -2828,6 +2972,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnPowerResumeObserved()
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+
+        _motionSource?.InvalidateAndCancel();
+        _ = StopMotionSourceAsync("PowerResume");
 
         if (_xboxGameSessionRuntime is { } xboxGameSessionRuntime)
             _ = xboxGameSessionRuntime.ReconcileAfterResumeAsync();
