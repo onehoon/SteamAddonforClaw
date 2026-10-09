@@ -50,6 +50,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<MsiClawPhysicalIdentity?>? _controllerVibrationProbeIdentitySource;
     private readonly Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? _controllerLedProfileReadProbe;
     private readonly Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? _testControllerVibrationMotor;
+    private readonly Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? _runDeveloperRumbleRearm;
+    private int _controllerExclusiveOperationInFlight;
 
     /// <summary>Wraps the Runtime-owned <see cref="ClawSensorProbeCoordinator"/> for one active
     /// diagnostic session, plus the device identity captured at Open time (so a stale-but-still-open
@@ -164,7 +166,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<string, bool>? reconcileXboxBackButtonMapping = null,
         Func<string, string?>? activeXboxDisplayNameSource = null,
         Func<MsiClawPhysicalIdentity?>? controllerVibrationProbeIdentitySource = null,
-        Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? controllerLedProfileReadProbe = null)
+        Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? controllerLedProfileReadProbe = null,
+        Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -208,6 +211,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _controllerVibrationProbeIdentitySource = controllerVibrationProbeIdentitySource;
         _testControllerVibrationMotor = testControllerVibrationMotor;
         _controllerLedProfileReadProbe = controllerLedProfileReadProbe;
+        _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -224,6 +228,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     public event EventHandler? StateInvalidated;
+
+    private async Task<T> RunExclusiveControllerOperationAsync<T>(Func<Task<T>> operation, Func<T> unavailable)
+    {
+        if (Interlocked.CompareExchange(ref _controllerExclusiveOperationInFlight, 1, 0) != 0)
+            return unavailable();
+        try { return await operation().ConfigureAwait(false); }
+        finally { Volatile.Write(ref _controllerExclusiveOperationInFlight, 0); }
+    }
 
     public Task<FrontendShortcutEditorSnapshot> CaptureShortcutEditorAsync(CancellationToken cancellationToken = default)
     {
@@ -939,11 +951,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
-    public async Task<FrontendSettingsSnapshot> SetControllerLedSettingsAsync(ControllerLedSettings settings, CancellationToken cancellationToken = default)
+    public Task<FrontendSettingsSnapshot> SetControllerLedSettingsAsync(ControllerLedSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => SetControllerLedSettingsCoreAsync(settings, cancellationToken),
+            () => MapSettings());
+    }
+
+    private async Task<FrontendSettingsSnapshot> SetControllerLedSettingsCoreAsync(ControllerLedSettings settings, CancellationToken cancellationToken)
+    {
         if (!_controllerLedAvailable)
         {
             AppLog.Info("ControllerLed", "Controller LED mutation is unavailable outside supported Addon authority.");
@@ -1161,8 +1180,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
-        return _startXbox360RumbleLoopDiagnostic?.Invoke(cancellationToken)
-            ?? Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
+        return RunExclusiveControllerOperationAsync(
+            () => _startXbox360RumbleLoopDiagnostic?.Invoke(cancellationToken)
+                ?? Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable()),
+            () => FrontendXbox360RumbleLoopSnapshot.Unavailable("Another controller diagnostic is already running."));
     }
 
     public Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
@@ -1172,8 +1193,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        return _runPid1902InputCadenceDiagnostic?.Invoke(cancellationToken)
-            ?? Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
+        cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => _runPid1902InputCadenceDiagnostic?.Invoke(cancellationToken)
+                ?? Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable()),
+            () => FrontendPid1902InputCadenceResult.Unavailable("Another controller diagnostic is already running."));
     }
 
     public Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default)
@@ -1718,13 +1742,22 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(CaptureControllerVibrationSnapshot());
     }
 
-    public async Task<FrontendControllerVibrationStrengthMutationResult> SetControllerVibrationStrengthAsync(
+    public Task<FrontendControllerVibrationStrengthMutationResult> SetControllerVibrationStrengthAsync(
         int leftPercent,
         int rightPercent,
         CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => SetControllerVibrationStrengthCoreAsync(leftPercent, rightPercent, cancellationToken),
+            () => new(FrontendControllerVibrationStrengthMutationOutcome.Unavailable,
+                CaptureControllerVibrationSnapshot(), "Another controller diagnostic or re-arm is already running."));
+    }
+
+    private async Task<FrontendControllerVibrationStrengthMutationResult> SetControllerVibrationStrengthCoreAsync(
+        int leftPercent, int rightPercent, CancellationToken cancellationToken)
+    {
         var current = CaptureControllerVibrationSnapshot();
         var requested = new ControllerVibrationSettings(leftPercent, rightPercent);
         var invalid = ControllerVibrationSettingsValidation.Validate(requested);
@@ -1771,12 +1804,21 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             savedSnapshot with { Status = "Saved and applied while the Addon owns the controller." }, null);
     }
 
-    public async Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(
+    public Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(
         FrontendControllerVibrationMotor motor,
         CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => TestControllerVibrationMotorCoreAsync(motor, cancellationToken),
+            () => new(FrontendControllerVibrationTestOutcome.Unavailable,
+                "Another controller diagnostic or re-arm is already running."));
+    }
+
+    private async Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorCoreAsync(
+        FrontendControllerVibrationMotor motor, CancellationToken cancellationToken)
+    {
         if (!Enum.IsDefined(motor))
             return new(FrontendControllerVibrationTestOutcome.Failed, "The selected vibration motor is invalid.");
         if (!IsControllerVibrationTestAvailable() || _testControllerVibrationMotor is null)
@@ -1799,12 +1841,49 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    public async Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
+    public Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_runDeveloperRumbleRearm is null)
+            return Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable(
+                "The Developer rumble re-arm is unavailable in this Runtime."));
+
+        // The UI/page/pipe token is admission-only. Once Runtime ownership accepts the attempt, a
+        // closed page or disconnected frontend must not cancel the bounded physical cleanup.
+        return RunExclusiveControllerOperationAsync(
+            () => RunDeveloperRumbleRearmCoreAsync(),
+            () => FrontendDeveloperRumbleRearmResult.Unavailable(
+                "Another controller diagnostic or re-arm is already running."));
+    }
+
+    private async Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmCoreAsync()
+    {
+        try { return await _runDeveloperRumbleRearm!(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerOwnership", "Developer rumble re-arm frontend command failed.", exception,
+                ("Event", "DeveloperRumbleRearmFrontendFailed"));
+            return new(FrontendDeveloperRumbleRearmOutcome.Failed,
+                "The re-arm request failed unexpectedly. See the application log.", false, false, false, false, false);
+        }
+    }
+
+    public Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
         FrontendControllerVibrationProfileWriteProbeMode mode,
         CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => RunControllerVibrationProfileWriteProbeCoreAsync(mode, cancellationToken),
+            () => new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
+                "Another controller diagnostic or re-arm is already running."));
+    }
+
+    private async Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeCoreAsync(
+        FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken cancellationToken)
+    {
         if (!Enum.IsDefined(mode))
             return new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Failed,
                 "The selected developer probe operation is invalid.");
@@ -1849,11 +1928,21 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return new(mode, outcome, status);
     }
 
-    public async Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(
+    public Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(
         CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => RunControllerLedProfileReadProbeCoreAsync(cancellationToken),
+            () => CreateLedProfileReadProbeResult(
+                FrontendControllerLedProfileReadProbeOutcome.Unavailable, null,
+                "Another controller diagnostic or re-arm is already running."));
+    }
+
+    private async Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeCoreAsync(
+        CancellationToken cancellationToken)
+    {
         if (_controllerLedProfileReadProbe is null)
             return CreateLedProfileReadProbeResult(
                 FrontendControllerLedProfileReadProbeOutcome.Unavailable, null,
@@ -2181,9 +2270,21 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(_centerMStartup?.Capture() ?? FrontendCenterMStartupSnapshot.Unavailable);
     }
 
-    public async Task<FrontendCenterMStartupMutationResult> RequestCenterMAuthorityTransitionAsync(bool centerMEnabled, CancellationToken cancellationToken = default)
+    public Task<FrontendCenterMStartupMutationResult> RequestCenterMAuthorityTransitionAsync(bool centerMEnabled, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => RequestCenterMAuthorityTransitionCoreAsync(centerMEnabled, cancellationToken),
+            () => new FrontendCenterMStartupMutationResult(
+                FrontendCenterMStartupMutationOutcome.Unavailable,
+                _centerMStartup?.Capture() ?? FrontendCenterMStartupSnapshot.Unavailable,
+                "A controller diagnostic or rumble re-arm is already running."));
+    }
+
+    private async Task<FrontendCenterMStartupMutationResult> RequestCenterMAuthorityTransitionCoreAsync(
+        bool centerMEnabled, CancellationToken cancellationToken)
+    {
         if (_centerMAuthorityTransition is null)
             return new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable,
                 FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable.");

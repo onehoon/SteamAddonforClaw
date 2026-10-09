@@ -75,6 +75,95 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(MsiClawNativeMode.DirectInput, h.LastSwitchTarget);
     }
 
+    [Fact]
+    public async Task Developer_rearm_runs_and_proves_both_real_mode_transitions_before_recovery()
+    {
+        var h = CreateRearmHarness();
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+        var eventStart = h.Events.Count;
+
+        var result = await owner.RunDeveloperRumbleRearmAsync(() => true);
+
+        Assert.Equal(DeveloperRumbleRearmPhysicalOutcome.Completed, result.Outcome);
+        Assert.True(result.XInputTransitionVerified);
+        Assert.True(result.DirectInputTransitionVerified);
+        Assert.True(result.PhysicalOwnershipRestored);
+        Assert.True(result.ModeWriteIssued);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.True(h.InputSource.IsRunning);
+        Assert.Equal(2, h.InputSource.StartCallCount);
+        var events = h.Events.Skip(eventStart).ToArray();
+        Assert.True(Array.IndexOf(events, "InputStop") < Array.IndexOf(events, "ModeSwitch:XInput"));
+        Assert.True(Array.IndexOf(events, "ModeSwitch:XInput") < Array.IndexOf(events, "ModeSwitch:DirectInput"));
+        Assert.True(Array.IndexOf(events, "ModeSwitch:DirectInput") < Array.IndexOf(events, "InputStart"));
+
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Developer_rearm_does_not_write_a_mode_command_when_directinput_cleanup_is_unproven()
+    {
+        var h = CreateRearmHarness();
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+        h.InputSource.CleanupProven = false;
+
+        var result = await owner.RunDeveloperRumbleRearmAsync(() => true);
+
+        Assert.Equal(DeveloperRumbleRearmPhysicalOutcome.Failed, result.Outcome);
+        Assert.Equal("DirectInputCleanupUnproven", result.Reason);
+        Assert.False(result.ModeWriteIssued);
+        Assert.Empty(h.SwitchTargets);
+        Assert.False(h.InputSource.IsRunning);
+
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Developer_rearm_fails_closed_when_either_native_transition_is_not_proven()
+    {
+        var xInputFailure = CreateRearmHarness();
+        var xInputOwner = xInputFailure.Build();
+        Assert.True((await xInputOwner.AcquireAsync(default)).IsOwned);
+        xInputFailure.SwitchFailsForRelease = true;
+
+        var xInputResult = await xInputOwner.RunDeveloperRumbleRearmAsync(() => true);
+
+        Assert.Equal(DeveloperRumbleRearmPhysicalOutcome.Failed, xInputResult.Outcome);
+        Assert.False(xInputResult.XInputTransitionVerified);
+        Assert.False(xInputResult.PhysicalOwnershipRestored);
+        Assert.Equal([MsiClawNativeMode.XInput], xInputFailure.SwitchTargets);
+        Assert.False(xInputFailure.InputSource.IsRunning);
+        await xInputOwner.DisposeAsync();
+
+        var directInputFailure = CreateRearmHarness();
+        var directInputOwner = directInputFailure.Build();
+        Assert.True((await directInputOwner.AcquireAsync(default)).IsOwned);
+        directInputFailure.SwitchSucceeds = false;
+
+        var directInputResult = await directInputOwner.RunDeveloperRumbleRearmAsync(() => true);
+
+        Assert.Equal(DeveloperRumbleRearmPhysicalOutcome.Failed, directInputResult.Outcome);
+        Assert.True(directInputResult.XInputTransitionVerified);
+        Assert.False(directInputResult.DirectInputTransitionVerified);
+        Assert.False(directInputResult.PhysicalOwnershipRestored);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], directInputFailure.SwitchTargets);
+        Assert.False(directInputFailure.InputSource.IsRunning);
+        await directInputOwner.DisposeAsync();
+    }
+
+    private static Harness CreateRearmHarness() => new()
+    {
+        RecordModeSwitchEvents = true,
+        PnpDevices =
+        [
+            PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+            PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+            PnpCollection(ConsumerPnp, PhysKey, 0x000C, 0x0001, "MI_01"),
+        ],
+    };
+
     // ---- 25.3 fail closed before mutation ----
 
     [Fact]
@@ -1498,6 +1587,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public MsiClawNativeMode? FinalModeAfterSwitch { get; set; }
         private int _nonRecoveringCaptureCount;
         public bool SwitchSucceeds { get; set; } = true;
+        public bool RecordModeSwitchEvents { get; set; }
         public int DirectInputMissingAttempts { get; set; }
         public int DirectInputUnverifiedAttempts { get; set; }
         public bool DirectInputAmbiguous { get; set; }
@@ -1585,6 +1675,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 if (Recovering) RecoverySwitchCalls++;
                 LastSwitchTarget = target;
                 SwitchTargets.Add(target);
+                if (RecordModeSwitchEvents) Events.Add("ModeSwitch:" + target);
                 var ok = target == MsiClawNativeMode.XInput
                     ? !SwitchFailsForRelease
                     : Recovering ? RecoverySwitchSucceeds : SwitchSucceeds;
@@ -1634,7 +1725,10 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 return new(InitialCaptureStatus, null, InitialCaptureStatus.ToString());
             if (Recovering && RecoveryCaptureStatus is { } status && status != NativeStateCaptureStatus.Success)
                 return new(status, null, status.ToString());
-            var payload = new MsiClawNativeStatePayload(mode, "inst", "USB\\parent", null, 0x1902, confidence, physKey);
+            var productId = mode == MsiClawNativeMode.XInput
+                ? MsiClawHardware.XInputProductId
+                : MsiClawHardware.DirectInputProductId;
+            var payload = new MsiClawNativeStatePayload(mode, "inst", "USB\\parent", null, productId, confidence, physKey);
             var snapshot = new DeviceNativeStateSnapshot(new HandheldDeviceId("msi.claw"), 1, DateTimeOffset.UtcNow,
                 JsonSerializer.SerializeToElement(payload));
             return new(NativeStateCaptureStatus.Success, snapshot, "ok");
@@ -1701,6 +1795,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public void ResetLatestStateToNeutral() { }
         public MsiClawInputStartStatus StartResult { get; set; } = MsiClawInputStartStatus.Started;
         public bool FirstValidState { get; set; } = true;
+        public bool CleanupProven { get; set; } = true;
         public bool StartCalled { get; private set; }
         public int StartCallCount { get; private set; }
         public bool StopCalled { get; private set; }
@@ -1733,8 +1828,15 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public Task StopAsync()
         {
             StopCalled = true;
+            Events?.Add("InputStop");
             IsRunning = false;
             return Task.CompletedTask;
+        }
+
+        public async Task<bool> StopAndConfirmCleanupAsync()
+        {
+            await StopAsync();
+            return CleanupProven;
         }
 
         public ValueTask DisposeAsync()

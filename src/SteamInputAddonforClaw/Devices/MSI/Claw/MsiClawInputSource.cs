@@ -23,6 +23,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     private readonly Func<long> _timestampProvider;
     private readonly Lock _sync = new();
     private InputSession? _currentSession;
+    private MsiClawInputTestSummary? _lastCompletionSummary;
     private int _testSession;
     private bool _disposed;
 
@@ -109,6 +110,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
 
     private MsiClawInputStartResult StartCoreLocked(IDirectInputDeviceEnumerator enumerator, DirectInputDeviceDescriptor descriptor, int sessionId, string logCategory)
     {
+        _lastCompletionSummary = null;
         IDirectInputDevice? device = null;
         try
         {
@@ -194,6 +196,14 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         {
         }
         await session.PollingCompletion.Task.ConfigureAwait(false);
+    }
+
+    public async Task<bool> StopAndConfirmCleanupAsync()
+    {
+        await StopAsync().ConfigureAwait(false);
+        lock (_sync)
+            return _currentSession is null
+                && _lastCompletionSummary is { CleanupSucceeded: true, StopReason: MsiClawInputStopReason.Stopped };
     }
 
     public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken)
@@ -483,6 +493,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             var summary = new MsiClawInputTestSummary(session.Id, stopwatch.ElapsedMilliseconds, m1Observed, m2Observed, independent, readFailures, cleanupSucceeded, stopReason);
             lock (_sync)
             {
+                _lastCompletionSummary = summary;
                 if (ReferenceEquals(_currentSession, session))
                 {
                     _currentSession = null;

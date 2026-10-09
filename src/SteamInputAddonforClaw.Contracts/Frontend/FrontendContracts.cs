@@ -231,6 +231,7 @@ public sealed record FrontendBatteryChargeLimitMutationResult(
 public enum FrontendControllerVibrationMotor { Left, Right }
 public enum FrontendControllerVibrationStrengthMutationOutcome { Succeeded, Unavailable, Failed }
 public enum FrontendControllerVibrationTestOutcome { Succeeded, Unavailable, Failed }
+public enum FrontendDeveloperRumbleRearmOutcome { Completed, Unavailable, Failed }
 public enum FrontendControllerVibrationProfileWriteProbeMode { ApplyZeroHundred, RestoreFiftyFifty }
 public enum FrontendControllerVibrationProfileWriteProbeOutcome { Succeeded, Unavailable, Failed }
 public enum FrontendControllerLedProfileReadProbeOutcome
@@ -270,6 +271,23 @@ public sealed record FrontendControllerVibrationTestResult(
     string? FailureMessage)
 {
     public bool Succeeded => Outcome == FrontendControllerVibrationTestOutcome.Succeeded;
+}
+
+/// <summary>Reports the verified software lifecycle of the developer-only A2VM 8 mode-cycle PoC.
+/// A completed result never implies that physical motor vibration was measured.</summary>
+public sealed record FrontendDeveloperRumbleRearmResult(
+    FrontendDeveloperRumbleRearmOutcome Outcome,
+    string Status,
+    bool XInputTransitionVerified,
+    bool DirectInputTransitionVerified,
+    bool PhysicalOwnershipRestored,
+    bool PresentationRestored,
+    bool PhysicalMotorEffectVerified)
+{
+    public bool Succeeded => Outcome == FrontendDeveloperRumbleRearmOutcome.Completed;
+
+    public static FrontendDeveloperRumbleRearmResult Unavailable(string status) =>
+        new(FrontendDeveloperRumbleRearmOutcome.Unavailable, status, false, false, false, false, false);
 }
 
 public sealed record FrontendControllerVibrationProfileWriteProbeResult(
@@ -725,6 +743,9 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendControllerVibrationTestResult(
             FrontendControllerVibrationTestOutcome.Unavailable,
             "Physical controller vibration testing is unavailable."));
+    Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable(
+            "Developer rumble re-arm is unavailable in this Runtime."));
     Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
         FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendControllerVibrationProfileWriteProbeResult(

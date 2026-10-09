@@ -87,7 +87,7 @@ public sealed class XboxGameSessionRuntimeHostTests
         var client = ReadSource("src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs");
         var control = ReadSource("src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs");
 
-        Assert.Contains("CurrentVersion = 69", wire, StringComparison.Ordinal);
+        Assert.Contains("CurrentVersion = 70", wire, StringComparison.Ordinal);
         Assert.Contains("Version 58:", wire, StringComparison.Ordinal);
         Assert.Contains("Version 59:", wire, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureXboxSessionDiagnostic", wire + contracts + server + client + control, StringComparison.Ordinal);

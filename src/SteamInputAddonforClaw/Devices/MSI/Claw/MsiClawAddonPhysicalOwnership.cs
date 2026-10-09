@@ -42,6 +42,19 @@ internal sealed record PhysicalOwnershipReleaseResult(bool Succeeded, string Rea
     internal static PhysicalOwnershipReleaseResult NothingOwned { get; } = new(true, "NoPhysicalOwnership", []);
 }
 
+internal enum DeveloperRumbleRearmPhysicalOutcome { Completed, Unavailable, Failed }
+
+internal sealed record DeveloperRumbleRearmPhysicalResult(
+    DeveloperRumbleRearmPhysicalOutcome Outcome,
+    string Reason,
+    bool XInputTransitionVerified,
+    bool DirectInputTransitionVerified,
+    bool PhysicalOwnershipRestored,
+    bool ModeWriteIssued)
+{
+    internal bool Succeeded => Outcome == DeveloperRumbleRearmPhysicalOutcome.Completed;
+}
+
 internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
 {
     /// <summary>One-shot startup acquisition. Re-reads the shared Center M authority immediately
@@ -56,6 +69,9 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
 
     /// <summary>The strong physical identity committed by the currently owned PID1902 session.</summary>
     MsiClawPhysicalIdentity? OwnedPhysicalIdentity { get; }
+    MsiClawPhysicalInputIdentity? CurrentIdentity { get; }
+    long CurrentSessionGeneration { get; }
+    string? OwnedPrimaryHiddenTarget { get; }
 
     /// <summary>The official Center M Enable-and-Restart release: retire the process-owned DirectInput
     /// session, then restore the same strongly-verified physical MSI Claw to PID1901. Runs through the
@@ -69,6 +85,13 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
     /// HidHide baseline BEFORE restarting DirectInput and requires a first valid state before it
     /// commits. Never issues a PID mode write and never restores PID1901.</summary>
     Task<MsiClawPhysicalOwnershipResult> RecoverLostInputAsync(CancellationToken cancellationToken);
+
+    /// <summary>One explicit Developer-only A2VM rumble re-arm. The caller has already stopped and
+    /// drained the active virtual presentation. This method owns the physical serialization gate,
+    /// stops the current DirectInput session with cleanup proof, verifies PID1902->PID1901->PID1902,
+    /// then enters the existing stopped-session recovery core.</summary>
+    Task<string?> CheckDeveloperRumbleRearmAdmissionAsync();
+    Task<DeveloperRumbleRearmPhysicalResult> RunDeveloperRumbleRearmAsync(Func<bool> mayBeginModeMutation);
 }
 
 /// <summary>
@@ -156,6 +179,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     public IMsiClawPreparedInputSource? LiveInputSource => _ownsInputSource ? _inputSource : null;
 
     public MsiClawPhysicalIdentity? OwnedPhysicalIdentity => _ownsInputSource ? _ownedPhysicalIdentity : null;
+
+    public string? OwnedPrimaryHiddenTarget => _ownsInputSource ? _ownedPrimaryHiddenTarget : null;
 
     public MsiClawPhysicalInputIdentity? CurrentIdentity { get { lock (_identitySync) return _currentIdentity; } }
 
@@ -496,7 +521,269 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         finally { _gate.Release(); }
     }
 
-    private async Task<MsiClawPhysicalOwnershipResult> RecoverLostInputCoreAsync(CancellationToken cancellationToken)
+    public async Task<string?> CheckDeveloperRumbleRearmAdmissionAsync()
+    {
+        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _disposed) != 0) return "OwnerDisposed";
+            if (_releasedForEnable) return "ReleasedForCenterMEnable";
+            if (!_ownsInputSource || !_inputSource.IsRunning) return "OwnedDirectInputSourceUnavailable";
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled) return "CenterMAuthorityNotDisabled";
+            if (_ownedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong } ownedIdentity
+                || ownedIdentity.VendorId != MsiClawHardware.VendorId
+                || ownedIdentity.ProductId != MsiClawHardware.DirectInputProductId
+                || _ownedPrimaryHiddenTarget is not { } ownedTarget
+                || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(ownedTarget)
+                || !_ownedHiddenTargets.Contains(ownedTarget, StringComparer.OrdinalIgnoreCase))
+                return "OwnedPhysicalIdentityOrExactTargetUnavailable";
+
+            var liveSession = CurrentIdentity;
+            if (liveSession is null || string.IsNullOrWhiteSpace(liveSession.PhysicalIdentity)
+                || !string.Equals(liveSession.PnpInstanceId, ownedTarget, StringComparison.OrdinalIgnoreCase))
+                return "LivePhysicalSessionDoesNotMatchOwnedTarget";
+
+            var capture = await _captureStableNativeState(CancellationToken.None).ConfigureAwait(false);
+            if (!TryReadIdentity(capture, out var mode, out var identity, out var reason)
+                || mode != MsiClawNativeMode.DirectInput
+                || identity.ProductId != MsiClawHardware.DirectInputProductId
+                || !ownedIdentity.StronglyMatches(identity))
+                return "InitialPid1902StateNotVerified:" + reason;
+
+            var targetDevice = _resolvePnpDevice(ownedTarget);
+            if (targetDevice is null || !targetDevice.Present
+                || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(targetDevice.InstanceId)
+                || !ownedIdentity.StronglyMatches(MsiClawPhysicalIdentity.From(targetDevice)))
+                return "ExactPrimaryPid1902TargetNotPresent";
+
+            var control = new MsiClawControlHidResolver().Resolve(_enumeratePnpDevices(), MsiClawNativeMode.DirectInput, identity);
+            return control is null ? "CurrentControlHidUnavailable" : null;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerOwnership", "Developer rumble re-arm admission check failed.", exception,
+                ("Event", "DeveloperRumbleRearmAdmissionUnavailable"));
+            return "AdmissionCheckFailed:" + exception.GetType().Name;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<DeveloperRumbleRearmPhysicalResult> RunDeveloperRumbleRearmAsync(Func<bool> mayBeginModeMutation)
+    {
+        ArgumentNullException.ThrowIfNull(mayBeginModeMutation);
+        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        var modeWriteIssued = false;
+        var xInputTransitionVerified = false;
+        var directInputTransitionVerified = false;
+        try
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+                return RearmUnavailable("OwnerDisposed", IsHealthyOwnedInput());
+            if (_releasedForEnable)
+                return RearmUnavailable("ReleasedForCenterMEnable", false);
+            if (!_ownsInputSource || !_inputSource.IsRunning)
+                return RearmUnavailable("OwnedDirectInputSourceUnavailable", false);
+            if (_ownedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong } ownedIdentity
+                || ownedIdentity.VendorId != MsiClawHardware.VendorId
+                || ownedIdentity.ProductId != MsiClawHardware.DirectInputProductId
+                || _ownedPrimaryHiddenTarget is not { } ownedTarget
+                || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(ownedTarget)
+                || !_ownedHiddenTargets.Contains(ownedTarget, StringComparer.OrdinalIgnoreCase))
+                return RearmUnavailable("OwnedPhysicalIdentityOrExactTargetUnavailable", false);
+
+            var liveSession = CurrentIdentity;
+            if (liveSession is null
+                || string.IsNullOrWhiteSpace(liveSession.PhysicalIdentity)
+                || !string.Equals(liveSession.PnpInstanceId, ownedTarget, StringComparison.OrdinalIgnoreCase))
+                return RearmUnavailable("LivePhysicalSessionDoesNotMatchOwnedTarget", false);
+
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+                return RearmUnavailable("CenterMAuthorityNotDisabled", IsHealthyOwnedInput());
+
+            var initialCapture = await _captureStableNativeState(CancellationToken.None).ConfigureAwait(false);
+            if (!TryReadIdentity(initialCapture, out var initialMode, out var initialIdentity, out var captureReason)
+                || initialMode != MsiClawNativeMode.DirectInput
+                || initialIdentity.ProductId != MsiClawHardware.DirectInputProductId
+                || !ownedIdentity.StronglyMatches(initialIdentity))
+                return RearmUnavailable("InitialPid1902StateNotVerified:" + captureReason, IsHealthyOwnedInput());
+
+            var targetDevice = _resolvePnpDevice(ownedTarget);
+            if (targetDevice is null
+                || !targetDevice.Present
+                || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(targetDevice.InstanceId)
+                || !ownedIdentity.StronglyMatches(MsiClawPhysicalIdentity.From(targetDevice)))
+                return RearmUnavailable("ExactPrimaryPid1902TargetNotPresent", IsHealthyOwnedInput());
+
+            if (new MsiClawControlHidResolver().Resolve(
+                    _enumeratePnpDevices(), MsiClawNativeMode.DirectInput, initialIdentity) is null)
+                return RearmUnavailable("CurrentControlHidUnavailable", IsHealthyOwnedInput());
+
+            AppLog.Info("ControllerOwnership", "Developer rumble re-arm physical sequence started.",
+                ("Event", "DeveloperRumbleRearmPhysicalStarted"), ("Mode", initialMode),
+                ("PhysicalSessionGeneration", CurrentSessionGeneration), ("PrimaryHiddenTarget", ownedTarget));
+
+            // Reserve this single operation with the Runtime before stopping the input source.
+            // Suspend/shutdown/Overlay/authority admission that wins before this point prevents the
+            // attempt from interrupting the live PID1902 session. A failed cleanup still issues no
+            // mode write; once the reservation succeeds, bounded lifecycle work continues under the
+            // Runtime owner even if the frontend disconnects.
+            if (!mayBeginModeMutation())
+                return RearmUnavailable("AdmissionChangedBeforeFirstModeWrite", IsHealthyOwnedInput());
+
+            // Clear the live rumble identity before stopping DirectInput. The presentation owner has
+            // already stopped/joined publication, drained callbacks, sent STOP, and invalidated the
+            // retained rumble HID handle.
+            _ownsInputSource = false;
+            ClearLivePhysicalSession();
+            bool cleanupProven;
+            try
+            {
+                cleanupProven = await _inputSource.StopAndConfirmCleanupAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("ControllerOwnership", "Developer rumble re-arm DirectInput stop threw.", exception,
+                    ("Event", "DeveloperRumbleRearmDirectInputStopFailed"));
+                return new(DeveloperRumbleRearmPhysicalOutcome.Failed, "DirectInputCleanupUnproven", false, false, false, false);
+            }
+            if (!cleanupProven || _inputSource.IsRunning)
+            {
+                AppLog.Warn("ControllerOwnership", "Developer rumble re-arm DirectInput cleanup was not proven.", null,
+                    ("Event", "DeveloperRumbleRearmDirectInputStopFailed"),
+                    ("CleanupProven", cleanupProven), ("SourceStillRunning", _inputSource.IsRunning), ("ModeWriteIssued", false));
+                return new(DeveloperRumbleRearmPhysicalOutcome.Failed, "DirectInputCleanupUnproven", false, false, false, false);
+            }
+            AppLog.Info("ControllerOwnership", "Developer rumble re-arm DirectInput source stopped and cleaned.",
+                ("Event", "DeveloperRumbleRearmDirectInputStopped"), ("CleanupProven", true), ("ModeWriteIssued", false));
+
+            // The authority is re-read immediately before the first native command. The Runtime
+            // reservation prevents its own authority transition from entering concurrently.
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+                return new(DeveloperRumbleRearmPhysicalOutcome.Unavailable, "AdmissionChangedBeforeFirstModeWrite", false, false, false, false);
+
+            modeWriteIssued = true;
+            var toXInput = await _switchMode(MsiClawNativeMode.XInput, ownedIdentity, CancellationToken.None).ConfigureAwait(false);
+            if (!IsCrossModeTransitionProven(toXInput, out var xInputTransitionFailure))
+            {
+                var observed = await CaptureObservedModeForRearmAsync("XInputTransitionFailed").ConfigureAwait(false);
+                AppLog.Warn("ControllerOwnership", "Developer rumble re-arm XInput transition was not verified.", null,
+                    ("Event", "DeveloperRumbleRearmXInputTransitionResult"), ("Verified", false),
+                    ("Reason", xInputTransitionFailure), ("ObservedMode", observed));
+                return new(DeveloperRumbleRearmPhysicalOutcome.Failed, "XInputTransitionFailed:" + xInputTransitionFailure, false, false, false, true);
+            }
+            AppLog.Info("ControllerOwnership", "Developer rumble re-arm XInput PID transition verified.",
+                ("Event", "DeveloperRumbleRearmXInputTransitionResult"), ("Verified", true),
+                ("OldPidDisappeared", toXInput.OldPidDisappeared), ("TargetPidAppeared", toXInput.TargetPidAppeared),
+                ("SourceIdentityVerified", toXInput.SourceIdentityVerified), ("TargetTopologyVerified", toXInput.TargetTopologyVerified));
+
+            var xInputCapture = await _captureStableNativeState(CancellationToken.None).ConfigureAwait(false);
+            if (!TryReadIdentity(xInputCapture, out var xInputMode, out var xInputIdentity, out var xInputReason)
+                || xInputMode != MsiClawNativeMode.XInput
+                || xInputIdentity.ProductId != MsiClawHardware.XInputProductId)
+            {
+                var observed = await CaptureObservedModeForRearmAsync("XInputCaptureFailed").ConfigureAwait(false);
+                return new(DeveloperRumbleRearmPhysicalOutcome.Failed,
+                    "FreshPid1901StateNotVerified:" + xInputReason + ";Observed=" + observed, false, false, false, true);
+            }
+            xInputTransitionVerified = true;
+
+            var toDirectInput = await _switchMode(MsiClawNativeMode.DirectInput, xInputIdentity, CancellationToken.None).ConfigureAwait(false);
+            if (!IsCrossModeTransitionProven(toDirectInput, out var directInputTransitionFailure))
+            {
+                var observed = await CaptureObservedModeForRearmAsync("DirectInputTransitionFailed").ConfigureAwait(false);
+                AppLog.Warn("ControllerOwnership", "Developer rumble re-arm DirectInput transition was not verified.", null,
+                    ("Event", "DeveloperRumbleRearmDirectInputTransitionResult"), ("Verified", false),
+                    ("Reason", directInputTransitionFailure), ("ObservedMode", observed));
+                return new(DeveloperRumbleRearmPhysicalOutcome.Failed, "DirectInputTransitionFailed:" + directInputTransitionFailure, true, false, false, true);
+            }
+            AppLog.Info("ControllerOwnership", "Developer rumble re-arm DirectInput PID transition verified.",
+                ("Event", "DeveloperRumbleRearmDirectInputTransitionResult"), ("Verified", true),
+                ("OldPidDisappeared", toDirectInput.OldPidDisappeared), ("TargetPidAppeared", toDirectInput.TargetPidAppeared),
+                ("SourceIdentityVerified", toDirectInput.SourceIdentityVerified), ("TargetTopologyVerified", toDirectInput.TargetTopologyVerified));
+
+            var finalCapture = await _captureStableNativeState(CancellationToken.None).ConfigureAwait(false);
+            if (!TryReadIdentity(finalCapture, out var finalMode, out var finalIdentity, out var finalReason)
+                || finalMode != MsiClawNativeMode.DirectInput
+                || finalIdentity.ProductId != MsiClawHardware.DirectInputProductId)
+            {
+                var observed = await CaptureObservedModeForRearmAsync("FinalPid1902CaptureFailed").ConfigureAwait(false);
+                return new(DeveloperRumbleRearmPhysicalOutcome.Failed,
+                    "FreshFinalPid1902StateNotVerified:" + finalReason + ";Observed=" + observed, true, false, false, true);
+            }
+            directInputTransitionVerified = true;
+
+            // The two verified native transitions establish cross-mode continuity. Adopt only the
+            // fresh final PID1902 identity, then let the normal stopped-session recovery core prove
+            // the original exact HidHide target, DirectInput input, and ownership publication.
+            _ownedPhysicalIdentity = finalIdentity;
+            var recovered = await RecoverLostInputCoreAsync(CancellationToken.None, TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+            if (!recovered.IsOwned || !_inputSource.IsRunning)
+            {
+                AppLog.Warn("ControllerOwnership", "Developer rumble re-arm physical ownership recovery failed.", null,
+                    ("Event", "DeveloperRumbleRearmPhysicalRecovered"), ("Verified", false), ("Reason", recovered.Reason),
+                    ("PhysicalMotorEffectVerified", false));
+                return new(DeveloperRumbleRearmPhysicalOutcome.Failed, "PhysicalRecoveryFailed:" + recovered.Reason,
+                    true, true, false, true);
+            }
+
+            AppLog.Info("ControllerOwnership", "Developer rumble re-arm physical ownership restored.",
+                ("Event", "DeveloperRumbleRearmPhysicalRecovered"), ("Verified", true),
+                ("PrimaryHiddenTarget", recovered.PrimaryHiddenTarget ?? "None"),
+                ("PhysicalSessionGeneration", CurrentSessionGeneration), ("PhysicalMotorEffectVerified", false));
+            return new(DeveloperRumbleRearmPhysicalOutcome.Completed, "PhysicalOwnershipRestored", true, true, true, true);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("ControllerOwnership", "Developer rumble re-arm physical operation failed unexpectedly.", exception,
+                ("Event", "DeveloperRumbleRearmFailed"), ("ModeWriteIssued", modeWriteIssued),
+                ("PhysicalMotorEffectVerified", false));
+            var observed = modeWriteIssued
+                ? await CaptureObservedModeForRearmAsync("PhysicalOperationException").ConfigureAwait(false)
+                : "NotObserved";
+            return new(DeveloperRumbleRearmPhysicalOutcome.Failed,
+                "PhysicalOperationThrew:" + exception.GetType().Name + ";Observed=" + observed,
+                xInputTransitionVerified, directInputTransitionVerified, IsHealthyOwnedInput(), modeWriteIssued);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private DeveloperRumbleRearmPhysicalResult RearmUnavailable(string reason, bool physicalOwnershipRestored) =>
+        new(DeveloperRumbleRearmPhysicalOutcome.Unavailable, reason, false, false, physicalOwnershipRestored, false);
+
+    private bool IsHealthyOwnedInput() =>
+        _ownsInputSource
+        && _inputSource.IsRunning
+        && _ownedPhysicalIdentity is { Confidence: MsiClawIdentityConfidence.Strong }
+        && _ownedPrimaryHiddenTarget is { } target
+        && MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(target)
+        && CurrentIdentity is { } current
+        && string.Equals(current.PnpInstanceId, target, StringComparison.OrdinalIgnoreCase);
+
+    private async Task<string> CaptureObservedModeForRearmAsync(string stage)
+    {
+        try
+        {
+            var capture = await _captureStableNativeState(CancellationToken.None).ConfigureAwait(false);
+            if (TryReadIdentity(capture, out var mode, out var identity, out _))
+            {
+                AppLog.Info("ControllerOwnership", "Developer rumble re-arm observed actual native state after transition failure.",
+                    ("Event", "DeveloperRumbleRearmObservedNativeState"), ("Stage", stage),
+                    ("Mode", mode), ("ProductId", identity.ProductId));
+                return $"{mode}/0x{identity.ProductId:X4}";
+            }
+            return capture.Status + ":" + capture.Reason;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerOwnership", "Developer rumble re-arm could not capture the observed native mode.", exception,
+                ("Event", "DeveloperRumbleRearmObservedNativeState"), ("Stage", stage));
+            return "Unavailable:" + exception.GetType().Name;
+        }
+    }
+
+    private async Task<MsiClawPhysicalOwnershipResult> RecoverLostInputCoreAsync(
+        CancellationToken cancellationToken,
+        TimeSpan? firstValidStateTimeout = null)
     {
         // 10.2 / PR10. "Ownership was committed" is proven by the retained strong physical identity +
         //       exact hidden target that a successful acquisition/recovery stored (and never cleared),
@@ -677,12 +964,20 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         bool ready;
         try
         {
-            ready = await _inputSource.WaitForFirstValidStateAsync(cancellationToken).ConfigureAwait(false);
+            var firstState = _inputSource.WaitForFirstValidStateAsync(cancellationToken);
+            ready = firstValidStateTimeout is { } timeout
+                ? await firstState.WaitAsync(timeout, cancellationToken).ConfigureAwait(false)
+                : await firstState.ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             await SafeStopAsync().ConfigureAwait(false);
             throw;
+        }
+        catch (TimeoutException)
+        {
+            await SafeStopAsync().ConfigureAwait(false);
+            return RecoveryFail("FirstValidStateTimedOut", anyModeWriteIssued);
         }
         if (!ready || !_inputSource.IsRunning)
         {

@@ -36,6 +36,16 @@ internal sealed record PresentationReconcileResult(PresentationReconcileOutcome 
     internal bool Succeeded => Outcome is PresentationReconcileOutcome.NoChange or PresentationReconcileOutcome.Switched or PresentationReconcileOutcome.Attached;
 }
 
+internal sealed record DeveloperRumbleRearmPresentationResult(
+    bool Unavailable,
+    bool Failed,
+    DeveloperRumbleRearmPhysicalResult? PhysicalResult,
+    bool PresentationRestored,
+    string Reason)
+{
+    internal bool Succeeded => !Unavailable && !Failed && PhysicalResult?.Succeeded == true && PresentationRestored;
+}
+
 internal enum OverlayPauseOutcome
 {
     /// <summary>Publisher proven stopped and the SAME attached device written neutral. The typed
@@ -207,6 +217,16 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     Task<PresentationReconcileResult> ReconcileDesiredPresentationAsync(
         IMsiClawPreparedInputSource source, Func<SteamPresentationSnapshot> captureSnapshot, CancellationToken cancellationToken);
 
+    /// <summary>Developer-only verified native-mode round-trip. Retires the current typed device
+    /// under the existing presentation gate, holds that gate while the physical owner performs the
+    /// bounded cycle/recovery, then attaches one fresh Steam/BPM-desired presentation only if the
+    /// Runtime still admits publication.</summary>
+    Task<DeveloperRumbleRearmPresentationResult> RunDeveloperRumbleRearmAsync(
+        Func<Task<DeveloperRumbleRearmPhysicalResult>> runPhysicalRearm,
+        Func<IMsiClawPreparedInputSource?> captureLiveSource,
+        Func<SteamPresentationSnapshot> captureSnapshot,
+        Func<bool> mayRestorePresentation);
+
     /// <summary>The official Center M Enable-and-Restart step: stop/join the publisher, neutral+detach
     /// the selected typed device, then tear the canonical VIIPER runtime down to its closed state.
     /// Must reach a proven-safe state before physical ownership is released to MSI.</summary>
@@ -230,6 +250,8 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// intentionally blocked because the current power cycle entered Suspend and has not yet been
     /// safely released. Never persisted; not controller authority.</summary>
     bool IsSuspendPaused { get; }
+
+    bool IsOverlayPaused { get; }
 
     /// <summary>Full1902 Suspend/Resume section 7: mark suspend-pause active, stop + JOIN the current
     /// publisher, clear pending synthetic Steam/QuickAccess pulses, disarm + drain the rumble
@@ -266,7 +288,10 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
 /// </summary>
 internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 {
-    private sealed record PresentationRetirementResult(bool Succeeded, bool PhysicalRumbleStopConfirmed);
+    private sealed record PresentationRetirementResult(
+        bool Succeeded,
+        bool PhysicalRumbleStopConfirmed,
+        bool FeedbackDrainConfirmed = true);
 
     private readonly CanonicalViiperRuntime? _viiper;
     private readonly Func<CanonicalViiperRuntime, ICanonicalSteamDeckSession> _deckSessionFactory;
@@ -308,6 +333,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private Task? _faultCleanup;
     private bool _disposed;
     private bool _overlayPaused;
+    private bool _developerRumbleRearmInProgress;
+    private int _motorTestInProgress;
     private int _suppressM1UntilRelease;
     private int _suppressM2UntilRelease;
     // Full1902 Suspend/Resume section 6: one in-memory, never-persisted fact. Live game-facing
@@ -376,6 +403,27 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor motor,
         CancellationToken cancellationToken)
     {
+        if (Volatile.Read(ref _developerRumbleRearmInProgress))
+            return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable,
+                "A developer rumble re-arm operation is in progress.");
+        if (Interlocked.CompareExchange(ref _motorTestInProgress, 1, 0) != 0)
+            return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable,
+                "Another physical motor test is already running.");
+        if (Volatile.Read(ref _developerRumbleRearmInProgress))
+        {
+            Volatile.Write(ref _motorTestInProgress, 0);
+            return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable,
+                "A developer rumble re-arm operation is in progress.");
+        }
+
+        try { return await TestVibrationMotorCoreAsync(motor, cancellationToken).ConfigureAwait(false); }
+        finally { Volatile.Write(ref _motorTestInProgress, 0); }
+    }
+
+    private async Task<SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestResult> TestVibrationMotorCoreAsync(
+        SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor motor,
+        CancellationToken cancellationToken)
+    {
         if (!Enum.IsDefined(motor))
             return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Failed,
                 "The selected vibration motor is invalid.");
@@ -441,7 +489,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Succeeded, null);
     }
 
-    internal bool IsOverlayPaused => _overlayPaused;
+    public bool IsOverlayPaused => _overlayPaused;
 
     public bool IsSuspendPaused => _suspendPaused;
 
@@ -688,72 +736,167 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_disposed)
-                return Blocked("OwnerDisposed");
-            // OQ4 section 5.4: while Overlay capture is paused the current presentation stays
-            // attached + neutral. No attach, no detach, no publisher restart. The Runtime requests
-            // one normal reconcile with fresh Steam/BPM facts AFTER capture ends.
-            if (_overlayPaused)
-                return Blocked("OverlayCaptureActive");
-            // Full1902 Suspend/Resume section 8.1: no attach/detach/publisher restart until the
-            // suspend pause is explicitly released by ResumeAfterSuspendAsync.
-            if (_suspendPaused)
-                return Blocked("SuspendPaused");
-            if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
-                return Blocked("ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"));
-            if (source is null || !source.IsRunning)
-                return Blocked("LiveInputSourceNotRunning");
-
-            // Fresh raw fact at the actual mutation boundary (section 18): a switch queued behind an
-            // earlier one must converge to the state that is current now, not when its event fired.
-            var snapshot = captureSnapshot();
-            var desired = snapshot.WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
-
-            if (_activeKind == desired && _publisher is { IsRunning: true })
-            {
-                AppLog.Debug("ControllerPresentation", "Runtime presentation reconcile: no change.", ("Event", "PresentationReconcileNoChange"),
-                    ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive), ("CurrentPresentation", desired));
-                return new(PresentationReconcileOutcome.NoChange, desired, "AlreadyDesired");
-            }
-
-            var previous = _activeKind;
-            AppLog.Info("ControllerPresentation", "Runtime presentation switch started.", ("Event", "PresentationSwitchStarted"),
-                ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive),
-                ("PreviousPresentation", previous?.ToString() ?? "None"), ("DesiredPresentation", desired));
-
-            var retirement = previous is not null
-                ? await RetireActivePresentationCoreAsync("SwitchTo:" + desired).ConfigureAwait(false)
-                : null;
-            if (retirement is { Succeeded: false })
-            {
-                // Hard cleanup barrier -- the current presentation could not be proven retired. Do
-                // NOT attach the target; ownership evidence is retained.
-                return new(PresentationReconcileOutcome.Failed, previous, "RetireCurrentPresentationFailed");
-            }
-
-            if (previous is not null && previous != desired)
-                ArmRearButtonReleaseGate(source.LatestState);
-
-            var attach = desired == AddonPresentationKind.Xbox360
-                ? await AttachXbox360Async(source).ConfigureAwait(false)
-                : await AttachSteamDeckAsync(source).ConfigureAwait(false);
-            if (!attach.Succeeded)
-            {
-                if (previous is not null && previous != desired)
-                    ClearRearButtonReleaseGate();
-                // The previous presentation (if any) is already safely retired. No fallback / rollback
-                // to it or to any alternate presentation (section 15.3); both typed devices stay
-                // detached and a later real Steam/BPM event may reconcile again.
-                AppLog.Warn("ControllerPresentation", "Runtime presentation switch failed at target attach.", null,
-                    ("Event", "PresentationSwitchFailed"), ("DesiredPresentation", desired), ("Reason", attach.Reason));
-                return new(PresentationReconcileOutcome.Failed, null, "TargetAttachFailed:" + attach.Reason);
-            }
-
-            AppLog.Info("ControllerPresentation", "Runtime presentation switch completed.", ("Event", "PresentationSwitchCompleted"),
-                ("CurrentPresentation", desired), ("PreviousPresentation", previous?.ToString() ?? "None"));
-            return new(previous is null ? PresentationReconcileOutcome.Attached : PresentationReconcileOutcome.Switched, desired, "Reconciled");
+            return await ReconcileDesiredPresentationCoreAsync(source, captureSnapshot).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
+    }
+
+    private async Task<PresentationReconcileResult> ReconcileDesiredPresentationCoreAsync(
+        IMsiClawPreparedInputSource source, Func<SteamPresentationSnapshot> captureSnapshot,
+        bool developerRearmCompletion = false)
+    {
+        if (_disposed)
+            return Blocked("OwnerDisposed");
+        if (_overlayPaused)
+            return Blocked("OverlayCaptureActive");
+        if (_suspendPaused)
+            return Blocked("SuspendPaused");
+        if (_developerRumbleRearmInProgress && !developerRearmCompletion)
+            return Blocked("DeveloperRumbleRearmInProgress");
+        if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
+            return Blocked("ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"));
+        if (source is null || !source.IsRunning)
+            return Blocked("LiveInputSourceNotRunning");
+
+        // Re-open the production rumble endpoint only after this re-arm has published a healthy new
+        // physical session. Ordinary Steam/BPM reconciliation must leave the current HID cache alone.
+        if (developerRearmCompletion)
+            (_rumbleSink as IMsiClawRumbleSessionLifecycle)?.BeginPhysicalSession();
+
+        var snapshot = captureSnapshot();
+        var desired = snapshot.WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
+        if (_activeKind == desired && _publisher is { IsRunning: true })
+        {
+            AppLog.Debug("ControllerPresentation", "Runtime presentation reconcile: no change.", ("Event", "PresentationReconcileNoChange"),
+                ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive), ("CurrentPresentation", desired));
+            return new(PresentationReconcileOutcome.NoChange, desired, "AlreadyDesired");
+        }
+
+        var previous = _activeKind;
+        AppLog.Info("ControllerPresentation", "Runtime presentation switch started.", ("Event", "PresentationSwitchStarted"),
+            ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive),
+            ("PreviousPresentation", previous?.ToString() ?? "None"), ("DesiredPresentation", desired));
+
+        var retirement = previous is not null
+            ? await RetireActivePresentationCoreAsync("SwitchTo:" + desired).ConfigureAwait(false)
+            : null;
+        if (retirement is { Succeeded: false })
+            return new(PresentationReconcileOutcome.Failed, previous, "RetireCurrentPresentationFailed");
+
+        if (previous is not null && previous != desired)
+            ArmRearButtonReleaseGate(source.LatestState);
+        var attach = desired == AddonPresentationKind.Xbox360
+            ? await AttachXbox360Async(source).ConfigureAwait(false)
+            : await AttachSteamDeckAsync(source).ConfigureAwait(false);
+        if (!attach.Succeeded)
+        {
+            if (previous is not null && previous != desired)
+                ClearRearButtonReleaseGate();
+            AppLog.Warn("ControllerPresentation", "Runtime presentation switch failed at target attach.", null,
+                ("Event", "PresentationSwitchFailed"), ("DesiredPresentation", desired), ("Reason", attach.Reason));
+            return new(PresentationReconcileOutcome.Failed, null, "TargetAttachFailed:" + attach.Reason);
+        }
+
+        AppLog.Info("ControllerPresentation", "Runtime presentation switch completed.", ("Event", "PresentationSwitchCompleted"),
+            ("CurrentPresentation", desired), ("PreviousPresentation", previous?.ToString() ?? "None"));
+        return new(previous is null ? PresentationReconcileOutcome.Attached : PresentationReconcileOutcome.Switched, desired, "Reconciled");
+    }
+
+    public async Task<DeveloperRumbleRearmPresentationResult> RunDeveloperRumbleRearmAsync(
+        Func<Task<DeveloperRumbleRearmPhysicalResult>> runPhysicalRearm,
+        Func<IMsiClawPreparedInputSource?> captureLiveSource,
+        Func<SteamPresentationSnapshot> captureSnapshot,
+        Func<bool> mayRestorePresentation)
+    {
+        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return new(true, false, null, false, "OwnerDisposed");
+            if (_overlayPaused) return new(true, false, null, false, "OverlayCaptureActive");
+            if (_suspendPaused) return new(true, false, null, false, "SuspendPaused");
+            if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
+                return new(true, false, null, false, "ViiperNotReady");
+            if (_activeKind is null || _publisher is not { IsRunning: true })
+                return new(true, false, null, false, "ActivePresentationUnavailable");
+            if (_rumbleSink is not IMsiClawRumbleSessionLifecycle rumbleLifecycle)
+                return new(true, false, null, false, "RumbleEndpointLifecycleUnavailable");
+            if (Volatile.Read(ref _motorTestInProgress) != 0)
+                return new(true, false, null, false, "PhysicalMotorTestAlreadyRunning");
+            if (_rumbleLoopDiagnostic?.Snapshot.State == FrontendXbox360RumbleLoopState.Running)
+                return new(true, false, null, false, "Xbox360RumbleLoopAlreadyRunning");
+
+            _developerRumbleRearmInProgress = true;
+            var startKind = _activeKind;
+            var retirement = await RetireActivePresentationCoreAsync("DeveloperRumbleRearm").ConfigureAwait(false);
+            if (!retirement.Succeeded)
+            {
+                _developerRumbleRearmInProgress = false;
+                AppLog.Warn("ControllerPresentation", "Developer rumble re-arm presentation retirement failed.", null,
+                    ("Event", "DeveloperRumbleRearmPresentationRetired"), ("Succeeded", false), ("Reason", "RetirementUnproven"));
+                return new(false, true, null, false, "PresentationRetirementUnproven");
+            }
+
+            rumbleLifecycle.BeginPhysicalSessionRetirement();
+            if (!rumbleLifecycle.InvalidatePhysicalSession())
+            {
+                AppLog.Warn("ControllerPresentation", "Developer rumble re-arm could not invalidate the retained physical rumble endpoint.", null,
+                    ("Event", "DeveloperRumbleRearmRumbleEndpointInvalidationFailed"), ("ModeWriteIssued", false));
+                return new(false, true, null, false, "RumbleEndpointInvalidationUnproven");
+            }
+            AppLog.Info("ControllerPresentation", "Developer rumble re-arm presentation retired.",
+                ("Event", "DeveloperRumbleRearmPresentationRetired"), ("Succeeded", true),
+                ("Presentation", startKind), ("PhysicalRumbleStopConfirmed", retirement.PhysicalRumbleStopConfirmed),
+                ("ViiperRuntimeRetained", true));
+            if (!retirement.PhysicalRumbleStopConfirmed)
+            {
+                _developerRumbleRearmInProgress = false;
+                return new(false, true, null, false, "PhysicalRumbleStopUnconfirmed");
+            }
+
+            DeveloperRumbleRearmPhysicalResult physicalResult;
+            try { physicalResult = await runPhysicalRearm().ConfigureAwait(false); }
+            catch (Exception exception)
+            {
+                AppLog.Error("ControllerOwnership", "Developer rumble re-arm physical operation threw.", exception,
+                    ("Event", "DeveloperRumbleRearmFailed"), ("PhysicalMotorEffectVerified", false));
+                physicalResult = new(DeveloperRumbleRearmPhysicalOutcome.Failed,
+                    "PhysicalOperationThrew:" + exception.GetType().Name, false, false, false, false);
+            }
+
+            var source = captureLiveSource();
+            var canRestore = physicalResult.PhysicalOwnershipRestored
+                && source is { IsRunning: true }
+                && mayRestorePresentation()
+                && !_disposed
+                && !_overlayPaused
+                && !_suspendPaused
+                && _viiper is { State: CanonicalViiperRuntimeState.Ready };
+            if (!canRestore)
+            {
+                var reason = physicalResult.PhysicalOwnershipRestored
+                    ? "PresentationRestoreAdmissionClosed"
+                    : "PhysicalOwnershipNotRestored";
+                AppLog.Warn("ControllerPresentation", "Developer rumble re-arm left presentation detached.", null,
+                    ("Event", "DeveloperRumbleRearmPresentationRestored"), ("Restored", false),
+                    ("Reason", reason), ("PhysicalOwnershipRestored", physicalResult.PhysicalOwnershipRestored));
+                return new(false, physicalResult.Outcome == DeveloperRumbleRearmPhysicalOutcome.Failed,
+                    physicalResult, false, reason);
+            }
+
+            var reconcile = await ReconcileDesiredPresentationCoreAsync(source!, captureSnapshot, developerRearmCompletion: true).ConfigureAwait(false);
+            var restored = reconcile.Succeeded && _activeKind is not null && _publisher is { IsRunning: true };
+            AppLog.Info("ControllerPresentation", "Developer rumble re-arm presentation restore completed.",
+                ("Event", "DeveloperRumbleRearmPresentationRestored"), ("Restored", restored),
+                ("Presentation", _activeKind?.ToString() ?? "None"), ("Reason", reconcile.Reason),
+                ("PhysicalOwnershipRestored", physicalResult.PhysicalOwnershipRestored), ("PhysicalMotorEffectVerified", false));
+            return new(false, !restored, physicalResult, restored,
+                restored ? "PresentationRestored" : "PresentationRestoreFailed:" + reconcile.Reason);
+        }
+        finally
+        {
+            _developerRumbleRearmInProgress = false;
+            _gate.Release();
+        }
     }
 
     private async Task<InitialPresentationResult> AttachXbox360Async(IMsiClawPreparedInputSource source)
@@ -875,19 +1018,25 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// stopped/joined the publisher; <c>armed.Dispose()</c> clears the native registration, cancels
     /// the SteamDeck dead-man stop, and DRAINS any callback still inside its physical write, so the
     /// STOP written below is guaranteed to be the final physical write.</summary>
-    private bool DisarmFeedbackAndStopLocked(string reason)
+    private bool TryDisarmFeedbackLocked(string reason)
     {
         var armed = _armedFeedback;
-        _armedFeedback = null;
-        if (armed is not null)
+        if (armed is null) return true;
+        try
         {
-            try { armed.Dispose(); }
-            catch (Exception exception)
-            {
-                AppLog.Warn("Rumble", "Production rumble feedback disarm threw.", exception, ("Reason", reason));
-            }
+            armed.Dispose();
+            if (ReferenceEquals(_armedFeedback, armed)) _armedFeedback = null;
+            return true;
         }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Rumble", "Production rumble feedback disarm threw.", exception, ("Reason", reason));
+            return false;
+        }
+    }
 
+    private bool RequestPhysicalRumbleStopLocked(string reason)
+    {
         if (_rumbleSink is null) return true;
         try
         {
@@ -903,6 +1052,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 ("Event", "ProductionRumbleStopFailed"), ("Reason", reason));
             return false;
         }
+    }
+
+    private bool DisarmFeedbackAndStopLocked(string reason)
+    {
+        _ = TryDisarmFeedbackLocked(reason);
+        return RequestPhysicalRumbleStopLocked(reason);
     }
 
     private void OnPublisherFault(Exception exception)
@@ -1420,8 +1575,29 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         // 2-3. Stop accepting old-presentation feedback (clear the native callback) and request a
         //      best-effort physical STOP before the typed device is detached, so a switch/release/
         //      shutdown/fail-close can never leave a motor latched.
-        try { physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked(reason); }
+        var strictRearmRetirement = string.Equals(reason, "DeveloperRumbleRearm", StringComparison.Ordinal);
+        var feedbackDrainConfirmed = true;
+        try
+        {
+            if (strictRearmRetirement)
+            {
+                feedbackDrainConfirmed = TryDisarmFeedbackLocked(reason);
+                if (feedbackDrainConfirmed)
+                    physicalRumbleStopConfirmed = RequestPhysicalRumbleStopLocked(reason);
+            }
+            else
+            {
+                physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked(reason);
+            }
+        }
         finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync(reason).ConfigureAwait(false); }
+
+        if (!feedbackDrainConfirmed)
+        {
+            AppLog.Error("ControllerPresentation", "Developer rumble re-arm callback drain was not proven; retaining the typed device and aborting before mode mutation.", null,
+                ("Event", "DeveloperRumbleRearmFeedbackDrainFailed"), ("Presentation", _activeKind));
+            return new(false, false, false);
+        }
 
         // 4. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
         if (_activeKind == AddonPresentationKind.Xbox360)

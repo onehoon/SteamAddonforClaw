@@ -916,6 +916,120 @@ public sealed class MsiClawAddonPresentationTests
             delay: delay);
     }
 
+    [Fact]
+    public async Task Developer_rearm_keeps_viiper_but_does_not_reattach_after_physical_recovery_fails()
+    {
+        var events = new List<string>();
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink { LifecycleEvents = events };
+        sink.WriteObserver = rumble =>
+        {
+            if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+        };
+        var source = new FakeSource();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(source, WantsXbox(), default)).Succeeded);
+        events.Clear();
+
+        var result = await owner.RunDeveloperRumbleRearmAsync(
+            () =>
+            {
+                events.Add("PhysicalRecovery");
+                return Task.FromResult(new DeveloperRumbleRearmPhysicalResult(
+                    DeveloperRumbleRearmPhysicalOutcome.Failed, "DirectInputTransitionFailed", true, false, false, true));
+            },
+            () => source,
+            () => throw new InvalidOperationException("A failed physical recovery must not capture or restore presentation."),
+            () => true);
+
+        Assert.False(result.PresentationRestored);
+        Assert.True(result.Failed);
+        Assert.Equal(DeveloperRumbleRearmPhysicalOutcome.Failed, result.PhysicalResult!.Outcome);
+        Assert.Null(owner.ActivePresentation);
+        Assert.Equal(CanonicalViiperRuntimeState.Ready, owner.ViiperState);
+        Assert.True(events.IndexOf("PhysicalStop") < events.IndexOf("RumbleEndpointInvalidated"));
+        Assert.True(events.IndexOf("RumbleEndpointInvalidated") < events.IndexOf("PhysicalRecovery"));
+        Assert.All(sink.Writes, rumble => Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, rumble));
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Developer_rearm_aborts_before_mode_switch_when_rumble_endpoint_invalidation_is_unproven()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink { InvalidationSucceeds = false };
+        var source = new FakeSource();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(source, WantsXbox(), default)).Succeeded);
+        var physicalOperationCalled = false;
+
+        var result = await owner.RunDeveloperRumbleRearmAsync(
+            () =>
+            {
+                physicalOperationCalled = true;
+                return Task.FromResult(new DeveloperRumbleRearmPhysicalResult(
+                    DeveloperRumbleRearmPhysicalOutcome.Completed, "unexpected", true, true, true, true));
+            },
+            () => source,
+            WantsDeck,
+            () => true);
+
+        Assert.True(result.Failed);
+        Assert.Equal("RumbleEndpointInvalidationUnproven", result.Reason);
+        Assert.False(physicalOperationCalled);
+        Assert.Null(owner.ActivePresentation);
+        Assert.All(sink.Writes, rumble => Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, rumble));
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Developer_rearm_uses_a_fresh_snapshot_to_restore_one_desired_presentation_without_a_motor_pulse()
+    {
+        var events = new List<string>();
+        var native = new FakeNative();
+        var xbox = new FakePublisher();
+        var deck = new FakePublisher();
+        var sink = new FakeRumbleSink { LifecycleEvents = events };
+        sink.WriteObserver = rumble =>
+        {
+            if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            else events.Add("PhysicalPulse");
+        };
+        var source = new FakeSource();
+        var owner = BuildWithSink(native, xbox, deck, sink);
+        Assert.True((await owner.AttachInitialAsync(source, WantsXbox(), default)).Succeeded);
+        sink.Writes.Clear();
+        events.Clear();
+        var snapshotCaptureCount = 0;
+
+        var result = await owner.RunDeveloperRumbleRearmAsync(
+            () =>
+            {
+                events.Add("VerifiedModeCycleAndRecovery");
+                return Task.FromResult(new DeveloperRumbleRearmPhysicalResult(
+                    DeveloperRumbleRearmPhysicalOutcome.Completed, "PhysicalOwnershipRestored", true, true, true, true));
+            },
+            () => source,
+            () =>
+            {
+                snapshotCaptureCount++;
+                events.Add("FreshSteamSnapshot");
+                return WantsDeck();
+            },
+            () => true);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.PresentationRestored);
+        Assert.Equal(1, snapshotCaptureCount);
+        Assert.Equal(AddonPresentationKind.SteamDeck, owner.ActivePresentation);
+        Assert.True(events.IndexOf("PhysicalStop") < events.IndexOf("RumbleEndpointInvalidated"));
+        Assert.True(events.IndexOf("RumbleEndpointInvalidated") < events.IndexOf("VerifiedModeCycleAndRecovery"));
+        Assert.True(events.IndexOf("VerifiedModeCycleAndRecovery") < events.IndexOf("RumbleEndpointReopened"));
+        Assert.True(events.IndexOf("RumbleEndpointReopened") < events.IndexOf("FreshSteamSnapshot"));
+        Assert.All(sink.Writes, rumble => Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, rumble));
+        await owner.DisposeAsync();
+    }
+
     [Theory]
     [InlineData(FrontendControllerVibrationMotor.Left, 65535, 0)]
     [InlineData(FrontendControllerVibrationMotor.Right, 0, 65535)]
@@ -1217,12 +1331,14 @@ public sealed class MsiClawAddonPresentationTests
         finally { handle.Free(); }
     }
 
-    private sealed class FakeRumbleSink : SteamInputAddonforClaw.Feedback.IPhysicalRumbleSink
+    private sealed class FakeRumbleSink : SteamInputAddonforClaw.Feedback.IPhysicalRumbleSink, IMsiClawRumbleSessionLifecycle
     {
         private readonly object _sync = new();
         internal List<SteamInputAddonforClaw.Feedback.TwoMotorRumble> Writes { get; } = [];
         internal Queue<SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteResult> Results { get; } = new();
         internal bool Throw { get; set; }
+        internal List<string>? LifecycleEvents { get; set; }
+        internal bool InvalidationSucceeds { get; set; } = true;
         internal Action<SteamInputAddonforClaw.Feedback.TwoMotorRumble>? WriteObserver { get; set; }
         // When set, the FIRST non-zero write blocks on this gate until the test releases it, modeling
         // WindowsMsiClawRumbleTransport's up-to-250 ms pending physical write.
@@ -1248,6 +1364,14 @@ public sealed class MsiClawAddonPresentationTests
                     : new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "OK");
             }
         }
+
+        public void BeginPhysicalSessionRetirement() => LifecycleEvents?.Add("RumbleEndpointRetiring");
+        public bool InvalidatePhysicalSession()
+        {
+            LifecycleEvents?.Add("RumbleEndpointInvalidated");
+            return InvalidationSucceeds;
+        }
+        public void BeginPhysicalSession() => LifecycleEvents?.Add("RumbleEndpointReopened");
     }
 
     [Fact] // PR #488 review finding 2: a callback already inside a pending physical write is drained

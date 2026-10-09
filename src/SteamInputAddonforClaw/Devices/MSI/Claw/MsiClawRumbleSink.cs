@@ -3,7 +3,14 @@ using SteamInputAddonforClaw.Feedback;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
+internal interface IMsiClawRumbleSessionLifecycle
+{
+    void BeginPhysicalSessionRetirement();
+    bool InvalidatePhysicalSession();
+    void BeginPhysicalSession();
+}
+
+internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IMsiClawRumbleSessionLifecycle, IDisposable
 {
     private readonly IMsiClawPhysicalInputIdentityProvider _identityProvider;
     private readonly IMsiClawRumbleEndpointResolver _endpointResolver;
@@ -151,13 +158,24 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         string.Equals(expected.PnpInstanceId, actual.PnpInstanceId, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(expected.PhysicalIdentity, actual.PhysicalIdentity, StringComparison.OrdinalIgnoreCase);
 
-    internal void InvalidatePhysicalSession()
+    public bool InvalidatePhysicalSession()
     {
-        try { _transport.InvalidatePhysicalSession(); }
+        lock (_sync)
+        {
+            _endpointGeneration = null;
+            _cachedEndpoint = default;
+            ResetLastWritten();
+        }
+        try
+        {
+            _transport.InvalidatePhysicalSession();
+            return true;
+        }
         catch (Exception exception)
         {
             try { AppLog.Debug("Rumble", "MSI rumble invalidation failure was contained.", ("Reason", exception.GetType().Name)); }
             catch { }
+            return false;
         }
     }
 
@@ -171,12 +189,12 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         }
     }
 
-    internal void BeginPhysicalSessionRetirement()
+    public void BeginPhysicalSessionRetirement()
     {
         Volatile.Write(ref _admissionOpen, false);
     }
 
-    internal void BeginPhysicalSession()
+    public void BeginPhysicalSession()
     {
         lock (_sync)
         {
