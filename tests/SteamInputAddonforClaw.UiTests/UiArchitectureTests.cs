@@ -1389,7 +1389,7 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Vibration_test_page_exposes_only_explicit_apply_restore_probe_actions()
+    public void Vibration_test_page_exposes_explicit_vibration_and_read_only_LED_probe_actions()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml"));
@@ -1402,7 +1402,9 @@ public sealed class UiArchitectureTests
         Assert.Contains("Developer-only physical hardware mutation. No SyncToROM is sent.", page, StringComparison.Ordinal);
         Assert.Contains("press Left Test once, then Right Test once", page, StringComparison.Ordinal);
         Assert.Contains("Content=\"Apply Left 0 / Right 100\"", page, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Restore 50 / 50\"", page, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Restore Addon default 50 / 50\"", page, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Read 0x024A Profile\"", page, StringComparison.Ordinal);
+        Assert.Contains("No LED profile write or SyncToROM command is issued", page, StringComparison.Ordinal);
         Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred", code, StringComparison.Ordinal);
         Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty", code, StringComparison.Ordinal);
         Assert.Contains("ApplyVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy", code, StringComparison.Ordinal);

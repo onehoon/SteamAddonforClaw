@@ -274,7 +274,7 @@ public sealed class MsiClawModeSwitchTests
         fake.ReadReports.Enqueue(Ack(0x05));
         var transport = new WindowsMsiClawRawHidTransport(fake);
 
-        var reports = await transport.WriteAndReadAsync(
+        var exchange = await transport.WriteAndReadAsync(
             "hid-path",
             MsiClawModeCommand.BuildReadGamepadMode(),
             reportLength: 64,
@@ -282,9 +282,9 @@ public sealed class MsiClawModeSwitchTests
             timeout: TimeSpan.FromSeconds(1),
             CancellationToken.None);
 
-        Assert.NotNull(reports);
-        Assert.Equal(2, reports.Count);
-        Assert.Equal(Ack(0x05), reports[1]);
+        Assert.True(exchange.WriteSucceeded);
+        Assert.Equal(2, exchange.Reports.Count);
+        Assert.Equal(Ack(0x05), exchange.Reports[1]);
         Assert.Equal(1, fake.OpenCallCount);
         Assert.Equal(1, fake.WriteCallCount);
         Assert.Equal(3, fake.ReadCallCount);
@@ -583,12 +583,12 @@ public sealed class MsiClawModeSwitchTests
             ReadCallCount++;
             return Task.FromResult(ReadValue);
         }
-        public Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(string devicePath, ReadOnlyMemory<byte> bytes, int reportLength, int maxReports, TimeSpan timeout, CancellationToken cancellationToken)
+        public Task<MsiClawHidWriteAndReadResult> WriteAndReadAsync(string devicePath, ReadOnlyMemory<byte> bytes, int reportLength, int maxReports, TimeSpan timeout, CancellationToken cancellationToken, bool preserveShortReports = false)
         {
             DevicePath = devicePath;
             Bytes = bytes.ToArray();
             WriteAndReadCallCount++;
-            return Task.FromResult(ReadValues);
+            return Task.FromResult(new MsiClawHidWriteAndReadResult(Result, Result ? ReadValues ?? [] : []));
         }
     }
 

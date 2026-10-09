@@ -434,6 +434,22 @@ public sealed class FrontendNamedPipeTransportTests
             FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty], fake.ProfileWriteProbeModes);
     }
 
+    [Fact]
+    public async Task Developer_A2VM_LED_profile_read_probe_round_trips_without_payload_and_keeps_protocol_version()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var result = await client.RunControllerLedProfileReadProbeAsync();
+
+        Assert.Equal(69, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal("RunControllerLedProfileReadProbe", Enum.GetNames<FrontendRpcMethod>().Last());
+        Assert.Equal(fake.ControllerLedProfileReadProbeResult, result);
+        Assert.Equal(1, fake.ControllerLedProfileReadProbeCount);
+    }
+
     [Theory]
     [InlineData("SetControllerVibrationStrength", "{\"LeftPercent\":101,\"RightPercent\":50}")]
     [InlineData("TestControllerVibrationMotor", "{\"Motor\":99}")]
@@ -441,6 +457,7 @@ public sealed class FrontendNamedPipeTransportTests
     [InlineData("RunControllerVibrationProfileWriteProbe", "null")]
     [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":\"Unknown\"}")]
     [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":99}")]
+    [InlineData("RunControllerLedProfileReadProbe", "{}")]
     public async Task Invalid_controller_vibration_payload_fails_closed_before_frontend_dispatch(string method, string payload)
     {
         var fake = new RecordingFrontendControl();
@@ -464,6 +481,7 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(0, fake.ControllerVibrationMutationCount);
         Assert.Empty(fake.ControllerVibrationTestMotors);
         Assert.Empty(fake.ProfileWriteProbeModes);
+        Assert.Equal(0, fake.ControllerLedProfileReadProbeCount);
     }
 
     [Fact]
@@ -2321,6 +2339,10 @@ public sealed class FrontendNamedPipeTransportTests
         public int ControllerVibrationMutationCount { get; private set; }
         public List<FrontendControllerVibrationMotor> ControllerVibrationTestMotors { get; } = [];
         public List<FrontendControllerVibrationProfileWriteProbeMode> ProfileWriteProbeModes { get; } = [];
+        public FrontendControllerLedProfileReadProbeResult ControllerLedProfileReadProbeResult { get; } = new(
+            FrontendControllerLedProfileReadProbeOutcome.CandidateReadbackParsed, 0x0230, 0x024A,
+            "CandidateReadbackParsed. Firmware 0x0230; candidate 0x024A; valid read response: yes.");
+        public int ControllerLedProfileReadProbeCount { get; private set; }
         public Task<FrontendControllerVibrationStrengthSnapshot> CaptureControllerVibrationStrengthAsync(CancellationToken t = default)
         { TotalCalls++; return Task.FromResult(ControllerVibrationSnapshot); }
         public Task<FrontendControllerVibrationStrengthMutationResult> SetControllerVibrationStrengthAsync(int left, int right, CancellationToken t = default)
@@ -2332,6 +2354,8 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken t = default)
         { TotalCalls++; ProfileWriteProbeModes.Add(mode); return Task.FromResult(ProfileWriteProbeResult(mode)); }
+        public Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(CancellationToken t = default)
+        { TotalCalls++; ControllerLedProfileReadProbeCount++; return Task.FromResult(ControllerLedProfileReadProbeResult); }
         public FrontendXbox360RumbleLoopSnapshot RumbleLoopSnapshot { get; private set; } =
             new(true, FrontendXbox360RumbleLoopState.Ready, "Ready", null, 0, 0, 0, 0, null, null, null, null, null);
         public int RumbleLoopStartCount { get; private set; }

@@ -6,6 +6,47 @@ internal static class MsiClawLedProtocol
 {
     private const int ReportLength = 64;
     private const int FrameLength = 27;
+    internal const ushort A2vm230CandidateRgbAddress = 0x024A;
+
+    internal enum CandidateReadParseOutcome { CandidateReadbackParsed, UnexpectedReport, WrongAddressOrIndex }
+
+    internal readonly record struct CandidateReadback(byte Effect, byte Speed, byte Brightness, byte[] RgbBytes);
+
+    internal static byte[] BuildA2vm230CandidateProfileReadRequest()
+    {
+        var request = new byte[ReportLength];
+        request[0] = 0x0F;
+        request[3] = 0x3C;
+        request[4] = 0x04;
+        request[5] = 0x01;
+        request[6] = (byte)(A2vm230CandidateRgbAddress >> 8);
+        request[7] = (byte)(A2vm230CandidateRgbAddress & 0xFF);
+        request[8] = 0x20;
+        return request;
+    }
+
+    internal static CandidateReadParseOutcome ParseA2vm230CandidateProfileReadResponse(
+        ReadOnlySpan<byte> response,
+        out CandidateReadback readback)
+    {
+        readback = default;
+        if (response.Length != ReportLength
+            || response[0] != 0x10
+            || response[3] != 0x3C
+            || response[4] != 0x05
+            || response[9] != 0x00
+            || response[10] != 0x01)
+            return CandidateReadParseOutcome.UnexpectedReport;
+
+        var address = (ushort)((response[6] << 8) | response[7]);
+        if (response[5] != 0x01
+            || address != A2vm230CandidateRgbAddress
+            || response[8] != 0x20)
+            return CandidateReadParseOutcome.WrongAddressOrIndex;
+
+        readback = new(response[11], response[12], response[13], response[14..41].ToArray());
+        return CandidateReadParseOutcome.CandidateReadbackParsed;
+    }
 
     internal static bool TryResolveRgbAddress(ushort firmwareVersion, out ushort address)
     {

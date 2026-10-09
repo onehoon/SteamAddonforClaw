@@ -46,16 +46,16 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter, IMsiClawGam
         var matching = SelectDeviceInformation(device, infos);
         if (matching is null) return null;
 
-        var reports = await _transport.WriteAndReadAsync(
+        var exchange = await _transport.WriteAndReadAsync(
             matching.Id,
             MsiClawModeCommand.BuildReadGamepadMode(),
             reportLength: 64,
             maxReports: 4,
             timeout,
             cancellationToken).ConfigureAwait(false);
-        if (reports is null) return null;
+        if (!exchange.WriteSucceeded) return null;
 
-        return reports.FirstOrDefault(report =>
+        return exchange.Reports.FirstOrDefault(report =>
             MsiClawModeCommand.TryParseGamepadModeAck(report, out _));
     }
 

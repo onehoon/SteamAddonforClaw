@@ -72,6 +72,27 @@ public sealed class ControllerLedUiContractTests
         Assert.Contains("_controllerLedSaveChain = SaveControllerLedAfterAsync", drain, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Developer_vibration_test_page_wires_explicit_A2VM_LED_read_only_action()
+    {
+        var xaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "VibrationTestPage.xaml"));
+        var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "VibrationTestPage.xaml.cs"));
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var button = xaml.Descendants().Single(element =>
+            (string?)element.Attribute(x + "Name") == "ReadA2vmLedProfileProbeButton");
+
+        Assert.Equal("Read 0x024A Profile", (string?)button.Attribute("Content"));
+        Assert.Equal("ReadA2vmLedProfileProbe_Click", (string?)button.Attribute("Click"));
+        Assert.Contains("private async void ReadA2vmLedProfileProbe_Click", code, StringComparison.Ordinal);
+        Assert.Contains("RunControllerLedProfileReadProbeAsync()", code, StringComparison.Ordinal);
+        Assert.Contains("Stop the Xbox360 terminal STOP loop before running a controller profile probe.", code, StringComparison.Ordinal);
+        Assert.Contains("No LED profile write or SyncToROM command is issued", xaml.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("RunControllerLedProfileReadProbeAsync", code[..code.IndexOf("private async Task RunA2vmLedProfileReadProbeAsync", StringComparison.Ordinal)], StringComparison.Ordinal);
+        Assert.Contains("Restore Addon default 50 / 50", xaml.ToString(), StringComparison.Ordinal);
+        Assert.Contains("physical effect has not yet been verified on A2VM", File.ReadAllText(Source("src", "SteamInputAddonforClaw", "Frontend", "InProcessAddonFrontendControl.cs")), StringComparison.Ordinal);
+        Assert.Contains("does not authorize color mutation", xaml.ToString(), StringComparison.Ordinal);
+    }
+
     private static string Source(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

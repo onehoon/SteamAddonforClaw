@@ -47,6 +47,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly MsiClawBatteryChargeLimitRuntime? _batteryChargeLimitRuntime;
     private readonly MsiClawVibrationStrengthClient? _controllerVibrationStrengthClient;
     private readonly Func<bool>? _controllerVibrationTestAvailable;
+    private readonly Func<MsiClawPhysicalIdentity?>? _controllerVibrationProbeIdentitySource;
+    private readonly Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? _controllerLedProfileReadProbe;
     private readonly Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? _testControllerVibrationMotor;
 
     /// <summary>Wraps the Runtime-owned <see cref="ClawSensorProbeCoordinator"/> for one active
@@ -160,7 +162,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         XboxGameProfileMutations? xboxGameProfileMutations = null,
         Func<ActiveProfileTarget>? activeProfileTargetSource = null,
         Func<string, bool>? reconcileXboxBackButtonMapping = null,
-        Func<string, string?>? activeXboxDisplayNameSource = null)
+        Func<string, string?>? activeXboxDisplayNameSource = null,
+        Func<MsiClawPhysicalIdentity?>? controllerVibrationProbeIdentitySource = null,
+        Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? controllerLedProfileReadProbe = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -201,7 +205,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _controllerVibrationStrengthClient = controllerVibrationStrengthClient;
         _applyControllerVibrationSettings = applyControllerVibrationSettings;
         _controllerVibrationTestAvailable = controllerVibrationTestAvailable;
+        _controllerVibrationProbeIdentitySource = controllerVibrationProbeIdentitySource;
         _testControllerVibrationMotor = testControllerVibrationMotor;
+        _controllerLedProfileReadProbe = controllerLedProfileReadProbe;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -1813,7 +1819,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             _ => throw new InvalidOperationException("The developer probe operation is invalid.")
         };
         var result = await _controllerVibrationStrengthClient.RunDiagnosticMotorPairWriteAsync(
-            clientMode, IsCenterMExactlyDisabled, cancellationToken).ConfigureAwait(false);
+            clientMode, _controllerVibrationProbeIdentitySource ?? (() => null), IsCenterMExactlyDisabled, cancellationToken).ConfigureAwait(false);
         var outcome = result.Outcome switch
         {
             MsiClawVibrationProfileWriteProbeOutcome.Succeeded => FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded,
@@ -1822,6 +1828,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         };
         var status = outcome switch
         {
+            FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded
+                when _controllerVibrationStrengthClient.ModelId == "msi.claw.a2vm.8"
+                    && mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred =>
+                "HID write accepted; physical effect has not yet been verified on A2VM. Press Left Test once, then Right Test once, and explicitly restore the Addon default 50/50.",
+            FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded
+                when _controllerVibrationStrengthClient.ModelId == "msi.claw.a2vm.8" =>
+                "Restore Addon default 50/50 HID write accepted; physical effect has not yet been verified on A2VM. This is not a readback of the firmware's original value.",
             FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded when mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred =>
                 "HID transport write succeeded. This pair was physically validated on CG3EM firmware 0x0419. Press Left Test once, then Right Test once.",
             FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded =>
@@ -1835,6 +1848,41 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         };
         return new(mode, outcome, status);
     }
+
+    public async Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_controllerLedProfileReadProbe is null)
+            return CreateLedProfileReadProbeResult(
+                FrontendControllerLedProfileReadProbeOutcome.Unavailable, null,
+                "The developer-only A2VM LED profile read probe is unavailable.");
+
+        var result = await _controllerLedProfileReadProbe(cancellationToken).ConfigureAwait(false);
+        var outcome = result.Outcome switch
+        {
+            MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed => FrontendControllerLedProfileReadProbeOutcome.CandidateReadbackParsed,
+            MsiClawLedProfileReadProbeOutcome.TransportWriteFailed => FrontendControllerLedProfileReadProbeOutcome.TransportWriteFailed,
+            MsiClawLedProfileReadProbeOutcome.NoReplyOrTimeout => FrontendControllerLedProfileReadProbeOutcome.NoReplyOrTimeout,
+            MsiClawLedProfileReadProbeOutcome.UnexpectedReport => FrontendControllerLedProfileReadProbeOutcome.UnexpectedReport,
+            MsiClawLedProfileReadProbeOutcome.WrongAddressOrIndex => FrontendControllerLedProfileReadProbeOutcome.WrongAddressOrIndex,
+            MsiClawLedProfileReadProbeOutcome.Unavailable => FrontendControllerLedProfileReadProbeOutcome.Unavailable,
+            _ => FrontendControllerLedProfileReadProbeOutcome.Failed
+        };
+        var firmware = result.FirmwareVersion is ushort version ? $"0x{version:X4}" : "unavailable";
+        var responseValidity = result.ReadResponseValid ? "yes" : "no";
+        var interpretation = result.ReadResponseValid
+            ? "The response was structurally parsed; this does not verify that the candidate address is safe to write."
+            : $"No valid candidate read response was confirmed ({result.Reason}).";
+        return CreateLedProfileReadProbeResult(outcome, result.FirmwareVersion,
+            $"{outcome}. Firmware {firmware}; candidate 0x{MsiClawLedProtocol.A2vm230CandidateRgbAddress:X4}; valid read response: {responseValidity}. {interpretation}");
+    }
+
+    private static FrontendControllerLedProfileReadProbeResult CreateLedProfileReadProbeResult(
+        FrontendControllerLedProfileReadProbeOutcome outcome,
+        ushort? firmwareVersion,
+        string status) => new(outcome, firmwareVersion, MsiClawLedProtocol.A2vm230CandidateRgbAddress, status);
 
     private FrontendControllerVibrationStrengthSnapshot CaptureControllerVibrationSnapshot()
     {
@@ -1863,8 +1911,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     private static string DescribeVibrationProfileProbeUnavailable(string reason) => reason switch
     {
-        "UnsupportedModel" => "Unavailable: this developer probe is restricted to MSI Claw 8 EX AI+ CG3EM.",
+        "UnsupportedModel" => "Unavailable: this developer probe is restricted to MSI Claw 8 EX AI+ CG3EM and MSI Claw 8 AI+ A2VM.",
         "CenterMIsNotExactlyDisabled" => "Unavailable: MSI Center M startup authority is not exactly Disabled.",
+        "OwnedPhysicalSessionUnavailable" => "Unavailable: a healthy Addon-owned PID1902 physical session is not available.",
         "Pid1902ControlHidNotUniquelyResolved" => "Unavailable: a unique, strongly identified PID1902 control HID was not found.",
         _ => "Unavailable: the developer-only vibration profile write probe could not run."
     };

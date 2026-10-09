@@ -89,8 +89,15 @@ writes. Physical SteamAddon LED acceptance for `0x0419` remains pending.
 The A2VM 2.30 observation (`VersionNumber=0x0230` / `REV_0230`) does not have an
 exact verified RGB address in the current table or the inspected RE. The historical
 A2VM `0x0229` and `0x0308` observations both point to `0x024A`, but they do not prove
-that `0x0230` uses that address. Keep `0x0230` unsupported and issue zero profile
-writes until model/firmware-specific evidence exists.
+that `0x0230` uses that address. Keep `0x0230` unsupported for production writes.
+The explicit Developer-only A2VM 8 read probe may issue one bounded `ReadProfile`
+query to candidate `0x024A`, index 1, block length `0x20`, only on the current
+healthy Addon-owned PID1902 `0xFFF0/0x0040` control HID with exact firmware
+`0x0230` and Center M exactly Disabled. It structurally validates the 64-byte
+response and logs only the bounded profile block. This is diagnostic evidence,
+not proof that the address is safe to write. No LED `WriteProfile` (`0x21`) or
+`SyncToROM` command is issued by this probe; the production resolver continues to
+reject `0x0230`. Physical A2VM response evidence remains pending user testing.
 
 ## Historical device-specific RE notes
 

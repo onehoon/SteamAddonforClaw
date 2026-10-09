@@ -142,8 +142,8 @@ software rumble multipliers, or EEPROM-persistence controls.
 
 ## Developer diagnostics
 
-Developer → Vibration Test retains the bounded CG3EM-only profile probe for
-future hardware investigation:
+Developer → Vibration Test exposes a bounded profile probe for CG3EM and an
+explicit, still-unvalidated A2VM 8 diagnostic investigation:
 
 | Action | Pair written | Required follow-up |
 | --- | --- | --- |
@@ -152,14 +152,18 @@ future hardware investigation:
 
 These are explicit Developer actions, use the same profile transaction gate as
 production writes, and do not change production settings. They require Center M
-authority exactly `Disabled` and one strongly identified PID1902 control HID.
-Transport success means only that the HID transport accepted the frame. A failed
-restore must be surfaced and retried only by another explicit button press.
+authority exactly `Disabled`, a healthy live Addon-owned physical PID1902 session,
+and one strongly identified PID1902 control HID. A2VM eligibility is restricted
+to `msi.claw.a2vm.8`; it does not include A2VM 7. On A2VM, the UI explicitly says
+that HID write acceptance does not prove a physical motor effect. `50/50` is the
+Addon default, not readback of the firmware's original value. A failed restore
+must be surfaced and retried only by another explicit button press. Neither model
+uses `SyncToROM` in this probe.
 
 The existing physical Left / Right Test remains independent of whether
-production strength setting is available. The CG3EM write probe remains
-CG3EM-only in this PR; A2VM probe enablement and physical acceptance are a later,
-evidence-backed change.
+production strength setting is available. The A2VM 8 developer probe is code-only
+until the user records physical results. No A2VM production enablement or hardware
+acceptance is implied by the diagnostic implementation.
 
 The former index-0 / index-1 pair-read capture was a one-off Developer
 investigation. It is no longer run implicitly by normal Controller-page capture,
@@ -169,6 +173,8 @@ and its obsolete runtime read path has been removed. Its recorded 0/100 and
 ## Still unproven
 
 - Production pair-write behavior on A2VM / MS-1T42 and MS-1T52.
+- Physical motor effect of the A2VM 8 developer-only `0/100` and explicit `50/50`
+  profile writes; software tests and transport acceptance do not establish it.
 - Controller-side durable profile persistence across power loss; production
   relies on Addon `settings.json` and lifecycle reapplication instead.
 - Production writes through PID1901 or equivalence between PID1901 / PID1902
