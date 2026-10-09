@@ -120,6 +120,8 @@ public sealed class ControllerVibrationStrengthFrontendTests : IDisposable
 
         Assert.False(snapshot.Available);
         Assert.False(snapshot.Writable);
+        Assert.Contains("profile-write mapping has not been verified", snapshot.Status, StringComparison.Ordinal);
+        Assert.Contains("no profile write was issued", snapshot.Status, StringComparison.Ordinal);
         Assert.True(snapshot.TestAvailable);
         Assert.Equal(25, snapshot.LeftPercent);
         Assert.Equal(75, snapshot.RightPercent);

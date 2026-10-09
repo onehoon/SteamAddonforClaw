@@ -29,6 +29,7 @@ public sealed class StartupCoordinatorTests
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.False(result.RecoverySafe);
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline);
         Assert.Equal(["TopologyWaiter", "Baseline"], events);
     }
 
@@ -118,6 +119,78 @@ public sealed class StartupCoordinatorTests
 
         Assert.False(result.RecoverySafe);
         Assert.DoesNotContain("Baseline", events);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline); // Legacy construction did not prove exact startup roots.
+    }
+
+    [Fact]
+    public async Task EnabledSupportedStockTopologyTimeout_ExposesOnlyTheNoBaselineRepairFact()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(
+            new FixedTopologyWaiter(events, ControllerTopologyReadiness.Indeterminate), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            stockCenterMBaseline: new FakeBaseline(events),
+            captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Enabled));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.ShouldStartRuntime);
+        Assert.False(result.RecoverySafe);
+        Assert.True(result.StockTopologyUnreadyBeforeBaseline);
+        Assert.Equal(["TopologyWaiter"], events);
+    }
+
+    [Fact]
+    public async Task FreshStockVerification_WaitsForStableTopologyThenEstablishesBaseline()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), stockCenterMBaseline: new FakeBaseline(events));
+
+        var verified = await coordinator.VerifyCurrentStockTopologyAndBaselineAsync(CancellationToken.None);
+
+        Assert.True(verified);
+        Assert.Equal(["TopologyWaiter", "Baseline"], events);
+    }
+
+    [Fact]
+    public async Task FreshStockVerification_DoesNotAttemptBaselineWhenTopologyIsIndeterminate()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(
+            new FixedTopologyWaiter(events, ControllerTopologyReadiness.Indeterminate), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            stockCenterMBaseline: new FakeBaseline(events));
+
+        var verified = await coordinator.VerifyCurrentStockTopologyAndBaselineAsync(CancellationToken.None);
+
+        Assert.False(verified);
+        Assert.Equal(["TopologyWaiter"], events);
+    }
+
+    [Fact]
+    public async Task FreshStockVerification_BaselineExceptionFailsClosed()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            stockCenterMBaseline: new ThrowingBaseline(events, new InvalidOperationException("test baseline failure")));
+
+        var verified = await coordinator.VerifyCurrentStockTopologyAndBaselineAsync(CancellationToken.None);
+
+        Assert.False(verified);
+        Assert.Equal(["TopologyWaiter", "Baseline"], events);
+    }
+
+    [Fact]
+    public async Task FreshStockVerification_WithoutBaselineOwnerFailsClosed()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator());
+
+        var verified = await coordinator.VerifyCurrentStockTopologyAndBaselineAsync(CancellationToken.None);
+
+        Assert.False(verified);
+        Assert.Empty(events);
     }
 
     [Fact]
@@ -133,6 +206,7 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.Contains("Baseline", events);
         Assert.True(result.RecoverySafe);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline);
     }
 
     private sealed class FakeBaseline(List<string> events, bool succeeded = true) : IStockCenterMStartupBaseline
@@ -255,6 +329,7 @@ public sealed class StartupCoordinatorTests
 
         Assert.True(evaluator.CallCount > 1);
         Assert.False(result.RecoverySafe);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline);
     }
 
     [Fact]
@@ -292,6 +367,7 @@ public sealed class StartupCoordinatorTests
 
         Assert.True(result.ShouldStartRuntime);
         Assert.True(result.DisabledBootAdmission!.IsReady);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline);
         Assert.Equal(FrontendCenterMStartupState.Disabled, result.CenterMStartupState);
         Assert.NotEqual(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.Equal(["TopologyWaiter", "Admission"], events);
@@ -313,6 +389,7 @@ public sealed class StartupCoordinatorTests
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.Equal(DisabledBootAdmissionOutcome.Blocked, result.DisabledBootAdmission!.Outcome);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline);
         Assert.Equal(0, admission.EvaluateCount);
         Assert.True(result.ShouldStartRuntime); // mandatory Runtime stays alive
         Assert.NotEqual(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
@@ -351,6 +428,7 @@ public sealed class StartupCoordinatorTests
         Assert.True(result.ShouldStartRuntime);
         Assert.False(result.RecoverySafe);
         Assert.Equal(DisabledBootAdmissionOutcome.PrerequisitesNotReady, result.DisabledBootAdmission!.Outcome);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline);
         Assert.False(result.DisabledBootAdmission.IsReady);
         Assert.DoesNotContain("Baseline", events);
     }
@@ -372,6 +450,7 @@ public sealed class StartupCoordinatorTests
         Assert.True(result.ShouldStartRuntime);
         Assert.Null(result.DisabledBootAdmission);
         Assert.Equal(Enum.Parse<FrontendCenterMStartupState>(state), result.CenterMStartupState);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline);
         Assert.NotEqual(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.Equal(0, admission.EvaluateCount);
         Assert.DoesNotContain("Baseline", events);
@@ -394,6 +473,7 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.True(result.RecoverySafe);
+        Assert.False(result.StockTopologyUnreadyBeforeBaseline);
     }
 
     [Fact]

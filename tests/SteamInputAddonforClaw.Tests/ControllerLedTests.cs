@@ -113,6 +113,11 @@ public sealed class ControllerLedTests : IDisposable
         Assert.False(await unknown.ApplyAsync(ControllerLedSettings.Default, identity, CancellationToken.None));
         Assert.Empty(unknownTransport.Writes);
 
+        var a2vm230Transport = new RecordingLedTransport(0x0230);
+        var a2vm230 = CreateController([device], [new("control-path", device.InstanceId, device.ContainerId)], a2vm230Transport);
+        Assert.False(await a2vm230.ApplyAsync(ControllerLedSettings.Default, identity, CancellationToken.None));
+        Assert.Empty(a2vm230Transport.Writes);
+
         var duplicate = ControlDevice(device.ContainerId!.Value, "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_B");
         var ambiguousTransport = new RecordingLedTransport(0x0411);
         var ambiguous = CreateController([device, duplicate], [

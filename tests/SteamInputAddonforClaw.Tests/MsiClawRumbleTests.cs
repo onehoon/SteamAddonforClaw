@@ -485,8 +485,10 @@ public sealed class MsiClawRumbleTests
     private static MsiClawRumbleEndpointCandidate Candidate(
         string path, ushort pid = 0x1902, int inputLength = 64, int outputLength = 32,
         ushort usagePage = MsiClawHardware.DirectInputUsagePage, ushort usage = MsiClawHardware.DirectInputUsage,
-        bool openSucceeded = true, string pnp = "PNP-A", string physical = "ROOT-A") =>
-        new(path, pnp, physical, 0x0DB0, pid, inputLength, outputLength, usagePage, usage, openSucceeded);
+        bool openSucceeded = true, string pnp = "PNP-A", string physical = "ROOT-A",
+        bool capabilitiesReadSucceeded = true) =>
+        new(path, pnp, physical, 0x0DB0, pid, inputLength, outputLength, usagePage, usage, openSucceeded,
+            capabilitiesReadSucceeded);
 
     [Fact]
     public void Endpoint_resolver_accepts_the_real_32_byte_pid1902_gamepad_endpoint()
@@ -512,7 +514,7 @@ public sealed class MsiClawRumbleTests
 
         var result = new MsiClawRumbleEndpointResolver(_ => [nonGamepad]).Resolve(identity);
 
-        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Equal("NoVerifiedGamepadEndpoint", result.Reason);
         Assert.Null(result.DevicePath);
     }
 
@@ -533,7 +535,7 @@ public sealed class MsiClawRumbleTests
 
         var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", physical: "ROOT-WRONG")]).Resolve(identity);
 
-        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Equal("PhysicalIdentityMismatch", result.Reason);
         Assert.Null(result.DevicePath);
     }
 
@@ -544,7 +546,7 @@ public sealed class MsiClawRumbleTests
 
         var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", pid: 0x1901)]).Resolve(identity);
 
-        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Equal("NoPhysicalGamepadEndpoint", result.Reason);
         Assert.Null(result.DevicePath);
     }
 
@@ -555,7 +557,7 @@ public sealed class MsiClawRumbleTests
 
         var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", outputLength: 0)]).Resolve(identity);
 
-        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Equal("PhysicalRumbleEndpointUnusable", result.Reason);
     }
 
     [Fact]
@@ -565,7 +567,7 @@ public sealed class MsiClawRumbleTests
 
         var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", openSucceeded: false)]).Resolve(identity);
 
-        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Equal("PhysicalRumbleEndpointUnusable", result.Reason);
     }
 
     [Fact]
@@ -575,7 +577,7 @@ public sealed class MsiClawRumbleTests
 
         var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", inputLength: 32)]).Resolve(identity);
 
-        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Equal("PhysicalRumbleEndpointUnusable", result.Reason);
         Assert.Null(result.DevicePath);
     }
 
@@ -596,21 +598,34 @@ public sealed class MsiClawRumbleTests
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
 
-        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity).Reason);
+        Assert.Equal("NoPhysicalGamepadEndpoint", new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity).Reason);
     }
 
     [Fact]
     public void Endpoint_resolver_treats_a_capability_lookup_failure_as_no_candidates_without_throwing()
     {
-        // WindowsMsiClawRumbleEndpointCatalog.Find skips any candidate whose HID capability
-        // query fails, so the resolver simply sees an empty candidate list -- this must not fail
-        // main Steam Deck routing, and must not be conflated with a retryable transient error.
+        // The catalog keeps a bounded candidate record when HID capabilities cannot be read; the
+        // resolver reports it as unusable and never promotes it to a writable endpoint.
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
 
-        var result = new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity);
+        var result = new MsiClawRumbleEndpointResolver(_ =>
+            [Candidate("unreadable", capabilitiesReadSucceeded: false)]).Resolve(identity);
 
         Assert.False(result.IsAvailable);
-        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Equal("PhysicalRumbleEndpointUnusable", result.Reason);
+    }
+
+    [Fact]
+    public void A2vm230_observed_control_usage_is_not_promoted_to_a_rumble_endpoint()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        var candidate = Candidate("control", usagePage: 0x0001, usage: 0x0040);
+
+        var result = new MsiClawRumbleEndpointResolver(_ => [candidate]).Resolve(identity);
+
+        Assert.False(result.IsAvailable);
+        Assert.Equal("NonGamepadUsageOnly", result.Reason);
+        Assert.Null(result.DevicePath);
     }
 
     [Fact]
@@ -728,6 +743,25 @@ public sealed class MsiClawRumbleTests
         Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, sink.SetRumble(TwoMotorRumble.Stopped).Status);
         Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
         Assert.Equal(2, resolver.Calls);
+    }
+
+    [Fact]
+    public void Sink_reports_unverified_rumble_endpoint_without_issuing_packets()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var resolver = new SequenceResolver(
+            new(null, "NonGamepadUsageOnly"),
+            new(null, "NonGamepadUsageOnly"));
+        var transport = new FakeTransport();
+        using var sink = new MsiClawRumbleSink(identity, transport, resolver);
+
+        var first = sink.SetRumble(new(100, 200));
+        var second = sink.SetRumble(new(100, 200));
+
+        Assert.Equal("NonGamepadUsageOnly", first.Reason);
+        Assert.Equal("NonGamepadUsageOnly", second.Reason);
+        Assert.Empty(transport.Packets);
+        Assert.Equal(0, transport.WriteCount);
     }
 
     [Fact]

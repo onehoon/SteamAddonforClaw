@@ -78,7 +78,11 @@ internal sealed class MsiClawModeController(
         var source = ResolveSource(devices, expectedIdentity);
         if (source.Status is not MsiClawModeTransitionStatus.Succeeded)
         {
-            AppLog.Debug("NativeMode", "NativeModeSourceAmbiguous", ("Reason", source.Reason), ("TargetMode", target));
+            if (source.Reason == "A2vm230ControlEndpointUnverified")
+                AppLog.Warn("NativeMode", "Native mode command was not issued because the A2VM 2.30 control endpoint is unverified.", null,
+                    ("Reason", source.Reason), ("TargetMode", target), ("WriteIssued", false));
+            else
+                AppLog.Debug("NativeMode", "NativeModeSourceAmbiguous", ("Reason", source.Reason), ("TargetMode", target));
             return Result(source.Status, source.Mode, target, started, source.Reason, source.ProductId);
         }
         AppLog.Debug("NativeMode", "NativeModeSourceResolved", ("SourceMode", source.Mode), ("SourcePID", source.ProductId), ("SourceIdentityConfidence", expectedIdentity.Confidence));
@@ -185,6 +189,13 @@ internal sealed class MsiClawModeController(
         var modes = matching.Select(d => d.ProductId switch { MsiClawHardware.XInputProductId => MsiClawNativeMode.XInput, MsiClawHardware.DirectInputProductId => MsiClawNativeMode.DirectInput, _ => MsiClawNativeMode.Other }).Distinct().ToArray();
         if (modes.Length != 1 || modes[0] == MsiClawNativeMode.Other) return new(MsiClawModeTransitionStatus.UnsupportedDevice, MsiClawNativeMode.Other, null, null, "Current native mode is unsupported or ambiguous.");
         var control = resolver.Resolve(devices, modes[0], expectedIdentity);
+        if (control is null && modes[0] == MsiClawNativeMode.DirectInput)
+        {
+            var unverifiedA2vm230Candidates = matching.Count(MsiClawHardware.IsA2vm230ObservedControlEndpointCandidate);
+            if (unverifiedA2vm230Candidates > 0)
+                return new(MsiClawModeTransitionStatus.AmbiguousDevice, modes[0], matching[0].ProductId, null,
+                    "A2vm230ControlEndpointUnverified");
+        }
         return control is null
             ? new(MsiClawModeTransitionStatus.AmbiguousDevice, modes[0], matching[0].ProductId, null, "Source control HID was not uniquely resolved.")
             : new(MsiClawModeTransitionStatus.Succeeded, modes[0], control.Device.ProductId, control, "Source control HID resolved.");

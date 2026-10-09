@@ -522,6 +522,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             return SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
         }
+        static bool IsFileProvenAbsent(string path)
+        {
+            try
+            {
+                _ = File.GetAttributes(path);
+                return false;
+            }
+            catch (FileNotFoundException) { return true; }
+            catch (DirectoryNotFoundException) { return true; }
+            catch { return false; }
+        }
         var centerMAuthorityTransition = new SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition(
             _centerMStartupControl,
             composition.StartupSettings,
@@ -572,7 +583,31 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 || _presentationOwnership?.ActivePresentation is not null,
             disabledBootPrerequisiteRepairWindow:
                 startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
-                && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady);
+                && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady,
+            stockTopologyUnreadyBeforeBaseline: startupResult.StockTopologyUnreadyBeforeBaseline,
+            verifyCurrentStockTopologyAndBaseline: startupComposition.Coordinator is { } startupCoordinator
+                ? startupCoordinator.VerifyCurrentStockTopologyAndBaselineAsync
+                : null,
+            hasVerifiedHidHideAbsenceWithoutOwnedState: () =>
+            {
+                var package = new SteamInputAddonforClaw.HidHide.WindowsHidHidePackageProbe().Inspect();
+                var driver = new SteamInputAddonforClaw.HidHide.HidHideDriverClient().Inspect();
+                var receipt = new SteamInputAddonforClaw.HidHide.HidHideProvisioningReceiptStore(
+                    VelopackAppPaths.HidHideProvisioningReceiptPath).Load();
+                var legacyReceiptAbsent = IsFileProvenAbsent(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
+                var verified = SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition
+                    .IsVerifiedHidHideAbsenceWithoutOwnedState(package, driver, receipt, legacyReceiptAbsent);
+                AppLog.Info("Uninstall", "HidHide absence evidence captured for the zero-owned-target release gate.",
+                    ("Event", "UninstallHidHideAbsenceEvidence"),
+                    ("PackageInspectionSucceeded", package.InspectionSucceeded),
+                    ("PackageInstalled", package.Installed),
+                    ("DriverStatus", driver.Status),
+                    ("ReceiptPresent", receipt.Receipt is not null),
+                    ("ReceiptCorrupt", receipt.IsCorrupt),
+                    ("LegacyReceiptAbsent", legacyReceiptAbsent),
+                    ("VerifiedAbsence", verified));
+                return verified;
+            });
         _centerMAuthorityTransition = centerMAuthorityTransition;
         if (_headlessUninstallPreparation)
             return;
@@ -580,11 +615,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (_runtimeCompositionFactory is null)
             _updateCoordinator = new FrontendUpdateCoordinator(new VelopackUpdateClient(),
                 () => _requestRestart?.Invoke() == true);
-        var allowPrerequisiteRepairWhileRecoveryUnsafe =
+        var disabledBootPrerequisiteRepairWindow =
             startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
             && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady;
+        var allowPrerequisiteRepairWhileRecoveryUnsafe =
+            SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor.IsStartupPrerequisiteRepairWindow(
+                startupResult.CenterMStartupState,
+                disabledBootPrerequisiteRepairWindow,
+                startupResult.StockTopologyUnreadyBeforeBaseline);
         var setupExecutor = new SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor(
-            allowPrerequisiteRepairWhileRecoveryUnsafe);
+            allowPrerequisiteRepairWhileRecoveryUnsafe,
+            disabledBootPrerequisiteRepairWindow,
+            startupResult.StockTopologyUnreadyBeforeBaseline,
+            startupResult.CenterMStartupState);
         _xboxGameSessionRuntime = new XboxGameSessionRuntime();
         _xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;
         try

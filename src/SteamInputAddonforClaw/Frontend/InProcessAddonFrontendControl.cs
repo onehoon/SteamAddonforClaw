@@ -1839,10 +1839,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private FrontendControllerVibrationStrengthSnapshot CaptureControllerVibrationSnapshot()
     {
         var settings = _settings.ControllerVibration;
-        var available = _controllerVibrationStrengthClient?.IsProductionPairWriteVerified == true;
+        var client = _controllerVibrationStrengthClient;
+        var available = client?.IsProductionPairWriteVerified == true;
         var writable = available && IsCenterMExactlyDisabled();
         var status = !available
-            ? "Saved vibration strength is not yet applied on this model."
+            ? client?.ProductionUnavailableReason
+                ?? "Saved vibration strength is not yet applied on this model because its profile-write mapping has not been verified; no profile write was issued."
             : writable
                 ? "Set the vibration strength applied while the Addon owns the controller."
                 : "Saved vibration strength is read-only while MSI Center M owns the controller.";

@@ -132,6 +132,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly Func<RuntimePrerequisiteAssessment, bool> _hasExactPendingPrerequisites;
     private readonly Func<bool> _hasActiveControllerOwnership;
     private readonly bool _disabledBootPrerequisiteRepairWindow;
+    private readonly bool _stockTopologyUnreadyBeforeBaseline;
+    private readonly Func<CancellationToken, Task<bool>>? _verifyCurrentStockTopologyAndBaseline;
+    private readonly Func<bool>? _hasVerifiedHidHideAbsenceWithoutOwnedState;
     private int _inProgress;
 
     public bool IsInProgress => Volatile.Read(ref _inProgress) != 0;
@@ -153,7 +156,10 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         IWindowsRestartRequester restartRequester,
         Func<RuntimePrerequisiteAssessment, bool>? hasExactPendingPrerequisites = null,
         Func<bool>? hasActiveControllerOwnership = null,
-        bool disabledBootPrerequisiteRepairWindow = false)
+        bool disabledBootPrerequisiteRepairWindow = false,
+        bool stockTopologyUnreadyBeforeBaseline = false,
+        Func<CancellationToken, Task<bool>>? verifyCurrentStockTopologyAndBaseline = null,
+        Func<bool>? hasVerifiedHidHideAbsenceWithoutOwnedState = null)
     {
         _centerMStartup = centerMStartup;
         _startupSettings = startupSettings;
@@ -169,6 +175,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _hasExactPendingPrerequisites = hasExactPendingPrerequisites ?? (_ => false);
         _hasActiveControllerOwnership = hasActiveControllerOwnership ?? (() => false);
         _disabledBootPrerequisiteRepairWindow = disabledBootPrerequisiteRepairWindow;
+        _stockTopologyUnreadyBeforeBaseline = stockTopologyUnreadyBeforeBaseline;
+        _verifyCurrentStockTopologyAndBaseline = verifyCurrentStockTopologyAndBaseline;
+        _hasVerifiedHidHideAbsenceWithoutOwnedState = hasVerifiedHidHideAbsenceWithoutOwnedState;
     }
 
     /// <param name="centerMEnabled">The requested next-boot authority: <see langword="true"/> =
@@ -239,7 +248,49 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
             && _disabledBootPrerequisiteRepairWindow
             && !activeControllerOwnership
             && (prerequisitesReady || exactPendingPrerequisites);
-        if (!admission.RecoverySafe && !disabledBootRepairCommit)
+
+        var stockOnboardingProof = false;
+        var stockOnboardingOrigin = snapshot.State == FrontendCenterMStartupState.Enabled
+            && _stockTopologyUnreadyBeforeBaseline;
+        if (!admission.RecoverySafe && stockOnboardingOrigin && !activeControllerOwnership)
+        {
+            // Re-read the three startup roots immediately before the bounded PnP/baseline proof.
+            snapshot = _centerMStartup.Capture();
+            if (snapshot.State != FrontendCenterMStartupState.Enabled)
+                return Fail(snapshot, "MSI Center M is no longer exactly Enabled. No authority change or restart was made.");
+
+            if (_verifyCurrentStockTopologyAndBaseline is not null)
+            {
+                try
+                {
+                    stockOnboardingProof = await _verifyCurrentStockTopologyAndBaseline(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("CenterM.Onboarding", "Fresh stock safety proof threw; MSI Center M remains Enabled.", exception);
+                }
+            }
+
+            if (!stockOnboardingProof)
+            {
+                snapshot = _centerMStartup.Capture();
+                return Fail(snapshot, "Controller stock baseline is not verified; MSI Center M remains Enabled. Retry after the controller is available.");
+            }
+
+            // The topology wait is bounded but may take several seconds. Reconfirm both authority
+            // and the no-owner/safe-transition preconditions before entering the existing write chain.
+            snapshot = _centerMStartup.Capture();
+            if (snapshot.State != FrontendCenterMStartupState.Enabled)
+                return Fail(snapshot, "MSI Center M changed during stock verification. No further authority change or restart was made.");
+            if (!_lowerLevelRuntimeSafety().CanTerminate || _hasActiveControllerOwnership())
+                return Fail(snapshot, "Controller ownership or another runtime operation changed during stock verification. MSI Center M remains Enabled.");
+        }
+
+        if (!admission.RecoverySafe && !disabledBootRepairCommit && !stockOnboardingProof)
             return Fail(snapshot,
                 "Controller recovery is not in a verified safe state, so MSI Center M was not disabled. Resolve controller recovery and retry Disable and Restart.");
 
@@ -351,13 +402,21 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         var targets = release.HiddenTargets.Count != 0
             ? release.HiddenTargets
             : _captureExistingOwnedHiddenTargets();
-        var clear = _hidHideBaseline.ApplyEnabledModeBaseline(targets);
-        AppLog.Info("CenterM.Authority", "Stock restoration HidHide release.",
-            ("Event", "UninstallHidHideRelease"), ("Reason", reason), ("Outcome", clear.Outcome),
-            ("ClearReason", clear.Reason), ("HiddenTargetCount", targets.Count),
-            ("HiddenTargets", string.Join(";", targets)));
-        if (!clear.IsCompliant)
-            return StockRestorationResult.Fail("HidHideRelease:" + clear.Reason);
+        if (reason == "Uninstall" && targets.Count == 0 && HasVerifiedHidHideAbsenceWithoutOwnedState())
+        {
+            AppLog.Info("CenterM.Authority", "HidHide release skipped after verified package/driver absence with no owned state.",
+                ("Event", "UninstallHidHideVerifiedAbsent"), ("Reason", reason), ("HiddenTargetCount", 0));
+        }
+        else
+        {
+            var clear = _hidHideBaseline.ApplyEnabledModeBaseline(targets);
+            AppLog.Info("CenterM.Authority", "Stock restoration HidHide release.",
+                ("Event", "UninstallHidHideRelease"), ("Reason", reason), ("Outcome", clear.Outcome),
+                ("ClearReason", clear.Reason), ("HiddenTargetCount", targets.Count),
+                ("HiddenTargets", string.Join(";", targets)));
+            if (!clear.IsCompliant)
+                return StockRestorationResult.Fail("HidHideRelease:" + clear.Reason);
+        }
 
         // 9-10. Center M startup roots -> exactly Enabled / Enabled / Automatic, verified by read-back.
         var mutation = await _centerMStartup.SetEnabledAsync(true, CancellationToken.None).ConfigureAwait(false);
@@ -382,6 +441,24 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         }
         return StockRestorationResult.Ok(mutation.Snapshot);
     }
+
+    private bool HasVerifiedHidHideAbsenceWithoutOwnedState()
+    {
+        try { return _hasVerifiedHidHideAbsenceWithoutOwnedState?.Invoke() == true; }
+        catch { return false; }
+    }
+
+    internal static bool IsVerifiedHidHideAbsenceWithoutOwnedState(
+        HidHidePackageState package,
+        HidHideInspection driver,
+        HidHideReceiptLoadResult receipt,
+        bool legacyReceiptAbsent) =>
+        package.InspectionSucceeded
+        && !package.Installed
+        && driver.Status == HidHideInspectionStatus.NotInstalled
+        && receipt.Receipt is null
+        && !receipt.IsCorrupt
+        && legacyReceiptAbsent;
 
     public async Task<StockUninstallPrepareResult> PrepareForUninstallAsync(CancellationToken cancellationToken)
     {

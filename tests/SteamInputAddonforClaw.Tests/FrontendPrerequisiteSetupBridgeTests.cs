@@ -152,6 +152,58 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
         Assert.True(allowPrerequisiteRepair);
     }
 
+    [Fact]
+    public async Task EnabledStockTopologyTimeout_FirstInstallReusesTheExistingSetupRunner()
+    {
+        var startupRepairWindow = FrontendPrerequisiteSetupExecutor.IsStartupPrerequisiteRepairWindow(
+            FrontendCenterMStartupState.Enabled,
+            disabledBootPrerequisiteRepairWindow: false,
+            stockTopologyUnreadyBeforeBaseline: true);
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Ready"));
+        var allowed = FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(startupRepairWindow, prerequisites);
+        var setup = FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
+            new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "Test"),
+            RecoverySafe: false,
+            SteamSessionState.FromRunningAppId(0),
+            prerequisites.HidHide,
+            prerequisites.UsbIpWin2,
+            new(PrerequisiteKind.HidHide, ComponentInstallationStatus.Missing, "PackageAndRuntimeMissing"),
+            new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.Missing, "PackageAndRuntimeMissing"),
+            new(ComponentProvisioningState.None, ComponentProvisioningState.None),
+            AllowPrerequisiteRepairWhileRecoveryUnsafe: allowed));
+        var executor = new FakeExecutor(setup) { Result = new(ChildProcessResultKind.Completed, 0) };
+        var firstInstall = Snapshot("enabled-stock-first-install") with { Prerequisites = prerequisites, RecoverySafe = false };
+        var control = CreateControl([firstInstall, firstInstall], executor);
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal(FrontendPrerequisiteSetupResultKind.Installed, result.Result);
+        Assert.Equal(FrontendSetupStatus.Required, result.Status!.SetupStatus);
+        Assert.True(result.Status.CanInstallRequiredComponents);
+        Assert.True(startupRepairWindow);
+        Assert.Equal(1, executor.RunCallCount);
+    }
+
+    [Theory]
+    [InlineData(FrontendCenterMStartupState.Enabled, false, true, true)]
+    [InlineData(FrontendCenterMStartupState.Disabled, true, false, true)]
+    [InlineData(FrontendCenterMStartupState.Enabled, false, false, false)]
+    [InlineData(FrontendCenterMStartupState.Disabled, false, true, false)]
+    [InlineData(FrontendCenterMStartupState.Partial, false, true, false)]
+    [InlineData(FrontendCenterMStartupState.Unavailable, false, true, false)]
+    public void StartupRepairWindow_RequiresExactAuthorityAndOriginFact(
+        FrontendCenterMStartupState state,
+        bool disabledRepair,
+        bool stockTopologyFact,
+        bool expected)
+    {
+        Assert.Equal(expected, FrontendPrerequisiteSetupExecutor.IsStartupPrerequisiteRepairWindow(
+            state, disabledRepair, stockTopologyFact));
+    }
+
     [Theory]
     [InlineData(3010, FrontendPrerequisiteSetupResultKind.RebootRequired)]
     [InlineData(3, FrontendPrerequisiteSetupResultKind.Blocked)]
