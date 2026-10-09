@@ -147,51 +147,178 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
     }
 
     [Theory]
-    [InlineData(FrontendProbe.ApplyZeroHundred, 0x00, 0x64)]
-    [InlineData(FrontendProbe.RestoreFiftyFifty, 0x32, 0x32)]
+    [InlineData("msi.claw.cg3em", FrontendProbe.ApplyZeroHundred, 0x00, 0x64)]
+    [InlineData("msi.claw.cg3em", FrontendProbe.RestoreFiftyFifty, 0x32, 0x32)]
+    [InlineData("msi.claw.a2vm.8", FrontendProbe.ApplyZeroHundred, 0x00, 0x64)]
+    [InlineData("msi.claw.a2vm.8", FrontendProbe.RestoreFiftyFifty, 0x32, 0x32)]
     public async Task Developer_profile_probe_keeps_its_explicit_single_pair_write(
+        string modelId,
         FrontendProbe mode,
         byte expectedLeft,
         byte expectedRight)
     {
         var device = CreateControlDevice();
         var io = new FakeProfileIo();
-        var (client, _) = CreateClient(io, "msi.claw.cg3em", [device]);
+        var (client, _) = CreateClient(io, modelId, [device]);
+        var identity = MsiClawPhysicalIdentity.From(device);
         var clientMode = mode == FrontendProbe.ApplyZeroHundred
             ? MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred
             : MsiClawVibrationProfileWriteProbeMode.RestoreFiftyFifty;
 
-        var result = await client.RunDiagnosticMotorPairWriteAsync(clientMode, () => true, default);
+        var result = await client.RunDiagnosticMotorPairWriteAsync(clientMode, () => identity, () => true, default);
 
         Assert.True(result.Succeeded);
         Assert.Single(io.WriteFrames);
+        Assert.Equal(64, io.WriteFrames[0].Length);
+        Assert.Equal(MsiClawVibrationProfileCommand.BuildMotorPairWrite(expectedLeft, expectedRight), io.WriteFrames[0]);
         Assert.Equal(new byte[] { 0x0F, 0, 0, 0x3C, 0x21, 0x01, 0, 0x22, 0x02, expectedLeft, expectedRight }, io.WriteFrames[0][..11]);
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("ControllerVibrationProfileWriteProbeStarted", log);
+        Assert.Contains("ControllerVibrationProfileWriteProbeCompleted", log);
         Assert.Contains("SyncToRom=False", log);
+        Assert.Contains("PhysicalEffectVerified=False", log);
+        Assert.Contains("ProductionEnabled=False", log);
         Assert.Contains("VerifiedForProduction=False", log);
     }
 
     [Fact]
-    public async Task Developer_probe_requires_disabled_authority_and_CG3EM_before_enumeration()
+    public async Task Developer_probe_requires_disabled_authority_and_supported_model_before_enumeration()
     {
         var io = new FakeProfileIo();
         var (client, devices) = CreateClient(io, "msi.claw.cg3em");
+        var identity = MsiClawPhysicalIdentity.From(CreateControlDevice());
 
         var authorityUnavailable = await client.RunDiagnosticMotorPairWriteAsync(
-            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => false, default);
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => identity, () => false, default);
 
         Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, authorityUnavailable.Outcome);
         Assert.Equal(0, devices.EnumerationCount);
         Assert.Empty(io.WriteFrames);
 
-        var (unsupportedClient, unsupportedDevices) = CreateClient(io, "msi.claw.a2vm.8");
+        var (unsupportedClient, unsupportedDevices) = CreateClient(io, "msi.claw.a2vm.7");
         var unsupported = await unsupportedClient.RunDiagnosticMotorPairWriteAsync(
-            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => true, default);
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => identity, () => true, default);
 
         Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, unsupported.Outcome);
         Assert.Equal(0, unsupportedDevices.EnumerationCount);
+        Assert.Empty(io.WriteFrames);
+
+        var (unknownClient, unknownDevices) = CreateClient(io, "unknown");
+        var unknown = await unknownClient.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => identity, () => true, default);
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, unknown.Outcome);
+        Assert.Equal(0, unknownDevices.EnumerationCount);
+        Assert.Empty(io.WriteFrames);
+    }
+
+    [Fact]
+    public async Task Developer_probe_requires_a_healthy_owned_physical_session_before_enumeration()
+    {
+        var io = new FakeProfileIo();
+        var (client, devices) = CreateClient(io, "msi.claw.a2vm.8");
+
+        var unavailable = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => null, () => true, default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, unavailable.Outcome);
+        Assert.Equal("OwnedPhysicalSessionUnavailable", unavailable.Reason);
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.Empty(io.WriteFrames);
+
+        var weak = MsiClawPhysicalIdentity.From(CreateControlDevice(strongIdentity: false));
+        var weakResult = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => weak, () => true, default);
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, weakResult.Outcome);
+        Assert.Equal("OwnedPhysicalSessionUnavailable", weakResult.Reason);
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.Empty(io.WriteFrames);
+    }
+
+    [Fact]
+    public async Task Developer_probe_rejects_a_control_hid_that_does_not_match_the_live_owned_identity()
+    {
+        var owned = CreateControlDevice(instanceSuffix: "OWNED");
+        var other = CreateControlDevice(instanceSuffix: "OTHER", identityContainer: Guid.NewGuid(), identityRoot: "USB\\VID_0DB0&PID_1902\\OTHER");
+        var io = new FakeProfileIo();
+        var (client, _) = CreateClient(io, "msi.claw.a2vm.8", [other]);
+
+        var result = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred,
+            () => MsiClawPhysicalIdentity.From(owned),
+            () => true,
+            default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, result.Outcome);
+        Assert.Equal("Pid1902ControlHidNotUniquelyResolved", result.Reason);
+        Assert.Empty(io.WriteFrames);
+    }
+
+    [Fact]
+    public async Task Developer_probe_rejects_ambiguous_control_hids_without_writing()
+    {
+        var first = CreateControlDevice(instanceSuffix: "FIRST");
+        var second = first with { InstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL02\\SECOND" };
+        var io = new FakeProfileIo();
+        var (client, _) = CreateClient(io, "msi.claw.a2vm.8", [first, second]);
+
+        var result = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred,
+            () => MsiClawPhysicalIdentity.From(first),
+            () => true,
+            default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, result.Outcome);
+        Assert.Equal("Pid1902ControlHidNotUniquelyResolved", result.Reason);
+        Assert.Empty(io.WriteFrames);
+    }
+
+    [Fact]
+    public async Task Developer_probe_cancellation_before_resolution_sends_no_write()
+    {
+        var io = new FakeProfileIo();
+        var (client, devices) = CreateClient(io, "msi.claw.a2vm.8");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred,
+            () => MsiClawPhysicalIdentity.From(CreateControlDevice()),
+            () => true,
+            cancellation.Token));
+
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.Empty(io.WriteFrames);
+    }
+
+    [Fact]
+    public async Task Developer_probe_rechecks_center_m_and_owned_identity_immediately_before_the_single_write()
+    {
+        var device = CreateControlDevice();
+        var identity = MsiClawPhysicalIdentity.From(device);
+        var io = new FakeProfileIo();
+        var (centerMClient, _) = CreateClient(io, "msi.claw.a2vm.8", [device]);
+        var authorityReads = 0;
+        var authorityResult = await centerMClient.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred,
+            () => identity,
+            () => ++authorityReads == 1,
+            default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, authorityResult.Outcome);
+        Assert.Equal("CenterMIsNotExactlyDisabled", authorityResult.Reason);
+        Assert.Empty(io.WriteFrames);
+
+        var (identityClient, _) = CreateClient(io, "msi.claw.a2vm.8", [device]);
+        var identityReads = 0;
+        var identityResult = await identityClient.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred,
+            () => ++identityReads == 1 ? identity : null,
+            () => true,
+            default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, identityResult.Outcome);
+        Assert.Equal("OwnedPhysicalSessionUnavailable", identityResult.Reason);
         Assert.Empty(io.WriteFrames);
     }
 

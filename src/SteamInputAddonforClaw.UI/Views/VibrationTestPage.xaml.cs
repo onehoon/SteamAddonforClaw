@@ -96,6 +96,9 @@ public sealed partial class VibrationTestPage : UserControl
     private async void RestoreVibrationProfileProbe_Click(object sender, RoutedEventArgs e) =>
         await RunVibrationProfileProbeAsync(FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty);
 
+    private async void ReadA2vmLedProfileProbe_Click(object sender, RoutedEventArgs e) =>
+        await RunA2vmLedProfileReadProbeAsync();
+
     private async Task RunVibrationProfileProbeAsync(FrontendControllerVibrationProfileWriteProbeMode mode)
     {
         if (_frontend is null || _busy || _profileProbeBusy)
@@ -123,6 +126,39 @@ public sealed partial class VibrationTestPage : UserControl
                 : "The developer profile write failed; production saved strength is unchanged. See the application log.";
             AppLog.Warn("ControllerVibration", "ControllerVibrationProfileWriteProbeUiFailed", exception,
                 ("Mode", mode), ("Reason", exception.GetType().Name));
+        }
+        finally
+        {
+            SetProfileProbeBusy(false);
+        }
+    }
+
+    private async Task RunA2vmLedProfileReadProbeAsync()
+    {
+        if (_frontend is null || _busy || _profileProbeBusy)
+            return;
+        if (_snapshot.State == FrontendXbox360RumbleLoopState.Running)
+        {
+            A2vmLedProfileProbeStatusText.Text = "Stop the Xbox360 terminal STOP loop before running a controller profile probe.";
+            return;
+        }
+
+        SetProfileProbeBusy(true);
+        A2vmLedProfileProbeStatusText.Text = "Reading one A2VM candidate profile block (read-only)...";
+        try
+        {
+            var result = await _frontend.RunControllerLedProfileReadProbeAsync();
+            A2vmLedProfileProbeStatusText.Text = result.Status;
+            if (!result.ReadResponseValid)
+                AppLog.Info("ControllerLed", "ControllerLedProfileReadProbeUiResult",
+                    ("Outcome", result.Outcome), ("Firmware", result.FirmwareVersion),
+                    ("CandidateAddress", $"0x{result.CandidateAddress:X4}"));
+        }
+        catch (Exception exception)
+        {
+            A2vmLedProfileProbeStatusText.Text = "The LED profile read probe failed; no LED profile write was issued. See the application log.";
+            AppLog.Warn("ControllerLed", "ControllerLedProfileReadProbeUiFailed", exception,
+                ("Reason", exception.GetType().Name));
         }
         finally
         {
@@ -167,6 +203,7 @@ public sealed partial class VibrationTestPage : UserControl
         StopButton.IsEnabled = !_busy && !_profileProbeBusy && snapshot.State == FrontendXbox360RumbleLoopState.Running;
         ApplyVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
         RestoreVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
+        ReadA2vmLedProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
     }
 
     private static string FormatCallback(FrontendXbox360RumbleLoopSnapshot snapshot) =>

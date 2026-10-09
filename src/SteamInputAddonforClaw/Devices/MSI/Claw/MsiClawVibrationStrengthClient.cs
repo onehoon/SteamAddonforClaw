@@ -140,6 +140,7 @@ internal sealed class MsiClawVibrationStrengthClient
 
     internal async Task<MsiClawVibrationProfileWriteProbeResult> RunDiagnosticMotorPairWriteAsync(
         MsiClawVibrationProfileWriteProbeMode mode,
+        Func<MsiClawPhysicalIdentity?> ownedIdentitySource,
         Func<bool> centerMIsExactlyDisabled,
         CancellationToken cancellationToken)
     {
@@ -156,13 +157,17 @@ internal sealed class MsiClawVibrationStrengthClient
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_modelId.Value != "msi.claw.cg3em")
+            if (_modelId.Value is not ("msi.claw.cg3em" or "msi.claw.a2vm.8"))
                 return DiagnosticProbeUnavailable(mode, pair.Value, "UnsupportedModel");
 
             if (!IsCenterMDisabled(centerMIsExactlyDisabled))
                 return DiagnosticProbeUnavailable(mode, pair.Value, "CenterMIsNotExactlyDisabled");
 
-            var device = ResolveCurrentPid1902ControlHid(null);
+            var ownedIdentity = CaptureStrongOwnedIdentity(ownedIdentitySource);
+            if (ownedIdentity is null)
+                return DiagnosticProbeUnavailable(mode, pair.Value, "OwnedPhysicalSessionUnavailable");
+
+            var device = ResolveCurrentPid1902ControlHid(ownedIdentity);
             if (device is null)
                 return DiagnosticProbeUnavailable(mode, pair.Value, "Pid1902ControlHidNotUniquelyResolved");
 
@@ -170,6 +175,9 @@ internal sealed class MsiClawVibrationStrengthClient
             // authorize this developer-only mutation using an earlier observation.
             if (!IsCenterMDisabled(centerMIsExactlyDisabled))
                 return DiagnosticProbeUnavailable(mode, pair.Value, "CenterMIsNotExactlyDisabled");
+            if (!IsSameStrongOwnedIdentity(ownedIdentitySource, ownedIdentity))
+                return DiagnosticProbeUnavailable(mode, pair.Value, "OwnedPhysicalSessionUnavailable");
+            cancellationToken.ThrowIfCancellationRequested();
 
             var report = MsiClawVibrationProfileCommand.BuildMotorPairWrite(
                 pair.Value.Left, pair.Value.Right);
@@ -182,13 +190,18 @@ internal sealed class MsiClawVibrationStrengthClient
                 ("Left", pair.Value.Left),
                 ("Right", pair.Value.Right),
                 ("SyncToRom", false),
+                ("PhysicalEffectVerified", false),
+                ("ProductionEnabled", false),
                 ("VerifiedForProduction", false));
 
             var transportSucceeded = await _io.WriteAsync(device, report, cancellationToken).ConfigureAwait(false);
             AppLog.Info("ControllerVibration", "ControllerVibrationProfileWriteProbeCompleted",
+                ("Model", _modelId.Value),
                 ("Left", pair.Value.Left),
                 ("Right", pair.Value.Right),
                 ("TransportSucceeded", transportSucceeded),
+                ("PhysicalEffectVerified", false),
+                ("ProductionEnabled", false),
                 ("SyncToRom", false),
                 ("VerifiedForProduction", false));
 
@@ -205,9 +218,12 @@ internal sealed class MsiClawVibrationStrengthClient
         catch (Exception exception)
         {
             AppLog.Info("ControllerVibration", "ControllerVibrationProfileWriteProbeCompleted",
+                ("Model", _modelId.Value),
                 ("Left", pair.Value.Left),
                 ("Right", pair.Value.Right),
                 ("TransportSucceeded", false),
+                ("PhysicalEffectVerified", false),
+                ("ProductionEnabled", false),
                 ("SyncToRom", false),
                 ("VerifiedForProduction", false),
                 ("Reason", exception.GetType().Name));
@@ -265,6 +281,21 @@ internal sealed class MsiClawVibrationStrengthClient
         && identity.VendorId == MsiClawHardware.VendorId
         && identity.ProductId == MsiClawHardware.DirectInputProductId
         && (!string.IsNullOrWhiteSpace(identity.PhysicalDeviceKey) || MsiClawPhysicalIdentity.IsUsableContainer(identity.ContainerId));
+
+    private static MsiClawPhysicalIdentity? CaptureStrongOwnedIdentity(Func<MsiClawPhysicalIdentity?> source)
+    {
+        try
+        {
+            var identity = source?.Invoke();
+            return identity is not null && IsStrongOwnedPid1902Identity(identity) ? identity : null;
+        }
+        catch { return null; }
+    }
+
+    private static bool IsSameStrongOwnedIdentity(
+        Func<MsiClawPhysicalIdentity?> source,
+        MsiClawPhysicalIdentity expected) =>
+        CaptureStrongOwnedIdentity(source) is { } current && current.StronglyMatches(expected);
 
     private bool FailApply(string reason)
     {

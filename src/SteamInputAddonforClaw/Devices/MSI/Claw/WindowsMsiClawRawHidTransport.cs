@@ -14,16 +14,18 @@ internal interface IMsiClawRawHidTransport
         return false;
     }
     Task<byte[]?> ReadAsync(string devicePath, int reportLength, TimeSpan timeout, CancellationToken cancellationToken) => Task.FromResult<byte[]?>(null);
-    Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(
+    Task<MsiClawHidWriteAndReadResult> WriteAndReadAsync(
         string devicePath,
         ReadOnlyMemory<byte> bytes,
         int reportLength,
         int maxReports,
         TimeSpan timeout,
-        CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<byte[]>?>(null);
+        CancellationToken cancellationToken,
+        bool preserveShortReports = false) => Task.FromResult(new MsiClawHidWriteAndReadResult(false, []));
 }
 
 internal readonly record struct MsiClawHidDeviceAttributes(ushort VendorId, ushort ProductId, ushort VersionNumber);
+internal sealed record MsiClawHidWriteAndReadResult(bool WriteSucceeded, IReadOnlyList<byte[]> Reports);
 
 internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
 {
@@ -108,13 +110,14 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
         return await ReadOneBoundedAsync(handle, reportLength, timeout, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(
+    public async Task<MsiClawHidWriteAndReadResult> WriteAndReadAsync(
         string devicePath,
         ReadOnlyMemory<byte> bytes,
         int reportLength,
         int maxReports,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool preserveShortReports = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(devicePath)
@@ -124,16 +127,16 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
             || maxReports <= 0
             || maxReports > 4
             || timeout <= TimeSpan.Zero)
-            return null;
+            return new(false, []);
 
         using var handle = _api.Open(devicePath, GenericRead | GenericWrite, ShareRead | ShareWrite, OpenExisting);
         if (handle.IsInvalid)
-            return null;
+            return new(false, []);
 
         var request = bytes.ToArray();
         cancellationToken.ThrowIfCancellationRequested();
         if (!_api.Write(handle, request, out var bytesWritten) || bytesWritten != request.Length)
-            return null;
+            return new(false, []);
 
         var reports = new List<byte[]>(maxReports);
         var started = Stopwatch.GetTimestamp();
@@ -143,20 +146,21 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
             if (remaining <= TimeSpan.Zero)
                 break;
 
-            var report = await ReadOneBoundedAsync(handle, reportLength, remaining, cancellationToken).ConfigureAwait(false);
+            var report = await ReadOneBoundedAsync(handle, reportLength, remaining, cancellationToken, preserveShortReports).ConfigureAwait(false);
             if (report is null)
                 break;
             reports.Add(report);
         }
 
-        return reports;
+        return new(true, reports);
     }
 
     private async Task<byte[]?> ReadOneBoundedAsync(
         SafeFileHandle handle,
         int reportLength,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool preserveShortReports = false)
     {
         var buffer = new byte[reportLength];
         var readTask = Task.Run(() =>
@@ -169,9 +173,10 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(timeout);
             var (succeeded, bytesRead) = await readTask.WaitAsync(timeoutSource.Token).ConfigureAwait(false);
-            if (!succeeded || bytesRead != reportLength)
+            if (!succeeded || bytesRead == 0 || bytesRead > buffer.Length
+                || (!preserveShortReports && bytesRead != buffer.Length))
                 return null;
-            return buffer;
+            return bytesRead == buffer.Length ? buffer : buffer[..checked((int)bytesRead)];
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

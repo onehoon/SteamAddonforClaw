@@ -683,11 +683,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             stopGameInputSystemButtonProbe: StopGameInputSystemButtonProbeAsync,
             controllerVibrationStrengthClient: _controllerVibrationStrengthClient,
             controllerVibrationTestAvailable: () => _presentationOwnership?.IsVibrationTestAvailable == true,
+            controllerVibrationProbeIdentitySource: CaptureLiveOwnedPhysicalIdentityForDeveloperProbe,
             testControllerVibrationMotor: (motor, token) => _presentationOwnership is { } presentation
                 ? presentation.TestVibrationMotorAsync(motor, token)
                 : Task.FromResult(new SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestResult(
                     SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable,
                     "The live Full1902 physical rumble path is unavailable.")),
+            controllerLedProfileReadProbe: token => RunA2vmLedProfileReadProbeAsync(
+                startupResult.HardwareDeviceModel is { } ledModel ? ledModel.Value : "unknown", token),
             // This is a presentation capability derived from the existing supported-hardware and
             // startup authority facts. The apply callback re-checks live authority and ownership.
             controllerLedAvailable: startupResult.HardwareSupported
@@ -1385,6 +1388,41 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Warn("ControllerLed", "Static LED apply failed; Full1902 controller ownership remains active.", exception,
                 ("Event", "ControllerLedApplyFailed"));
         }
+    }
+
+    private Task<SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawLedProfileReadProbeResult> RunA2vmLedProfileReadProbeAsync(
+        string modelId,
+        CancellationToken cancellationToken)
+    {
+        _controllerLedController ??= new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawLedController(
+            GetMsiControllerDevices(),
+            new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
+            new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawHidDeviceInformationLookup(),
+            new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawRawHidTransport());
+        return _controllerLedController.ReadA2vm230CandidateProfileAsync(
+            modelId,
+            CaptureLiveOwnedPhysicalIdentityForDeveloperProbe,
+            () => _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled,
+            cancellationToken);
+    }
+
+    private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawPhysicalIdentity? CaptureLiveOwnedPhysicalIdentityForDeveloperProbe()
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0
+            || !_ownedControllerRecovery.IsCompleted
+            || Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0
+            || _presentationOwnership?.IsSuspendPaused == true)
+            return null;
+
+        var physical = _physicalOwnership;
+        if (physical?.LiveInputSource is not { IsRunning: true }
+            || physical.OwnedPhysicalIdentity is not { } identity
+            || identity.Confidence != SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawIdentityConfidence.Strong
+            || identity.VendorId != SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.VendorId
+            || identity.ProductId != SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.DirectInputProductId)
+            return null;
+
+        return identity;
     }
 
     private async Task<bool> ApplyOwnedControllerVibrationSettingsAsync(

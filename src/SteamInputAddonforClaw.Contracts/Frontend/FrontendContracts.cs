@@ -233,6 +233,16 @@ public enum FrontendControllerVibrationStrengthMutationOutcome { Succeeded, Unav
 public enum FrontendControllerVibrationTestOutcome { Succeeded, Unavailable, Failed }
 public enum FrontendControllerVibrationProfileWriteProbeMode { ApplyZeroHundred, RestoreFiftyFifty }
 public enum FrontendControllerVibrationProfileWriteProbeOutcome { Succeeded, Unavailable, Failed }
+public enum FrontendControllerLedProfileReadProbeOutcome
+{
+    CandidateReadbackParsed,
+    TransportWriteFailed,
+    NoReplyOrTimeout,
+    UnexpectedReport,
+    WrongAddressOrIndex,
+    Unavailable,
+    Failed
+}
 
 /// <summary>The persisted desired Left/Right pair and the current production-write capability projection.</summary>
 public sealed record FrontendControllerVibrationStrengthSnapshot(
@@ -268,6 +278,15 @@ public sealed record FrontendControllerVibrationProfileWriteProbeResult(
     string Status)
 {
     public bool Succeeded => Outcome == FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded;
+}
+
+public sealed record FrontendControllerLedProfileReadProbeResult(
+    FrontendControllerLedProfileReadProbeOutcome Outcome,
+    ushort? FirmwareVersion,
+    ushort CandidateAddress,
+    string Status)
+{
+    public bool ReadResponseValid => Outcome == FrontendControllerLedProfileReadProbeOutcome.CandidateReadbackParsed;
 }
 
 public enum FrontendXbox360RumbleLoopState { Unavailable, Ready, Running, Stopped, Failed }
@@ -711,6 +730,10 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendControllerVibrationProfileWriteProbeResult(
             mode, FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
             "The developer-only vibration profile write probe is unavailable."));
+    Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendControllerLedProfileReadProbeResult(
+            FrontendControllerLedProfileReadProbeOutcome.Unavailable, null, 0x024A,
+            "The developer-only A2VM LED profile read probe is unavailable."));
     Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
     Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
