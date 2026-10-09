@@ -954,6 +954,41 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
+    public async Task Normal_pnp_recovery_reopens_rumble_after_failed_developer_mode_cycle()
+    {
+        var events = new List<string>();
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink { LifecycleEvents = events };
+        var source = new FakeSource();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(source, WantsXbox(), default)).Succeeded);
+
+        var failedRearm = await owner.RunDeveloperRumbleRearmAsync(
+            () => Task.FromResult(new DeveloperRumbleRearmPhysicalResult(
+                DeveloperRumbleRearmPhysicalOutcome.Failed, "DirectInputTransitionFailed", true, false, false, true)),
+            () => null,
+            () => throw new InvalidOperationException("Failed recovery must not capture a presentation."),
+            () => true);
+
+        Assert.True(failedRearm.Failed);
+        Assert.Null(owner.ActivePresentation);
+        Assert.Equal(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Unavailable,
+            sink.SetRumble(new(0x8000, 0x8000)).Status);
+
+        // The regular PnP/physical-owner path later supplies a healthy PID1902 source.
+        var recoveredSource = new FakeSource();
+        var recovery = await owner.ReconcileDesiredPresentationAsync(recoveredSource, WantsXbox, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Attached, recovery.Outcome);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation);
+        Assert.Equal(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded,
+            sink.SetRumble(new(0x8000, 0x8000)).Status);
+        Assert.Contains("RumbleEndpointInvalidated", events);
+        Assert.Contains("RumbleEndpointReopened", events);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Developer_rearm_aborts_before_mode_switch_when_rumble_endpoint_invalidation_is_unproven()
     {
         var native = new FakeNative();
@@ -1334,6 +1369,7 @@ public sealed class MsiClawAddonPresentationTests
     private sealed class FakeRumbleSink : SteamInputAddonforClaw.Feedback.IPhysicalRumbleSink, IMsiClawRumbleSessionLifecycle
     {
         private readonly object _sync = new();
+        private bool _admissionOpen = true;
         internal List<SteamInputAddonforClaw.Feedback.TwoMotorRumble> Writes { get; } = [];
         internal Queue<SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteResult> Results { get; } = new();
         internal bool Throw { get; set; }
@@ -1349,6 +1385,8 @@ public sealed class MsiClawAddonPresentationTests
         public SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteResult SetRumble(SteamInputAddonforClaw.Feedback.TwoMotorRumble rumble)
         {
             if (Throw) throw new InvalidOperationException("sink failure");
+            if (!_admissionOpen && !rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
+                return new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Unavailable, "PhysicalSessionRetiring");
             if (BlockFirstNonZeroWrite is { } gate && !_blocked && !rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
             {
                 _blocked = true;
@@ -1365,13 +1403,21 @@ public sealed class MsiClawAddonPresentationTests
             }
         }
 
-        public void BeginPhysicalSessionRetirement() => LifecycleEvents?.Add("RumbleEndpointRetiring");
+        public void BeginPhysicalSessionRetirement()
+        {
+            _admissionOpen = false;
+            LifecycleEvents?.Add("RumbleEndpointRetiring");
+        }
         public bool InvalidatePhysicalSession()
         {
             LifecycleEvents?.Add("RumbleEndpointInvalidated");
             return InvalidationSucceeds;
         }
-        public void BeginPhysicalSession() => LifecycleEvents?.Add("RumbleEndpointReopened");
+        public void BeginPhysicalSession()
+        {
+            _admissionOpen = true;
+            LifecycleEvents?.Add("RumbleEndpointReopened");
+        }
     }
 
     [Fact] // PR #488 review finding 2: a callback already inside a pending physical write is drained

@@ -958,7 +958,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         cancellationToken.ThrowIfCancellationRequested();
         return RunExclusiveControllerOperationAsync(
             () => SetControllerLedSettingsCoreAsync(settings, cancellationToken),
-            () => MapSettings());
+            () => throw new InvalidOperationException(
+                "LED settings were not saved because a controller operation is running."));
     }
 
     private async Task<FrontendSettingsSnapshot> SetControllerLedSettingsCoreAsync(ControllerLedSettings settings, CancellationToken cancellationToken)

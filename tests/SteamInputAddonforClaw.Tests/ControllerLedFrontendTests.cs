@@ -44,6 +44,44 @@ public sealed class ControllerLedFrontendTests : IDisposable
     }
 
     [Fact]
+    public async Task Concurrent_led_edit_during_motor_test_reports_rejection_without_fake_success()
+    {
+        AppLog.DirectoryOverride = _directory;
+        var original = new ControllerLedSettings(true, 50, 10, 20, 30);
+        var store = new SettingsStore(Path.Combine(_directory, "settings.json"));
+        store.Save(new AppSettings { ControllerLed = original });
+        var coordinator = new StartupSettingsCoordinator(new AppSettings { ControllerLed = original }, store, new NoOpStartupManager());
+        var testStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishTest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var applyCount = 0;
+        var control = new InProcessAddonFrontendControl(
+            coordinator,
+            new ThrowingStatusProvider(),
+            null,
+            controllerVibrationTestAvailable: () => true,
+            testControllerVibrationMotor: async (_, _) =>
+            {
+                testStarted.TrySetResult();
+                await finishTest.Task;
+                return new(FrontendControllerVibrationTestOutcome.Succeeded, null);
+            },
+            controllerLedAvailable: true,
+            applyControllerLedSettings: (_, _) => { applyCount++; return Task.CompletedTask; });
+
+        var motorTest = control.TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor.Left);
+        await testStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var requested = new ControllerLedSettings(false, 75, 40, 50, 60);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => control.SetControllerLedSettingsAsync(requested));
+
+        Assert.Equal(original, coordinator.ControllerLed);
+        Assert.Equal(original, store.Load().ControllerLed);
+        Assert.Equal(0, applyCount);
+        finishTest.TrySetResult();
+        Assert.True((await motorTest).Succeeded);
+    }
+
+    [Fact]
     public async Task Unsupported_authority_or_invalid_brightness_does_not_persist_or_apply()
     {
         AppLog.DirectoryOverride = _directory;

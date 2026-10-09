@@ -334,6 +334,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private bool _disposed;
     private bool _overlayPaused;
     private bool _developerRumbleRearmInProgress;
+    private bool _rumbleSessionNeedsRecovery;
     private int _motorTestInProgress;
     private int _suppressM1UntilRelease;
     private int _suppressM2UntilRelease;
@@ -758,10 +759,26 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         if (source is null || !source.IsRunning)
             return Blocked("LiveInputSourceNotRunning");
 
-        // Re-open the production rumble endpoint only after this re-arm has published a healthy new
-        // physical session. Ordinary Steam/BPM reconciliation must leave the current HID cache alone.
+        // Re-open only after a healthy physical source exists and the old typed callbacks are gone.
+        // A failed Developer mode cycle can recover later through the ordinary PnP owner path; prove
+        // stale HID closure again before allowing that normal presentation to submit motor writes.
         if (developerRearmCompletion)
+        {
             (_rumbleSink as IMsiClawRumbleSessionLifecycle)?.BeginPhysicalSession();
+            _rumbleSessionNeedsRecovery = false;
+        }
+        else if (_rumbleSessionNeedsRecovery)
+        {
+            if (_activeKind is not null || _publisher is not null || _armedFeedback is not null || _deckSession is not null)
+                return Blocked("RumbleSessionRecoveryRequiresRetiredPresentation");
+            if (_rumbleSink is not IMsiClawRumbleSessionLifecycle lifecycle)
+                return Blocked("RumbleEndpointLifecycleUnavailable");
+            if (!lifecycle.InvalidatePhysicalSession())
+                return Blocked("PhysicalRumbleEndpointInvalidationUnproven");
+
+            lifecycle.BeginPhysicalSession();
+            _rumbleSessionNeedsRecovery = false;
+        }
 
         var snapshot = captureSnapshot();
         var desired = snapshot.WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
@@ -837,6 +854,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             }
 
             rumbleLifecycle.BeginPhysicalSessionRetirement();
+            // Keep admission closed after any failed mode transition. A later ordinary PnP recovery
+            // can re-open it only after presenting a healthy source and re-proving endpoint closure.
+            _rumbleSessionNeedsRecovery = retirement.PhysicalRumbleStopConfirmed;
             if (!rumbleLifecycle.InvalidatePhysicalSession())
             {
                 AppLog.Warn("ControllerPresentation", "Developer rumble re-arm could not invalidate the retained physical rumble endpoint.", null,
