@@ -73,7 +73,7 @@ public sealed class ControllerLedUiContractTests
     }
 
     [Fact]
-    public void Developer_vibration_test_page_wires_explicit_A2VM_LED_read_only_action()
+    public void Developer_vibration_test_page_wires_explicit_A2VM_LED_read_only_action_and_states_acceptance_boundary()
     {
         var xaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "VibrationTestPage.xaml"));
         var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "VibrationTestPage.xaml.cs"));
@@ -86,11 +86,11 @@ public sealed class ControllerLedUiContractTests
         Assert.Contains("private async void ReadA2vmLedProfileProbe_Click", code, StringComparison.Ordinal);
         Assert.Contains("RunControllerLedProfileReadProbeAsync()", code, StringComparison.Ordinal);
         Assert.Contains("Stop the Xbox360 terminal STOP loop before running a controller profile probe.", code, StringComparison.Ordinal);
-        Assert.Contains("No LED profile write or SyncToROM command is issued", xaml.ToString(), StringComparison.Ordinal);
+        Assert.Contains("This diagnostic sends no LED write or SyncToROM command", xaml.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("RunControllerLedProfileReadProbeAsync", code[..code.IndexOf("private async Task RunA2vmLedProfileReadProbeAsync", StringComparison.Ordinal)], StringComparison.Ordinal);
         Assert.Contains("Restore Addon default 50 / 50", xaml.ToString(), StringComparison.Ordinal);
-        Assert.Contains("physical effect has not yet been verified on A2VM", File.ReadAllText(Source("src", "SteamInputAddonforClaw", "Frontend", "InProcessAddonFrontendControl.cs")), StringComparison.Ordinal);
-        Assert.Contains("does not authorize color mutation", xaml.ToString(), StringComparison.Ordinal);
+        Assert.Contains("0% / 100% motor asymmetry was physically observed on A2VM 8", File.ReadAllText(Source("src", "SteamInputAddonforClaw", "Frontend", "InProcessAddonFrontendControl.cs")), StringComparison.Ordinal);
+        Assert.Contains("physical LED behavior remains unverified", xaml.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Source(params string[] parts)

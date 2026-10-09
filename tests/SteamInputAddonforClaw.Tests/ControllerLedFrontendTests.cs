@@ -73,7 +73,7 @@ public sealed class ControllerLedFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task A2vm_led_read_probe_reports_candidate_and_does_not_claim_write_safety_or_hardware_validation()
+    public async Task A2vm_led_read_probe_reports_structural_readback_without_claiming_physical_write_validation()
     {
         AppLog.DirectoryOverride = _directory;
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
@@ -90,7 +90,7 @@ public sealed class ControllerLedFrontendTests : IDisposable
         Assert.Equal((ushort)0x0230, result.FirmwareVersion);
         Assert.Equal((ushort)0x024A, result.CandidateAddress);
         Assert.True(result.ReadResponseValid);
-        Assert.Contains("does not verify that the candidate address is safe to write", result.Status, StringComparison.Ordinal);
+        Assert.Contains("physical Static LED output from production writes remains unverified", result.Status, StringComparison.Ordinal);
         Assert.DoesNotContain("CG3EM", result.Status, StringComparison.OrdinalIgnoreCase);
     }
 

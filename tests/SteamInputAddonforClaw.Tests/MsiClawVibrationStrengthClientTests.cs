@@ -23,10 +23,13 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
     }
 
     [Theory]
-    [InlineData(50, 50, 0x32, 0x32)]
-    [InlineData(0, 100, 0x00, 0x64)]
-    [InlineData(100, 0, 0x64, 0x00)]
-    public async Task Production_CG3EM_apply_sends_one_exact_pair_write_to_the_owned_PID1902_control_HID(
+    [InlineData("msi.claw.cg3em", 50, 50, 0x32, 0x32)]
+    [InlineData("msi.claw.cg3em", 0, 100, 0x00, 0x64)]
+    [InlineData("msi.claw.cg3em", 100, 0, 0x64, 0x00)]
+    [InlineData("msi.claw.a2vm.8", 50, 50, 0x32, 0x32)]
+    [InlineData("msi.claw.a2vm.8", 37, 63, 0x25, 0x3F)]
+    public async Task Production_apply_sends_one_exact_pair_write_to_the_owned_PID1902_control_HID(
+        string modelId,
         int left,
         int right,
         byte expectedLeft,
@@ -34,7 +37,7 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
     {
         var controlDevice = CreateControlDevice();
         var io = new FakeProfileIo();
-        var (client, devices) = CreateClient(io, "msi.claw.cg3em", [controlDevice]);
+        var (client, devices) = CreateClient(io, modelId, [controlDevice]);
 
         var succeeded = await client.ApplyAsync(
             new ControllerVibrationSettings(left, right),
@@ -50,7 +53,6 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
 
     [Theory]
     [InlineData("msi.claw.a2vm.7")]
-    [InlineData("msi.claw.a2vm.8")]
     [InlineData("unknown")]
     public async Task Production_apply_is_unavailable_for_unverified_models_before_HID_enumeration(string modelId)
     {
@@ -79,11 +81,13 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
         Assert.Empty(io.WriteFrames);
     }
 
-    [Fact]
-    public async Task Production_apply_rejects_weak_identity_before_HID_enumeration()
+    [Theory]
+    [InlineData("msi.claw.cg3em")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task Production_apply_rejects_weak_identity_before_HID_enumeration(string modelId)
     {
         var io = new FakeProfileIo();
-        var (client, devices) = CreateClient(io, "msi.claw.cg3em");
+        var (client, devices) = CreateClient(io, modelId);
         var identity = MsiClawPhysicalIdentity.From(CreateControlDevice(strongIdentity: false));
 
         var succeeded = await client.ApplyAsync(ControllerVibrationSettings.Default, identity, default);
@@ -93,8 +97,10 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
         Assert.Empty(io.WriteFrames);
     }
 
-    [Fact]
-    public async Task Production_apply_rejects_a_control_HID_that_does_not_match_the_owned_identity()
+    [Theory]
+    [InlineData("msi.claw.cg3em")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task Production_apply_rejects_a_control_HID_that_does_not_match_the_owned_identity(string modelId)
     {
         var expected = CreateControlDevice(instanceSuffix: "OWNED");
         var other = CreateControlDevice(
@@ -102,7 +108,7 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
             identityContainer: Guid.NewGuid(),
             identityRoot: "USB\\VID_0DB0&PID_1902\\OTHER");
         var io = new FakeProfileIo();
-        var (client, _) = CreateClient(io, "msi.claw.cg3em", [other]);
+        var (client, _) = CreateClient(io, modelId, [other]);
 
         var succeeded = await client.ApplyAsync(
             ControllerVibrationSettings.Default,
@@ -113,13 +119,15 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
         Assert.Empty(io.WriteFrames);
     }
 
-    [Fact]
-    public async Task Production_apply_rejects_ambiguous_control_HIDs_without_writing()
+    [Theory]
+    [InlineData("msi.claw.cg3em")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task Production_apply_rejects_ambiguous_control_HIDs_without_writing(string modelId)
     {
         var first = CreateControlDevice(instanceSuffix: "FIRST");
         var duplicate = first with { InstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL02\\DUPLICATE" };
         var io = new FakeProfileIo();
-        var (client, _) = CreateClient(io, "msi.claw.cg3em", [first, duplicate]);
+        var (client, _) = CreateClient(io, modelId, [first, duplicate]);
 
         var succeeded = await client.ApplyAsync(
             ControllerVibrationSettings.Default,
@@ -177,9 +185,9 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
         Assert.Contains("ControllerVibrationProfileWriteProbeStarted", log);
         Assert.Contains("ControllerVibrationProfileWriteProbeCompleted", log);
         Assert.Contains("SyncToRom=False", log);
-        Assert.Contains("PhysicalEffectVerified=False", log);
-        Assert.Contains("ProductionEnabled=False", log);
-        Assert.Contains("VerifiedForProduction=False", log);
+        Assert.Contains("PhysicalEffectVerifiedByThisProbe=False", log);
+        Assert.Contains("ThisWriteIsProductionApply=False", log);
+        Assert.DoesNotContain("VerifiedForProduction=", log, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -51,13 +51,22 @@ The working read command is `ReadProfile (0x04)`, not the older guessed
 
 ```text
 request:  0F 00 00 3C 04 01 <addrHi> <addrLo> 20
-response: 10 00 00 3C 05 01 <addrHi> <addrLo> 20 00 01
-          <effect> <speed> <brightness> <9 x RGB>
+response: 10 00 00 3C 05 01 <addrHi> <addrLo> 20 00
+          <effect> 09 <speed> <brightness> <9 x RGB>
 ```
 
-The response acknowledgement is `0x05` at byte `[4]`. This describes the historical
-readback RE. The current Basic Static setter uses the exact firmware table and fills
-all four frame slots instead of reading profile state on each edit.
+The response acknowledgement is `0x05` at byte `[4]`; `[10]` is the effect/mode
+and may be `0x04`, while `[11]` is the observed `0x09` block constant. The actual
+A2VM 8 / MS-1T52 firmware `0x0230` response prefix read at candidate address
+`0x024A` was:
+
+```text
+10 00 00 3C 05 01 02 4A 20 00 04 09 03 64 ...
+```
+
+The response included 27 RGB bytes at `[14..40]`. The current Basic Static setter
+uses the exact firmware/model admission and fills all four frame slots instead of
+reading profile state on each edit.
 
 ## Current firmware address evidence
 
@@ -86,18 +95,24 @@ not adopt CTW's general nearest-match policy: `0x0419` is promoted to one explic
 known entry, while every other unknown version still fails closed with zero profile
 writes. Physical SteamAddon LED acceptance for `0x0419` remains pending.
 
-The A2VM 2.30 observation (`VersionNumber=0x0230` / `REV_0230`) does not have an
-exact verified RGB address in the current table or the inspected RE. The historical
-A2VM `0x0229` and `0x0308` observations both point to `0x024A`, but they do not prove
-that `0x0230` uses that address. Keep `0x0230` unsupported for production writes.
-The explicit Developer-only A2VM 8 read probe may issue one bounded `ReadProfile`
-query to candidate `0x024A`, index 1, block length `0x20`, only on the current
-healthy Addon-owned PID1902 `0xFFF0/0x0040` control HID with exact firmware
-`0x0230` and Center M exactly Disabled. It structurally validates the 64-byte
-response and logs only the bounded profile block. This is diagnostic evidence,
-not proof that the address is safe to write. No LED `WriteProfile` (`0x21`) or
-`SyncToROM` command is issued by this probe; the production resolver continues to
-reject `0x0230`. Physical A2VM response evidence remains pending user testing.
+On 2026-10-09, the A2VM 8 / MS-1T52 `VersionNumber=0x0230` ReadProfile response at
+candidate `0x024A` echoed the requested profile index/address/length and returned
+the expected block, including effect `0x04`, constant `0x09`, and 27 RGB bytes.
+SteamAddon therefore enables the existing four-write **Static** path only when
+both the detected model is exactly `msi.claw.a2vm.8` and the current PID1902
+control-HID attributes report firmware `0x0230`. The production apply boundary
+rejects the same firmware on CG3EM, A2VM 7, unknown models, or any other model.
+This exact admission does not add nearest-version fallback or a firmware range.
+
+The matching readback supports the address selection but does **not** prove that
+Static writes produce the desired physical LED behavior; that acceptance remains
+pending user testing. The explicit Developer-only A2VM 8 read probe remains
+read-only: it issues one bounded `ReadProfile` query at candidate `0x024A`, index
+1, block length `0x20`, only on the current healthy Addon-owned PID1902
+`0xFFF0/0x0040` control HID with exact firmware `0x0230` and Center M exactly
+Disabled. It validates the 64-byte response and logs only the bounded profile
+block. The probe itself issues no LED `WriteProfile` (`0x21`) or `SyncToROM`
+command and does not claim a physical LED change.
 
 ## Historical device-specific RE notes
 
@@ -105,6 +120,7 @@ reject `0x0230`. Physical A2VM response evidence remains pending user testing.
 | --- | --- | --- |
 | A2VM `0x229` | on-device read/write RE; nearest firmware table entry | `02 4A` |
 | A2VM `0x308` | device control-surface RE | `02 4A` |
+| A2VM 8 / MS-1T52 `0x0230` | matching PID1902 ReadProfile response; scoped Static production admission | `02 4A` |
 | EX `0x0411` | current HHC table | `02 4A` |
 | EX `0x0414` | current HHC table | `02 4A` |
 | EX `0x0419` | CG3EM/MS-1T91 field firmware; CTW nearest-match resolves to EX `0x0414` | `02 4A` |
@@ -129,9 +145,10 @@ other effect research below remain historical/reference material and are out of 
 The SteamAddon base packet contains the Static header and first frame. The three
 follow-on packets contain raw frames only (no effect header).
 
-The firmware version must exactly match the table above. Effective hardware brightness
-is the saved brightness while enabled and zero while disabled; the saved brightness
-and color are retained. SteamAddon sends no `0x22` SyncToROM command.
+The firmware version must exactly match an enabled entry: the exact versions in the
+table above or the separately scoped A2VM 8 / `0x0230` admission. Effective hardware
+brightness is the saved brightness while enabled and zero while disabled; the saved
+brightness and color are retained. SteamAddon sends no `0x22` SyncToROM command.
 
 ## Effects and stale-frame hazard
 

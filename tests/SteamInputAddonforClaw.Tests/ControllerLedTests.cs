@@ -57,6 +57,7 @@ public sealed class ControllerLedTests : IDisposable
     [InlineData(0x0217, 0x024A)]
     [InlineData(0x0219, 0x024A)]
     [InlineData(0x0308, 0x024A)]
+    [InlineData(0x0230, 0x024A)]
     [InlineData(0x0411, 0x024A)]
     [InlineData(0x0414, 0x024A)]
     [InlineData(0x0419, 0x024A)]
@@ -95,8 +96,9 @@ public sealed class ControllerLedTests : IDisposable
     {
         var settings = new ControllerLedSettings(false, 71, 4, 5, 6);
 
-        Assert.True(MsiClawLedProtocol.TryBuildStaticWrites(0x0411, settings, out var writes));
+        Assert.True(MsiClawLedProtocol.TryBuildStaticWrites(0x0230, settings, out var writes));
 
+        Assert.Equal(4, writes.Count);
         Assert.Equal(0, writes[0][13]);
         Assert.Equal(71, settings.Brightness);
         Assert.Equal((4, 5, 6), (settings.Red, settings.Green, settings.Blue));
@@ -105,34 +107,69 @@ public sealed class ControllerLedTests : IDisposable
     [Fact]
     public async Task Unknown_firmware_and_ambiguous_or_non_control_hids_issue_no_profile_writes()
     {
+        Assert.False(MsiClawLedProtocol.TryResolveRgbAddress(0x0229, out _));
+        Assert.False(MsiClawLedProtocol.TryResolveRgbAddress(0xFFFF, out _));
         var device = ControlDevice(Guid.NewGuid(), "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_A");
         var identity = MsiClawPhysicalIdentity.From(device);
 
         var unknownTransport = new RecordingLedTransport(0x9999);
         var unknown = CreateController([device], [new("control-path", device.InstanceId, device.ContainerId)], unknownTransport);
-        Assert.False(await unknown.ApplyAsync(ControllerLedSettings.Default, identity, CancellationToken.None));
+        Assert.False(await unknown.ApplyAsync(ControllerLedSettings.Default, identity, "msi.claw.cg3em", CancellationToken.None));
         Assert.Empty(unknownTransport.Writes);
-
-        var a2vm230Transport = new RecordingLedTransport(0x0230);
-        var a2vm230 = CreateController([device], [new("control-path", device.InstanceId, device.ContainerId)], a2vm230Transport);
-        Assert.False(await a2vm230.ApplyAsync(ControllerLedSettings.Default, identity, CancellationToken.None));
-        Assert.Empty(a2vm230Transport.Writes);
 
         var duplicate = ControlDevice(device.ContainerId!.Value, "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_B");
         var ambiguousTransport = new RecordingLedTransport(0x0411);
         var ambiguous = CreateController([device, duplicate], [
             new("control-a", device.InstanceId, device.ContainerId),
             new("control-b", duplicate.InstanceId, duplicate.ContainerId)], ambiguousTransport);
-        Assert.False(await ambiguous.ApplyAsync(ControllerLedSettings.Default, identity, CancellationToken.None));
+        Assert.False(await ambiguous.ApplyAsync(ControllerLedSettings.Default, identity, "msi.claw.cg3em", CancellationToken.None));
         Assert.Empty(ambiguousTransport.Writes);
 
         var gamepad = device with { InstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\GAMEPAD", UsagePage = 0x0001, Usage = 0x0005 };
         var rumble = device with { InstanceId = "HID\\VID_0DB0&PID_1902&MI_02&COL01\\RUMBLE", UsagePage = 0xFF00, Usage = 0x0001 };
         var wrongCollectionsTransport = new RecordingLedTransport(0x0411);
         var wrongCollections = CreateController([gamepad, rumble], [], wrongCollectionsTransport);
-        Assert.False(await wrongCollections.ApplyAsync(ControllerLedSettings.Default, identity, CancellationToken.None));
+        Assert.False(await wrongCollections.ApplyAsync(ControllerLedSettings.Default, identity, "msi.claw.cg3em", CancellationToken.None));
         Assert.Empty(wrongCollectionsTransport.Writes);
-        Assert.False(MsiClawLedProtocol.TryResolveRgbAddress(0x0230, out _));
+        Assert.True(MsiClawLedProtocol.TryResolveRgbAddress(0x0230, out var a2vmAddress));
+        Assert.Equal((ushort)0x024A, a2vmAddress);
+    }
+
+    [Theory]
+    [InlineData("msi.claw.cg3em")]
+    [InlineData("msi.claw.a2vm.7")]
+    [InlineData("unknown")]
+    public async Task Firmware_0230_static_writes_are_rejected_for_every_model_except_A2VM8(string modelId)
+    {
+        var device = ControlDevice(Guid.NewGuid(), "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_A");
+        var transport = new RecordingLedTransport(0x0230);
+        var controller = CreateController([device], [new("exact-control-path", device.InstanceId, device.ContainerId)], transport);
+
+        Assert.False(await controller.ApplyAsync(ControllerLedSettings.Default, MsiClawPhysicalIdentity.From(device), modelId, CancellationToken.None));
+        Assert.Empty(transport.Writes);
+    }
+
+    [Fact]
+    public async Task A2VM8_firmware_0230_uses_the_existing_four_write_static_path()
+    {
+        var device = ControlDevice(Guid.NewGuid(), "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_A");
+        var transport = new RecordingLedTransport(0x0230);
+        var controller = CreateController([device], [new("exact-control-path", device.InstanceId, device.ContainerId)], transport);
+        var settings = new ControllerLedSettings(true, 100, 0x12, 0x34, 0x56);
+
+        Assert.True(await controller.ApplyAsync(settings, MsiClawPhysicalIdentity.From(device), "msi.claw.a2vm.8", CancellationToken.None));
+        Assert.Equal(4, transport.Writes.Count);
+        Assert.All(transport.Writes, write => Assert.Equal(64, write.Bytes.Length));
+        Assert.Equal(new[] { 0x024A, 0x026A, 0x0285, 0x02A0 }, transport.Writes.Select(write => write.Bytes[6] * 256 + write.Bytes[7]));
+        Assert.Equal(0x01, transport.Writes[0].Bytes[10]);
+        Assert.Equal(0x09, transport.Writes[0].Bytes[11]);
+        Assert.Equal(0x03, transport.Writes[0].Bytes[12]);
+        Assert.Equal(100, transport.Writes[0].Bytes[13]);
+        Assert.All(transport.Writes, packet => Assert.Equal(0x21, packet.Bytes[4]));
+        var frame = Enumerable.Range(0, 9).SelectMany(_ => new byte[] { 0x12, 0x34, 0x56 }).ToArray();
+        Assert.Equal(frame, transport.Writes[0].Bytes[14..41]);
+        Assert.All(transport.Writes.Skip(1), packet => Assert.Equal(frame, packet.Bytes[9..36]));
+        Assert.Equal(4, transport.Writes.Count);
     }
 
     [Fact]
@@ -158,6 +195,14 @@ public sealed class ControllerLedTests : IDisposable
         Assert.Equal((byte)0x64, parsed.Brightness);
         Assert.Equal(27, parsed.RgbBytes.Length);
 
+        var observedA2vmResponse = CandidateProfileReadResponse(effect: 0x04);
+        Assert.Equal(MsiClawLedProtocol.CandidateReadParseOutcome.CandidateReadbackParsed,
+            MsiClawLedProtocol.ParseA2vm230CandidateProfileReadResponse(observedA2vmResponse, out var observed));
+        Assert.Equal((byte)0x04, observed.Effect);
+        Assert.Equal((byte)0x03, observed.Speed);
+        Assert.Equal((byte)0x64, observed.Brightness);
+        Assert.Equal(27, observed.RgbBytes.Length);
+
         var wrongReportId = valid.ToArray();
         wrongReportId[0] = 0x11;
         Assert.Equal(MsiClawLedProtocol.CandidateReadParseOutcome.UnexpectedReport,
@@ -166,6 +211,18 @@ public sealed class ControllerLedTests : IDisposable
         wrongCommand[4] = 0x21;
         Assert.Equal(MsiClawLedProtocol.CandidateReadParseOutcome.UnexpectedReport,
             MsiClawLedProtocol.ParseA2vm230CandidateProfileReadResponse(wrongCommand, out _));
+        var wrongMarker = valid.ToArray();
+        wrongMarker[3] = 0x3D;
+        Assert.Equal(MsiClawLedProtocol.CandidateReadParseOutcome.UnexpectedReport,
+            MsiClawLedProtocol.ParseA2vm230CandidateProfileReadResponse(wrongMarker, out _));
+        var wrongReservedField = valid.ToArray();
+        wrongReservedField[9] = 0x01;
+        Assert.Equal(MsiClawLedProtocol.CandidateReadParseOutcome.UnexpectedReport,
+            MsiClawLedProtocol.ParseA2vm230CandidateProfileReadResponse(wrongReservedField, out _));
+        var wrongHeaderConstant = valid.ToArray();
+        wrongHeaderConstant[11] = 0x08;
+        Assert.Equal(MsiClawLedProtocol.CandidateReadParseOutcome.UnexpectedReport,
+            MsiClawLedProtocol.ParseA2vm230CandidateProfileReadResponse(wrongHeaderConstant, out _));
         Assert.Equal(MsiClawLedProtocol.CandidateReadParseOutcome.UnexpectedReport,
             MsiClawLedProtocol.ParseA2vm230CandidateProfileReadResponse(valid[..63], out _));
 
@@ -185,7 +242,7 @@ public sealed class ControllerLedTests : IDisposable
         var identity = MsiClawPhysicalIdentity.From(device);
         var transport = new RecordingLedTransport(0x0230)
         {
-            WriteAndReadResult = new(true, [CandidateProfileReadResponse()])
+            WriteAndReadResult = new(true, [CandidateProfileReadResponse(effect: 0x04)])
         };
         var controller = CreateController([device], [new("exact-control-path", device.InstanceId, device.ContainerId)], transport);
 
@@ -194,6 +251,9 @@ public sealed class ControllerLedTests : IDisposable
 
         Assert.Equal(MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed, result.Outcome);
         Assert.Equal((ushort)0x0230, result.FirmwareVersion);
+        Assert.Equal((byte)0x04, result.Effect);
+        Assert.Equal((byte)0x03, result.Speed);
+        Assert.Equal((byte)0x64, result.Brightness);
         Assert.True(result.ReadResponseValid);
         Assert.Equal("exact-control-path", transport.ReadRequestPath);
         Assert.Equal(MsiClawLedProtocol.BuildA2vm230CandidateProfileReadRequest(), transport.ReadRequest);
@@ -348,23 +408,21 @@ public sealed class ControllerLedTests : IDisposable
         Assert.Empty(ownerTransport.Writes);
     }
 
-    [Fact]
-    public async Task Exact_owned_control_hid_gets_four_ordered_writes_and_stops_on_failure()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public async Task Static_writer_stops_at_the_first_failed_packet(int failAtWrite)
     {
         var device = ControlDevice(Guid.NewGuid(), "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_A");
         var identity = MsiClawPhysicalIdentity.From(device);
-        var transport = new RecordingLedTransport(0x0411);
+        var transport = new RecordingLedTransport(0x0230) { FailAtWrite = failAtWrite };
         var controller = CreateController([device], [new("exact-control-path", device.InstanceId, device.ContainerId)], transport);
 
-        Assert.True(await controller.ApplyAsync(new(true, 50, 1, 2, 3), identity, CancellationToken.None));
-        Assert.Equal(4, transport.Writes.Count);
+        Assert.False(await controller.ApplyAsync(new(true, 50, 1, 2, 3), identity, "msi.claw.a2vm.8", CancellationToken.None));
+        Assert.Equal(failAtWrite, transport.Writes.Count);
         Assert.All(transport.Writes, write => Assert.Equal("exact-control-path", write.Path));
-        Assert.Equal(new[] { 0x024A, 0x026A, 0x0285, 0x02A0 }, transport.Writes.Select(write => write.Bytes[6] * 256 + write.Bytes[7]));
-
-        var failing = new RecordingLedTransport(0x0411) { FailAtWrite = 2 };
-        var failureController = CreateController([device], [new("exact-control-path", device.InstanceId, device.ContainerId)], failing);
-        Assert.False(await failureController.ApplyAsync(ControllerLedSettings.Default, identity, CancellationToken.None));
-        Assert.Equal(2, failing.Writes.Count);
     }
 
     [Fact]
@@ -440,7 +498,7 @@ public sealed class ControllerLedTests : IDisposable
         0xFFF0,
         0x0040);
 
-    private static byte[] CandidateProfileReadResponse()
+    private static byte[] CandidateProfileReadResponse(byte effect = 0x01)
     {
         var response = new byte[64];
         response[0] = 0x10;
@@ -451,8 +509,8 @@ public sealed class ControllerLedTests : IDisposable
         response[7] = 0x4A;
         response[8] = 0x20;
         response[9] = 0x00;
-        response[10] = 0x01;
-        response[11] = 0x01;
+        response[10] = effect;
+        response[11] = 0x09;
         response[12] = 0x03;
         response[13] = 0x64;
         for (var index = 14; index < 41; index++) response[index] = (byte)(index - 14);
