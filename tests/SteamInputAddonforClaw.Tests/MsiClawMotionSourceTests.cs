@@ -2,6 +2,7 @@ using System.Diagnostics;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
+using SteamInputAddonforClaw.Hosting;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -10,6 +11,34 @@ public sealed class MsiClawMotionSourceTests
 {
     private const string MotionType = "E83AF229-8640-4D18-A213-E22675EBB2C3";
     private const string A2VmGyroDeviceId = @"\\?\ACPI#INTC0AC2#VID_8087&PID_0AC2#0";
+
+    [Fact]
+    public void Motion_readers_are_off_without_healthy_owned_Steam_Deck_presentation()
+    {
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(false, AddonPresentationKind.SteamDeck, false));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, null, false));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, true));
+    }
+
+    [Fact]
+    public void Bpm_only_Steam_Deck_presentation_runs_motion_readers_without_a_running_game()
+    {
+        // BPM has RunningAppId == 0; the committed Steam Deck presentation is the activation fact.
+        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false));
+    }
+
+    [Fact]
+    public void Active_Steam_game_Steam_Deck_presentation_runs_motion_readers()
+    {
+        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false));
+    }
+
+    [Fact]
+    public void Transition_back_to_Xbox360_disables_motion_readers()
+    {
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false));
+    }
 
     [Theory]
     [InlineData("msi.claw.a2vm.7")]
@@ -285,7 +314,7 @@ public sealed class MsiClawMotionSourceTests
     }
 
     [Fact]
-    public void Host_starts_motion_only_after_owned_live_input_and_stops_it_at_existing_lifecycle_boundaries()
+    public void Host_starts_motion_only_after_a_committed_Steam_Deck_presentation_and_stops_at_lifecycle_boundaries()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
@@ -293,9 +322,11 @@ public sealed class MsiClawMotionSourceTests
 
         var owned = host.IndexOf("if (!acquired.IsOwned)", StringComparison.Ordinal);
         var live = host.IndexOf("if (source is null || !source.IsRunning)", owned, StringComparison.Ordinal);
-        var motionStart = host.IndexOf("await StartMotionSourceAsync(\"Startup\")", live, StringComparison.Ordinal);
-        var firstPresentation = host.IndexOf("AttachInitialAsync", motionStart, StringComparison.Ordinal);
-        Assert.True(owned >= 0 && live > owned && motionStart > live && firstPresentation > motionStart);
+        var sourceCreated = host.IndexOf("_motionSource = new MsiClawMotionSource(motionModel)", live, StringComparison.Ordinal);
+        var firstPresentation = host.IndexOf("AttachInitialAsync", sourceCreated, StringComparison.Ordinal);
+        var motionReconcile = host.IndexOf("await ReconcileMotionReadersAsync(\"StartupPresentation\")", firstPresentation, StringComparison.Ordinal);
+        Assert.True(owned >= 0 && live > owned && sourceCreated > live && firstPresentation > sourceCreated && motionReconcile > firstPresentation);
+        Assert.DoesNotContain("await StartMotionSourceAsync(\"Startup\")", host, StringComparison.Ordinal);
         Assert.True(
             host.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal)
             < host.IndexOf("var acquired = await owner.AcquireAsync", StringComparison.Ordinal),
@@ -309,14 +340,16 @@ public sealed class MsiClawMotionSourceTests
         Assert.True(loss >= 0 && lossInvalidation > loss && lossRecovery > lossInvalidation);
 
         var suspend = host.IndexOf("private async Task<bool> QuiesceFull1902PresentationForSuspendAsync", StringComparison.Ordinal);
-        var suspendStop = host.IndexOf("await StopMotionSourceAsync(\"Suspend\")", suspend, StringComparison.Ordinal);
+        var suspendInvalidation = host.IndexOf("_motionSource?.InvalidateAndCancel();", suspend, StringComparison.Ordinal);
         var presentationPause = host.IndexOf("PauseForSuspendAsync", suspend, StringComparison.Ordinal);
-        Assert.True(suspend >= 0 && suspendStop > suspend && presentationPause > suspendStop);
+        var suspendStop = host.IndexOf("await StopMotionSourceAsync(\"Suspend\")", suspend, StringComparison.Ordinal);
+        Assert.True(suspend >= 0 && suspendInvalidation > suspend && presentationPause > suspendInvalidation && suspendStop > presentationPause);
 
         var resume = host.IndexOf("private void OnPowerResumeObserved()", StringComparison.Ordinal);
         var resumeStop = host.IndexOf("StopMotionSourceAsync(\"PowerResume\")", resume, StringComparison.Ordinal);
-        var resumeStart = host.IndexOf("RestartMotionSourceAfterResumeAsync(motionStop)", resume, StringComparison.Ordinal);
-        Assert.True(resume >= 0 && resumeStop > resume && resumeStart > resumeStop);
+        var presentationReconcile = host.IndexOf("RequestControllerPresentationReconcile(\"PowerResume\")", resume, StringComparison.Ordinal);
+        Assert.True(resume >= 0 && resumeStop > resume && presentationReconcile > resumeStop);
+        Assert.DoesNotContain("RestartMotionSourceAfterResumeAsync", host, StringComparison.Ordinal);
 
         var stockRelease = host.IndexOf("await DisposeMotionSourceAsync(\"CenterMAuthorityRelease\")", StringComparison.Ordinal);
         var stockOwnerRelease = host.IndexOf("return await owner.ReleaseForCenterMEnableAsync(token)", stockRelease, StringComparison.Ordinal);

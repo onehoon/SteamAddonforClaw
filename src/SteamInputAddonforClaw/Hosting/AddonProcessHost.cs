@@ -986,7 +986,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             {
                 _motionModel = motionModel;
                 _motionSource = new MsiClawMotionSource(motionModel);
-                await StartMotionSourceAsync("Startup").ConfigureAwait(false);
             }
 
             // The LED is part of physical PID1902 ownership, not VIIPER presentation. Apply the
@@ -1018,6 +1017,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var presentationResult = await presentation.AttachInitialAsync(source, snapshot, _startupCancellationTokenSource.Token).ConfigureAwait(false);
             AppLog.Info("ControllerPresentation", "First presentation attach completed.",
                 ("Succeeded", presentationResult.Succeeded), ("Presentation", presentationResult.Presentation?.ToString() ?? "None"), ("Reason", presentationResult.Reason));
+            await ReconcileMotionReadersAsync("StartupPresentation").ConfigureAwait(false);
 
             // Full1902 A2 section 7: the feature-local OEM1/WING front-button action path is composed
             // against the now-existing Full1902 presentation owner -- never AddonRoutingRuntime. Pulse
@@ -1203,7 +1203,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private async Task StartMotionSourceAsync(string trigger)
     {
-        if (!IsHealthyOwnedMotionSession())
+        if (!ShouldRunMotionReaders())
             return;
 
         if (_motionModel is not { } model
@@ -1220,10 +1220,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return;
             }
 
-            AppLog.Info("ControllerMotion", "Motion reader start was accepted after healthy physical ownership proof.",
+            AppLog.Info("ControllerMotion", "Motion reader start was accepted for the active Steam Deck presentation.",
                 ("Event", "MotionSourceStartAccepted"), ("Model", model.Value), ("Trigger", trigger));
-            if (!IsHealthyOwnedMotionSession())
-                await StopMotionSourceAsync("OwnershipNoLongerHealthy").ConfigureAwait(false);
+            if (!ShouldRunMotionReaders())
+                await StopMotionSourceAsync("MotionReaderGateClosed").ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -1289,6 +1289,28 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         return true;
     }
+
+    private bool ShouldRunMotionReaders()
+    {
+        var presentation = _presentationOwnership;
+        return ShouldRunMotionReaders(
+            IsHealthyOwnedMotionSession(),
+            presentation?.ActivePresentation,
+            presentation?.IsSuspendPaused ?? false);
+    }
+
+    internal static bool ShouldRunMotionReaders(
+        bool hasHealthyOwnedMotionSession,
+        Devices.MSI.Claw.AddonPresentationKind? activePresentation,
+        bool isSuspendPaused) =>
+        hasHealthyOwnedMotionSession
+        && !isSuspendPaused
+        && activePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck;
+
+    private Task ReconcileMotionReadersAsync(string trigger) =>
+        ShouldRunMotionReaders()
+            ? StartMotionSourceAsync(trigger)
+            : StopMotionSourceAsync(trigger);
 
     private SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator GetMsiControllerDevices() =>
         _msiControllerDevices ??= new SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator();
@@ -1424,7 +1446,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ("Trigger", trigger), ("Result", logResult), ("Reason", result.Reason),
                 ("PrimaryHiddenTarget", result.PrimaryHiddenTarget ?? "None"), ("HiddenTargetCount", result.HiddenTargets.Count));
             if (result.IsOwned)
-                _ = StartMotionSourceAsync("PhysicalRecovery");
+                _ = ReconcileMotionReadersAsync("PhysicalRecovery");
 
             // 11: raw Steam/BPM state may have changed while input was down and PR7 correctly refused
             // forward mutation on a non-running source. Re-run the existing reconcile exactly once.
@@ -2898,6 +2920,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Error("ControllerPresentation", "Runtime presentation reconcile threw; Runtime remains available.", exception, ("Trigger", trigger));
         }
+        finally
+        {
+            await ReconcileMotionReadersAsync("PresentationReconcile:" + trigger).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Full1902 Suspend/Resume section 5 / review addendum A.2: the one narrow host-side
@@ -2911,19 +2937,24 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return true;
 
         _motionSource?.InvalidateAndCancel();
-        await StopMotionSourceAsync("Suspend").ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0)
+                return true;
 
-        if (Volatile.Read(ref _processShutdownStarted) != 0)
-            return true;
+            var presentation = _presentationOwnership;
+            if (presentation is null)
+                return true;
 
-        var presentation = _presentationOwnership;
-        if (presentation is null)
-            return true;
-
-        var pause = await presentation.PauseForSuspendAsync(cancellationToken).ConfigureAwait(false);
-        AppLog.Info("ControllerPresentation", "Full1902 suspend participant quiesced.",
-            ("Event", "PresentationSuspendPauseParticipant"), ("Outcome", pause.Outcome), ("Reason", pause.Reason), ("Safe", pause.Safe));
-        return pause.Safe;
+            var pause = await presentation.PauseForSuspendAsync(cancellationToken).ConfigureAwait(false);
+            AppLog.Info("ControllerPresentation", "Full1902 suspend participant quiesced.",
+                ("Event", "PresentationSuspendPauseParticipant"), ("Outcome", pause.Outcome), ("Reason", pause.Reason), ("Safe", pause.Safe));
+            return pause.Safe;
+        }
+        finally
+        {
+            await StopMotionSourceAsync("Suspend").ConfigureAwait(false);
+        }
     }
 
     /// <summary>Full1902 Suspend/Resume review addendum A.1: the one small host-local adapter. It is
@@ -2943,7 +2974,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
 
         _motionSource?.InvalidateAndCancel();
-        var motionStop = StopMotionSourceAsync("PowerResume");
+        _ = StopMotionSourceAsync("PowerResume");
 
         if (_xboxGameSessionRuntime is { } xboxGameSessionRuntime)
             _ = xboxGameSessionRuntime.ReconcileAfterResumeAsync();
@@ -2952,7 +2983,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // immediately -- it carries the suspend-pause release pre-step and must not wait behind the
         // unrelated 2.5 s CPU Boost / Power Mode profile settle below.
         RequestControllerPresentationReconcile("PowerResume");
-        _ = RestartMotionSourceAfterResumeAsync(motionStop);
         // A healthy DirectInput source can survive the controller's hibernate power-cycle, so the
         // physical-recovery path may not run even though firmware has restored its LED state.
         // Reapply the latest desired state once after the control HID has had a bounded settle.
@@ -2968,23 +2998,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             () => _powerModeRuntime.Reconcile(),
             () => _intelGpuMinimumClockRuntime.ReconcileAfterResume(),
             () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"));
-    }
-
-    private async Task RestartMotionSourceAfterResumeAsync(Task stopTask)
-    {
-        try
-        {
-            await stopTask.ConfigureAwait(false);
-            if (!IsHealthyOwnedMotionSession())
-                return;
-
-            await StartMotionSourceAsync("PowerResume").ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("ControllerMotion", "Motion source resume reacquisition failed; controller ownership is unaffected.", exception,
-                ("Event", "MotionSourceResumeFailed"));
-        }
     }
 
     internal static async Task ReconcilePerformanceAfterResumeAsync(

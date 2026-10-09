@@ -43,9 +43,9 @@ public sealed class AddonProcessHostResumeTests
         Assert.Contains("if (presentation is null)", quiesce);
         Assert.Contains("PauseForSuspendAsync", quiesce);
         Assert.True(
-            quiesce.IndexOf("await StopMotionSourceAsync(\"Suspend\")", StringComparison.Ordinal)
-            < quiesce.IndexOf("PauseForSuspendAsync", StringComparison.Ordinal),
-            "motion must be invalidated and its readers quiesced before the suspend presentation pause returns");
+            quiesce.IndexOf("PauseForSuspendAsync", StringComparison.Ordinal)
+            < quiesce.IndexOf("await StopMotionSourceAsync(\"Suspend\")", StringComparison.Ordinal),
+            "the presentation safety pause must complete before joining potentially blocked sensor readers");
 
         // B.1: in the reconcile entrypoint the suspend-release pre-step comes AFTER the source and
         // Win+G suppression guards, and ResetLatestStateToNeutral only runs inside that block.
