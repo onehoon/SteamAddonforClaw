@@ -164,6 +164,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // ALL further owned-controller recovery (including Device Arrival) for the rest of this Runtime
     // lifetime -- native resources may still be retained. A Runtime restart resets it.
     private int _ownedControllerRecoveryBlockedByCleanup;
+    // One Runtime-local arbitration fact for the Developer rumble re-arm and normal physical recovery.
+    // The existing physical and presentation owner gates remain the resource authorities.
+    private readonly object _controllerOwnershipOperationSync = new();
+    private int _developerRumbleRearmInProgress;
+    private int _developerRumbleRearmPresentationReconcilePending;
+    private long _controllerPowerLifecycleGeneration;
+    private Task _developerRumbleRearmTask = Task.CompletedTask;
     // PR10: one Runtime-owned, event-driven Windows Device Arrival observer. Non-null once a physical
     // owner has actually committed; it only wakes the existing recovery entrypoint, which re-proves
     // the strong MSI Claw identity itself. Disposed at BeginProcessShutdown before recovery drains.
@@ -696,6 +703,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     "The live Full1902 physical rumble path is unavailable.")),
             controllerLedProfileReadProbe: token => RunA2vmLedProfileReadProbeAsync(
                 startupResult.HardwareDeviceModel is { } ledModel ? ledModel.Value : "unknown", token),
+            runDeveloperRumbleRearm: RunDeveloperRumbleRearmAsync,
             // This is a presentation capability derived from the existing supported-hardware and
             // startup authority facts. The apply callback re-checks live authority and ownership.
             controllerLedAvailable: startupResult.HardwareSupported
@@ -1338,6 +1346,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // 15: no new recovery may be scheduled once controlled shutdown has begun.
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
 
+        if (Volatile.Read(ref _developerRumbleRearmInProgress) != 0)
+        {
+            if (!summary.CleanupSucceeded)
+                Interlocked.Exchange(ref _ownedControllerRecoveryBlockedByCleanup, 1);
+            AppLog.Info("ControllerOwnership", "Physical input completion observed while the Developer rumble re-arm owns the controller sequence.",
+                ("Event", "DeveloperRumbleRearmInputCompletionObserved"), ("StopReason", summary.StopReason),
+                ("CleanupSucceeded", summary.CleanupSucceeded));
+            return;
+        }
+
         var physical = _physicalOwnership;
         if (physical is null) return;
         // 7.2: PR5 has not committed the owned live source yet (or it was already released) -- the
@@ -1392,6 +1410,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnControllerDeviceArrived()
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        if (Volatile.Read(ref _developerRumbleRearmInProgress) != 0)
+        {
+            AppLog.Debug("ControllerOwnership", "Device arrival is owned by the Developer rumble re-arm sequence.",
+                ("Event", "DeveloperRumbleRearmDeviceArrivalSuppressed"));
+            return;
+        }
         // 7.4 continued: an unproven prior DirectInput cleanup blocks recovery for the rest of this
         // Runtime lifetime -- a Device Arrival is only a trigger and must never bypass that rule.
         if (Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0)
@@ -1417,22 +1441,31 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// gate remains the serialization authority.</summary>
     private void RequestOwnedControllerRecovery(Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical, string trigger)
     {
-        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
-
-        // Coalesce concurrent triggers to one in-flight attempt. A real Device Arrival that lands
-        // while an attempt is still inside its bounded settle window must NOT be dropped (PR10
-        // section 8.2): retain a single pending-arrival bit and consume it for exactly one follow-up
-        // once the current attempt finishes, if the source is still down. No epoch/manager.
-        if (!_ownedControllerRecovery.IsCompleted)
+        lock (_controllerOwnershipOperationSync)
         {
-            if (trigger == "DeviceArrival")
-                Interlocked.Exchange(ref _pendingOwnedControllerArrival, 1);
-            return;
-        }
+            if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+            if (_developerRumbleRearmInProgress != 0)
+            {
+                AppLog.Debug("ControllerOwnership", "Automatic recovery suppressed while the Developer rumble re-arm owns the stopped source.",
+                    ("Event", "DeveloperRumbleRearmRecoverySuppressed"), ("Trigger", trigger));
+                return;
+            }
 
-        AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.",
-            ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", trigger));
-        _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, trigger, _startupCancellationTokenSource.Token);
+            // Coalesce concurrent triggers to one in-flight attempt. A real Device Arrival that lands
+            // while an attempt is still inside its bounded settle window must NOT be dropped (PR10
+            // section 8.2): retain a single pending-arrival bit and consume it for exactly one follow-up
+            // once the current attempt finishes, if the source is still down. No epoch/manager.
+            if (!_ownedControllerRecovery.IsCompleted)
+            {
+                if (trigger == "DeviceArrival")
+                    Interlocked.Exchange(ref _pendingOwnedControllerArrival, 1);
+                return;
+            }
+
+            AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.",
+                ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", trigger));
+            _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, trigger, _startupCancellationTokenSource.Token);
+        }
     }
 
     private async Task RecoverOwnedControllerPhysicalInputAsync(
@@ -1678,6 +1711,222 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _presentationOwnership is { } presentation
             ? presentation.StopXbox360RumbleLoopDiagnosticAsync(cancellationToken)
             : Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
+
+    internal Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        TaskCompletionSource<FrontendDeveloperRumbleRearmResult> completion;
+        long powerGeneration;
+        lock (_controllerOwnershipOperationSync)
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0)
+                return Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable("The Runtime is shutting down."));
+            if (_developerRumbleRearmInProgress != 0)
+                return Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable("A developer rumble re-arm operation is already running."));
+            if (!_ownedControllerRecovery.IsCompleted)
+                return Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable("Owned controller recovery is already running."));
+
+            _developerRumbleRearmInProgress = 1;
+            powerGeneration = Volatile.Read(ref _controllerPowerLifecycleGeneration);
+            completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _developerRumbleRearmTask = completion.Task;
+        }
+
+        _ = CompleteDeveloperRumbleRearmAsync(completion, powerGeneration);
+        return completion.Task;
+    }
+
+    private async Task CompleteDeveloperRumbleRearmAsync(
+        TaskCompletionSource<FrontendDeveloperRumbleRearmResult> completion,
+        long powerGeneration)
+    {
+        FrontendDeveloperRumbleRearmResult result;
+        try { result = await RunDeveloperRumbleRearmCoreAsync(powerGeneration).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Error("ControllerOwnership", "Developer rumble re-arm coordinator failed unexpectedly.", exception,
+                ("Event", "DeveloperRumbleRearmFailed"), ("PhysicalMotorEffectVerified", false));
+            result = new(FrontendDeveloperRumbleRearmOutcome.Failed,
+                "The re-arm operation failed unexpectedly. See the application log.", false, false, false, false, false);
+        }
+        finally
+        {
+            lock (_controllerOwnershipOperationSync)
+            {
+                _developerRumbleRearmInProgress = 0;
+            }
+        }
+
+        var presentationReconcilePending = Interlocked.Exchange(ref _developerRumbleRearmPresentationReconcilePending, 0) != 0;
+        if ((result.Outcome == FrontendDeveloperRumbleRearmOutcome.Completed
+                && Volatile.Read(ref _controllerPowerLifecycleGeneration) == powerGeneration
+                || presentationReconcilePending && result.PhysicalOwnershipRestored)
+            && Volatile.Read(ref _processShutdownStarted) == 0)
+            RequestControllerPresentationReconcile("DeveloperRumbleRearmFinished");
+        completion.TrySetResult(result);
+    }
+
+    private async Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmCoreAsync(long powerGeneration)
+    {
+        await _visibleSurfaceTransition.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            var admissionFailure = GetDeveloperRumbleRearmAdmissionFailure(powerGeneration);
+            if (admissionFailure is not null)
+            {
+                AppLog.Info("ControllerOwnership", "Developer rumble re-arm was unavailable before presentation retirement.",
+                    ("Event", "DeveloperRumbleRearmUnavailable"), ("Reason", admissionFailure), ("ModeWriteIssued", false));
+                return FrontendDeveloperRumbleRearmResult.Unavailable(admissionFailure);
+            }
+
+            var physical = _physicalOwnership!;
+            var presentation = _presentationOwnership!;
+            var physicalAdmissionFailure = await physical.CheckDeveloperRumbleRearmAdmissionAsync().ConfigureAwait(false);
+            if (physicalAdmissionFailure is not null)
+            {
+                AppLog.Info("ControllerOwnership", "Developer rumble re-arm was unavailable before presentation retirement.",
+                    ("Event", "DeveloperRumbleRearmUnavailable"), ("Reason", physicalAdmissionFailure), ("ModeWriteIssued", false));
+                return FrontendDeveloperRumbleRearmResult.Unavailable(physicalAdmissionFailure);
+            }
+
+            var sourceIdentity = physical.CurrentIdentity!;
+            var model = _startupResult!.HardwareDeviceModel!.Value;
+            var primaryTarget = physical.OwnedPrimaryHiddenTarget!;
+            AppLog.Info("ControllerOwnership", "Developer rumble re-arm requested.",
+                ("Event", "DeveloperRumbleRearmStarted"), ("Model", model.Value), ("Firmware", "Unknown"),
+                ("StartingMode", "DirectInput/PID1902"), ("PhysicalSessionGeneration", physical.CurrentSessionGeneration),
+                ("Presentation", presentation.ActivePresentation?.ToString() ?? "None"),
+                ("PrimaryHiddenTarget", primaryTarget), ("PhysicalIdentity", sourceIdentity.PhysicalIdentity));
+
+            await StopMotionSourceAsync("DeveloperRumbleRearm").ConfigureAwait(false);
+            var presentationResult = await presentation.RunDeveloperRumbleRearmAsync(
+                async () =>
+                {
+                    var result = await physical.RunDeveloperRumbleRearmAsync(() =>
+                    {
+                        lock (_controllerOwnershipOperationSync)
+                        {
+                            if (_developerRumbleRearmInProgress == 0
+                                || Volatile.Read(ref _processShutdownStarted) != 0
+                                || Volatile.Read(ref _controllerPowerLifecycleGeneration) != powerGeneration
+                                || _overlayCaptureActive
+                                || _overlayController.IsVisible
+                                || _centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled)
+                                return false;
+                            return true;
+                        }
+                    }).ConfigureAwait(false);
+
+                    if (result.Reason.StartsWith("DirectInputCleanupUnproven", StringComparison.Ordinal))
+                        Interlocked.Exchange(ref _ownedControllerRecoveryBlockedByCleanup, 1);
+
+                    // Feature-local settings failures are logged by their production helpers and
+                    // cannot demote safely recovered physical ownership.
+                    if (result.Succeeded)
+                    {
+                        var settings = _runtimeStartupSettings;
+                        if (settings is not null)
+                        {
+                            await ApplyOwnedControllerLedSettingsAsync(settings.ControllerLed, CancellationToken.None).ConfigureAwait(false);
+                            _ = await ApplyOwnedControllerVibrationSettingsAsync(
+                                settings.ControllerVibration, "DeveloperRumbleRearm", CancellationToken.None).ConfigureAwait(false);
+                        }
+                    }
+                    return result;
+                },
+                () => physical.LiveInputSource,
+                () => _runtimeHost!.CapturePresentationSnapshot(),
+                () => Volatile.Read(ref _processShutdownStarted) == 0
+                    && Volatile.Read(ref _controllerPowerLifecycleGeneration) == powerGeneration
+                    && !_overlayCaptureActive
+                    && !_overlayController.IsVisible
+                    && _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled);
+
+            var physicalResult = presentationResult.PhysicalResult;
+            var xInputVerified = physicalResult?.XInputTransitionVerified == true;
+            var directInputVerified = physicalResult?.DirectInputTransitionVerified == true;
+            var ownershipRestored = physicalResult?.PhysicalOwnershipRestored == true;
+            FrontendDeveloperRumbleRearmResult frontendResult;
+            if (presentationResult.Unavailable || physicalResult?.Outcome == DeveloperRumbleRearmPhysicalOutcome.Unavailable)
+            {
+                frontendResult = new(FrontendDeveloperRumbleRearmOutcome.Unavailable,
+                    "Unavailable: " + presentationResult.Reason + (physicalResult is null ? string.Empty : "; " + physicalResult.Reason),
+                    xInputVerified, directInputVerified, ownershipRestored,
+                    presentationResult.PresentationRestored, false);
+            }
+            else if (!presentationResult.Succeeded)
+            {
+                frontendResult = new(FrontendDeveloperRumbleRearmOutcome.Failed,
+                    "Failed: " + (physicalResult?.Reason ?? presentationResult.Reason) + ". See the application log.",
+                    xInputVerified, directInputVerified, ownershipRestored,
+                    presentationResult.PresentationRestored, false);
+            }
+            else
+            {
+                frontendResult = new(FrontendDeveloperRumbleRearmOutcome.Completed,
+                    "Mode cycle and controller restoration completed. Physical motor vibration is NOT verified: go to Controller > Vibration Strength and run Left Test / Right Test.",
+                    true, true, true, true, false);
+            }
+
+            AppLog.Info("ControllerOwnership", frontendResult.Succeeded
+                    ? "Developer rumble re-arm completed."
+                    : frontendResult.Outcome == FrontendDeveloperRumbleRearmOutcome.Unavailable
+                        ? "Developer rumble re-arm unavailable."
+                        : "Developer rumble re-arm failed.",
+                ("Event", frontendResult.Succeeded ? "DeveloperRumbleRearmCompleted"
+                    : frontendResult.Outcome == FrontendDeveloperRumbleRearmOutcome.Unavailable
+                        ? "DeveloperRumbleRearmUnavailable" : "DeveloperRumbleRearmFailed"),
+                ("Outcome", frontendResult.Outcome), ("Reason", physicalResult?.Reason ?? presentationResult.Reason),
+                ("XInputTransitionVerified", frontendResult.XInputTransitionVerified),
+                ("DirectInputTransitionVerified", frontendResult.DirectInputTransitionVerified),
+                ("PhysicalOwnershipRestored", frontendResult.PhysicalOwnershipRestored),
+                ("PresentationRestored", frontendResult.PresentationRestored), ("PhysicalMotorEffectVerified", false));
+            return frontendResult;
+        }
+        finally { _visibleSurfaceTransition.Release(); }
+    }
+
+    private string? GetDeveloperRumbleRearmAdmissionFailure(long powerGeneration)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0 || Volatile.Read(ref _runtimeShutdownPrepared) != 0)
+            return "RuntimeShuttingDown";
+        if (_runtimeInitialized == 0 || _startupOutcome != AddonProcessStartupOutcome.RuntimeReady || _runtimeHost is null)
+            return "RuntimeNotReady";
+        if (_startupResult?.HardwareDeviceModel is not { Value: "msi.claw.a2vm.8" })
+            return "SupportedModelIsA2vm8Only";
+        if (_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled)
+            return "CenterMAuthorityNotDisabled";
+        if (Volatile.Read(ref _disabledControllerStartupPending) != 0)
+            return "ControllerStartupStillPending";
+        if (Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0)
+            return "PriorDirectInputCleanupUnproven";
+        if (!_ownedControllerRecovery.IsCompleted)
+            return "OwnedControllerRecoveryAlreadyRunning";
+        if (!_presentationReconcile.IsCompleted)
+            return "PresentationTransitionAlreadyRunning";
+        if (Volatile.Read(ref _controllerPowerLifecycleGeneration) != powerGeneration)
+            return "PowerLifecycleChanged";
+        if (_overlayCaptureActive || _overlayController.IsVisible)
+            return "OverlayCaptureActive";
+
+        var presentation = _presentationOwnership;
+        if (presentation is null || presentation.IsOverlayPaused || presentation.IsSuspendPaused)
+            return "PresentationLifecyclePaused";
+        var physical = _physicalOwnership;
+        if (physical is null || physical.LiveInputSource is not { IsRunning: true })
+            return "OwnedDirectInputSourceUnavailable";
+        if (physical.OwnedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong } identity
+            || identity.VendorId != MsiClawHardware.VendorId
+            || identity.ProductId != MsiClawHardware.DirectInputProductId)
+            return "StrongPid1902IdentityUnavailable";
+        if (physical.OwnedPrimaryHiddenTarget is not { } target
+            || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(target)
+            || physical.CurrentIdentity is not { } current
+            || !string.Equals(current.PnpInstanceId, target, StringComparison.OrdinalIgnoreCase)
+            || physical.CurrentSessionGeneration <= 0)
+            return "ExactPrimaryPid1902TargetUnavailable";
+        return null;
+    }
 
     private Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken) =>
         _physicalOwnership?.LiveInputSource is { IsRunning: true } source
@@ -2464,7 +2713,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void BeginProcessShutdown()
     {
-        if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
+        lock (_controllerOwnershipOperationSync)
+        {
+            if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
+        }
         _motionSource?.InvalidateAndCancel();
         _ = StopMotionSourceAsync("ProcessShutdown");
         StopMsiQuickSettingsProcessStartWatcher();
@@ -2519,6 +2771,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception) { AppLog.Error("Startup", "Deferred Runtime startup work failed.", exception); }
             _deferredRuntimeStartup = null;
         }
+        try { await _developerRumbleRearmTask.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("ControllerOwnership", "Developer rumble re-arm did not complete cleanly during shutdown.", exception); }
         if (_xboxGameSessionRuntime is not null)
         {
             try { await _xboxGameSessionRuntime.DisposeAsync().ConfigureAwait(false); }
@@ -2848,6 +3102,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void RequestControllerPresentationReconcile(string trigger)
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        if (Volatile.Read(ref _developerRumbleRearmInProgress) != 0)
+        {
+            Interlocked.Exchange(ref _developerRumbleRearmPresentationReconcilePending, 1);
+            AppLog.Debug("ControllerPresentation", "Presentation reconcile deferred to the Developer rumble re-arm completion.",
+                ("Event", "DeveloperRumbleRearmPresentationReconcileSuppressed"), ("Trigger", trigger));
+            return;
+        }
         var presentation = _presentationOwnership;
         var physical = _physicalOwnership;
         if (presentation is null || physical is null) return;
@@ -2938,6 +3199,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Volatile.Read(ref _processShutdownStarted) != 0)
             return true;
 
+        lock (_controllerOwnershipOperationSync)
+            _controllerPowerLifecycleGeneration++;
+
         _motionSource?.InvalidateAndCancel();
         try
         {
@@ -2974,6 +3238,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnPowerResumeObserved()
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+
+        lock (_controllerOwnershipOperationSync)
+            _controllerPowerLifecycleGeneration++;
 
         _motionSource?.InvalidateAndCancel();
         _ = StopMotionSourceAsync("PowerResume");

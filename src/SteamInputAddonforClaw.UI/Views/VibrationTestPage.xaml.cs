@@ -14,6 +14,7 @@ public sealed partial class VibrationTestPage : UserControl
     private bool _active;
     private bool _busy;
     private bool _profileProbeBusy;
+    private bool _rearmBusy;
 
     public event EventHandler? BackRequested;
 
@@ -98,6 +99,47 @@ public sealed partial class VibrationTestPage : UserControl
 
     private async void ReadA2vmLedProfileProbe_Click(object sender, RoutedEventArgs e) =>
         await RunA2vmLedProfileReadProbeAsync();
+
+    private async void RearmRumble_Click(object sender, RoutedEventArgs e)
+    {
+        if (_frontend is null || _busy || _profileProbeBusy || _rearmBusy)
+            return;
+        if (_snapshot.State == FrontendXbox360RumbleLoopState.Running)
+        {
+            RearmRumbleStatusText.Text = "Stop the Xbox360 terminal STOP loop before re-arming controller rumble.";
+            return;
+        }
+
+        _rearmBusy = true;
+        RearmRumbleStatusText.Text = "Re-arming controller rumble. Keep games closed until the operation completes.";
+        Render(_snapshot);
+        try
+        {
+            var result = await _frontend.RunDeveloperRumbleRearmAsync();
+            RearmRumbleStatusText.Text = result.Outcome == FrontendDeveloperRumbleRearmOutcome.Completed
+                ? "Mode cycle and controller restoration completed. Physical motor vibration is NOT verified: go to Controller > Vibration Strength and run Left Test / Right Test."
+                : result.Status;
+            AppLog.Info("ControllerOwnership", "Developer rumble re-arm UI result.",
+                ("Event", result.Outcome == FrontendDeveloperRumbleRearmOutcome.Completed
+                    ? "DeveloperRumbleRearmUiCompleted" : "DeveloperRumbleRearmUiResult"),
+                ("Outcome", result.Outcome), ("XInputTransitionVerified", result.XInputTransitionVerified),
+                ("DirectInputTransitionVerified", result.DirectInputTransitionVerified),
+                ("PhysicalOwnershipRestored", result.PhysicalOwnershipRestored),
+                ("PresentationRestored", result.PresentationRestored),
+                ("PhysicalMotorEffectVerified", result.PhysicalMotorEffectVerified));
+        }
+        catch (Exception exception)
+        {
+            RearmRumbleStatusText.Text = "The re-arm operation failed. See the application log.";
+            AppLog.Warn("ControllerOwnership", "Developer rumble re-arm UI request failed.", exception,
+                ("Event", "DeveloperRumbleRearmUiFailed"), ("Reason", exception.GetType().Name));
+        }
+        finally
+        {
+            _rearmBusy = false;
+            Render(_snapshot);
+        }
+    }
 
     private async Task RunVibrationProfileProbeAsync(FrontendControllerVibrationProfileWriteProbeMode mode)
     {
@@ -199,11 +241,12 @@ public sealed partial class VibrationTestPage : UserControl
             ? snapshot.Slot is int readySlot ? $"XInput slot: {readySlot}" : string.Empty
             : $"Run: {snapshot.RunId}\nSlot: {snapshot.Slot?.ToString() ?? "Unavailable"}    Cycle: {snapshot.Cycle}    Step: {snapshot.Step}/{snapshot.StepCount}\nCurrent: {(snapshot.CurrentValue8 is int value ? $"{value}/0x{value:X2}" : "—")}    Last callback: {FormatCallback(snapshot)}";
         FailureText.Text = snapshot.FailureReason is null ? string.Empty : $"Failure: {snapshot.FailureReason}";
-        StartButton.IsEnabled = !_busy && !_profileProbeBusy && snapshot.Available && snapshot.State != FrontendXbox360RumbleLoopState.Running;
-        StopButton.IsEnabled = !_busy && !_profileProbeBusy && snapshot.State == FrontendXbox360RumbleLoopState.Running;
-        ApplyVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
-        RestoreVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
-        ReadA2vmLedProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
+        StartButton.IsEnabled = !_busy && !_profileProbeBusy && !_rearmBusy && snapshot.Available && snapshot.State != FrontendXbox360RumbleLoopState.Running;
+        StopButton.IsEnabled = !_busy && !_profileProbeBusy && !_rearmBusy && snapshot.State == FrontendXbox360RumbleLoopState.Running;
+        ApplyVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && !_rearmBusy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
+        RestoreVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && !_rearmBusy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
+        ReadA2vmLedProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && !_rearmBusy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
+        RearmRumbleButton.IsEnabled = !_profileProbeBusy && !_busy && !_rearmBusy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
     }
 
     private static string FormatCallback(FrontendXbox360RumbleLoopSnapshot snapshot) =>
