@@ -396,6 +396,34 @@ One clear location should own the model's physical-to-application transform.
 
 ---
 
+### 8.1 Post-merge physical axis/sign comparison — 2026-10-10 (A2VM vs genuine Steam Controller)
+
+**Evidence type:** Direct user observation in the **Steam client controller gyro-calibration UI**, reading the three on-screen controller rotation-arrow indicators while physically moving each device. The baseline is the user's **genuine Steam Controller**, not a software-derived SDL or assumed Steam Deck coordinate system. The compared virtual device was the Full1902 **8-inch A2VM** presenting as a **VIIPER virtual Steam Deck (28DE:1205)** after gyro PR1 #731 and native IMU PR2 #733 had been merged.
+
+**Measurement posture:** Hold the controller with its front/display facing the observer. The directions below describe how the corresponding physical edge is moved relative to the observer; signs are those observed in the Steam calibration UI.
+
+| Physical movement | Genuine Steam Controller | A2VM virtual Steam Deck | Comparison |
+|---|:---:|:---:|---|
+| Move top edge away from observer (pitch) | Negative (−) | Negative (−) | Match |
+| Move top edge toward observer (pitch) | Positive (+) | Positive (+) | Match |
+| Raise left edge (roll) | Positive (+) | Positive (+) | Match |
+| Lower left edge (roll) | Negative (−) | Negative (−) | Match |
+| Pull left edge toward observer (yaw) | Negative (−) | Negative (−) | Match |
+| Pull right edge toward observer (yaw) | Positive (+) | Positive (+) | Match |
+
+**Measured result:** All **six direction/sign observations agree**, covering the three rotation motions. The A2VM readings also returned close to zero at rest **without the user pressing manual gyro calibration**. This is practical evidence that the current A2VM-to-Steam Deck **axis assignment and sign conventions need no inversion based on this comparison**.
+
+**Scope/limitations:**
+- This compares **sign/direction** in Steam's calibration interface. It does **not** establish matching angular-velocity magnitude, sensitivity, response curve, scale calibration, latency, or accelerometer/gravity orientation.
+- A real **Steam Controller** is a different device type from the virtual **Steam Deck**. The reference confirms observed UI arrow/sign behavior, not byte-for-byte native-protocol equivalence.
+- In Addon build **0.1.350.0**, the user observed live values in Steam's calibration interface, but **gyro-to-joystick did not move the camera in Aniimo**, while the physical right stick and mouse did. Runtime/Steam logs from [A2VM 01](https://drive.google.com/drive/folders/1rESOeWcgJlDTarnn2FXZX6TRGnbi7v0H) confirmed live Steam Deck presentation / motion-source selection / successful ~250 Hz SetState calls and the game's Steam Input layout being loaded; they did **not** establish that the game consumed nonzero IMU-derived stick output. Root cause remains **open**. A genuine Steam Controller vs Aniimo functional comparison was planned but no gameplay outcome was yet reported.
+- A2VM 7-inch and EX/CG3EM physical direction/sign validation is **still pending**. Do not generalize this measurement to those devices.
+- The 2026-09-05 sections above are **historical research/design context**. The [2026-10-09 Full1902 gyro implementation plan](FULL1902_GYRO_PR1_PR2_IMPLEMENTATION_PLAN_2026-10-09.md) and current main code supersede the old pre-implementation gates; PR1 #731 and PR2 #733 are now merged.
+
+**Engineering decision:** Preserve the current PR733 axis/sign mapping. Investigate **runtime IMU value availability** and **Steam Input's game-level gyro-to-stick conversion** separately if the game remains unresponsive; do not infer that axis inversion is required.
+
+---
+
 ## 9. Zero-rate offset policy
 
 Before implementing any correction on CG3EM, capture stationary data in at least two separate sessions and preferably at different physical tilts.
