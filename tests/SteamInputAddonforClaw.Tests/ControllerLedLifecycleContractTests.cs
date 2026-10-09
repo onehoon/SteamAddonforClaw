@@ -33,6 +33,7 @@ public sealed class ControllerLedLifecycleContractTests
         Assert.Contains("physical?.LiveInputSource is not { IsRunning: true }", applyHelper, StringComparison.Ordinal);
         Assert.Contains("physical.OwnedPhysicalIdentity is not { } identity", applyHelper, StringComparison.Ordinal);
         Assert.Contains("new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver()", applyHelper, StringComparison.Ordinal);
+        Assert.Contains("_controllerVibrationStrengthClient?.ModelId ?? \"unknown\"", applyHelper, StringComparison.Ordinal);
     }
 
     [Fact]

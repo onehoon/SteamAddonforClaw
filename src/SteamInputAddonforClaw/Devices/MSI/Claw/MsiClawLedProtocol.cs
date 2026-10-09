@@ -35,7 +35,7 @@ internal static class MsiClawLedProtocol
             || response[3] != 0x3C
             || response[4] != 0x05
             || response[9] != 0x00
-            || response[10] != 0x01)
+            || response[11] != 0x09)
             return CandidateReadParseOutcome.UnexpectedReport;
 
         var address = (ushort)((response[6] << 8) | response[7]);
@@ -44,7 +44,7 @@ internal static class MsiClawLedProtocol
             || response[8] != 0x20)
             return CandidateReadParseOutcome.WrongAddressOrIndex;
 
-        readback = new(response[11], response[12], response[13], response[14..41].ToArray());
+        readback = new(response[10], response[12], response[13], response[14..41].ToArray());
         return CandidateReadParseOutcome.CandidateReadbackParsed;
     }
 
@@ -53,7 +53,7 @@ internal static class MsiClawLedProtocol
         address = firmwareVersion switch
         {
             0x0163 or 0x0211 => 0x01FA,
-            0x0166 or 0x0167 or 0x0217 or 0x0219 or 0x0308 or 0x0411 or 0x0414 or 0x0419 => 0x024A,
+            0x0166 or 0x0167 or 0x0217 or 0x0219 or 0x0230 or 0x0308 or 0x0411 or 0x0414 or 0x0419 => 0x024A,
             _ => 0
         };
         return address != 0;

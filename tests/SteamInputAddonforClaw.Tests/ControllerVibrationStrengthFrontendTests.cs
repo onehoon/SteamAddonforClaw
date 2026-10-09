@@ -94,12 +94,12 @@ public sealed class ControllerVibrationStrengthFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task Unsupported_model_and_stock_authority_preserve_saved_values_without_apply()
+    public async Task Unsupported_A2VM7_preserves_saved_values_without_apply()
     {
         var original = new ControllerVibrationSettings(25, 75);
         var (settings, store) = CreateSettings(original);
         var devices = new CountingEnumerator([]);
-        var unsupportedClient = CreateClient("msi.claw.a2vm.8", devices, new NoOpVibrationProfileIo());
+        var unsupportedClient = CreateClient("msi.claw.a2vm.7", devices, new NoOpVibrationProfileIo());
         var applyCount = 0;
         var testCount = 0;
         var control = CreateControl(
@@ -130,6 +130,70 @@ public sealed class ControllerVibrationStrengthFrontendTests : IDisposable
         Assert.True(test.Succeeded);
         Assert.Equal(1, testCount);
         Assert.Equal(0, applyCount);
+        Assert.Equal(0, devices.EnumerationCount);
+    }
+
+    [Fact]
+    public async Task A2VM8_snapshot_is_writable_under_Addon_authority_and_stock_authority_keeps_it_read_only()
+    {
+        var original = new ControllerVibrationSettings(25, 75);
+        var (settings, store) = CreateSettings(original);
+        var devices = new CountingEnumerator([]);
+        var applyCount = 0;
+        var client = CreateClient("msi.claw.a2vm.8", devices, new NoOpVibrationProfileIo());
+        var addonControl = CreateControl(
+            settings,
+            CenterM(FrontendCenterMStartupState.Disabled),
+            client,
+            apply: (pair, _) => { applyCount++; Assert.Equal(pair, store.Load().ControllerVibration); return Task.FromResult(true); });
+
+        var addonSnapshot = await addonControl.CaptureControllerVibrationStrengthAsync();
+        Assert.True(addonSnapshot.Available);
+        Assert.True(addonSnapshot.Writable);
+        Assert.Equal<int?>(original.LeftPercent, addonSnapshot.LeftPercent);
+        Assert.Equal<int?>(original.RightPercent, addonSnapshot.RightPercent);
+        Assert.True((await addonControl.SetControllerVibrationStrengthAsync(20, 80)).Succeeded);
+        Assert.Equal(1, applyCount);
+        Assert.Equal(new ControllerVibrationSettings(20, 80), store.Load().ControllerVibration);
+
+        var stockControl = CreateControl(settings, CenterM(FrontendCenterMStartupState.Enabled), client,
+            apply: (_, _) => { applyCount++; return Task.FromResult(true); });
+        var stockSnapshot = await stockControl.CaptureControllerVibrationStrengthAsync();
+        var blocked = await stockControl.SetControllerVibrationStrengthAsync(10, 90);
+
+        Assert.True(stockSnapshot.Available);
+        Assert.False(stockSnapshot.Writable);
+        Assert.Equal(FrontendControllerVibrationStrengthMutationOutcome.Unavailable, blocked.Outcome);
+        Assert.Equal(new ControllerVibrationSettings(20, 80), store.Load().ControllerVibration);
+        Assert.Equal(1, applyCount);
+        Assert.Equal(0, devices.EnumerationCount);
+    }
+
+    [Fact]
+    public async Task A2VM8_mutation_keeps_the_saved_pair_when_the_production_apply_fails()
+    {
+        var (settings, store) = CreateSettings(ControllerVibrationSettings.Default);
+        var requested = new ControllerVibrationSettings(37, 63);
+        var devices = new CountingEnumerator([]);
+        var applyCount = 0;
+        var control = CreateControl(
+            settings,
+            CenterM(FrontendCenterMStartupState.Disabled),
+            CreateClient("msi.claw.a2vm.8", devices, new NoOpVibrationProfileIo()),
+            apply: (pair, _) =>
+            {
+                applyCount++;
+                Assert.Equal(requested, pair);
+                Assert.Equal(requested, store.Load().ControllerVibration);
+                return Task.FromResult(false);
+            });
+
+        var result = await control.SetControllerVibrationStrengthAsync(requested.LeftPercent, requested.RightPercent);
+
+        Assert.Equal(FrontendControllerVibrationStrengthMutationOutcome.Failed, result.Outcome);
+        Assert.Equal(requested, store.Load().ControllerVibration);
+        Assert.Equal(requested, settings.ControllerVibration);
+        Assert.Equal(1, applyCount);
         Assert.Equal(0, devices.EnumerationCount);
     }
 
@@ -172,7 +236,7 @@ public sealed class ControllerVibrationStrengthFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task A2vm_probe_status_keeps_effect_unverified_and_surfaces_failed_restore()
+    public async Task A2vm_probe_status_distinguishes_transport_acceptance_from_verified_effect_and_surfaces_failed_restore()
     {
         var device = CreateControlDevice();
         var identity = MsiClawPhysicalIdentity.From(device);
@@ -186,7 +250,8 @@ public sealed class ControllerVibrationStrengthFrontendTests : IDisposable
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
 
         Assert.Equal(FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded, apply.Outcome);
-        Assert.Contains("physical effect has not yet been verified on A2VM", apply.Status, StringComparison.Ordinal);
+        Assert.Contains("0% / 100% motor asymmetry was physically observed on A2VM 8", apply.Status, StringComparison.Ordinal);
+        Assert.Contains("this probe result confirms HID transport only", apply.Status, StringComparison.Ordinal);
         Assert.DoesNotContain("CG3EM", apply.Status, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, applyIo.WriteCount);
 

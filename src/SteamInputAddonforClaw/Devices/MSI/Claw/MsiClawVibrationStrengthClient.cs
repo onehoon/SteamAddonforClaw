@@ -190,9 +190,8 @@ internal sealed class MsiClawVibrationStrengthClient
                 ("Left", pair.Value.Left),
                 ("Right", pair.Value.Right),
                 ("SyncToRom", false),
-                ("PhysicalEffectVerified", false),
-                ("ProductionEnabled", false),
-                ("VerifiedForProduction", false));
+                ("PhysicalEffectVerifiedByThisProbe", false),
+                ("ThisWriteIsProductionApply", false));
 
             var transportSucceeded = await _io.WriteAsync(device, report, cancellationToken).ConfigureAwait(false);
             AppLog.Info("ControllerVibration", "ControllerVibrationProfileWriteProbeCompleted",
@@ -200,10 +199,9 @@ internal sealed class MsiClawVibrationStrengthClient
                 ("Left", pair.Value.Left),
                 ("Right", pair.Value.Right),
                 ("TransportSucceeded", transportSucceeded),
-                ("PhysicalEffectVerified", false),
-                ("ProductionEnabled", false),
-                ("SyncToRom", false),
-                ("VerifiedForProduction", false));
+                ("PhysicalEffectVerifiedByThisProbe", false),
+                ("ThisWriteIsProductionApply", false),
+                ("SyncToRom", false));
 
             return transportSucceeded
                 ? DiagnosticProbeResult(mode, MsiClawVibrationProfileWriteProbeOutcome.Succeeded,
@@ -222,10 +220,9 @@ internal sealed class MsiClawVibrationStrengthClient
                 ("Left", pair.Value.Left),
                 ("Right", pair.Value.Right),
                 ("TransportSucceeded", false),
-                ("PhysicalEffectVerified", false),
-                ("ProductionEnabled", false),
+                ("PhysicalEffectVerifiedByThisProbe", false),
+                ("ThisWriteIsProductionApply", false),
                 ("SyncToRom", false),
-                ("VerifiedForProduction", false),
                 ("Reason", exception.GetType().Name));
             return DiagnosticProbeResult(mode, MsiClawVibrationProfileWriteProbeOutcome.Failed,
                 pair.Value.Left, pair.Value.Right, exception.GetType().Name);

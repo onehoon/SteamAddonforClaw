@@ -1401,10 +1401,13 @@ public sealed class UiArchitectureTests
         Assert.Contains("Vibration Profile 0/100 Probe", page, StringComparison.Ordinal);
         Assert.Contains("Developer-only physical hardware mutation. No SyncToROM is sent.", page, StringComparison.Ordinal);
         Assert.Contains("press Left Test once, then Right Test once", page, StringComparison.Ordinal);
+        Assert.Contains("0% / 100% motor asymmetry was physically observed on A2VM 8 firmware 0x0230", page, StringComparison.Ordinal);
+        Assert.Contains("this probe only reports HID transport for the current command", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("A successful HID write does not prove a physical motor effect", page, StringComparison.Ordinal);
         Assert.Contains("Content=\"Apply Left 0 / Right 100\"", page, StringComparison.Ordinal);
         Assert.Contains("Content=\"Restore Addon default 50 / 50\"", page, StringComparison.Ordinal);
         Assert.Contains("Content=\"Read 0x024A Profile\"", page, StringComparison.Ordinal);
-        Assert.Contains("No LED profile write or SyncToROM command is issued", page, StringComparison.Ordinal);
+        Assert.Contains("This diagnostic sends no LED write or SyncToROM command", page, StringComparison.Ordinal);
         Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred", code, StringComparison.Ordinal);
         Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty", code, StringComparison.Ordinal);
         Assert.Contains("ApplyVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy", code, StringComparison.Ordinal);

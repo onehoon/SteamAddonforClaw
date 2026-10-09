@@ -158,7 +158,8 @@ internal sealed class MsiClawLedController(
                 ("ResponsePrefix", response is { Length: > 0 }
                     ? Convert.ToHexString(response.AsSpan(0, Math.Min(response.Length, 41)))
                     : "Unavailable"),
-                ("ProductionEnabled", false),
+                ("ProbeIsReadOnly", true),
+                ("PhysicalLedWriteVerified", false),
                 ("Reason", reason));
             return new(outcome, firmwareVersion, effect, speed, brightness, reason);
         }
@@ -167,6 +168,7 @@ internal sealed class MsiClawLedController(
     internal async Task<bool> ApplyAsync(
         ControllerLedSettings settings,
         MsiClawPhysicalIdentity? expectedIdentity,
+        string modelId,
         CancellationToken cancellationToken)
     {
         if (ControllerLedSettingsValidation.Validate(settings) is { } invalid)
@@ -194,6 +196,9 @@ internal sealed class MsiClawLedController(
             || attributes.VendorId != MsiClawHardware.VendorId
             || attributes.ProductId != MsiClawHardware.DirectInputProductId)
             return Fail("ControlHidAttributesUnavailableOrUnexpected");
+        if (attributes.VersionNumber == 0x0230
+            && !string.Equals(modelId, "msi.claw.a2vm.8", StringComparison.Ordinal))
+            return Fail("UnsupportedFirmwareForModel");
         if (!MsiClawLedProtocol.TryBuildStaticWrites(attributes.VersionNumber, settings, out var writes))
         {
             var failureReason = MsiClawLedProtocol.TryResolveRgbAddress(attributes.VersionNumber, out _)
@@ -201,7 +206,7 @@ internal sealed class MsiClawLedController(
                 : "UnsupportedFirmware";
             if (failureReason == "UnsupportedFirmware")
             {
-                AppLog.Warn("ControllerLed", "Static LED settings were not applied because the controller firmware is not in the verified RGB address table; controller ownership remains unchanged.", null,
+                AppLog.Warn("ControllerLed", "Static LED settings were not applied because the firmware is not in the exact supported RGB profile-address map; controller ownership remains unchanged.", null,
                     ("Event", "ControllerLedApplyFailed"), ("Reason", failureReason),
                     ("FirmwareVersion", $"0x{attributes.VersionNumber:X4}"));
                 return false;

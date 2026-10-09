@@ -1486,7 +1486,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
                 new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawHidDeviceInformationLookup(),
                 new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawRawHidTransport());
-            await _controllerLedController.ApplyAsync(settings, identity, cancellationToken).ConfigureAwait(false);
+            await _controllerLedController.ApplyAsync(
+                settings,
+                identity,
+                _controllerVibrationStrengthClient?.ModelId ?? "unknown",
+                cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

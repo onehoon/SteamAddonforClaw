@@ -1831,10 +1831,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded
                 when _controllerVibrationStrengthClient.ModelId == "msi.claw.a2vm.8"
                     && mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred =>
-                "HID write accepted; physical effect has not yet been verified on A2VM. Press Left Test once, then Right Test once, and explicitly restore the Addon default 50/50.",
+                "HID write accepted. The 0% / 100% motor asymmetry was physically observed on A2VM 8; this probe result confirms HID transport only. Explicitly restore the Addon default 50/50 when finished.",
             FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded
                 when _controllerVibrationStrengthClient.ModelId == "msi.claw.a2vm.8" =>
-                "Restore Addon default 50/50 HID write accepted; physical effect has not yet been verified on A2VM. This is not a readback of the firmware's original value.",
+                "Restore Addon default 50/50 HID write accepted. This is not a readback of the firmware's original value or proof of device-side persistence.",
             FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded when mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred =>
                 "HID transport write succeeded. This pair was physically validated on CG3EM firmware 0x0419. Press Left Test once, then Right Test once.",
             FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded =>
@@ -1873,7 +1873,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var firmware = result.FirmwareVersion is ushort version ? $"0x{version:X4}" : "unavailable";
         var responseValidity = result.ReadResponseValid ? "yes" : "no";
         var interpretation = result.ReadResponseValid
-            ? "The response was structurally parsed; this does not verify that the candidate address is safe to write."
+            ? "The profile block was structurally read; physical Static LED output from production writes remains unverified."
             : $"No valid candidate read response was confirmed ({result.Reason}).";
         return CreateLedProfileReadProbeResult(outcome, result.FirmwareVersion,
             $"{outcome}. Firmware {firmware}; candidate 0x{MsiClawLedProtocol.A2vm230CandidateRgbAddress:X4}; valid read response: {responseValidity}. {interpretation}");
