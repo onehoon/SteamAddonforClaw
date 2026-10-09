@@ -22,8 +22,23 @@ public sealed class FrontButtonMappingContractTests
     }
 
     [Fact]
+    public void A2vm_defaults_match_all_four_model_specific_bindings()
+    {
+        var d = FrontButtonMappingSettings.A2vmDefault;
+
+        Assert.Equal(FrontButtonAction.QuickSettingsOverlay, d.Resolve(FrontButtonKind.Gamebar, FrontButtonDomain.Normal).Action);
+        Assert.Equal(FrontButtonAction.SteamBigPicture, d.Resolve(FrontButtonKind.CenterM, FrontButtonDomain.Normal).Action);
+        Assert.Equal(FrontButtonAction.QuickSettingsOverlay, d.Resolve(FrontButtonKind.Gamebar, FrontButtonDomain.Steam).Action);
+        Assert.Equal(FrontButtonAction.SteamButton, d.Resolve(FrontButtonKind.CenterM, FrontButtonDomain.Steam).Action);
+    }
+
+    [Fact]
     public void Defaults_are_a_valid_mapping()
         => Assert.Null(FrontButtonMappingValidation.Validate(FrontButtonMappingSettings.Default));
+
+    [Fact]
+    public void A2vm_defaults_are_a_valid_mapping()
+        => Assert.Null(FrontButtonMappingValidation.Validate(FrontButtonMappingSettings.A2vmDefault));
 
     [Fact]
     public void Action_vocabulary_has_no_none_member()

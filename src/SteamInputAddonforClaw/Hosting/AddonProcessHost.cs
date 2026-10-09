@@ -449,7 +449,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 // tolerates the legitimate state where this host exists but Full1902 controller
                 // ownership has not committed (or is unavailable).
                 full1902SuspendParticipant: new Full1902SuspendParticipant(QuiesceFull1902PresentationForSuspendAsync),
-                uninstallPreparationOnly: _headlessUninstallPreparation);
+                uninstallPreparationOnly: _headlessUninstallPreparation,
+                hardwareDeviceModel: startupResult.HardwareDeviceModel);
 
         _runtimeHost = composition.RuntimeHost;
         _cpuBoostRuntime.SetActiveProfileResolver(_activeProfileResolver);

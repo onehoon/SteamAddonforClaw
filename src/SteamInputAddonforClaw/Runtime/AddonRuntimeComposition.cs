@@ -1,6 +1,8 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Install;
@@ -36,10 +38,11 @@ internal static class AddonRuntimeCompositionFactory
         // participant, created by AddonProcessHost and passed through unchanged. Its quiesce callback
         // reads AddonProcessHost's current presentation ownership with a null guard at execution time.
         IPowerSuspendParticipant? full1902SuspendParticipant = null,
-        bool uninstallPreparationOnly = false)
+        bool uninstallPreparationOnly = false,
+        HandheldDeviceModelId? hardwareDeviceModel = null)
     {
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
-        var settings = settingsStore.Load();
+        var settings = settingsStore.Load(SelectFrontButtonMappingDefault(hardwareDeviceModel));
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
         // The Runtime is already High before composition; startup-task repair writes directly and
         // verifies the exact owned-task contract.
@@ -99,4 +102,11 @@ internal static class AddonRuntimeCompositionFactory
         return new AddonRuntimeComposition(
             runtimeHost, startupSettings, statusProvider);
     }
+
+    internal static FrontButtonMappingSettings SelectFrontButtonMappingDefault(HandheldDeviceModelId? hardwareDeviceModel)
+        => hardwareDeviceModel is { } model
+            && (model == MsiClawDeviceModels.Claw7AiPlusA2vm.Id
+                || model == MsiClawDeviceModels.Claw8AiPlusA2vm.Id)
+                ? FrontButtonMappingSettings.A2vmDefault
+                : FrontButtonMappingSettings.Default;
 }
