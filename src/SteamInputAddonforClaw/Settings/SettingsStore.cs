@@ -26,14 +26,15 @@ public sealed class SettingsStore
         _settingsPath = settingsPath ?? throw new ArgumentNullException(nameof(settingsPath));
     }
 
-    public AppSettings Load()
+    public AppSettings Load(FrontButtonMappingSettings? frontButtonMappingDefault = null)
     {
+        var selectedFrontButtonMappingDefault = frontButtonMappingDefault ?? FrontButtonMappingSettings.Default;
         AppLog.Debug("Settings", "Settings load started.", ("Path", _settingsPath), ("FileExists", File.Exists(_settingsPath)));
         try
         {
             if (!File.Exists(_settingsPath))
             {
-                var defaults = new AppSettings();
+                var defaults = new AppSettings { FrontButtonMapping = selectedFrontButtonMappingDefault };
                 try
                 {
                     Save(defaults);
@@ -71,7 +72,7 @@ public sealed class SettingsStore
                 ClawHudEnabled = clawHudEnabled,
                 DeveloperMenuEnabled = developerMenuEnabled,
                 QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
-                FrontButtonMapping = ReadFrontButtonMapping(root),
+                FrontButtonMapping = ReadFrontButtonMapping(root, selectedFrontButtonMappingDefault),
                 BackButtonMapping = ReadBackButtonMapping(root),
                 ControllerLed = ReadControllerLedSettings(root),
                 ControllerVibration = ReadControllerVibrationSettings(root),
@@ -83,12 +84,18 @@ public sealed class SettingsStore
         catch (JsonException exception)
         {
             AppLog.Warn("Settings", "Settings parsing failed. Using defaults.", exception, ("Action", "Defaults"));
-            return new AppSettings(LogLevel: AppLogPreference.Off);
+            return new AppSettings(LogLevel: AppLogPreference.Off)
+            {
+                FrontButtonMapping = selectedFrontButtonMappingDefault
+            };
         }
         catch (IOException exception)
         {
             AppLog.Warn("Settings", "Settings read failed. Using defaults.", exception, ("Action", "Defaults"));
-            return new AppSettings(LogLevel: AppLogPreference.Off);
+            return new AppSettings(LogLevel: AppLogPreference.Off)
+            {
+                FrontButtonMapping = selectedFrontButtonMappingDefault
+            };
         }
     }
 
@@ -175,18 +182,20 @@ public sealed class SettingsStore
     /// <summary>
     /// Reads the persisted front-button mapping (App UI PR-C). Parsed in isolation so a broken value
     /// can never throw into <see cref="Load"/>'s catch and reset unrelated log/developer/overlay-tab
-    /// settings. Pre-release migration policy: absent, malformed, unknown-action, domain-invalid,
-    /// duplicate, or incomplete all resolve to the frozen PR-C defaults -- there is no schema
-    /// migration from the old split OEM1/WING structure, and the obsolete <c>Oem1Mapping</c> /
-    /// <c>WingMapping</c> JSON members are simply ignored (the next normal save drops them).
+    /// settings. Absent, malformed, unknown-action, domain-invalid, duplicate, or incomplete values
+    /// resolve to the selected device defaults -- there is no schema migration from the old split
+    /// OEM1/WING structure, and the obsolete <c>Oem1Mapping</c> / <c>WingMapping</c> JSON members
+    /// are simply ignored (the next normal save drops them).
     /// </summary>
-    private static FrontButtonMappingSettings ReadFrontButtonMapping(JsonElement root)
+    private static FrontButtonMappingSettings ReadFrontButtonMapping(
+        JsonElement root,
+        FrontButtonMappingSettings frontButtonMappingDefault)
     {
         if (!root.TryGetProperty("FrontButtonMapping", out var property) || property.ValueKind != JsonValueKind.Object)
         {
             AppLog.Warn("Settings", "Front-button mapping is missing; using defaults.", null,
                 ("Reason", "MissingFrontButtonMapping"));
-            return FrontButtonMappingSettings.Default;
+            return frontButtonMappingDefault;
         }
 
         try
@@ -195,8 +204,8 @@ public sealed class SettingsStore
             var reason = FrontButtonMappingValidation.Validate(mapping);
             if (reason is not null)
             {
-                AppLog.Warn("Settings", "Front-button mapping is invalid; using the frozen defaults for this feature only.", null, ("Reason", reason));
-                return FrontButtonMappingSettings.Default;
+                AppLog.Warn("Settings", "Front-button mapping is invalid; using the selected defaults for this feature only.", null, ("Reason", reason));
+                return frontButtonMappingDefault;
             }
             var effective = mapping!;
             AppLog.Debug("Settings", "Front-button mapping loaded.",
@@ -208,8 +217,8 @@ public sealed class SettingsStore
         }
         catch (JsonException exception)
         {
-            AppLog.Warn("Settings", "Front-button mapping could not be parsed; using the frozen defaults for this feature only.", exception);
-            return FrontButtonMappingSettings.Default;
+            AppLog.Warn("Settings", "Front-button mapping could not be parsed; using the selected defaults for this feature only.", exception);
+            return frontButtonMappingDefault;
         }
     }
 

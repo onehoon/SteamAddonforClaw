@@ -26,6 +26,70 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
         => Assert.Equal(FrontButtonMappingSettings.Default, new SettingsStore(PathName).Load().FrontButtonMapping);
 
     [Fact]
+    public void Fresh_A2vm_settings_persist_and_reload_the_model_defaults()
+    {
+        var store = new SettingsStore(PathName);
+
+        Assert.Equal(FrontButtonMappingSettings.A2vmDefault, store.Load(FrontButtonMappingSettings.A2vmDefault).FrontButtonMapping);
+        Assert.True(File.Exists(PathName));
+        Assert.Equal(FrontButtonMappingSettings.A2vmDefault, store.Load(FrontButtonMappingSettings.Default).FrontButtonMapping);
+    }
+
+    [Fact]
+    public void Existing_file_without_mapping_uses_A2vm_defaults_and_preserves_other_settings()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, "{\"LogLevel\":\"Debug\"}");
+
+        var loaded = new SettingsStore(PathName).Load(FrontButtonMappingSettings.A2vmDefault);
+
+        Assert.Equal(FrontButtonMappingSettings.A2vmDefault, loaded.FrontButtonMapping);
+        Assert.Equal(AppLogPreference.Debug, loaded.LogLevel);
+    }
+
+    [Fact]
+    public void Invalid_mapping_uses_A2vm_defaults_without_resetting_other_settings()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName,
+            "{\"FrontButtonMapping\":{\"Normal\":{\"Gamebar\":{\"Action\":\"Nonsense\"}}},\"LogLevel\":\"Debug\"}");
+
+        var loaded = new SettingsStore(PathName).Load(FrontButtonMappingSettings.A2vmDefault);
+
+        Assert.Equal(FrontButtonMappingSettings.A2vmDefault, loaded.FrontButtonMapping);
+        Assert.Equal(AppLogPreference.Debug, loaded.LogLevel);
+    }
+
+    [Fact]
+    public void Whole_file_parse_failure_uses_A2vm_mapping_with_existing_log_fallback()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, "{");
+
+        var loaded = new SettingsStore(PathName).Load(FrontButtonMappingSettings.A2vmDefault);
+
+        Assert.Equal(FrontButtonMappingSettings.A2vmDefault, loaded.FrontButtonMapping);
+        Assert.Equal(AppLogPreference.Off, loaded.LogLevel);
+    }
+
+    [Fact]
+    public void Valid_user_mapping_is_not_overwritten_by_A2vm_startup_defaults()
+    {
+        var store = new SettingsStore(PathName);
+        store.Load(FrontButtonMappingSettings.A2vmDefault);
+        var customized = FrontButtonMappingSettings.A2vmDefault.With(
+            FrontButtonKind.Gamebar,
+            FrontButtonDomain.Normal,
+            FrontButtonBinding.Of(FrontButtonAction.KeyboardHotkey) with
+            {
+                Hotkey = new FrontButtonHotkeyBinding(FrontButtonHotkeyModifiers.Control, FrontButtonHotkeyKey.R)
+            });
+        store.Save(new AppSettings { FrontButtonMapping = customized });
+
+        Assert.Equal(customized, store.Load(FrontButtonMappingSettings.A2vmDefault).FrontButtonMapping);
+    }
+
+    [Fact]
     public void Valid_mapping_round_trips_and_publishes_one_event()
     {
         var coordinator = NewCoordinator();

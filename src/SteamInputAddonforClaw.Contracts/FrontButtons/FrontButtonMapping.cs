@@ -184,6 +184,22 @@ public sealed record FrontButtonMappingSettings
         }
     };
 
+    /// <summary>First-install defaults for Claw 7/8 A2VM, where WING is the physical right-hand
+    /// front button and Center M is the physical left-hand button.</summary>
+    public static FrontButtonMappingSettings A2vmDefault { get; } = new()
+    {
+        Normal = new()
+        {
+            Gamebar = FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay),
+            CenterM = FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture)
+        },
+        Steam = new()
+        {
+            Gamebar = FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay),
+            CenterM = FrontButtonBinding.Of(FrontButtonAction.SteamButton)
+        }
+    };
+
     public FrontButtonDomainMapping ResolveDomain(FrontButtonDomain domain) =>
         domain == FrontButtonDomain.Steam ? Steam : Normal;
 
