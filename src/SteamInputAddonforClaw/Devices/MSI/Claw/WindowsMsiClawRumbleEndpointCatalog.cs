@@ -56,6 +56,9 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
             if (!TryReadHidCapabilities(device.Id, out var inputLength, out var outputLength, out var usagePage, out var usage, out var openSucceeded, out var win32Error, out var hidStatus))
             {
                 AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: HID capability query failed.", ("PnpInstanceId", pnp), ("PhysicalRoot", physicalRoot), ("Win32Error", win32Error), ("HidStatus", hidStatus));
+                candidates.Add(new(device.Id, pnp!, physicalRoot, MsiClawHardware.VendorId,
+                    MsiClawHardware.DirectInputProductId, inputLength, outputLength,
+                    usagePage, usage, openSucceeded, CapabilitiesReadSucceeded: false));
                 continue;
             }
             var physicalRootMatch = MatchesPhysicalRoot(physicalRoot, identity.PhysicalIdentity);

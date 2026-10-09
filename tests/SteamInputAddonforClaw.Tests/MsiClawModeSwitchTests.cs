@@ -495,6 +495,38 @@ public sealed class MsiClawModeSwitchTests
         Assert.Equal(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, result.Status);
     }
 
+    [Fact]
+    public async Task A2vm230_observed_control_usage_is_diagnosed_but_never_written()
+    {
+        var candidate = new ControllerDeviceInfo(
+            "HID\\VID_0DB0&PID_1902&REV_0230&MI_02&COL01\\CONTROL",
+            Guid.NewGuid(),
+            "USB\\VID_0DB0&PID_1902\\CLAW_A",
+            ["USB\\VID_0DB0&PID_1902\\CLAW_A"],
+            "HID",
+            ["HID\\VID_0DB0&PID_1902&REV_0230&MI_02&COL01"],
+            ["HID_DEVICE_UP:0001_U:0040"],
+            "HIDClass",
+            null,
+            null,
+            0x0DB0,
+            0x1902,
+            true,
+            UsagePage: 0x0001,
+            Usage: 0x0040);
+        var writer = new RecordingWriter();
+        var result = await new MsiClawModeController(
+                new SequenceEnumerator([candidate]),
+                new MsiClawControlHidResolver(),
+                writer)
+            .SwitchModeAsync(MsiClawNativeMode.XInput, MsiClawPhysicalIdentity.From(candidate), CancellationToken.None);
+
+        Assert.Equal(MsiClawModeTransitionStatus.AmbiguousDevice, result.Status);
+        Assert.Equal("A2vm230ControlEndpointUnverified", result.Reason);
+        Assert.False(result.WriteSucceeded);
+        Assert.Equal(0, writer.CallCount);
+    }
+
     private static ControllerDeviceInfo Device(Guid? container, string? parent, string instance, ushort pid = 0x1901, ushort usagePage = 0, ushort usage = 0) => new(instance, container, parent, parent is null ? [] : [parent], "HID", [], [], "HIDClass", null, null, 0x0DB0, pid, true, UsagePage: usagePage, Usage: usage);
 
     private static ControllerDeviceInfo Topology(Guid container, string root, ushort pid)

@@ -23,7 +23,8 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
         int PresentPid1903CandidateCount,
         int RecognizedInternalDeviceCount,
         bool Pid1901XInputControlHidPresent,
-        bool Pid1902DirectInputControlHidPresent);
+        bool Pid1902DirectInputControlHidPresent,
+        int A2vm230ControlEndpointCandidateCount);
 
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
     private readonly ControllerDeviceClassifier _classifier;
@@ -56,7 +57,7 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
         var deadline = DateTimeOffset.UtcNow + _timeout;
         var stopwatch = Stopwatch.StartNew();
         var attempt = 0;
-        var lastObservation = new TopologyObservation(string.Empty, false, 0, 0, 0, 0, 0, false, false);
+        var lastObservation = new TopologyObservation(string.Empty, false, 0, 0, 0, 0, 0, false, false, 0);
         Exception? enumerationFailure = null;
         AppLog.Info("ControllerTopology", "Topology readiness wait started.", ("TimeoutMs", _timeout.TotalMilliseconds), ("PollIntervalMs", _sampleInterval.TotalMilliseconds));
 
@@ -108,6 +109,7 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             ("RecognizedInternalDeviceCount", lastObservation.RecognizedInternalDeviceCount),
             ("Pid1901XInputControlHidPresent", lastObservation.Pid1901XInputControlHidPresent),
             ("Pid1902DirectInputControlHidPresent", lastObservation.Pid1902DirectInputControlHidPresent),
+            ("A2vm230ControlEndpointCandidateCount", lastObservation.A2vm230ControlEndpointCandidateCount),
             ("ConsecutiveStableSnapshots", stableSnapshotCount),
             ("RequiredStableSnapshots", _requiredStableSnapshots),
             ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Action", "Passive"));
@@ -152,7 +154,8 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             msiCandidates.Count(device => device.ProductId == 0x1903),
             relevantDevices.Length,
             pid1901ControlHidPresent,
-            pid1902ControlHidPresent);
+            pid1902ControlHidPresent,
+            msiCandidates.Count(MsiClawHardware.IsA2vm230ObservedControlEndpointCandidate));
     }
 
     private static string GetFailureClass(TopologyObservation observation)
@@ -160,7 +163,9 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
         if (observation.PresentMsiCandidateCount == 0) return "NoPresentMsiCandidates";
         if (observation.RecognizedInternalDeviceCount == 0) return "MsiCandidatesNotClassifiedAsInternal";
         if (!observation.Pid1901XInputControlHidPresent && !observation.Pid1902DirectInputControlHidPresent)
-            return "RequiredControlHidMissing";
+            return observation.A2vm230ControlEndpointCandidateCount > 0
+                ? "A2vm230ControlEndpointUnverified"
+                : "RequiredControlHidMissing";
         return "RelevantTopologyNotStable";
     }
 

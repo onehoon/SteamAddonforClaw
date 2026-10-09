@@ -28,6 +28,13 @@ final translation remains a Windows-driver / firmware / hardware question.
 The Addon's physical Left / Right Test and runtime game-rumble path are distinct
 from the persistent desired strength pair described below.
 
+Runtime physical rumble is separately resolved against one exact, strongly
+identity-correlated PID1902 Game Pad/Joystick collection with readable report
+capabilities and a usable output report. Missing identity, an unverified physical
+root, an unusable collection, or a non-gamepad-only collection (including the
+observed A2VM 2.30 `0001/0040` usage) is diagnosed as unavailable; no rumble packet
+is issued. This does not change the game-rumble request or stop-safety behavior.
+
 ### Serialized motor profile
 
 Static analysis of the supplied MSI artifacts found these profile-relative fields:
@@ -98,6 +105,12 @@ refreshes.
 | `msi.claw.cg3em` | MS-1T91 | Enabled; validated on firmware `0x0419` |
 | `msi.claw.a2vm.7` | MS-1T42 | Disabled pending physical validation |
 | `msi.claw.a2vm.8` | MS-1T52 | Disabled pending physical validation |
+
+For either A2VM model, the frontend must report that the profile-write mapping is
+unverified and that no profile write was issued. The observed A2VM 2.30 HID usage
+does not establish the vibration profile endpoint or authorize a write. Runtime
+game rumble remains a separate diagnostic path and must not be presented as proof
+of profile-strength support.
 
 Production writes require Center M startup authority exactly `Disabled`, a
 healthy Addon-owned live PID1902 session, a Strong matching physical identity,

@@ -10,7 +10,8 @@ internal sealed record MsiClawRumbleEndpointCandidate(
     int OutputReportLength,
     ushort UsagePage,
     ushort Usage,
-    bool OpenSucceeded);
+    bool OpenSucceeded,
+    bool CapabilitiesReadSucceeded = true);
 
 internal readonly record struct MsiClawRumbleEndpointResolution(string? DevicePath, string Reason, int OutputReportLength = 0)
 {
@@ -41,22 +42,43 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
         // Desktop usage page, matching the exact contract HHC/ClawTweaks both rely on.
         var candidates = _catalog(identity).Where(candidate =>
             candidate.VendorId == MsiClawHardware.VendorId &&
-            candidate.ProductId == MsiClawHardware.DirectInputProductId &&
+            candidate.ProductId == MsiClawHardware.DirectInputProductId).ToArray();
+        var matchingRoot = candidates.Where(candidate =>
+            string.Equals(candidate.PhysicalIdentity, identity.PhysicalIdentity, StringComparison.OrdinalIgnoreCase)).ToArray();
+        var gamepadUsage = matchingRoot.Where(IsGamepadUsage).ToArray();
+        var verified = gamepadUsage.Where(candidate =>
+            candidate.CapabilitiesReadSucceeded &&
             candidate.InputReportLength == 64 &&
             candidate.OutputReportLength > 0 &&
-            candidate.UsagePage == MsiClawHardware.DirectInputUsagePage &&
-            candidate.Usage is MsiClawHardware.DirectInputUsage or MsiClawHardware.DirectInputJoystickUsage &&
             candidate.OpenSucceeded &&
-            string.Equals(candidate.PhysicalIdentity, identity.PhysicalIdentity, StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(candidate.DevicePath)).ToArray();
-        return candidates.Length switch
+        return verified.Length switch
         {
-            1 => new(candidates[0].DevicePath, "VerifiedExactPid1902Endpoint", candidates[0].OutputReportLength),
-            0 => new(null, "NoVerifiedEndpoint"),
+            1 => new(verified[0].DevicePath, "VerifiedExactPid1902Endpoint", verified[0].OutputReportLength),
+            0 => new(null, GetUnavailableReason(candidates, matchingRoot, gamepadUsage)),
             // Ambiguous valid gamepad candidates must never be guessed at -- fail closed for
             // rumble rather than picking one arbitrarily.
             _ => new(null, "AmbiguousEndpoints")
         };
+    }
+
+    private static bool IsGamepadUsage(MsiClawRumbleEndpointCandidate candidate) =>
+        candidate.UsagePage == MsiClawHardware.DirectInputUsagePage
+        && candidate.Usage is MsiClawHardware.DirectInputUsage or MsiClawHardware.DirectInputJoystickUsage;
+
+    private static string GetUnavailableReason(
+        IReadOnlyList<MsiClawRumbleEndpointCandidate> candidates,
+        IReadOnlyList<MsiClawRumbleEndpointCandidate> matchingRoot,
+        IReadOnlyList<MsiClawRumbleEndpointCandidate> gamepadUsage)
+    {
+        if (matchingRoot.Count == 0)
+            return candidates.Count > 0 ? "PhysicalIdentityMismatch" : "NoPhysicalGamepadEndpoint";
+        if (gamepadUsage.Count > 0 || matchingRoot.Any(candidate => !candidate.CapabilitiesReadSucceeded))
+            return "PhysicalRumbleEndpointUnusable";
+        if (matchingRoot.Any(candidate => candidate.UsagePage == MsiClawHardware.A2vm230ObservedControlUsagePage
+            && candidate.Usage == MsiClawHardware.A2vm230ObservedControlUsage))
+            return "NonGamepadUsageOnly";
+        return "NoVerifiedGamepadEndpoint";
     }
 
 }

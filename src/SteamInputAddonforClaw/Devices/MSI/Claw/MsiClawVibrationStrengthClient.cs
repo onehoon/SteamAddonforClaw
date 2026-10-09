@@ -92,6 +92,7 @@ internal sealed class MsiClawVibrationStrengthClient
 
     internal bool IsProductionPairWriteVerified => MsiClawVibrationProfilePolicy.IsProductionPairWriteVerified(_modelId);
     internal string ModelId => _modelId.Value;
+    internal string ProductionUnavailableReason => MsiClawVibrationProfilePolicy.GetProductionUnavailableReason(_modelId);
 
     internal async Task<bool> ApplyAsync(
         ControllerVibrationSettings settings,

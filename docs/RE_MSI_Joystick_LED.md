@@ -86,6 +86,12 @@ not adopt CTW's general nearest-match policy: `0x0419` is promoted to one explic
 known entry, while every other unknown version still fails closed with zero profile
 writes. Physical SteamAddon LED acceptance for `0x0419` remains pending.
 
+The A2VM 2.30 observation (`VersionNumber=0x0230` / `REV_0230`) does not have an
+exact verified RGB address in the current table or the inspected RE. The historical
+A2VM `0x0229` and `0x0308` observations both point to `0x024A`, but they do not prove
+that `0x0230` uses that address. Keep `0x0230` unsupported and issue zero profile
+writes until model/firmware-specific evidence exists.
+
 ## Historical device-specific RE notes
 
 | Controller firmware | Historical evidence | RGB address |

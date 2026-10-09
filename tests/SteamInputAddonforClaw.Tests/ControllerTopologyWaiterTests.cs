@@ -293,6 +293,45 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
     }
 
     [Fact]
+    public async Task TimeoutDiagnostic_ClassifiesA2vm230ObservedUsageAsUnverifiedWithoutTreatingItAsControlHid()
+    {
+        var candidate = GamepadInterface() with
+        {
+            InstanceId = "HID\\VID_0DB0&PID_1902&MI_02&COL01\\A2VM230",
+            HardwareIds = ["HID\\VID_0DB0&PID_1902&REV_0230&MI_02&COL01"],
+            CompatibleIds = ["HID_DEVICE_UP:0001_U:0040"],
+            UsagePage = 0x0001,
+            Usage = 0x0040,
+        };
+
+        var log = await CaptureTimeoutDiagnostic([GamepadInterface(), candidate], new MsiClawInternalControllerMatcher());
+
+        Assert.Contains("FailureClass=A2vm230ControlEndpointUnverified", log);
+        Assert.Contains("A2vm230ControlEndpointCandidateCount=1", log);
+        Assert.Contains("Pid1902DirectInputControlHidPresent=False", log);
+        Assert.DoesNotContain("REV_0230", log);
+        Assert.DoesNotContain(@"HID\VID_0DB0", log);
+    }
+
+    [Fact]
+    public async Task TimeoutDiagnostic_DoesNotGeneralizeA2vm230ClassificationToOtherRevisions()
+    {
+        var candidate = GamepadInterface() with
+        {
+            InstanceId = "HID\\VID_0DB0&PID_1902&REV_0231&MI_02&COL01\\OTHER",
+            HardwareIds = ["HID\\VID_0DB0&PID_1902&REV_0231&MI_02&COL01"],
+            CompatibleIds = ["HID_DEVICE_UP:0001_U:0040"],
+            UsagePage = 0x0001,
+            Usage = 0x0040,
+        };
+
+        var log = await CaptureTimeoutDiagnostic([GamepadInterface(), candidate], new MsiClawInternalControllerMatcher());
+
+        Assert.Contains("FailureClass=RequiredControlHidMissing", log);
+        Assert.Contains("A2vm230ControlEndpointCandidateCount=0", log);
+    }
+
+    [Fact]
     public async Task TimeoutDiagnostic_PreservesEnumerationExceptionAsTheTerminalFailure()
     {
         var waiter = CreateWaiter(new ThrowingEnumerator(), new MsiClawInternalControllerMatcher());

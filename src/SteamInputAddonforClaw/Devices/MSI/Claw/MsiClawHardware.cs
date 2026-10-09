@@ -16,6 +16,8 @@ internal static class MsiClawHardware
     public const string DirectInputHidCollectionPrefix = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\";
     public const ushort DirectInputControlUsagePage = 0xFFF0;
     public const ushort DirectInputControlUsage = 0x0040;
+    public const ushort A2vm230ObservedControlUsagePage = 0x0001;
+    public const ushort A2vm230ObservedControlUsage = 0x0040;
     public const ushort ConsumerUsagePage = 0x000C;
     public const ushort ConsumerUsage = 0x0001;
     public const string DirectInputControlHidCollectionPrefix = "HID\\VID_0DB0&PID_1902&MI_00&COL02\\";
@@ -31,6 +33,15 @@ internal static class MsiClawHardware
 
     public static bool IsDirectInputController(ushort vendorId, ushort productId) =>
         vendorId == VendorId && productId == DirectInputProductId;
+
+    internal static bool IsA2vm230ObservedControlEndpointCandidate(ControllerDeviceInfo device) =>
+        device.Present
+        && device.VendorId == VendorId
+        && device.ProductId == DirectInputProductId
+        && device.UsagePage == A2vm230ObservedControlUsagePage
+        && device.Usage == A2vm230ObservedControlUsage
+        && device.HardwareIds.Concat(device.CompatibleIds)
+            .Any(id => id.Contains("REV_0230", StringComparison.OrdinalIgnoreCase));
 
     public static bool IsDirectInputHidCollection(ControllerDeviceInfo device) =>
         device.Present && device.VendorId == VendorId && device.ProductId == DirectInputProductId &&

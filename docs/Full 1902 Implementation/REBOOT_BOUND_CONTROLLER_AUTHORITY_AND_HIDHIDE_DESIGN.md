@@ -787,10 +787,23 @@ Before removing the product, establish a stock-safe state:
 virtual output retired
 DirectInput released
 PID1901 restored and verified
-Addon HidHide controller baseline removed
+Addon HidHide controller baseline removed, unless HidHide package and driver are
+positively absent, no exact owned targets remain, and neither trusted nor legacy
+provisioning receipt/pending state exists
 mandatory Addon startup registration removed
 Center M startup policy restored according to supported uninstall contract
 ```
+
+The positive-absence exception applies only to uninstall preparation, only after
+the independent PID1901 stock proof, and only with an empty exact owned-target set.
+Package-probe uncertainty, an installed/unknown driver state, access denied, any
+receipt (including an in-progress/pending receipt), a corrupt receipt, or an
+unreadable legacy-receipt path must retain the normal HidHide baseline call and
+fail closed if it cannot be verified. It never relaxes Enable-and-Restart.
+
+The stock proof is required even when the process owner reports `NoPhysicalOwnership`;
+that result is not equivalent to `AlreadyXInput`. Only the independent current-world
+baseline may confirm PID1901 or perform the existing bounded PID1901 restoration.
 
 Do not treat ordinary Windows restart as equivalent to uninstall.
 
