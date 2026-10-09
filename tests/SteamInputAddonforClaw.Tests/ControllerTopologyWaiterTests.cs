@@ -295,7 +295,8 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
     [Fact]
     public async Task TimeoutDiagnostic_ClassifiesA2vm230ObservedUsageAsUnverifiedWithoutTreatingItAsControlHid()
     {
-        var candidate = GamepadInterface() with
+        var gamepad = GamepadInterface() with { ContainerId = Guid.Empty };
+        var candidate = gamepad with
         {
             InstanceId = "HID\\VID_0DB0&PID_1902&MI_02&COL01\\A2VM230",
             HardwareIds = ["HID\\VID_0DB0&PID_1902&REV_0230&MI_02&COL01"],
@@ -304,7 +305,7 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
             Usage = 0x0040,
         };
 
-        var log = await CaptureTimeoutDiagnostic([GamepadInterface(), candidate], new MsiClawInternalControllerMatcher());
+        var log = await CaptureTimeoutDiagnostic([gamepad, candidate], new MsiClawInternalControllerMatcher());
 
         Assert.Contains("FailureClass=A2vm230ControlEndpointUnverified", log);
         Assert.Contains("A2vm230ControlEndpointCandidateCount=1", log);

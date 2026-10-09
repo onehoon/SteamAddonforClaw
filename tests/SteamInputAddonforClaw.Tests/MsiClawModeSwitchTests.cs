@@ -500,7 +500,7 @@ public sealed class MsiClawModeSwitchTests
     {
         var candidate = new ControllerDeviceInfo(
             "HID\\VID_0DB0&PID_1902&REV_0230&MI_02&COL01\\CONTROL",
-            Guid.NewGuid(),
+            Guid.Empty,
             "USB\\VID_0DB0&PID_1902\\CLAW_A",
             ["USB\\VID_0DB0&PID_1902\\CLAW_A"],
             "HID",
@@ -514,6 +514,7 @@ public sealed class MsiClawModeSwitchTests
             true,
             UsagePage: 0x0001,
             Usage: 0x0040);
+        Assert.Equal(MsiClawIdentityConfidence.Strong, MsiClawPhysicalIdentity.From(candidate).Confidence);
         var writer = new RecordingWriter();
         var result = await new MsiClawModeController(
                 new SequenceEnumerator([candidate]),

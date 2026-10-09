@@ -943,6 +943,8 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             PhysicalRelease = SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned,
+            StockBaselineModeWrite = true,
+            StockBaselineReason = "XInputVerified",
             VerifiedHidHideAbsence = true,
         };
 
