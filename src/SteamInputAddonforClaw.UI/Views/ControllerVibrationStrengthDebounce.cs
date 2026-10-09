@@ -2,12 +2,13 @@ namespace SteamInputAddonforClaw.Views;
 
 internal sealed class ControllerVibrationStrengthDebounce : IDisposable
 {
-    internal static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(500);
+    internal static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(300);
 
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly Func<Action, bool> _dispatch;
     private readonly Action<int, int> _settled;
     private CancellationTokenSource? _pending;
+    private (int Left, int Right)? _latestPair;
     private bool _disposed;
 
     internal ControllerVibrationStrengthDebounce(
@@ -26,14 +27,30 @@ internal sealed class ControllerVibrationStrengthDebounce : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         CancelPending();
+        _latestPair = (leftPercent, rightPercent);
         var pending = _pending = new CancellationTokenSource();
-        _ = WaitForSettleAsync(pending, leftPercent, rightPercent);
+        _ = WaitForSettleAsync(pending);
+    }
+
+    internal bool FlushPending()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var pending = _pending;
+        if (pending is null || _latestPair is not { } pair)
+            return false;
+
+        _pending = null;
+        _latestPair = null;
+        Cancel(pending);
+        _settled(pair.Left, pair.Right);
+        return true;
     }
 
     internal void CancelPending()
     {
         var pending = _pending;
         _pending = null;
+        _latestPair = null;
         Cancel(pending);
     }
 
@@ -44,7 +61,7 @@ internal sealed class ControllerVibrationStrengthDebounce : IDisposable
         CancelPending();
     }
 
-    private async Task WaitForSettleAsync(CancellationTokenSource pending, int leftPercent, int rightPercent)
+    private async Task WaitForSettleAsync(CancellationTokenSource pending)
     {
         try
         {
@@ -55,15 +72,18 @@ internal sealed class ControllerVibrationStrengthDebounce : IDisposable
             return;
         }
 
-        _dispatch(() => Complete(pending, leftPercent, rightPercent));
+        _dispatch(() => Complete(pending));
     }
 
-    private void Complete(CancellationTokenSource pending, int leftPercent, int rightPercent)
+    private void Complete(CancellationTokenSource pending)
     {
         if (_disposed || !ReferenceEquals(_pending, pending)) return;
         _pending = null;
+        var pair = _latestPair;
+        _latestPair = null;
         pending.Dispose();
-        _settled(leftPercent, rightPercent);
+        if (pair is { } latest)
+            _settled(latest.Left, latest.Right);
     }
 
     private static void Cancel(CancellationTokenSource? pending)

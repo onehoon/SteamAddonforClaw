@@ -3,6 +3,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.Windows.Storage.Pickers;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
@@ -40,14 +41,26 @@ public sealed partial class ControllerPage : UserControl
     private FrontendControllerVibrationStrengthSnapshot _vibrationSnapshot =
         FrontendControllerVibrationStrengthSnapshot.Unavailable();
     private ControllerVibrationStrengthDebounce? _vibrationDebounce;
+    private (int Left, int Right)? _vibrationDraft;
+    private Slider? _vibrationPointerSlider;
+    private uint? _vibrationPointerId;
     private bool _isRenderingVibration;
+    private bool _vibrationPointerGestureInProgress;
     private bool _vibrationMutationInProgress;
     private bool _vibrationTestInProgress;
+    private bool _vibrationPageUnloaded;
     /// <summary>Suppresses change handlers while the page writes persisted state INTO the controls,
     /// so restoring the UI never looks like a user edit and re-saves.</summary>
     private bool _isLoading;
 
-    public ControllerPage() => InitializeComponent();
+    public ControllerPage()
+    {
+        InitializeComponent();
+        RegisterVibrationPointerHandlers(LeftVibrationStrengthSlider);
+        RegisterVibrationPointerHandlers(RightVibrationStrengthSlider);
+        Loaded += ControllerPage_Loaded;
+        Unloaded += ControllerPage_Unloaded;
+    }
 
     internal event EventHandler<FrontButtonMappingSettings>? MappingEditRequested;
     internal event EventHandler<BackButtonMappingSettings>? BackButtonMappingEditRequested;
@@ -59,6 +72,7 @@ public sealed partial class ControllerPage : UserControl
         Func<nint> windowHandleProvider)
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
+        _vibrationPageUnloaded = false;
         _available = bootstrap.FrontButtonMappingAvailable;
         _backButtonAvailable = bootstrap.BackButtonMappingAvailable;
         _controllerLedAvailable = bootstrap.ControllerLedAvailable;
@@ -89,15 +103,31 @@ public sealed partial class ControllerPage : UserControl
         _vibrationDebounce = new ControllerVibrationStrengthDebounce(
             Task.Delay,
             action => dispatcher.TryEnqueue(() => action()),
-            (left, right) => _ = CommitVibrationStrengthAsync(left, right));
+            VibrationStrengthDebounce_Settled);
         ApplyVibrationStrengthSnapshot(FrontendControllerVibrationStrengthSnapshot.Unavailable(), preserveDraft: false);
         ApplyControllerLedSettings(bootstrap.Settings.ControllerLed);
     }
 
     internal void Activate()
     {
+        _vibrationPageUnloaded = false;
         if (_frontend is not null)
             _ = RefreshVibrationStrengthAsync();
+    }
+
+    internal void Deactivate()
+    {
+        if (_vibrationPageUnloaded)
+            return;
+
+        if (_vibrationPointerGestureInProgress)
+        {
+            CompleteVibrationPointerGesture(pointerId: null, slider: null);
+            return;
+        }
+
+        if (_vibrationDebounce?.FlushPending() != true)
+            TryCommitVibrationDraftIfSettled();
     }
 
     internal void ApplyControllerLedSettings(ControllerLedSettings settings)
@@ -210,22 +240,141 @@ public sealed partial class ControllerPage : UserControl
         BackButtonMappingEditRequested?.Invoke(this, _backButtonMapping);
     }
 
+    private void RegisterVibrationPointerHandlers(Slider slider)
+    {
+        slider.AddHandler(UIElement.PointerPressedEvent,
+            new PointerEventHandler(VibrationStrengthSlider_PointerPressed), handledEventsToo: true);
+        slider.AddHandler(UIElement.PointerReleasedEvent,
+            new PointerEventHandler(VibrationStrengthSlider_PointerReleased), handledEventsToo: true);
+        slider.AddHandler(UIElement.PointerCanceledEvent,
+            new PointerEventHandler(VibrationStrengthSlider_PointerCanceled), handledEventsToo: true);
+        slider.AddHandler(UIElement.PointerCaptureLostEvent,
+            new PointerEventHandler(VibrationStrengthSlider_PointerCaptureLost), handledEventsToo: true);
+    }
+
+    private void ControllerPage_Loaded(object sender, RoutedEventArgs args) => _vibrationPageUnloaded = false;
+
+    private void ControllerPage_Unloaded(object sender, RoutedEventArgs args)
+    {
+        _vibrationPageUnloaded = true;
+        _vibrationDebounce?.CancelPending();
+        _vibrationDraft = null;
+        _vibrationPointerGestureInProgress = false;
+        _vibrationPointerId = null;
+        _vibrationPointerSlider = null;
+    }
+
+    private void VibrationStrengthSlider_PointerPressed(object sender, PointerRoutedEventArgs args)
+    {
+        if (_vibrationPageUnloaded
+            || _frontend is null
+            || _vibrationPointerGestureInProgress
+            || !CanEditVibrationSliders(_vibrationSnapshot.Available, _vibrationSnapshot.Writable, _vibrationTestInProgress))
+            return;
+
+        var slider = sender as Slider;
+        if (slider is null)
+            return;
+
+        var properties = args.GetCurrentPoint(slider).Properties;
+        var isContact = args.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse
+            ? properties.IsLeftButtonPressed
+            : args.Pointer.IsInContact;
+        if (!isContact)
+            return;
+
+        _vibrationPointerGestureInProgress = true;
+        _vibrationPointerId = args.Pointer.PointerId;
+        _vibrationPointerSlider = slider;
+        _vibrationDebounce?.CancelPending();
+        UpdateVibrationControls();
+    }
+
+    private void VibrationStrengthSlider_PointerReleased(object sender, PointerRoutedEventArgs args) =>
+        CompleteVibrationPointerGesture(args.Pointer.PointerId, sender as Slider);
+
+    private void VibrationStrengthSlider_PointerCanceled(object sender, PointerRoutedEventArgs args) =>
+        CompleteVibrationPointerGesture(args.Pointer.PointerId, sender as Slider);
+
+    private void VibrationStrengthSlider_PointerCaptureLost(object sender, PointerRoutedEventArgs args) =>
+        CompleteVibrationPointerGesture(args.Pointer.PointerId, sender as Slider);
+
+    private bool CompleteVibrationPointerGesture(uint? pointerId, Slider? slider)
+    {
+        if (!_vibrationPointerGestureInProgress
+            || (pointerId is { } observedPointerId
+                && !IsCurrentVibrationPointerGesture(_vibrationPointerGestureInProgress, _vibrationPointerId, observedPointerId))
+            || (slider is not null && !ReferenceEquals(_vibrationPointerSlider, slider)))
+            return false;
+
+        _vibrationPointerGestureInProgress = false;
+        _vibrationPointerId = null;
+        _vibrationPointerSlider = null;
+        TryCommitVibrationDraftIfSettled();
+        UpdateVibrationControls();
+        return true;
+    }
+
     private void VibrationStrengthSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs args)
     {
         if (_isRenderingVibration
+            || _vibrationPageUnloaded
             || _frontend is null
             || !_vibrationSnapshot.Available
             || !_vibrationSnapshot.Writable
-            || _vibrationMutationInProgress
             || _vibrationTestInProgress)
             return;
 
-        var left = ToPercent(LeftVibrationStrengthSlider.Value);
-        var right = ToPercent(RightVibrationStrengthSlider.Value);
-        LeftVibrationStrengthPercentText.Text = $"{left}%";
-        RightVibrationStrengthPercentText.Text = $"{right}%";
-        _vibrationDebounce?.Schedule(left, right);
+        var pair = (Left: ToPercent(LeftVibrationStrengthSlider.Value), Right: ToPercent(RightVibrationStrengthSlider.Value));
+        LeftVibrationStrengthPercentText.Text = $"{pair.Left}%";
+        RightVibrationStrengthPercentText.Text = $"{pair.Right}%";
+
+        _vibrationDraft = !_vibrationMutationInProgress && MatchesVibrationSnapshot(pair, _vibrationSnapshot)
+            ? null
+            : pair;
+
+        if (_vibrationPointerGestureInProgress)
+            _vibrationDebounce?.CancelPending();
+        else if (_vibrationDraft is { } draft)
+            _vibrationDebounce?.Schedule(draft.Left, draft.Right);
+        else
+            _vibrationDebounce?.CancelPending();
+
         UpdateVibrationControls();
+    }
+
+    private void VibrationStrengthDebounce_Settled(int leftPercent, int rightPercent)
+    {
+        if (_vibrationPageUnloaded
+            || _vibrationPointerGestureInProgress
+            || _vibrationDraft is not { } draft
+            || draft != (leftPercent, rightPercent))
+            return;
+
+        TryCommitVibrationDraftIfSettled();
+    }
+
+    private void TryCommitVibrationDraftIfSettled()
+    {
+        if (_vibrationDraft is not { } draft
+            || !CanSubmitVibrationDraft(
+                _vibrationSnapshot.Available,
+                _vibrationSnapshot.Writable,
+                hasDraft: true,
+                _vibrationPointerGestureInProgress,
+                _vibrationDebounce?.HasPendingDraft == true,
+                _vibrationMutationInProgress,
+                pageUnloaded: _vibrationPageUnloaded))
+            return;
+
+        if (MatchesVibrationSnapshot(draft, _vibrationSnapshot))
+        {
+            _vibrationDraft = null;
+            UpdateVibrationControls();
+            return;
+        }
+
+        _ = CommitVibrationStrengthAsync(draft.Left, draft.Right);
     }
 
     private async void LeftVibrationTestButton_Click(object sender, RoutedEventArgs args) =>
@@ -236,15 +385,38 @@ public sealed partial class ControllerPage : UserControl
 
     private async Task CommitVibrationStrengthAsync(int leftPercent, int rightPercent)
     {
-        if (_frontend is null || !_vibrationSnapshot.Available || !_vibrationSnapshot.Writable)
+        var submittedPair = (Left: leftPercent, Right: rightPercent);
+        var frontend = _frontend;
+        if (frontend is null
+            || _vibrationDraft != submittedPair
+            || !CanSubmitVibrationDraft(
+                _vibrationSnapshot.Available,
+                _vibrationSnapshot.Writable,
+                hasDraft: true,
+                _vibrationPointerGestureInProgress,
+                _vibrationDebounce?.HasPendingDraft == true,
+                _vibrationMutationInProgress,
+                pageUnloaded: _vibrationPageUnloaded))
             return;
 
         _vibrationMutationInProgress = true;
         UpdateVibrationControls();
         try
         {
-            var result = await _frontend.SetControllerVibrationStrengthAsync(leftPercent, rightPercent);
-            ApplyVibrationStrengthSnapshot(result.Snapshot, preserveDraft: false);
+            var result = await frontend.SetControllerVibrationStrengthAsync(leftPercent, rightPercent);
+            if (_vibrationPageUnloaded)
+                return;
+
+            if (ShouldClearSubmittedVibrationDraft(_vibrationDraft, submittedPair))
+                _vibrationDraft = null;
+            ApplyVibrationStrengthSnapshot(
+                result.Snapshot,
+                ShouldPreserveVibrationDraft(
+                    result.Snapshot.Available,
+                    result.Snapshot.Writable,
+                    hasDraft: _vibrationDraft is not null,
+                    _vibrationPointerGestureInProgress,
+                    _vibrationDebounce?.HasPendingDraft == true));
             if (!result.Succeeded)
             {
                 ShowVibrationMessage(result.FailureMessage ?? "The saved vibration setting could not be applied now.", InfoBarSeverity.Error);
@@ -252,7 +424,11 @@ public sealed partial class ControllerPage : UserControl
                 return;
             }
 
-            if (!result.Snapshot.Writable && result.Snapshot.Available)
+            if (_vibrationDraft is not null)
+            {
+                // A newer local edit is still waiting for its own settle/release boundary.
+            }
+            else if (!result.Snapshot.Writable && result.Snapshot.Available)
                 ShowVibrationMessage(result.Snapshot.Status, InfoBarSeverity.Informational);
             else
                 HideVibrationMessage();
@@ -260,13 +436,19 @@ public sealed partial class ControllerPage : UserControl
         catch (Exception exception)
         {
             AppLog.Warn("ControllerVibration", "Controller vibration setting update transport failed.", exception);
+            if (ShouldClearSubmittedVibrationDraft(_vibrationDraft, submittedPair))
+                _vibrationDraft = null;
             ShowVibrationMessage("The saved setting could not be confirmed. Refreshing the current setting.", InfoBarSeverity.Error);
             await RefreshVibrationStrengthAsync(preserveFailure: true);
         }
         finally
         {
             _vibrationMutationInProgress = false;
-            UpdateVibrationControls();
+            if (!_vibrationPageUnloaded)
+            {
+                UpdateVibrationControls();
+                TryCommitVibrationDraftIfSettled();
+            }
         }
     }
 
@@ -281,7 +463,8 @@ public sealed partial class ControllerPage : UserControl
         {
             var request = TryStartVibrationMotorTest(
                 _vibrationSnapshot,
-                _vibrationDebounce?.HasPendingDraft == true,
+                HasUncommittedVibrationDraft,
+                _vibrationPointerGestureInProgress,
                 _vibrationMutationInProgress,
                 _vibrationTestInProgress,
                 () =>
@@ -320,22 +503,25 @@ public sealed partial class ControllerPage : UserControl
     internal static bool CanRunVibrationMotorTest(
         FrontendControllerVibrationStrengthSnapshot snapshot,
         bool hasPendingDraft,
+        bool pointerGestureInProgress,
         bool mutationInProgress,
         bool testInProgress) =>
         snapshot.TestAvailable
         && !hasPendingDraft
+        && !pointerGestureInProgress
         && !mutationInProgress
         && !testInProgress;
 
     internal static Task<FrontendControllerVibrationTestResult>? TryStartVibrationMotorTest(
         FrontendControllerVibrationStrengthSnapshot snapshot,
         bool hasPendingDraft,
+        bool pointerGestureInProgress,
         bool mutationInProgress,
         bool testInProgress,
         Action markStarted,
         Func<Task<FrontendControllerVibrationTestResult>> dispatch)
     {
-        if (!CanRunVibrationMotorTest(snapshot, hasPendingDraft, mutationInProgress, testInProgress))
+        if (!CanRunVibrationMotorTest(snapshot, hasPendingDraft, pointerGestureInProgress, mutationInProgress, testInProgress))
             return null;
 
         markStarted();
@@ -344,13 +530,21 @@ public sealed partial class ControllerPage : UserControl
 
     private async Task RefreshVibrationStrengthAsync(bool preserveFailure = false)
     {
-        if (_frontend is null)
+        if (_frontend is null || _vibrationPageUnloaded)
             return;
 
         try
         {
             var snapshot = await _frontend.CaptureControllerVibrationStrengthAsync();
-            var preserveDraft = _vibrationMutationInProgress || _vibrationDebounce?.HasPendingDraft == true;
+            if (_vibrationPageUnloaded)
+                return;
+
+            var preserveDraft = ShouldPreserveVibrationDraft(
+                snapshot.Available,
+                snapshot.Writable,
+                _vibrationDraft is not null,
+                _vibrationPointerGestureInProgress,
+                _vibrationDebounce?.HasPendingDraft == true);
             ApplyVibrationStrengthSnapshot(snapshot, preserveDraft);
             if (preserveFailure)
                 return;
@@ -363,8 +557,15 @@ public sealed partial class ControllerPage : UserControl
         }
         catch (Exception exception)
         {
+            if (_vibrationPageUnloaded)
+                return;
+
             AppLog.Warn("ControllerVibration", "Controller vibration setting capture transport failed.", exception);
             _vibrationDebounce?.CancelPending();
+            _vibrationDraft = null;
+            _vibrationPointerGestureInProgress = false;
+            _vibrationPointerId = null;
+            _vibrationPointerSlider = null;
             ApplyVibrationStrengthSnapshot(
                 FrontendControllerVibrationStrengthSnapshot.Unavailable("The saved vibration setting could not be loaded."),
                 preserveDraft: false);
@@ -377,10 +578,23 @@ public sealed partial class ControllerPage : UserControl
         bool preserveDraft)
     {
         _vibrationSnapshot = snapshot;
-        if (preserveDraft && !snapshot.Available)
+        if (!snapshot.Available || !snapshot.Writable)
         {
             _vibrationDebounce?.CancelPending();
+            _vibrationDraft = null;
+            _vibrationPointerGestureInProgress = false;
+            _vibrationPointerId = null;
+            _vibrationPointerSlider = null;
             preserveDraft = false;
+        }
+        else
+        {
+            preserveDraft = preserveDraft && ShouldPreserveVibrationDraft(
+                snapshot.Available,
+                snapshot.Writable,
+                _vibrationDraft is not null,
+                _vibrationPointerGestureInProgress,
+                _vibrationDebounce?.HasPendingDraft == true);
         }
 
         if (!preserveDraft)
@@ -403,20 +617,73 @@ public sealed partial class ControllerPage : UserControl
 
     private void UpdateVibrationControls()
     {
-        var operationInProgress = _vibrationMutationInProgress || _vibrationTestInProgress;
-        LeftVibrationStrengthSlider.IsEnabled = _vibrationSnapshot.Available
-            && _vibrationSnapshot.Writable && !operationInProgress;
-        RightVibrationStrengthSlider.IsEnabled = _vibrationSnapshot.Available
-            && _vibrationSnapshot.Writable && !operationInProgress;
+        var slidersEnabled = CanEditVibrationSliders(
+            _vibrationSnapshot.Available,
+            _vibrationSnapshot.Writable,
+            _vibrationTestInProgress);
+        LeftVibrationStrengthSlider.IsEnabled = slidersEnabled;
+        RightVibrationStrengthSlider.IsEnabled = slidersEnabled;
 
         var testsEnabled = CanRunVibrationMotorTest(
             _vibrationSnapshot,
-            _vibrationDebounce?.HasPendingDraft == true,
+            HasUncommittedVibrationDraft,
+            _vibrationPointerGestureInProgress,
             _vibrationMutationInProgress,
             _vibrationTestInProgress);
         LeftVibrationTestButton.IsEnabled = testsEnabled;
         RightVibrationTestButton.IsEnabled = testsEnabled;
     }
+
+    private bool HasUncommittedVibrationDraft =>
+        _vibrationDraft is not null || _vibrationDebounce?.HasPendingDraft == true;
+
+    internal static bool CanEditVibrationSliders(bool available, bool writable, bool testInProgress) =>
+        available && writable && !testInProgress;
+
+    internal static bool CanSubmitVibrationDraft(
+        bool available,
+        bool writable,
+        bool hasDraft,
+        bool pointerGestureInProgress,
+        bool debouncePending,
+        bool mutationInProgress,
+        bool pageUnloaded) =>
+        !pageUnloaded
+        && available
+        && writable
+        && hasDraft
+        && !pointerGestureInProgress
+        && !debouncePending
+        && !mutationInProgress;
+
+    internal static bool ShouldPreserveVibrationDraft(
+        bool snapshotAvailable,
+        bool snapshotWritable,
+        bool hasDraft,
+        bool pointerGestureInProgress,
+        bool debouncePending) =>
+        snapshotAvailable
+        && snapshotWritable
+        && (hasDraft || pointerGestureInProgress || debouncePending);
+
+    internal static bool ShouldClearSubmittedVibrationDraft(
+        (int Left, int Right)? latestDraft,
+        (int Left, int Right) submittedPair) =>
+        latestDraft is { } draft && draft == submittedPair;
+
+    internal static bool IsCurrentVibrationPointerGesture(
+        bool gestureInProgress,
+        uint? activePointerId,
+        uint observedPointerId) =>
+        gestureInProgress && activePointerId == observedPointerId;
+
+    private static bool MatchesVibrationSnapshot(
+        (int Left, int Right) pair,
+        FrontendControllerVibrationStrengthSnapshot snapshot) =>
+        snapshot.Available
+        && snapshot.Writable
+        && snapshot.LeftPercent == pair.Left
+        && snapshot.RightPercent == pair.Right;
 
     private void ShowVibrationMessage(string message, InfoBarSeverity severity)
     {

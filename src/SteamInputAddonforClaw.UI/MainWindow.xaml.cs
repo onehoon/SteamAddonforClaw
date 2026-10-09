@@ -324,6 +324,7 @@ public sealed partial class MainWindow : Window
     {
         var wasVibrationTest = _vibrationTestContent is not null &&
             ReferenceEquals(DeveloperContentHost.Content, _vibrationTestContent);
+        var wasController = ControllerContent.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
         var wasProfile = ProfileContent.Visibility == Visibility.Visible;
         var wasXbox = XboxContent.Visibility == Visibility.Visible;
@@ -357,6 +358,7 @@ public sealed partial class MainWindow : Window
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
         if (page == MainNavigationPage.Controller) ControllerContent.Activate();
+        else if (wasController) ControllerContent.Deactivate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how
         // the user leaves.
