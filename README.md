@@ -10,6 +10,7 @@ This guide describes the features currently exposed by the app. The Main App inc
 - [Requirements and compatibility](#requirements-and-compatibility)
 - [Quick start](#quick-start)
 - [How controller presentation works](#how-controller-presentation-works)
+- [Gyroscope / IMU — Steam Input configuration (English / 한국어)](#gyroscope--imu--steam-input-configuration-english--한국어)
 - [MSI Center M and the built-in controller](#msi-center-m-and-the-built-in-controller)
 - [Main App guide](#main-app-guide)
   - [Device](#device)
@@ -43,7 +44,7 @@ The app currently recognizes these MSI Claw models:
 
 The app checks that the device is a supported model before starting controller management. If the model cannot be identified or is not supported, controller features will not start.
 
-MSI Claw 8 EX AI+ CG3EM has been tested on physical hardware. The A2VM models are supported by the software, but equivalent physical-device validation is still pending. Hardware-specific controls may also be unavailable on a model that does not expose the required capability.
+MSI Claw 8 EX AI+ CG3EM has been tested on physical hardware. The A2VM models are supported by the software, but equivalent full-device validation is still pending; **gyro output on the 8-inch A2VM has been verified in Steam Input and Aniimo**. Hardware-specific controls may also be unavailable on a model that does not expose the required capability.
 
 ## Requirements and compatibility
 
@@ -75,6 +76,28 @@ When MSI Center M controller authority is disabled and the Addon is managing the
 | Otherwise | Xbox 360 controller |
 
 There is no separate “Steam Deck mode” switch. Presentation follows Steam game and Big Picture activity. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the presentation that is active at the time of the press.
+
+## Gyroscope / IMU — Steam Input configuration (English / 한국어)
+
+### English
+
+When the Addon is presenting the built-in controller as a **virtual Steam Deck** (during a Steam game or Big Picture), it passes available physical **gyroscope and accelerometer** data to Steam Input. The Addon does **not** perform gyro-to-mouse or gyro-to-joystick conversion itself, and its **Xbox 360 presentation does not provide gyro input**.
+
+**Verified on MSI Claw 8 AI+ A2VM (8-inch):** Steam's gyro calibration screen shows live motion. All three rotation axes and all six direction signs matched the user's genuine Steam Controller in a direct calibration-screen comparison. **Gyro-to-joystick camera control worked in Aniimo** with Steam Input's gyro activation set to **Always On** (Addon build **0.1.350.0**). This confirms the tested A2VM 8 end-to-end path, not every game's configuration or quantitative gyro accuracy.
+
+**Configure and fine-tune gyro in Steam Input, not in the Addon.** Open the game's **Controller Layout** in Steam, configure **Gyro Behavior** (such as gyro-to-mouse or gyro-to-joystick), and adjust the **activation button/condition**, sensitivity, and other motion settings there. In particular, a gyro activation condition can prevent in-game movement **even when the gyro calibration screen shows live values**. For a quick test, select **Always On**; afterward, set your preferred activation button and sensitivity in Steam Input.
+
+A2VM 7-inch and EX/CG3EM gyro behavior has **not yet been physically verified**. See the [gyro architecture and hardware-validation record](docs/gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md#81-post-merge-physical-axissign-comparison--2026-10-10-a2vm-vs-genuine-steam-controller).
+
+### 한국어
+
+Addon이 Steam 게임 실행 중 또는 Big Picture에서 내장 컨트롤러를 **가상 Steam Deck**으로 제공하면, 사용 가능한 물리 **자이로스코프 및 가속도 센서값**을 Steam Input으로 전달합니다. Addon 자체에서 자이로를 마우스나 조이스틱 입력으로 변환하지 않으며, **Xbox 360 컨트롤러 모드에서는 자이로 입력을 제공하지 않습니다**.
+
+**MSI Claw 8 AI+ A2VM(8인치) 실기 검증 완료:** Steam 자이로 보정 화면에서 센서값이 정상적으로 표시되며, 실제 Steam Controller와 직접 비교했을 때 **3개 회전축과 6개 방향의 부호가 모두 일치**했습니다. **Aniimo에서 Steam Input의 자이로 활성화 조건을 ‘Always On(항상 켜기)’으로 변경한 후 자이로 → 조이스틱 카메라 조작이 정상 작동**했습니다(Addon **0.1.350.0** 빌드). 이는 해당 A2VM 8 기기의 실제 동작 검증 결과이며, 모든 게임에서 동일하게 동작하거나 정밀 감도까지 검증되었다는 의미는 아닙니다.
+
+**자이로 세부 설정과 조정은 Addon이 아닌 Steam Input에서 진행해야 합니다.** Steam에서 게임별 **컨트롤러 레이아웃**을 열고 **자이로 동작**(자이로 → 마우스/조이스틱), **활성화 버튼·조건**, 감도 및 기타 옵션을 설정하세요. 특히 **보정 화면에 센서값이 보이더라도 자이로 활성화 조건 때문에 게임에서는 움직이지 않을 수 있습니다**. 확인할 때는 활성화 조건을 우선 **Always On**으로 설정하고, 정상 작동을 확인한 뒤 Steam Input에서 원하는 활성화 버튼과 감도로 조정하면 됩니다.
+
+A2VM 7인치와 EX/CG3EM의 자이로 실기 검증은 **아직 진행되지 않았습니다**. 자세한 기록은 [자이로 아키텍처 및 실기 검증 문서](docs/gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md#81-post-merge-physical-axissign-comparison--2026-10-10-a2vm-vs-genuine-steam-controller)를 참고하세요.
 
 ## MSI Center M and the built-in controller
 
@@ -255,7 +278,7 @@ The built-in controller's face buttons, D-Pad, bumpers, triggers, sticks, and st
 | Menu / Start | Menu function | Menu / Start |
 | M1 / M2 | R4 / L4 | Configurable in Controller; Disabled by default |
 
-WING and Center M are configurable front buttons; they are not part of the ordinary gamepad mapping table. Fresh Steam Deck gyro and accelerometer data are passed to Steam Input, which owns gyro activation and mapping. A2VM/EX hardware behavior remains unvalidated.
+WING and Center M are configurable front buttons; they are not part of the ordinary gamepad mapping table. In Steam Deck presentation, the Addon forwards fresh gyro and accelerometer data to Steam Input. **Steam Input owns activation, gyro-to-mouse/joystick mapping, sensitivity and all fine-tuning**. The 8-inch A2VM has passed direct Steam Input and Aniimo gyro testing; A2VM 7-inch and EX/CG3EM gyro validation is still pending. See [Gyroscope / IMU](#gyroscope--imu--steam-input-configuration-english--한국어).
 
 ## Background operation and updates
 
@@ -274,6 +297,10 @@ If the controller has not returned after a short wait, try **Restart Addon** fro
 ### A Steam game appears as an Xbox controller
 
 Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. Steam Deck presentation follows Steam game and Big Picture activity; it is not selected manually.
+
+### Gyro values appear in Steam calibration, but the game does not respond
+
+Check the game's **Steam Input Controller Layout → Gyro Behavior** and, especially, its separate **gyro activation button/condition**. Test with **Always On** first, then adjust your preferred activation button and sensitivity **in Steam Input**. The Addon does not provide an independent gyro activation or fine-tuning setting.
 
 ### The controller does not respond after sleep or resume
 
@@ -315,7 +342,8 @@ Open **Settings → Required Components** to see the reported status. Follow the
 - The XBOX catalog includes recognized installed titles, not every app in Microsoft Store or Game Pass.
 - Steam profile tracking depends on Steam continuing to report the game or shortcut as active. Some launcher chains can cause a profile to stop applying when Steam loses that association.
 - Quick Settings Overlay is separate from Steam Quick Access. The Addon does not inject an Addon tab into Steam's menu.
-- **Steam Deck gyro / motion output is implemented, but A2VM/EX physical axis behavior and Steam Input acceptance remain unvalidated.** A general Device-page Fan Control is also not currently available as a user feature.
+- **Steam Deck gyro / motion output is implemented.** A2VM 8 gyro direction/sign and Steam Input gyro-to-joystick gameplay are physically verified; A2VM 7 and EX/CG3EM gyro validation remains pending. Fine-tuning and activation are handled in **Steam Input**, not in the Addon.
+- A general Device-page Fan Control is not currently available as a user feature.
 - The product supports one interactive Windows user and session; Fast User Switching, Remote Desktop sessions, and multi-user use are not supported.
 
 ## Return to stock MSI controller behavior and uninstall
