@@ -39,7 +39,7 @@ public sealed class ControllerVibrationStrengthUiTests
     }
 
     [Fact]
-    public async Task Slider_settle_waits_500ms_and_only_commits_the_latest_complete_pair()
+    public async Task Keyboard_settle_waits_300ms_and_only_commits_the_latest_complete_pair()
     {
         var delay = new ManualDelay();
         var committed = new TaskCompletionSource<(int Left, int Right)>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -51,11 +51,11 @@ public sealed class ControllerVibrationStrengthUiTests
         debounce.Schedule(60, 50);
         Assert.True(debounce.HasPendingDraft);
         Assert.False(committed.Task.IsCompleted);
-        Assert.Equal([TimeSpan.FromMilliseconds(500)], delay.RequestedDelays);
+        Assert.Equal([TimeSpan.FromMilliseconds(300)], delay.RequestedDelays);
 
         debounce.Schedule(60, 75);
         Assert.Equal(2, delay.RequestedDelays.Count);
-        Assert.All(delay.RequestedDelays, requested => Assert.Equal(TimeSpan.FromMilliseconds(500), requested));
+        Assert.All(delay.RequestedDelays, requested => Assert.Equal(TimeSpan.FromMilliseconds(300), requested));
         delay.Elapse();
 
         Assert.Equal((60, 75), await committed.Task.WaitAsync(TimeSpan.FromSeconds(2)));
@@ -63,7 +63,7 @@ public sealed class ControllerVibrationStrengthUiTests
     }
 
     [Fact]
-    public async Task Cancelling_a_pending_debounce_never_submits_a_firmware_pair()
+    public async Task Cancelling_a_pending_debounce_never_submits_a_vibration_pair()
     {
         var delay = new ManualDelay();
         var commits = 0;
@@ -82,6 +82,160 @@ public sealed class ControllerVibrationStrengthUiTests
     }
 
     [Fact]
+    public async Task Flushing_pending_pair_submits_once_and_ignores_late_timer_completion()
+    {
+        var delay = new ManualDelay();
+        var commits = new List<(int Left, int Right)>();
+        using var debounce = new ControllerVibrationStrengthDebounce(
+            delay.DelayAsync,
+            action => { action(); return true; },
+            (left, right) => commits.Add((left, right)));
+
+        debounce.Schedule(45, 65);
+        Assert.True(debounce.FlushPending());
+        Assert.False(debounce.FlushPending());
+        delay.Elapse();
+        await Task.Delay(20);
+
+        Assert.Equal([(45, 65)], commits);
+        Assert.False(debounce.HasPendingDraft);
+    }
+
+    [Fact]
+    public async Task Held_pointer_cancels_idle_settle_but_keeps_sliders_editable_until_release()
+    {
+        var delay = new ManualDelay();
+        var submissions = 0;
+        using var debounce = new ControllerVibrationStrengthDebounce(
+            delay.DelayAsync,
+            action => { action(); return true; },
+            (_, _) => submissions++);
+
+        debounce.Schedule(70, 50);
+        debounce.CancelPending(); // Pointer press pauses the idle timer for the whole gesture.
+        delay.Elapse();
+        await Task.Delay(20);
+
+        Assert.Equal(0, submissions);
+        Assert.True(ControllerPage.CanEditVibrationSliders(available: true, writable: true, testInProgress: false));
+        Assert.False(ControllerPage.CanSubmitVibrationDraft(
+            available: true,
+            writable: true,
+            hasDraft: true,
+            pointerGestureInProgress: true,
+            debouncePending: false,
+            mutationInProgress: false,
+            pageUnloaded: false));
+        Assert.True(ControllerPage.CanSubmitVibrationDraft(
+            available: true,
+            writable: true,
+            hasDraft: true,
+            pointerGestureInProgress: false,
+            debouncePending: false,
+            mutationInProgress: false,
+            pageUnloaded: false));
+    }
+
+    [Fact]
+    public void Pointer_completion_is_matched_to_the_active_pointer_and_is_idempotent()
+    {
+        Assert.True(ControllerPage.IsCurrentVibrationPointerGesture(
+            gestureInProgress: true, activePointerId: 17, observedPointerId: 17));
+        Assert.False(ControllerPage.IsCurrentVibrationPointerGesture(
+            gestureInProgress: true, activePointerId: 17, observedPointerId: 18));
+        Assert.False(ControllerPage.IsCurrentVibrationPointerGesture(
+            gestureInProgress: false, activePointerId: null, observedPointerId: 17));
+    }
+
+    [Fact]
+    public void In_flight_response_preserves_newer_pair_and_only_the_latest_pair_can_drain_afterward()
+    {
+        var submitted = (Left: 30, Right: 50);
+        var latestDraft = (Left: 80, Right: 25);
+
+        Assert.False(ControllerPage.ShouldClearSubmittedVibrationDraft(latestDraft, submitted));
+        Assert.True(ControllerPage.ShouldPreserveVibrationDraft(
+            snapshotAvailable: true,
+            snapshotWritable: true,
+            hasDraft: true,
+            pointerGestureInProgress: false,
+            debouncePending: false));
+        Assert.False(ControllerPage.CanSubmitVibrationDraft(
+            available: true,
+            writable: true,
+            hasDraft: true,
+            pointerGestureInProgress: false,
+            debouncePending: false,
+            mutationInProgress: true,
+            pageUnloaded: false));
+        Assert.True(ControllerPage.CanSubmitVibrationDraft(
+            available: true,
+            writable: true,
+            hasDraft: true,
+            pointerGestureInProgress: false,
+            debouncePending: false,
+            mutationInProgress: false,
+            pageUnloaded: false));
+        Assert.True(ControllerPage.ShouldClearSubmittedVibrationDraft(submitted, submitted));
+    }
+
+    [Fact]
+    public void Unavailable_or_read_only_snapshot_discards_pending_draft_and_never_submits()
+    {
+        Assert.False(ControllerPage.ShouldPreserveVibrationDraft(
+            snapshotAvailable: false,
+            snapshotWritable: false,
+            hasDraft: true,
+            pointerGestureInProgress: true,
+            debouncePending: true));
+        Assert.False(ControllerPage.ShouldPreserveVibrationDraft(
+            snapshotAvailable: true,
+            snapshotWritable: false,
+            hasDraft: true,
+            pointerGestureInProgress: false,
+            debouncePending: true));
+        Assert.False(ControllerPage.CanSubmitVibrationDraft(
+            available: false,
+            writable: false,
+            hasDraft: true,
+            pointerGestureInProgress: false,
+            debouncePending: false,
+            mutationInProgress: false,
+            pageUnloaded: false));
+        Assert.False(ControllerPage.CanSubmitVibrationDraft(
+            available: true,
+            writable: false,
+            hasDraft: true,
+            pointerGestureInProgress: false,
+            debouncePending: false,
+            mutationInProgress: false,
+            pageUnloaded: false));
+    }
+
+    [Fact]
+    public void Test_guard_rejects_pointer_draft_save_and_test_and_allows_only_confirmed_values()
+    {
+        var available = new FrontendControllerVibrationStrengthSnapshot(
+            Available: true,
+            Writable: true,
+            TestAvailable: true,
+            LeftPercent: 50,
+            RightPercent: 50,
+            Status: "Ready.");
+
+        Assert.False(ControllerPage.CanRunVibrationMotorTest(
+            available, hasPendingDraft: false, pointerGestureInProgress: true, mutationInProgress: false, testInProgress: false));
+        Assert.False(ControllerPage.CanRunVibrationMotorTest(
+            available, hasPendingDraft: true, pointerGestureInProgress: false, mutationInProgress: false, testInProgress: false));
+        Assert.False(ControllerPage.CanRunVibrationMotorTest(
+            available, hasPendingDraft: false, pointerGestureInProgress: false, mutationInProgress: true, testInProgress: false));
+        Assert.False(ControllerPage.CanRunVibrationMotorTest(
+            available, hasPendingDraft: false, pointerGestureInProgress: false, mutationInProgress: false, testInProgress: true));
+        Assert.True(ControllerPage.CanRunVibrationMotorTest(
+            available, hasPendingDraft: false, pointerGestureInProgress: false, mutationInProgress: false, testInProgress: false));
+    }
+
+    [Fact]
     public void Page_wires_value_changed_to_draft_only_and_renders_returned_desired_values()
     {
         var root = FindRepositoryRoot();
@@ -92,26 +246,38 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.True(handlerStart >= 0 && handlerEnd > handlerStart);
         var handler = page[handlerStart..handlerEnd];
 
-        Assert.Contains("_vibrationDebounce?.Schedule(left, right)", handler, StringComparison.Ordinal);
+        Assert.Contains("_vibrationDebounce?.Schedule(draft.Left, draft.Right)", handler, StringComparison.Ordinal);
         Assert.DoesNotContain("SetControllerVibrationStrengthAsync", handler, StringComparison.Ordinal);
         Assert.Contains("_isRenderingVibration", handler, StringComparison.Ordinal);
         Assert.Contains("_vibrationSnapshot.Available", handler, StringComparison.Ordinal);
         Assert.Contains("_vibrationSnapshot.Writable", handler, StringComparison.Ordinal);
-        Assert.Contains("_vibrationDebounce?.HasPendingDraft == true", page, StringComparison.Ordinal);
-        Assert.Contains("ApplyVibrationStrengthSnapshot(result.Snapshot, preserveDraft: false)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("|| _vibrationMutationInProgress", handler, StringComparison.Ordinal);
+        Assert.Contains("_vibrationDebounce?.CancelPending()", handler, StringComparison.Ordinal);
+        Assert.Contains("ShouldClearSubmittedVibrationDraft(_vibrationDraft, submittedPair)", page, StringComparison.Ordinal);
+        Assert.Contains("ShouldPreserveVibrationDraft(", page, StringComparison.Ordinal);
         Assert.Contains("snapshot.LeftPercent is { } left ? $\"{left}%\" : \"—\"", page, StringComparison.Ordinal);
         Assert.Contains("snapshot.RightPercent is { } right ? $\"{right}%\" : \"—\"", page, StringComparison.Ordinal);
         Assert.Contains("Visibility = snapshot.Available ? Visibility.Visible : Visibility.Collapsed", page, StringComparison.Ordinal);
         Assert.Contains("_isRenderingVibration = true", page, StringComparison.Ordinal);
         Assert.Contains("LeftVibrationStrengthSlider.Value = snapshot.LeftPercent ?? 0", page, StringComparison.Ordinal);
         Assert.Contains("RightVibrationStrengthSlider.Value = snapshot.RightPercent ?? 0", page, StringComparison.Ordinal);
-        Assert.Contains("var operationInProgress = _vibrationMutationInProgress || _vibrationTestInProgress", page, StringComparison.Ordinal);
+        Assert.Contains("CanEditVibrationSliders(", page, StringComparison.Ordinal);
         Assert.Contains("var testsEnabled = CanRunVibrationMotorTest(", page, StringComparison.Ordinal);
         Assert.DoesNotContain("var testsEnabled = _vibrationSnapshot.Available", page, StringComparison.Ordinal);
         Assert.Contains("LeftVibrationTestButton.IsEnabled = testsEnabled", page, StringComparison.Ordinal);
         Assert.Contains("RightVibrationTestButton.IsEnabled = testsEnabled", page, StringComparison.Ordinal);
-        Assert.Contains("&& !operationInProgress", page, StringComparison.Ordinal);
-        Assert.Contains("&& !mutationInProgress\n        && !testInProgress", page, StringComparison.Ordinal);
+        Assert.Contains("&& !testInProgress", page, StringComparison.Ordinal);
+        Assert.Contains("private void RegisterVibrationPointerHandlers", page, StringComparison.Ordinal);
+        Assert.Contains("UIElement.PointerReleasedEvent", page, StringComparison.Ordinal);
+        Assert.Contains("UIElement.PointerCanceledEvent", page, StringComparison.Ordinal);
+        Assert.Contains("UIElement.PointerCaptureLostEvent", page, StringComparison.Ordinal);
+        Assert.Contains("handledEventsToo: true", page, StringComparison.Ordinal);
+        Assert.Contains("CompleteVibrationPointerGesture(args.Pointer.PointerId", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("CapturePointer(", page, StringComparison.Ordinal);
+        Assert.Contains("private void ControllerPage_Unloaded", page, StringComparison.Ordinal);
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("else if (wasController) ControllerContent.Deactivate();", mainWindow, StringComparison.Ordinal);
 
         var testHandlerStart = page.IndexOf("private async Task TestVibrationMotorAsync", StringComparison.Ordinal);
         var testHandlerEnd = page.IndexOf("internal static bool CanRunVibrationMotorTest", testHandlerStart, StringComparison.Ordinal);
@@ -143,7 +309,7 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.False(unavailable.Writable);
         Assert.True(unavailable.TestAvailable);
         Assert.True(ControllerPage.CanRunVibrationMotorTest(
-            unavailable, hasPendingDraft: false, mutationInProgress: false, testInProgress: false));
+            unavailable, hasPendingDraft: false, pointerGestureInProgress: false, mutationInProgress: false, testInProgress: false));
 
         var dispatchCount = 0;
         var startedCount = 0;
@@ -153,6 +319,7 @@ public sealed class ControllerVibrationStrengthUiTests
         var request = ControllerPage.TryStartVibrationMotorTest(
             unavailable,
             hasPendingDraft: false,
+            pointerGestureInProgress: false,
             mutationInProgress: false,
             testInProgress: false,
             markStarted: () => startedCount++,
