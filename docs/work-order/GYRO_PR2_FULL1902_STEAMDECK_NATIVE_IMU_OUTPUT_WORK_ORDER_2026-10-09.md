@@ -24,7 +24,7 @@ Both families use the model-specific acquisition sources and shared normalized a
 Read these documents and current code before editing:
 
 1. [Full1902 document authority](../Full%201902%20Implementation/README.md), including the linked [Full1902 controller architecture](../Full%201902%20Implementation/FULL_1902_IMPLEMENTATION_ARCHITECTURE.md), [HidHide/startup authority policy](../Full%201902%20Implementation/HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md), and [elevated Runtime architecture](../Full%201902%20Implementation/FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md).
-2. [Approved PR1/PR2 gyro implementation plan](../gyro/FULL1902_GYRO_PR1_PR2_IMPLEMENTATION_PLAN_2026-10-09.md), especially ``3.3–3.4`, ``4–6` and lifecycle exclusions.
+2. [Approved PR1/PR2 gyro implementation plan](../gyro/FULL1902_GYRO_PR1_PR2_IMPLEMENTATION_PLAN_2026-10-09.md), especially sections 3.3–3.4 and 4–6, plus lifecycle exclusions.
 3. [Gyro PR1 work order](GYRO_PR1_FULL1902_COMMON_MOTION_CORE_WORK_ORDER_2026-10-09.md) and **actual merged PR #731 implementation** (code wins over the pre-implementation sketch).
 4. [Prior SD6 research](../gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md), for the real-accelerometer requirement and evidence/provenance. The old research-only implementation gate is superseded by the approved October plan.
 5. [Canonical VIIPER integration contract](../VIIPER_INTEGRATION.md) and current native ABI files.
