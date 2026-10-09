@@ -198,6 +198,34 @@ public sealed class ControllerLedTests : IDisposable
         Assert.Equal("exact-control-path", transport.ReadRequestPath);
         Assert.Equal(MsiClawLedProtocol.BuildA2vm230CandidateProfileReadRequest(), transport.ReadRequest);
         Assert.Equal(1, transport.WriteAndReadCallCount);
+        Assert.Equal(4, transport.MaxReportsRequested);
+        Assert.Equal(TimeSpan.FromMilliseconds(750), transport.TimeoutRequested);
+        Assert.True(transport.PreserveShortReportsRequested);
+        Assert.Empty(transport.Writes);
+    }
+
+    [Fact]
+    public async Task A2vm_probe_skips_unrelated_report_before_candidate_reply_with_one_outbound_request()
+    {
+        var device = ControlDevice(Guid.NewGuid(), "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_A");
+        var identity = MsiClawPhysicalIdentity.From(device);
+        var unrelated = new byte[64];
+        unrelated[0] = 0x02;
+        var transport = new RecordingLedTransport(0x0230)
+        {
+            WriteAndReadResult = new(true, [unrelated, CandidateProfileReadResponse()])
+        };
+        var controller = CreateController([device], [new("exact-control-path", device.InstanceId, device.ContainerId)], transport);
+
+        var result = await controller.ReadA2vm230CandidateProfileAsync(
+            "msi.claw.a2vm.8", () => identity, () => true, CancellationToken.None);
+
+        Assert.Equal(MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed, result.Outcome);
+        Assert.True(result.ReadResponseValid);
+        Assert.Equal(1, transport.WriteAndReadCallCount);
+        Assert.Equal(1, transport.ReadRequestCount);
+        Assert.Equal(MsiClawLedProtocol.BuildA2vm230CandidateProfileReadRequest(), transport.ReadRequest);
+        Assert.Equal(4, transport.MaxReportsRequested);
         Assert.Empty(transport.Writes);
     }
 
@@ -446,6 +474,10 @@ public sealed class ControllerLedTests : IDisposable
         public List<(string Path, byte[] Bytes)> Writes { get; } = [];
         public int FailAtWrite { get; init; }
         public int WriteAndReadCallCount { get; private set; }
+        public int ReadRequestCount { get; private set; }
+        public int MaxReportsRequested { get; private set; }
+        public TimeSpan TimeoutRequested { get; private set; }
+        public bool PreserveShortReportsRequested { get; private set; }
         public string? ReadRequestPath { get; private set; }
         public byte[] ReadRequest { get; private set; } = [];
         public MsiClawHidWriteAndReadResult WriteAndReadResult { get; set; } = new(false, []);
@@ -463,7 +495,11 @@ public sealed class ControllerLedTests : IDisposable
         {
             ReadRequestPath = devicePath;
             ReadRequest = bytes.ToArray();
+            ReadRequestCount++;
             WriteAndReadCallCount++;
+            MaxReportsRequested = maxReports;
+            TimeoutRequested = timeout;
+            PreserveShortReportsRequested = preserveShortReports;
             return Task.FromResult(WriteAndReadResult);
         }
     }

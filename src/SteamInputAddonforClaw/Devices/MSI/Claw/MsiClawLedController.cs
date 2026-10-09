@@ -95,7 +95,7 @@ internal sealed class MsiClawLedController(
                 info.Id,
                 request,
                 reportLength: 64,
-                maxReports: 1,
+                maxReports: 4,
                 timeout: TimeSpan.FromMilliseconds(750),
                 cancellationToken,
                 preserveShortReports: true).ConfigureAwait(false);
@@ -103,21 +103,24 @@ internal sealed class MsiClawLedController(
                 return Complete(MsiClawLedProfileReadProbeOutcome.TransportWriteFailed, "TransportWriteFailed");
             if (exchange.Reports.Count == 0)
                 return Complete(MsiClawLedProfileReadProbeOutcome.NoReplyOrTimeout, "NoReplyOrTimeout");
-            if (exchange.Reports.Count != 1)
-                return Complete(MsiClawLedProfileReadProbeOutcome.UnexpectedReport, "UnexpectedReportCount", exchange.Reports[0]);
 
-            var report = exchange.Reports[0];
-            var parseOutcome = MsiClawLedProtocol.ParseA2vm230CandidateProfileReadResponse(report, out var parsed);
-            var outcome = parseOutcome switch
+            MsiClawLedProtocol.CandidateReadParseOutcome? firstFailure = null;
+            byte[]? firstRejected = null;
+            foreach (var report in exchange.Reports)
             {
-                MsiClawLedProtocol.CandidateReadParseOutcome.CandidateReadbackParsed => MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed,
-                MsiClawLedProtocol.CandidateReadParseOutcome.WrongAddressOrIndex => MsiClawLedProfileReadProbeOutcome.WrongAddressOrIndex,
-                _ => MsiClawLedProfileReadProbeOutcome.UnexpectedReport
-            };
-            return Complete(outcome, parseOutcome.ToString(), report,
-                outcome == MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed ? parsed.Effect : null,
-                outcome == MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed ? parsed.Speed : null,
-                outcome == MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed ? parsed.Brightness : null);
+                var parseOutcome = MsiClawLedProtocol.ParseA2vm230CandidateProfileReadResponse(report, out var parsed);
+                if (parseOutcome == MsiClawLedProtocol.CandidateReadParseOutcome.CandidateReadbackParsed)
+                    return Complete(MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed,
+                        parseOutcome.ToString(), report, parsed.Effect, parsed.Speed, parsed.Brightness);
+
+                firstFailure ??= parseOutcome;
+                firstRejected ??= report;
+            }
+
+            var rejectedOutcome = firstFailure == MsiClawLedProtocol.CandidateReadParseOutcome.WrongAddressOrIndex
+                ? MsiClawLedProfileReadProbeOutcome.WrongAddressOrIndex
+                : MsiClawLedProfileReadProbeOutcome.UnexpectedReport;
+            return Complete(rejectedOutcome, firstFailure?.ToString() ?? "UnexpectedReport", firstRejected);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
