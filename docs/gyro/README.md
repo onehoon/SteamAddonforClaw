@@ -2,7 +2,7 @@
 
 Status: research, diagnostic implementation, and hardware characterization  
 Last updated: 2026-10-09  
-Production status: **Gyro PR1 Motion Core merged in PR #731; Gyro PR2 Steam Deck IMU work order ready, implementation pending.**
+Production status: **Gyro PR1 Motion Core merged in PR #731; Gyro PR2 Steam Deck IMU publication is implemented in review, with A2VM/EX hardware acceptance pending.**
 
 This folder is the single documentation home for MSI Claw gyro / accelerometer research and the Addon's SD6 motion feature track.
 
@@ -36,7 +36,7 @@ Current production-code checkpoint after PR #500:
 b1ff0b79dbd6a8215866567d900ee4499d262ec6
 ```
 
-The shared production Motion Core for A2VM and CG3EM was merged in **PR #731** (squash commit `a1a57ed8cdb78d05e016f862f22637ae446bd58c`). The active next step is **Gyro PR2 Steam Deck native IMU publication**, using that PR1 snapshot without a new sensor owner, new virtual publisher or Addon gyro UI. EX-specific hardware confirmation and A2VM7 physical validation remain **post-merge user responsibilities**, not Codex/CI/PR-review blockers. See the approved plan and both work orders below.
+The shared production Motion Core for A2VM and CG3EM was merged in **PR #731** (squash commit `a1a57ed8cdb78d05e016f862f22637ae446bd58c`). **Gyro PR2 Steam Deck native IMU publication is implemented in the current review PR**, using that PR1 snapshot without a new sensor owner, new virtual publisher or Addon gyro UI. EX-specific hardware confirmation and A2VM7 physical validation remain **post-merge user responsibilities**, not Codex/CI/PR-review blockers. See the approved plan and both work orders below.
 
 Two successful CG3EM Live Sanity captures have now confirmed that the repaired-driver machine exposes continuously readable STMicro LSM6DSO Physical Gyrometer and Physical Accelerometer sources through the legacy Windows Sensor API. The remaining characterization work is dedicated Stationary Bias, Axis Characterization, and practical restart / sleep-resume evidence before the measured CG3EM production source contract is frozen.
 

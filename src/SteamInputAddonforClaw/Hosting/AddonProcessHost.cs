@@ -953,7 +953,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     new SteamInputAddonforClaw.Processes.ChildProcessRunner(
                         SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture.CommandTimeout)),
                 physicalRumbleTestAvailabilityProvider: () =>
-                    owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null);
+                    owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null,
+                motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable);
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));

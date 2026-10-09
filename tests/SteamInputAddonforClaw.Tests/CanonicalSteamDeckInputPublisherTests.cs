@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
@@ -44,7 +45,65 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
 
         Assert.Equal((byte)1, sink.States[0].A);
         Assert.Equal((byte)1, sink.States[1].X);
+        AssertImuNeutral(sink.States[0]);
+        AssertImuNeutral(sink.States[1]);
         Assert.Equal(2, publisher.PublishedStateCount);
+    }
+
+    [Fact]
+    public async Task Each_tick_reads_one_current_motion_snapshot_and_failures_only_neutralize_imu()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        MsiClawMotionState? motion = Motion(1, 2, 3, 0.5, 0.25, -0.5);
+        var motionReads = 0;
+        var providerThrows = false;
+        var faults = 0;
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            source,
+            sink,
+            ticks,
+            fault: _ => faults++,
+            motionSnapshotProvider: () =>
+            {
+                motionReads++;
+                if (providerThrows) throw new InvalidOperationException("optional motion provider failed");
+                return motion!;
+            });
+
+        publisher.Start();
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(1);
+        Assert.Equal((short)16, sink.States[0].Pitch);
+        Assert.Equal((short)-48, sink.States[0].Yaw);
+
+        source.Value = new ControllerState(new GamepadButtons(false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false), new(11, -12), new(13, -14), default, new([false, false]));
+        motion = Motion(-1, 4, -2, -0.25, 0.5, 0.75);
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(2);
+        Assert.Equal((byte)1, sink.States[1].B);
+        Assert.Equal((short)-16, sink.States[1].Pitch);
+        Assert.Equal((short)32, sink.States[1].Yaw);
+        Assert.Equal((short)64, sink.States[1].Roll);
+        Assert.Equal((short)13, sink.States[1].RStickX);
+
+        motion = motion with { HasAccelerometer = false };
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(3);
+        AssertImuNeutral(sink.States[2]);
+        Assert.Equal((byte)1, sink.States[2].B);
+
+        providerThrows = true;
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(4);
+        AssertImuNeutral(sink.States[3]);
+        Assert.Equal((byte)1, sink.States[3].B);
+        await publisher.StopAsync();
+
+        Assert.Equal(4, motionReads);
+        Assert.Equal(0, faults);
+        Assert.Equal(4, publisher.PublishedStateCount);
     }
 
     [Fact]
@@ -76,7 +135,9 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         var overlay = new SteamDeckSystemButtonOverlay(time);
         var source = new Snapshot(new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, new([false, false])));
         var sink = new FakeSink(); var ticks = new ManualTicks();
-        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, systemButtonOverlay: overlay);
+        var motion = Motion(1, 2, 3, 0.5, 0.25, -0.5);
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            source, sink, ticks, systemButtonOverlay: overlay, motionSnapshotProvider: () => motion);
         publisher.Start();
 
         // Before any pulse is requested: normal mapped state, QuickAccess neutral.
@@ -90,6 +151,9 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         await ticks.TickAsync(); await sink.WaitForCountAsync(2);
         Assert.Equal((byte)1, sink.States[1].A);
         Assert.Equal((byte)1, sink.States[1].QuickAccess);
+        Assert.Equal((short)16, sink.States[1].Pitch);
+        Assert.Equal((short)-48, sink.States[1].Yaw);
+        Assert.Equal((short)8192, sink.States[1].AccelX);
 
         // After the pulse duration elapses, normal publication continues with QuickAccess neutral.
         time.Advance(TimeSpan.FromMilliseconds(101));
@@ -1011,6 +1075,27 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
 
     private sealed class Snapshot(ControllerState value) : IControllerStateSnapshotSource
     { public ControllerState Value { get; set; } = value; public ControllerState LatestState => Value; }
+
+    private static MsiClawMotionState Motion(
+        double gyroX,
+        double gyroY,
+        double gyroZ,
+        double accelX,
+        double accelY,
+        double accelZ) =>
+        new(gyroX, gyroY, gyroZ, accelX, accelY, accelZ,
+            1000, 1000, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
+            true, true, "gyro", "accelerometer");
+
+    private static void AssertImuNeutral(SteamDeckDeviceState state)
+    {
+        Assert.Equal((short)0, state.AccelX);
+        Assert.Equal((short)0, state.AccelY);
+        Assert.Equal((short)0, state.AccelZ);
+        Assert.Equal((short)0, state.Pitch);
+        Assert.Equal((short)0, state.Yaw);
+        Assert.Equal((short)0, state.Roll);
+    }
 
     private sealed class ManualTicks : IInputReportTickSource
     {

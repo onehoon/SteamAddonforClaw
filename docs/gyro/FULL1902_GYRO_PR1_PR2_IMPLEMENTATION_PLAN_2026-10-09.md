@@ -124,7 +124,7 @@ Implement in one focused PR:
 
 Full implementation contract: [Gyro PR1 work order](../work-order/GYRO_PR1_FULL1902_COMMON_MOTION_CORE_WORK_ORDER_2026-10-09.md).
 
-## 5. Gyro PR2 — Steam Deck only (work order ready; implementation pending)
+## 5. Gyro PR2 — Steam Deck only (implementation submitted for review)
 
 Wire PR1's latest motion snapshot as an optional, nonblocking input to the **existing** `CanonicalSteamDeckInputPublisher` / `SteamDeckDeviceStateMapper` / native `SteamDeckDeviceState`. Do not create an IMU publisher, change canonical cadence, add a virtual device, or affect the X360 publisher.
 
@@ -134,7 +134,7 @@ Wire PR1's latest motion snapshot as an optional, nonblocking input to the **exi
 - Steam Input continues to own gyro activation, sensitivity, mouse/stick mapping and per-game behavior. No Addon Steam-gyro settings UI.
 - Verify target IMU report packing and Steam Input behavior by tests where possible. Device results for both A2VM and EX are user **post-merge** responsibilities.
 
-**Implementation status:** PR1 common Motion Core merged as PR #731 (squash commit `a1a57ed8cdb78d05e016f862f22637ae446bd58c`). The [Gyro PR2 native Steam Deck IMU work order](../work-order/GYRO_PR2_FULL1902_STEAMDECK_NATIVE_IMU_OUTPUT_WORK_ORDER_2026-10-09.md) is ready for local Codex; PR2 code and hardware acceptance remain pending.
+**Implementation status:** PR1 common Motion Core merged as PR #731 (squash commit `a1a57ed8cdb78d05e016f862f22637ae446bd58c`). PR2 Steam Deck native IMU publication is implemented in the current review PR. A2VM/EX Steam Input behavior and physical axes remain post-merge user hardware verification; no hardware acceptance is claimed.
 
 ## 6. Explicit later work: Xbox360
 
