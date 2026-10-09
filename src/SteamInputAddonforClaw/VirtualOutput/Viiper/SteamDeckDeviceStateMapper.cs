@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
@@ -9,9 +10,8 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// <remarks>
 /// Steam Deck has native right-stick and R3 fields, so this mapper writes them directly (RightStick
 /// -> RStickX/Y, R3 -> native R3) rather than substituting them into trackpad fields. Trackpad,
-/// IMU/quaternion, L5/R5, Steam, and QuickAccess fields are intentionally left neutral until their
-/// separate feature tracks are implemented and hardware-validated -- see
-/// docs/VIIPER_MIGRATION_TODO.md SD5/SD6.
+/// quaternion, L5/R5, Steam, and QuickAccess fields remain neutral. Fresh PR1 motion snapshots may
+/// populate the Steam Deck IMU fields; invalid or unavailable snapshots remain neutral.
 /// </remarks>
 internal static class SteamDeckDeviceStateMapper
 {
@@ -22,11 +22,15 @@ internal static class SteamDeckDeviceStateMapper
     // pins the exact conversion.
     internal const ushort MaxAnalogTrigger = (ushort)short.MaxValue;
 
-    internal static SteamDeckDeviceState Map(ControllerState state, bool suppressM1 = false, bool suppressM2 = false)
+    internal static SteamDeckDeviceState Map(
+        ControllerState state,
+        bool suppressM1 = false,
+        bool suppressM2 = false,
+        MsiClawMotionState? motion = null)
     {
         var buttons = state.Buttons;
 
-        return new SteamDeckDeviceState
+        var result = new SteamDeckDeviceState
         {
             A = ToByte(buttons.A),
             X = ToByte(buttons.X),
@@ -67,10 +71,8 @@ internal static class SteamDeckDeviceStateMapper
             RStickX = state.RightStick.X,
             RStickY = state.RightStick.Y,
 
-            // Neutral for the first SD2 smoke test: L5/R5, Steam, QuickAccess, all trackpad
-            // touch/press/axes/force, stick touch/force, IMU, and quaternion. Left as struct
-            // defaults (0/false) below -- listed here for reviewability, not because they need an
-            // explicit assignment.
+            // L5/R5, Steam, QuickAccess, trackpad touch/press/axes/force, stick touch/force, and
+            // quaternion remain neutral. IMU is filled below only from a complete valid snapshot.
             L5 = 0,
             R5 = 0,
             Steam = 0,
@@ -89,17 +91,44 @@ internal static class SteamDeckDeviceStateMapper
             RPadForce = 0,
             LStickForce = 0,
             RStickForce = 0,
-            AccelX = 0,
-            AccelY = 0,
-            AccelZ = 0,
-            Pitch = 0,
-            Yaw = 0,
-            Roll = 0,
             GyroQuatW = 0,
             GyroQuatX = 0,
             GyroQuatY = 0,
             GyroQuatZ = 0,
         };
+
+        if (IsUsableMotion(motion))
+        {
+            result.Pitch = EncodeI16(motion!.GyroXDegPerSecond, 16);
+            result.Yaw = EncodeI16(-motion.GyroZDegPerSecond, 16);
+            result.Roll = EncodeI16(motion.GyroYDegPerSecond, 16);
+            result.AccelX = EncodeI16(motion.AccelXG, 16384);
+            result.AccelY = EncodeI16(-motion.AccelZG, 16384);
+            result.AccelZ = EncodeI16(motion.AccelYG, 16384);
+        }
+
+        return result;
+    }
+
+    private static bool IsUsableMotion(MsiClawMotionState? motion) =>
+        motion is { IsUsableForSteamDeckImu: true }
+        && double.IsFinite(motion.GyroXDegPerSecond)
+        && double.IsFinite(motion.GyroYDegPerSecond)
+        && double.IsFinite(motion.GyroZDegPerSecond)
+        && double.IsFinite(motion.AccelXG)
+        && double.IsFinite(motion.AccelYG)
+        && double.IsFinite(motion.AccelZG);
+
+    private static short EncodeI16(double value, double countsPerUnit)
+    {
+        if (!double.IsFinite(value)) return 0;
+
+        var counts = value * countsPerUnit;
+        if (double.IsPositiveInfinity(counts)) return short.MaxValue;
+        if (double.IsNegativeInfinity(counts)) return short.MinValue;
+
+        var rounded = Math.Round(counts, MidpointRounding.AwayFromZero);
+        return (short)Math.Clamp(rounded, (double)short.MinValue, (double)short.MaxValue);
     }
 
     private static byte ToByte(bool value) => value ? (byte)1 : (byte)0;

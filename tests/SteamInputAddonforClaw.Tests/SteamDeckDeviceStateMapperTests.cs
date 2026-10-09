@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
 
@@ -39,6 +40,98 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal(0, mapped.GyroQuatX);
         Assert.Equal(0, mapped.GyroQuatY);
         Assert.Equal(0, mapped.GyroQuatZ);
+    }
+
+    [Fact]
+    public void Fresh_motion_maps_normalized_axes_to_native_fields_once()
+    {
+        var motion = Motion(1, 2, 3, 0.5, 0.25, -0.5);
+
+        var mapped = SteamDeckDeviceStateMapper.Map(State(), motion: motion);
+
+        Assert.Equal((short)8192, mapped.AccelX);
+        Assert.Equal((short)8192, mapped.AccelY);
+        Assert.Equal((short)4096, mapped.AccelZ);
+        Assert.Equal((short)16, mapped.Pitch);
+        Assert.Equal((short)-48, mapped.Yaw);
+        Assert.Equal((short)32, mapped.Roll);
+        Assert.Equal((short)0, mapped.GyroQuatW);
+        Assert.Equal((short)0, mapped.GyroQuatX);
+        Assert.Equal((short)0, mapped.GyroQuatY);
+        Assert.Equal((short)0, mapped.GyroQuatZ);
+    }
+
+    [Fact]
+    public void Real_stationary_gravity_and_valid_zero_gyro_are_preserved()
+    {
+        var mapped = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(0, 0, 0, 0, 0, 1));
+
+        Assert.Equal((short)0, mapped.Pitch);
+        Assert.Equal((short)0, mapped.Yaw);
+        Assert.Equal((short)0, mapped.Roll);
+        Assert.Equal((short)0, mapped.AccelX);
+        Assert.Equal((short)-16384, mapped.AccelY);
+        Assert.Equal((short)0, mapped.AccelZ);
+    }
+
+    [Fact]
+    public void Missing_stale_or_nonfinite_motion_neutralizes_all_six_fields_without_affecting_gamepad()
+    {
+        var state = State(buttons: Button("A"));
+        var fresh = Motion(1, 2, 3, 0.5, 0.25, -0.5);
+        var staleGyro = (fresh with { GyroReceiveTicks = 749 }).WithFreshness(1000, 1000);
+        var staleAccel = (fresh with { AccelReceiveTicks = 499 }).WithFreshness(1000, 1000);
+        var unavailableStates = new MsiClawMotionState?[]
+        {
+            null,
+            MsiClawMotionState.Unavailable,
+            fresh with { HasAccelerometer = false },
+            fresh with { HasGyro = false },
+            staleGyro,
+            staleAccel,
+            fresh with { AccelXG = double.NaN }
+        };
+
+        foreach (var motion in unavailableStates)
+        {
+            var mapped = SteamDeckDeviceStateMapper.Map(state, motion: motion);
+
+            Assert.Equal((byte)1, mapped.A);
+            AssertImuNeutral(mapped);
+        }
+    }
+
+    [Fact]
+    public void Motion_encoding_rounds_midpoints_away_from_zero_and_saturates_signed_fields()
+    {
+        var rounded = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(0.03125, -0.03125, 0, 0, 0, 0));
+        Assert.Equal((short)1, rounded.Pitch);
+        Assert.Equal((short)-1, rounded.Roll);
+
+        var exactBoundaries = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(2048, -2048, 2048, 2, -2, 2));
+        Assert.Equal(short.MaxValue, exactBoundaries.Pitch);
+        Assert.Equal(short.MinValue, exactBoundaries.Yaw);
+        Assert.Equal(short.MinValue, exactBoundaries.Roll);
+        Assert.Equal(short.MaxValue, exactBoundaries.AccelX);
+        Assert.Equal(short.MinValue, exactBoundaries.AccelY);
+        Assert.Equal(short.MinValue, exactBoundaries.AccelZ);
+
+        var saturated = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(4000, -4000, 4000, 3, -3, 3));
+        Assert.Equal(short.MaxValue, saturated.Pitch);
+        Assert.Equal(short.MinValue, saturated.Yaw);
+        Assert.Equal(short.MinValue, saturated.Roll);
+        Assert.Equal(short.MaxValue, saturated.AccelX);
+        Assert.Equal(short.MinValue, saturated.AccelY);
+        Assert.Equal(short.MinValue, saturated.AccelZ);
+    }
+
+    [Fact]
+    public void Existing_mapper_call_without_motion_remains_neutral()
+    {
+        var mapped = SteamDeckDeviceStateMapper.Map(State(buttons: Button("X")));
+
+        Assert.Equal((byte)1, mapped.X);
+        AssertImuNeutral(mapped);
     }
 
     [Theory]
@@ -217,6 +310,27 @@ public sealed class SteamDeckDeviceStateMapperTests
         TriggerState? triggers = null,
         AuxiliaryButtonState? auxiliary = null) =>
         new(buttons ?? default, leftStick ?? default, rightStick ?? default, triggers ?? default, auxiliary ?? new AuxiliaryButtonState(new[] { false, false }));
+
+    private static MsiClawMotionState Motion(
+        double gyroX,
+        double gyroY,
+        double gyroZ,
+        double accelX,
+        double accelY,
+        double accelZ) =>
+        new(gyroX, gyroY, gyroZ, accelX, accelY, accelZ,
+            1000, 1000, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
+            true, true, "gyro", "accelerometer");
+
+    private static void AssertImuNeutral(SteamDeckDeviceState state)
+    {
+        Assert.Equal((short)0, state.AccelX);
+        Assert.Equal((short)0, state.AccelY);
+        Assert.Equal((short)0, state.AccelZ);
+        Assert.Equal((short)0, state.Pitch);
+        Assert.Equal((short)0, state.Yaw);
+        Assert.Equal((short)0, state.Roll);
+    }
 
     private static GamepadButtons Button(string name) => name switch
     {

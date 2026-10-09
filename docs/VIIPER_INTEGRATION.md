@@ -27,7 +27,7 @@ Game Bar foreground does not select another virtual controller.
 | Hardware status | EX basic non-gyro input validated; lifecycle evidence remains pending |
 | Rumble | Production callback/authority/STOP wiring implemented; hardware validation pending |
 | Rumble / haptic feedback | Production two-motor translation/wiring implemented; hardware validation pending |
-| Gyro / IMU | Separate feature track |
+| Gyro / IMU | Steam Deck output implemented; A2VM/EX hardware validation pending |
 
 The DLL, generated header, managed P/Invoke definitions, ABI tests, hashes,
 and this contract must all refer to the same VIIPER revision.
@@ -288,8 +288,12 @@ fields. Analog trigger travel and digital full-pull trigger state remain
 independent. Sticks, L3/R3, rear controls, Steam, and Quick Access use their
 native semantic fields where the current feature scope supports them.
 
-Trackpad and motion fields remain neutral until their separate feature tracks
-are implemented and hardware-validated.
+Trackpad and quaternion fields remain neutral. The Steam Deck motion fields
+consume the existing PR1 normalized gyro and accelerometer snapshot through the
+canonical publisher when both roles are fresh and valid; missing or stale
+motion is neutral for that report. Steam Input remains responsible for gyro
+activation and mapping. A2VM/EX device behavior and Steam Input acceptance have
+not yet been hardware-validated.
 
 ## 6. PnP identity and ownership
 

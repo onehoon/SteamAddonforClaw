@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
@@ -57,6 +58,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private readonly Action<Exception>? _fault;
     private readonly Func<long> _timestampProvider;
     private readonly Func<ControllerState, AuxiliaryButtonSlot, bool> _rearButtonSuppressionProvider;
+    private readonly Func<MsiClawMotionState>? _motionSnapshotProvider;
     private readonly SteamDeckSystemButtonOverlay _systemButtonOverlay;
     private CancellationTokenSource? _stop;
     private Task? _task;
@@ -107,7 +109,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
         Action<Exception>? fault = null,
         Func<long>? timestampProvider = null,
         SteamDeckSystemButtonOverlay? systemButtonOverlay = null,
-        Func<ControllerState, AuxiliaryButtonSlot, bool>? rearButtonSuppressionProvider = null)
+        Func<ControllerState, AuxiliaryButtonSlot, bool>? rearButtonSuppressionProvider = null,
+        Func<MsiClawMotionState>? motionSnapshotProvider = null)
     {
         _snapshot = snapshot;
         _sink = sink;
@@ -116,6 +119,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
         _systemButtonOverlay = systemButtonOverlay ?? new SteamDeckSystemButtonOverlay(timestampProvider: _timestampProvider);
         _rearButtonSuppressionProvider = rearButtonSuppressionProvider ?? (static (_, _) => false);
+        _motionSnapshotProvider = motionSnapshotProvider;
     }
 
     internal bool IsRunning => _task is { IsCompleted: false } || _workerThread is { IsAlive: true };
@@ -396,10 +400,12 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private bool PublishCurrentStateOnce()
     {
         var rawState = _snapshot.LatestState;
+        var motion = CaptureMotionSnapshot();
         var mapped = SteamDeckDeviceStateMapper.Map(
             rawState,
             _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.RightRear),
-            _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.LeftRear));
+            _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.LeftRear),
+            motion);
         var state = _systemButtonOverlay.Apply(mapped);
 
         var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
@@ -436,6 +442,20 @@ internal sealed class CanonicalSteamDeckInputPublisher
 
         if (diagnosticsEnabled) EmitHeartbeatIfDue();
         return true;
+    }
+
+    private MsiClawMotionState CaptureMotionSnapshot()
+    {
+        try
+        {
+            return _motionSnapshotProvider?.Invoke() ?? MsiClawMotionState.Unavailable;
+        }
+        catch
+        {
+            // Motion is optional to ordinary gamepad publication; do not fault the publisher or
+            // emit a high-rate log when its snapshot provider fails.
+            return MsiClawMotionState.Unavailable;
+        }
     }
 
     private static bool HasOrdinaryInput(SteamDeckDeviceState state) =>

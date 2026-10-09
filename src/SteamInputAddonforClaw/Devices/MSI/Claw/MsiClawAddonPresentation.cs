@@ -275,6 +275,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
     private readonly Func<IXbox360RumbleLoopXInput> _rumbleLoopXInputFactory;
     private readonly Func<IXbox360UsbTraceCapture>? _rumbleLoopUsbTraceCaptureFactory;
+    private readonly Func<MsiClawMotionState>? _motionSnapshotProvider;
     private readonly TimeSpan _rumbleLoopBurstStepCadence;
     private readonly TimeSpan _rumbleLoopCycleIdle;
     private readonly TimeSpan _rumbleLoopTerminalCallbackTimeout;
@@ -327,7 +328,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         Func<IXbox360UsbTraceCapture>? rumbleLoopUsbTraceCaptureFactory = null,
         TimeSpan? rumbleLoopCycleIdle = null,
         Func<bool>? physicalRumbleTestAvailabilityProvider = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        Func<MsiClawMotionState>? motionSnapshotProvider = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
@@ -339,6 +341,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             ?? Xbox360RumbleLoopDiagnostic.ProductionTerminalCallbackTimeout;
         _physicalRumbleTestAvailabilityProvider = physicalRumbleTestAvailabilityProvider;
         _delay = delay ?? Task.Delay;
+        _motionSnapshotProvider = motionSnapshotProvider;
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
         _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
         _xbox360PublisherFactory = xbox360PublisherFactory
@@ -354,7 +357,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 sink,
                 fault: fault,
                 systemButtonOverlay: overlay,
-                rearButtonSuppressionProvider: ShouldSuppressRearButton)));
+                rearButtonSuppressionProvider: ShouldSuppressRearButton,
+                motionSnapshotProvider: _motionSnapshotProvider)));
     }
 
     /// <summary>The canonical VIIPER runtime state, or <see langword="null"/> if VIIPER could not be
