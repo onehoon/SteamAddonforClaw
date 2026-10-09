@@ -2,7 +2,7 @@
 
 Status: research, diagnostic implementation, and hardware characterization  
 Last updated: 2026-10-09  
-Production status: **Gyro PR1 shared production Motion Core and Gyro PR2 Steam Deck IMU are planned but not yet implemented.**
+Production status: **Gyro PR1 Motion Core merged in PR #731; Gyro PR2 Steam Deck IMU work order ready, implementation pending.**
 
 This folder is the single documentation home for MSI Claw gyro / accelerometer research and the Addon's SD6 motion feature track.
 
@@ -36,7 +36,7 @@ Current production-code checkpoint after PR #500:
 b1ff0b79dbd6a8215866567d900ee4499d262ec6
 ```
 
-The active next step is **Gyro PR1 shared production Motion Core for both A2VM and CG3EM**, followed by **Gyro PR2 Steam Deck IMU publication**. EX-specific hardware confirmation and A2VM7 physical validation are **post-merge user responsibilities**, not Codex/CI/PR-review blockers. See the new approved 2026-10-09 plan and PR1 work order below.
+The shared production Motion Core for A2VM and CG3EM was merged in **PR #731** (squash commit `a1a57ed8cdb78d05e016f862f22637ae446bd58c`). The active next step is **Gyro PR2 Steam Deck native IMU publication**, using that PR1 snapshot without a new sensor owner, new virtual publisher or Addon gyro UI. EX-specific hardware confirmation and A2VM7 physical validation remain **post-merge user responsibilities**, not Codex/CI/PR-review blockers. See the approved plan and both work orders below.
 
 Two successful CG3EM Live Sanity captures have now confirmed that the repaired-driver machine exposes continuously readable STMicro LSM6DSO Physical Gyrometer and Physical Accelerometer sources through the legacy Windows Sensor API. The remaining characterization work is dedicated Stationary Bias, Axis Characterization, and practical restart / sleep-resume evidence before the measured CG3EM production source contract is frozen.
 
@@ -44,7 +44,7 @@ Two successful CG3EM Live Sanity captures have now confirmed that the repaired-d
 
 - [Full1902 Gyro PR1/PR2 Implementation Plan](FULL1902_GYRO_PR1_PR2_IMPLEMENTATION_PLAN_2026-10-09.md) — approved two-PR split, all A2VM/EX models in both PRs, reference axes/units, lifecycle and deferred Xbox360 gyro.
 - [Gyro PR1 Full1902 Common Motion Core Work Order](../work-order/GYRO_PR1_FULL1902_COMMON_MOTION_CORE_WORK_ORDER_2026-10-09.md) — local Codex instructions; no SteamDeck virtual output or Xbox360 feature in PR1.
-- Gyro PR2 work order will be authored after PR1; Xbox360 gyro-to-stick is explicitly later.
+- [Gyro PR2 Full1902 Steam Deck Native IMU Work Order](../work-order/GYRO_PR2_FULL1902_STEAMDECK_NATIVE_IMU_OUTPUT_WORK_ORDER_2026-10-09.md) — local Codex instructions for SteamDeck-only gyro/accel publication using the PR1 shared snapshot; no UI and no Xbox360 gyro-to-stick.
 
 The older 2026-09-05 research retains its source provenance. Its prior wait-for-more-EX-captures gate and older preliminary axis discussion are superseded for implementation sequencing and initial reference transforms by the 2026-10-09 approved plan. Current Full1902 controller ownership authority is unchanged.
 
