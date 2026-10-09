@@ -7,6 +7,7 @@ using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Processes;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -456,6 +457,40 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.Equal(expected, FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(
             startupRepairWindow,
             prerequisites));
+    }
+
+    [Theory]
+    [InlineData((int)ComponentInstallationStatus.Missing, (int)ComponentInstallationStatus.Installed)]
+    [InlineData((int)ComponentInstallationStatus.Installed, (int)ComponentInstallationStatus.Missing)]
+    [InlineData((int)ComponentInstallationStatus.Installed, (int)ComponentInstallationStatus.UpdateRequired)]
+    public void EnabledStockTopologyWindow_AllowsOnlyTheExistingMissingOrUpgradePackageRepairs(
+        int hidStatusValue,
+        int usbStatusValue)
+    {
+        var hidStatus = (ComponentInstallationStatus)hidStatusValue;
+        var usbStatus = (ComponentInstallationStatus)usbStatusValue;
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, hidStatus == ComponentInstallationStatus.Missing ? PrerequisiteStatus.Missing : PrerequisiteStatus.Ready, "Test"),
+            new(PrerequisiteKind.UsbIpWin2, usbStatus == ComponentInstallationStatus.Missing ? PrerequisiteStatus.Missing : usbStatus == ComponentInstallationStatus.UpdateRequired ? PrerequisiteStatus.Incompatible : PrerequisiteStatus.Ready, "Test"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Ready"));
+        var repairWindow = FrontendPrerequisiteSetupExecutor.IsStartupPrerequisiteRepairWindow(
+            FrontendCenterMStartupState.Enabled, disabledBootPrerequisiteRepairWindow: false, stockTopologyUnreadyBeforeBaseline: true);
+        var input = new FirstTimeSetupInput(
+            new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "Test"),
+            RecoverySafe: false,
+            SteamSessionState.FromRunningAppId(0),
+            prerequisites.HidHide,
+            prerequisites.UsbIpWin2,
+            new(PrerequisiteKind.HidHide, hidStatus, "Test"),
+            new(PrerequisiteKind.UsbIpWin2, usbStatus, "Test"),
+            new(ComponentProvisioningState.None, ComponentProvisioningState.None),
+            AllowPrerequisiteRepairWhileRecoveryUnsafe: FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(repairWindow, prerequisites));
+
+        var setup = FirstTimeSetupPolicy.Evaluate(input);
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.MissingComponents, setup.Reason);
+        Assert.True(setup.CanInstallRequiredComponents);
     }
 
     [Theory]

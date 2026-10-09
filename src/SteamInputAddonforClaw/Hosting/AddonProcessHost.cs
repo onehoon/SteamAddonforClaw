@@ -572,7 +572,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 || _presentationOwnership?.ActivePresentation is not null,
             disabledBootPrerequisiteRepairWindow:
                 startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
-                && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady);
+                && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady,
+            stockTopologyUnreadyBeforeBaseline: startupResult.StockTopologyUnreadyBeforeBaseline,
+            verifyCurrentStockTopologyAndBaseline: startupComposition.Coordinator is { } startupCoordinator
+                ? startupCoordinator.VerifyCurrentStockTopologyAndBaselineAsync
+                : null);
         _centerMAuthorityTransition = centerMAuthorityTransition;
         if (_headlessUninstallPreparation)
             return;
@@ -580,11 +584,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (_runtimeCompositionFactory is null)
             _updateCoordinator = new FrontendUpdateCoordinator(new VelopackUpdateClient(),
                 () => _requestRestart?.Invoke() == true);
-        var allowPrerequisiteRepairWhileRecoveryUnsafe =
+        var disabledBootPrerequisiteRepairWindow =
             startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
             && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady;
+        var allowPrerequisiteRepairWhileRecoveryUnsafe =
+            SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor.IsStartupPrerequisiteRepairWindow(
+                startupResult.CenterMStartupState,
+                disabledBootPrerequisiteRepairWindow,
+                startupResult.StockTopologyUnreadyBeforeBaseline);
         var setupExecutor = new SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor(
-            allowPrerequisiteRepairWhileRecoveryUnsafe);
+            allowPrerequisiteRepairWhileRecoveryUnsafe,
+            disabledBootPrerequisiteRepairWindow,
+            startupResult.StockTopologyUnreadyBeforeBaseline,
+            startupResult.CenterMStartupState);
         _xboxGameSessionRuntime = new XboxGameSessionRuntime();
         _xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;
         try

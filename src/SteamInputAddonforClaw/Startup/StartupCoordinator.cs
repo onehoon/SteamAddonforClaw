@@ -60,6 +60,7 @@ internal sealed class StartupCoordinator
         // legacy stock baseline path or the new read-only Addon Disabled-boot admission runs. A
         // construction path with no capture delegate (e.g. focused legacy tests) keeps the existing
         // stock path unchanged.
+        var centerMStartupWasCaptured = _captureCenterMStartup is not null;
         var centerMStartupState = _captureCenterMStartup is null
             ? FrontendCenterMStartupState.Enabled
             : _captureCenterMStartup().State;
@@ -90,7 +91,10 @@ internal sealed class StartupCoordinator
         AppLog.Info("ControllerTopology", "Controller topology readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
         if (readiness != ControllerTopologyReadiness.Stable)
             return new StartupResult(true, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
-                CenterMStartupState: FrontendCenterMStartupState.Enabled);
+                CenterMStartupState: FrontendCenterMStartupState.Enabled,
+                StockTopologyUnreadyBeforeBaseline: centerMStartupWasCaptured
+                    && centerMStartupState == FrontendCenterMStartupState.Enabled
+                    && hardwareSupported);
 
         if (_stockCenterMBaseline is null)
         {
@@ -109,6 +113,41 @@ internal sealed class StartupCoordinator
         // stale mutation journal to load, clean, or retire here.
         return new StartupResult(true, RecoverySafe: true, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
             CenterMStartupState: FrontendCenterMStartupState.Enabled);
+    }
+
+    /// <summary>Re-proves current stock readiness for one explicit Center M onboarding transition.
+    /// This result is local to the caller and never changes the process-wide RecoverySafe decision.</summary>
+    internal async Task<bool> VerifyCurrentStockTopologyAndBaselineAsync(CancellationToken cancellationToken)
+    {
+        if (_stockCenterMBaseline is null)
+        {
+            AppLog.Warn("CenterM.Onboarding", "Stock baseline verification is unavailable.", null, ("Reason", "StockBaselineUnavailable"));
+            return false;
+        }
+
+        try
+        {
+            var readiness = await _topologyWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
+            if (readiness != ControllerTopologyReadiness.Stable)
+            {
+                AppLog.Warn("CenterM.Onboarding", "Fresh stock topology verification did not stabilize.", null, ("Topology", readiness));
+                return false;
+            }
+
+            var baseline = await _stockCenterMBaseline.EstablishAsync(cancellationToken).ConfigureAwait(false);
+            AppLog.Info("CenterM.Onboarding", "Fresh stock baseline verification completed.",
+                ("Succeeded", baseline.Succeeded), ("ModeWriteIssued", baseline.ModeWriteIssued), ("Reason", baseline.Reason));
+            return baseline.Succeeded;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("CenterM.Onboarding", "Fresh stock baseline verification failed.", exception, ("Action", "KeepCenterMEnabled"));
+            return false;
+        }
     }
 
     /// <summary>PR4 Disabled branch: read-only only. Waits for a stable MSI Claw topology, then runs
@@ -200,6 +239,10 @@ internal sealed class StartupCoordinator
 /// paths that never reached the authority branch.</param>
 /// <param name="DisabledBootAdmission">PR4: the read-only Disabled-boot admission result PR5 will
 /// consume. Null unless Center M roots were exactly Disabled.</param>
+/// <param name="StockTopologyUnreadyBeforeBaseline">True only when supported hardware and exactly
+/// Enabled Center M roots were captured, then startup topology returned Indeterminate before the
+/// stock baseline owner was invoked. This is a narrow process-lifetime prerequisite/onboarding fact,
+/// not controller recovery safety.</param>
 internal sealed record StartupResult(
     bool ShouldStartRuntime,
     bool RecoverySafe = false,
@@ -207,4 +250,5 @@ internal sealed record StartupResult(
     HandheldDeviceModelId? HardwareDeviceModel = null,
     HardwareCompatibilityStatus? HardwareStatus = null,
     Contracts.Frontend.FrontendCenterMStartupState CenterMStartupState = Contracts.Frontend.FrontendCenterMStartupState.Unavailable,
-    DisabledBootControllerAdmissionResult? DisabledBootAdmission = null);
+    DisabledBootControllerAdmissionResult? DisabledBootAdmission = null,
+    bool StockTopologyUnreadyBeforeBaseline = false);

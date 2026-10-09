@@ -285,6 +285,228 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Empty(h.Order);
         Assert.Equal(0, restart.Calls);
         Assert.False(h.Hid.Active);
+        Assert.Equal(0, h.StockTopologyVerificationCalls);
+    }
+
+    [Fact]
+    public async Task EnabledStockTopologyTimeout_RequiresFreshProofThenUsesExistingOrderedCommit()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = true,
+            StockTopologyVerificationSucceeds = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(new[] { "stock-topology-proof", "startup:true", "hidhide:disable", "centerm:false", "restart" }, h.Order);
+        Assert.Equal(1, h.StockTopologyVerificationCalls);
+        Assert.Equal(1, restart.Calls);
+    }
+
+    [Fact]
+    public async Task EnabledStockTopologyTimeout_IndeterminateFreshProofKeepsCenterMEnabled()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = true,
+            StockTopologyVerificationSucceeds = false,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Contains("stock baseline is not verified", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(new[] { "stock-topology-proof" }, h.Order);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Fact]
+    public async Task EnabledStockTopologyTimeout_FreshProofExceptionKeepsCenterMEnabled()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = true,
+            StockTopologyVerification = _ => Task.FromException<bool>(new InvalidOperationException("proof failed")),
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Equal(new[] { "stock-topology-proof" }, h.Order);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Fact]
+    public async Task EnabledStockTopologyTimeout_RechecksCenterMRootsAfterFreshProof()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = true,
+            StockTopologyVerificationSucceeds = true,
+        };
+        h.DuringStockTopologyVerification = () =>
+        {
+            h.Roots.Server = false;
+            h.Roots.Updater = false;
+            h.Roots.Service = CenterMFoundationServiceMode.Disabled;
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, result.Snapshot.State);
+        Assert.Equal(new[] { "stock-topology-proof" }, h.Order);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Fact]
+    public async Task EnabledStockTopologyTimeout_RechecksCenterMRootsImmediatelyBeforeFreshProof()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = true,
+            StockTopologyVerificationSucceeds = true,
+        };
+        h.DuringAdmissionCapture = () =>
+        {
+            h.Roots.Server = false;
+            h.Roots.Updater = false;
+            h.Roots.Service = CenterMFoundationServiceMode.Disabled;
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Empty(h.Order);
+        Assert.Equal(0, h.StockTopologyVerificationCalls);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Fact]
+    public async Task EnabledStockTopologyTimeout_ExactPendingPrerequisitesKeepTheExistingNoHidHideMutationPath()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            PrerequisitesReady = false,
+            PendingPrerequisiteEvidenceValid = true,
+            StockTopologyUnreadyBeforeBaseline = true,
+            StockTopologyVerificationSucceeds = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(new[] { "stock-topology-proof", "startup:true", "centerm:false", "restart" }, h.Order);
+        Assert.Equal(1, restart.Calls);
+    }
+
+    [Fact]
+    public async Task EnabledStockTopologyTimeout_ActiveControllerOwnershipCannotUseFreshProof()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = true,
+            ControllerOwnershipActive = true,
+            StockTopologyVerificationSucceeds = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Empty(h.Order);
+        Assert.Equal(0, h.StockTopologyVerificationCalls);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Fact]
+    public async Task EnabledStockBaselineFailureOrigin_CannotUseFreshProof()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = false,
+            StockTopologyVerificationSucceeds = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Empty(h.Order);
+        Assert.Equal(0, h.StockTopologyVerificationCalls);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Fact]
+    public async Task StockTopologyProofCancellationStopsBeforeAnyMutation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = true,
+            StockTopologyVerification = token =>
+            {
+                cancellation.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(false);
+            },
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, cancellation.Token);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Cancelled, result.Outcome);
+        Assert.Equal(new[] { "stock-topology-proof" }, h.Order);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task StockTopologyProofCannotCrossDisabledOrPartialAuthority(bool startEnabled, bool startPartial)
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = startEnabled,
+            StartPartial = startPartial,
+            RecoverySafe = false,
+            StockTopologyUnreadyBeforeBaseline = true,
+            StockTopologyVerificationSucceeds = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Empty(h.Order);
+        Assert.Equal(0, h.StockTopologyVerificationCalls);
+        Assert.Equal(0, restart.Calls);
     }
 
     [Fact]
@@ -892,6 +1114,12 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool PendingPrerequisiteEvidenceValid { get; init; }
         public bool ControllerOwnershipActive { get; init; }
         public bool DisabledBootPrerequisiteRepairWindow { get; init; }
+        public bool StockTopologyUnreadyBeforeBaseline { get; init; }
+        public bool StockTopologyVerificationSucceeds { get; init; }
+        public Func<CancellationToken, Task<bool>>? StockTopologyVerification { get; init; }
+        public Action? DuringAdmissionCapture { get; set; }
+        public Action? DuringStockTopologyVerification { get; set; }
+        public int StockTopologyVerificationCalls { get; private set; }
         public SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult PhysicalRelease { get; init; } =
             SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
         public Action? OnPhysicalRelease { get; set; }
@@ -948,7 +1176,11 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
             return new CenterMRebootAuthorityTransition(
                 centerM, coordinator, baseline,
                 () => Safety,
-                _ => Task.FromResult((prerequisites, RecoverySafe)),
+                _ =>
+                {
+                    DuringAdmissionCapture?.Invoke();
+                    return Task.FromResult((prerequisites, RecoverySafe));
+                },
                 token =>
                 {
                     // PR5 review: EnableAsync must pass CancellationToken.None past the mutation
@@ -980,7 +1212,15 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                 r,
                 _ => PendingPrerequisiteEvidenceValid,
                 () => ControllerOwnershipActive,
-                DisabledBootPrerequisiteRepairWindow);
+                DisabledBootPrerequisiteRepairWindow,
+                StockTopologyUnreadyBeforeBaseline,
+                token =>
+                {
+                    StockTopologyVerificationCalls++;
+                    Order.Add("stock-topology-proof");
+                    DuringStockTopologyVerification?.Invoke();
+                    return StockTopologyVerification?.Invoke(token) ?? Task.FromResult(StockTopologyVerificationSucceeds);
+                });
         }
 
         private sealed class FakeInvoker(Harness h) : ICenterMStartupHelperInvoker

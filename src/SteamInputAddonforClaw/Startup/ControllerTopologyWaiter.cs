@@ -14,6 +14,17 @@ internal enum ControllerTopologyReadiness { Stable, Indeterminate }
 
 internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
 {
+    private sealed record TopologyObservation(
+        string Snapshot,
+        bool Ready,
+        int PresentMsiCandidateCount,
+        int PresentPid1901CandidateCount,
+        int PresentPid1902CandidateCount,
+        int PresentPid1903CandidateCount,
+        int RecognizedInternalDeviceCount,
+        bool Pid1901XInputControlHidPresent,
+        bool Pid1902DirectInputControlHidPresent);
+
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
     private readonly ControllerDeviceClassifier _classifier;
     private readonly int _requiredStableSnapshots;
@@ -45,6 +56,8 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
         var deadline = DateTimeOffset.UtcNow + _timeout;
         var stopwatch = Stopwatch.StartNew();
         var attempt = 0;
+        var lastObservation = new TopologyObservation(string.Empty, false, 0, 0, 0, 0, 0, false, false);
+        Exception? enumerationFailure = null;
         AppLog.Info("ControllerTopology", "Topology readiness wait started.", ("TimeoutMs", _timeout.TotalMilliseconds), ("PollIntervalMs", _sampleInterval.TotalMilliseconds));
 
         try
@@ -53,23 +66,23 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 attempt++;
-                var (snapshot, ready) = CreateRelevantTopologySnapshot();
-                AppLog.Debug("ControllerTopology", "Topology readiness poll.", ("Attempt", attempt), ("Ready", ready), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
-                if (!ready)
+                lastObservation = CreateRelevantTopologySnapshot();
+                AppLog.Debug("ControllerTopology", "Topology readiness poll.", ("Attempt", attempt), ("Ready", lastObservation.Ready), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+                if (!lastObservation.Ready)
                 {
                     stableSnapshotCount = 0;
                     previousSnapshot = null;
                     await Task.Delay(_sampleInterval, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
-                stableSnapshotCount = snapshot == previousSnapshot ? stableSnapshotCount + 1 : 1;
+                stableSnapshotCount = lastObservation.Snapshot == previousSnapshot ? stableSnapshotCount + 1 : 1;
                 if (stableSnapshotCount >= _requiredStableSnapshots)
                 {
                     AppLog.Info("ControllerTopology", "Topology readiness stable.", ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
                     return ControllerTopologyReadiness.Stable;
                 }
 
-                previousSnapshot = snapshot;
+                previousSnapshot = lastObservation.Snapshot;
                 await Task.Delay(_sampleInterval, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -80,17 +93,34 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
         }
         catch (Exception exception)
         {
-            AppLog.Warn("ControllerTopology", "Topology readiness wait failed.", exception, ("Action", "Passive"));
+            enumerationFailure = exception;
         }
 
-        AppLog.Warn("ControllerTopology", "Topology readiness timeout.", null, ("Action", "Passive"), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+        var failureClass = enumerationFailure is not null
+            ? "EnumerationFailed"
+            : GetFailureClass(lastObservation);
+        AppLog.Warn("ControllerTopology", "Topology readiness ended without a stable controller topology.", enumerationFailure,
+            ("FailureClass", failureClass),
+            ("PresentMsiCandidateCount", lastObservation.PresentMsiCandidateCount),
+            ("PresentPid1901CandidateCount", lastObservation.PresentPid1901CandidateCount),
+            ("PresentPid1902CandidateCount", lastObservation.PresentPid1902CandidateCount),
+            ("PresentPid1903CandidateCount", lastObservation.PresentPid1903CandidateCount),
+            ("RecognizedInternalDeviceCount", lastObservation.RecognizedInternalDeviceCount),
+            ("Pid1901XInputControlHidPresent", lastObservation.Pid1901XInputControlHidPresent),
+            ("Pid1902DirectInputControlHidPresent", lastObservation.Pid1902DirectInputControlHidPresent),
+            ("ConsecutiveStableSnapshots", stableSnapshotCount),
+            ("RequiredStableSnapshots", _requiredStableSnapshots),
+            ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Action", "Passive"));
         return ControllerTopologyReadiness.Indeterminate;
     }
 
-    private (string Snapshot, bool Ready) CreateRelevantTopologySnapshot()
+    private TopologyObservation CreateRelevantTopologySnapshot()
     {
         var devices = _deviceEnumerator.EnumeratePresentDevices();
         var topology = new ControllerTopologySnapshot(devices);
+        var msiCandidates = devices.Where(device => device.Present
+            && device.VendorId == MsiClawHardware.VendorId
+            && device.ProductId is 0x1901 or 0x1902 or 0x1903).ToArray();
         // Stability tracking must be scoped to the MSI Claw's own internal-controller topology only.
         // Any device that merely looks like a generic game controller (an Xbox controller, DualSense,
         // a real Steam Controller, etc.) must never be part of this snapshot: connecting/disconnecting
@@ -110,14 +140,28 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
         // HID hasn't enumerated yet, readiness must not settle on the gamepad-usage interface alone.
         // Either a PID1901 XInput or a PID1902 DirectInput control HID satisfies readiness -- PnP /
         // mode-transition timing may legitimately expose either while the caller is stabilizing.
-        var ready = relevantDevices.Length > 0 && HasResolvableControlHid(relevantDevices);
-        return (snapshot, ready);
+        var pid1901ControlHidPresent = MatchesModeTopology(relevantDevices, MsiClawNativeMode.XInput);
+        var pid1902ControlHidPresent = MatchesModeTopology(relevantDevices, MsiClawNativeMode.DirectInput);
+        var ready = relevantDevices.Length > 0 && (pid1901ControlHidPresent || pid1902ControlHidPresent);
+        return new TopologyObservation(
+            snapshot,
+            ready,
+            msiCandidates.Length,
+            msiCandidates.Count(device => device.ProductId == 0x1901),
+            msiCandidates.Count(device => device.ProductId == 0x1902),
+            msiCandidates.Count(device => device.ProductId == 0x1903),
+            relevantDevices.Length,
+            pid1901ControlHidPresent,
+            pid1902ControlHidPresent);
     }
 
-    private static bool HasResolvableControlHid(IReadOnlyList<ControllerDeviceInfo> devices)
+    private static string GetFailureClass(TopologyObservation observation)
     {
-        return MatchesModeTopology(devices, MsiClawNativeMode.XInput)
-            || MatchesModeTopology(devices, MsiClawNativeMode.DirectInput);
+        if (observation.PresentMsiCandidateCount == 0) return "NoPresentMsiCandidates";
+        if (observation.RecognizedInternalDeviceCount == 0) return "MsiCandidatesNotClassifiedAsInternal";
+        if (!observation.Pid1901XInputControlHidPresent && !observation.Pid1902DirectInputControlHidPresent)
+            return "RequiredControlHidMissing";
+        return "RelevantTopologyNotStable";
     }
 
     private static bool MatchesModeTopology(IReadOnlyList<ControllerDeviceInfo> devices, MsiClawNativeMode mode)

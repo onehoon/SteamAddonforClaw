@@ -1,12 +1,33 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-public sealed class ControllerTopologyWaiterTests
+[Collection("AppLog")]
+public sealed class ControllerTopologyWaiterTests : IDisposable
 {
+    private readonly string _logDirectory = Path.Combine(Path.GetTempPath(), $"TopologyWaiterTests.{Guid.NewGuid():N}");
+    private readonly AppLogLevel _previousLogLevel = AppLog.MinimumLevelOverride;
+    private readonly string? _previousLogDirectory = AppLog.DirectoryOverride;
+
+    public ControllerTopologyWaiterTests()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        AppLog.DirectoryOverride = _logDirectory;
+    }
+
+    public void Dispose()
+    {
+        AppLog.DrainForTests();
+        AppLog.MinimumLevelOverride = _previousLogLevel;
+        AppLog.DirectoryOverride = _previousLogDirectory;
+        if (Directory.Exists(_logDirectory)) Directory.Delete(_logDirectory, recursive: true);
+    }
+
     [Fact]
     public async Task WaitUntilStableAsync_WhenInternalHandheldIsAbsent_ReturnsIndeterminate()
     {
@@ -232,6 +253,74 @@ public sealed class ControllerTopologyWaiterTests
         Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
     }
 
+    [Fact]
+    public async Task TimeoutDiagnostic_DistinguishesNoPresentMsiCandidatesWithoutLoggingPnpIds()
+    {
+        var log = await CaptureTimeoutDiagnostic(Array.Empty<ControllerDeviceInfo>(), new MsiClawInternalControllerMatcher());
+
+        Assert.Contains("FailureClass=NoPresentMsiCandidates", log);
+        Assert.Contains("PresentMsiCandidateCount=0", log);
+        Assert.Contains("ConsecutiveStableSnapshots=0", log);
+        Assert.DoesNotContain(@"HID\VID_0DB0", log);
+    }
+
+    [Fact]
+    public async Task TimeoutDiagnostic_DistinguishesKnownVidPidCandidatesNotMatchedAsInternal()
+    {
+        var log = await CaptureTimeoutDiagnostic([GamepadInterface()], new NeverMatchInternalControllerMatcher());
+
+        Assert.Contains("FailureClass=MsiCandidatesNotClassifiedAsInternal", log);
+        Assert.Contains("PresentMsiCandidateCount=1", log);
+        Assert.Contains("RecognizedInternalDeviceCount=0", log);
+        Assert.DoesNotContain(@"HID\VID_0DB0", log);
+    }
+
+    [Fact]
+    public async Task TimeoutDiagnostic_DistinguishesMissingControlHidFromUnstableTopology()
+    {
+        var missingControlLog = await CaptureTimeoutDiagnostic([GamepadInterface()], new MsiClawInternalControllerMatcher());
+        Assert.Contains("FailureClass=RequiredControlHidMissing", missingControlLog);
+        Assert.Contains("RecognizedInternalDeviceCount=1", missingControlLog);
+        Assert.Contains("Pid1902DirectInputControlHidPresent=False", missingControlLog);
+
+        var gamepad = GamepadInterface();
+        var settlingEnumerator = new SettlingControlInterfaceEnumerator(gamepad, settleAfterTick: int.MaxValue);
+        var unstableLog = await CaptureTimeoutDiagnostic(settlingEnumerator, new MsiClawInternalControllerMatcher());
+        Assert.Contains("FailureClass=RelevantTopologyNotStable", unstableLog);
+        Assert.Contains("Pid1902DirectInputControlHidPresent=True", unstableLog);
+        Assert.Contains("ConsecutiveStableSnapshots=1", unstableLog);
+        Assert.DoesNotContain(@"HID\VID_0DB0", unstableLog);
+    }
+
+    [Fact]
+    public async Task TimeoutDiagnostic_PreservesEnumerationExceptionAsTheTerminalFailure()
+    {
+        var waiter = CreateWaiter(new ThrowingEnumerator(), new MsiClawInternalControllerMatcher());
+
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
+        Assert.Contains("FailureClass=EnumerationFailed", log);
+        Assert.Contains("InvalidOperationException", log);
+    }
+
+    private async Task<string> CaptureTimeoutDiagnostic(IReadOnlyList<ControllerDeviceInfo> devices, IInternalControllerMatcher matcher) =>
+        await CaptureTimeoutDiagnostic(new FakeEnumerator(devices), matcher);
+
+    private async Task<string> CaptureTimeoutDiagnostic(IControllerDeviceEnumerator enumerator, IInternalControllerMatcher matcher)
+    {
+        var readiness = await CreateWaiter(enumerator, matcher).WaitUntilStableAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
+        return File.ReadAllText(AppLog.CurrentLogFilePath);
+    }
+
+    private static ControllerTopologyWaiter CreateWaiter(IControllerDeviceEnumerator enumerator, IInternalControllerMatcher matcher) =>
+        new(enumerator, new ControllerDeviceClassifier(matcher), requiredStableSnapshots: 3,
+            sampleInterval: TimeSpan.Zero, timeout: TimeSpan.FromMilliseconds(10));
+
     private static ControllerTopologyWaiter CreateWaiter(
         IReadOnlyList<ControllerDeviceInfo> devices,
         int requiredStableSnapshots,
@@ -248,6 +337,17 @@ public sealed class ControllerTopologyWaiterTests
     private sealed class FakeEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
     {
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices;
+    }
+
+    private sealed class NeverMatchInternalControllerMatcher : IInternalControllerMatcher
+    {
+        public InternalControllerMatchResult Match(InternalControllerMatchContext context) =>
+            new(InternalControllerMatchStatus.NoMatch, "TestNoMatch");
+    }
+
+    private sealed class ThrowingEnumerator : IControllerDeviceEnumerator
+    {
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new InvalidOperationException("enumeration failed");
     }
 
     /// <summary>

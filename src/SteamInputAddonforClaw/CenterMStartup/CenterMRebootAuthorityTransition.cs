@@ -132,6 +132,8 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly Func<RuntimePrerequisiteAssessment, bool> _hasExactPendingPrerequisites;
     private readonly Func<bool> _hasActiveControllerOwnership;
     private readonly bool _disabledBootPrerequisiteRepairWindow;
+    private readonly bool _stockTopologyUnreadyBeforeBaseline;
+    private readonly Func<CancellationToken, Task<bool>>? _verifyCurrentStockTopologyAndBaseline;
     private int _inProgress;
 
     public bool IsInProgress => Volatile.Read(ref _inProgress) != 0;
@@ -153,7 +155,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         IWindowsRestartRequester restartRequester,
         Func<RuntimePrerequisiteAssessment, bool>? hasExactPendingPrerequisites = null,
         Func<bool>? hasActiveControllerOwnership = null,
-        bool disabledBootPrerequisiteRepairWindow = false)
+        bool disabledBootPrerequisiteRepairWindow = false,
+        bool stockTopologyUnreadyBeforeBaseline = false,
+        Func<CancellationToken, Task<bool>>? verifyCurrentStockTopologyAndBaseline = null)
     {
         _centerMStartup = centerMStartup;
         _startupSettings = startupSettings;
@@ -169,6 +173,8 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _hasExactPendingPrerequisites = hasExactPendingPrerequisites ?? (_ => false);
         _hasActiveControllerOwnership = hasActiveControllerOwnership ?? (() => false);
         _disabledBootPrerequisiteRepairWindow = disabledBootPrerequisiteRepairWindow;
+        _stockTopologyUnreadyBeforeBaseline = stockTopologyUnreadyBeforeBaseline;
+        _verifyCurrentStockTopologyAndBaseline = verifyCurrentStockTopologyAndBaseline;
     }
 
     /// <param name="centerMEnabled">The requested next-boot authority: <see langword="true"/> =
@@ -239,7 +245,49 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
             && _disabledBootPrerequisiteRepairWindow
             && !activeControllerOwnership
             && (prerequisitesReady || exactPendingPrerequisites);
-        if (!admission.RecoverySafe && !disabledBootRepairCommit)
+
+        var stockOnboardingProof = false;
+        var stockOnboardingOrigin = snapshot.State == FrontendCenterMStartupState.Enabled
+            && _stockTopologyUnreadyBeforeBaseline;
+        if (!admission.RecoverySafe && stockOnboardingOrigin && !activeControllerOwnership)
+        {
+            // Re-read the three startup roots immediately before the bounded PnP/baseline proof.
+            snapshot = _centerMStartup.Capture();
+            if (snapshot.State != FrontendCenterMStartupState.Enabled)
+                return Fail(snapshot, "MSI Center M is no longer exactly Enabled. No authority change or restart was made.");
+
+            if (_verifyCurrentStockTopologyAndBaseline is not null)
+            {
+                try
+                {
+                    stockOnboardingProof = await _verifyCurrentStockTopologyAndBaseline(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("CenterM.Onboarding", "Fresh stock safety proof threw; MSI Center M remains Enabled.", exception);
+                }
+            }
+
+            if (!stockOnboardingProof)
+            {
+                snapshot = _centerMStartup.Capture();
+                return Fail(snapshot, "Controller stock baseline is not verified; MSI Center M remains Enabled. Retry after the controller is available.");
+            }
+
+            // The topology wait is bounded but may take several seconds. Reconfirm both authority
+            // and the no-owner/safe-transition preconditions before entering the existing write chain.
+            snapshot = _centerMStartup.Capture();
+            if (snapshot.State != FrontendCenterMStartupState.Enabled)
+                return Fail(snapshot, "MSI Center M changed during stock verification. No further authority change or restart was made.");
+            if (!_lowerLevelRuntimeSafety().CanTerminate || _hasActiveControllerOwnership())
+                return Fail(snapshot, "Controller ownership or another runtime operation changed during stock verification. MSI Center M remains Enabled.");
+        }
+
+        if (!admission.RecoverySafe && !disabledBootRepairCommit && !stockOnboardingProof)
             return Fail(snapshot,
                 "Controller recovery is not in a verified safe state, so MSI Center M was not disabled. Resolve controller recovery and retry Disable and Restart.");
 
