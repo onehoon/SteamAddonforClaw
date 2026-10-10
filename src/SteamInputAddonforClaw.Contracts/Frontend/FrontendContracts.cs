@@ -273,7 +273,7 @@ public sealed record FrontendControllerVibrationTestResult(
     public bool Succeeded => Outcome == FrontendControllerVibrationTestOutcome.Succeeded;
 }
 
-/// <summary>Reports the verified software lifecycle of the developer-only A2VM 8 mode-cycle PoC.
+/// <summary>Reports the verified software lifecycle of the explicit controller rumble recovery.
 /// A completed result never implies that physical motor vibration was measured.</summary>
 public sealed record FrontendDeveloperRumbleRearmResult(
     FrontendDeveloperRumbleRearmOutcome Outcome,
@@ -745,7 +745,7 @@ public interface IAddonFrontendControl
             "Physical controller vibration testing is unavailable."));
     Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable(
-            "Developer rumble re-arm is unavailable in this Runtime."));
+            "Controller rumble recovery is unavailable in this Runtime."));
     Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
         FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendControllerVibrationProfileWriteProbeResult(

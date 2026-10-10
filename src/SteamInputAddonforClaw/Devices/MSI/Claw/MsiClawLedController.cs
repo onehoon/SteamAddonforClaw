@@ -197,7 +197,7 @@ internal sealed class MsiClawLedController(
             || attributes.ProductId != MsiClawHardware.DirectInputProductId)
             return Fail("ControlHidAttributesUnavailableOrUnexpected");
         if (attributes.VersionNumber == 0x0230
-            && !string.Equals(modelId, "msi.claw.a2vm.8", StringComparison.Ordinal))
+            && modelId is not ("msi.claw.a2vm.7" or "msi.claw.a2vm.8"))
             return Fail("UnsupportedFirmwareForModel");
         if (!MsiClawLedProtocol.TryBuildStaticWrites(attributes.VersionNumber, settings, out var writes))
         {

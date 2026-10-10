@@ -1164,7 +1164,7 @@ public sealed class UiArchitectureTests
         var cards = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
         var expanders = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander").ToArray();
 
-        Assert.Equal(14, cards.Length);
+        Assert.Equal(15, cards.Length);
         Assert.Equal(5, expanders.Length);
         Assert.All(expanders, expander => Assert.Single(
             expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon"));

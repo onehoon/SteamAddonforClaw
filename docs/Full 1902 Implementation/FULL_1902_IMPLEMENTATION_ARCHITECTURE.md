@@ -268,12 +268,14 @@ DesiredPhysicalPID = PID1902
 
 Startup/recovery logic evaluates current reality and converges toward that state.
 
+**Narrow boot-only exception (2026-10-10):** On A2VM 7/8 only, the first eligible controller acquisition in an actual Windows boot may first verify PID1902 → PID1901 → PID1902 when the initial strong state is already PID1902. A2VM 7/8 that initially enumerate PID1901 use only the normal verified PID1901 → PID1902 takeover. This optional cycle is gated by exact Center M Disabled startup admission, VIIPER Ready, the boot-scoped attempt marker, and an exact current PID1902 control-HID preflight. It completes before persisted LED/strength application and virtual presentation. If the marker cannot be read/written, skip only this optional cycle and continue ordinary ownership; the marker is not authority. EX/CG3EM is unchanged, and Runtime restart, update restart, PnP recovery, sleep/resume, Steam/BPM changes, or shutdown do not trigger this cycle. The persistent desired PID remains 1902 and shutdown still does not restore PID1901. See the [A2VM boot-rumble work order](../work-order/2026-10-10_A2VM_FAMILY_BOOT_RUMBLE_REARM_LED_VIBRATION_AND_RECOVERY_UI_WORK_ORDER.md).
+
 ### Current physical controller is PID1902
 
 ```text
 verify supported same MSI Claw
 → keep PID1902
-→ do not force 1902 → 1901 → 1902
+→ keep PID1902 on ordinary startup/recovery; see the A2VM boot-only exception above
 → acquire/reacquire DirectInput
 → reconcile HidHide
 ```
@@ -318,6 +320,8 @@ Windows shutdown/restart begins
 → DO NOT issue PID1902 → PID1901 solely because Windows is shutting down/restarting
 → Windows exits
 ```
+
+The A2VM boot-only initialization is not a shutdown action. User-invoked **Restore Vibration** is also a temporary recovery under Addon authority, not a stock release.
 
 After next logon:
 
@@ -1021,7 +1025,7 @@ Blocking examples include:
 - Disabled mode can intentionally stop the only controller Runtime;
 - mandatory Runtime startup is not guaranteed before disabling Center M;
 - restart unnecessarily forces PID1901;
-- startup round-trips an already-correct PID1902 through PID1901;
+- ordinary startup/recovery needlessly round-trips an already-correct PID1902 through PID1901; the scoped A2VM 7/8 once-per-Windows-boot rumble initialization above is the only exception;
 - virtual output appears before physical isolation;
 - Enable leaves PID1902/HidHide ownership behind;
 - stale input remains live after physical loss;
@@ -1089,7 +1093,7 @@ MSI authority restored
 5. **PID1902 is the desired physical state for the entire Disabled-mode lifetime.**
 6. **Windows shutdown/restart is not an authority-release boundary.**
 7. **Do not deliberately restore PID1901 merely to reboot and then immediately return to PID1902.**
-8. **At startup, keep PID1902 if already present; switch PID1901 only when necessary.**
+8. **Ordinary startup/recovery keeps PID1902 if already present; the A2VM 7/8 once-per-Windows-boot rumble initialization above is the only scoped exception.**
 9. **DirectInput and HidHide are persistent physical-ownership infrastructure, not Steam-session resources.**
 10. **HidHide configuration persists across restart while Disabled.**
 11. **Xbox360 is normal/default presentation; SteamDeck is Steam/BPM presentation.**

@@ -8,6 +8,10 @@ Static implementation still uses exact table matches and fails closed for every 
 unknown version. This does not claim that the `0x0419` SteamAddon path has passed
 physical hardware acceptance.
 
+## 2026-10-10 A2VM-family production admission
+
+The production Static path now admits A2VM 7 and A2VM 8 only when the exact current PID1902 HID attributes report firmware `0x0230`; the existing exact map resolves that version to RGB base `0x024A` and emits the same four frame writes. This is an A2VM-family policy based on the A2VM 8 matching ReadProfile response and the reported shared firmware generation. A2VM 7 has not been physically tested, and physical LED effects have not been verified on A2VM 8 either. CG3EM/EX retains only its existing exact firmware mappings. Unknown versions and other models reporting `0x0230` remain rejected. LED profile writes are separate from runtime rumble report `0x05` and from the left/right vibration-strength pair profile write.
+
 ## Transport and packet
 
 LED control uses the controller vendor HID channel, not WMI:
@@ -87,6 +91,8 @@ current table, superseding the older note that `0x0411` was absent.
 | EX `0x0414` | `0x024A` |
 | EX `0x0419` | `0x024A` |
 
+SteamAddon additionally has one exact A2VM-family entry: firmware `0x0230` → `0x024A`, admitted for models `msi.claw.a2vm.7` and `msi.claw.a2vm.8` only. Runtime still reads the actual current HID firmware; model identity alone never substitutes for the version check.
+
 Source: [Handheld Companion `ClawA1M.cs`](https://github.com/Valkirie/HandheldCompanion/blob/master/HandheldCompanion/Devices/MSI/ClawA1M.cs).
 HHC's exact MS-1T91 table currently ends at `0x0414`. The tested CG3EM/MS-1T91
 reports controller firmware `0x0419`; CTW's deployed production resolver selects the
@@ -98,15 +104,15 @@ writes. Physical SteamAddon LED acceptance for `0x0419` remains pending.
 On 2026-10-09, the A2VM 8 / MS-1T52 `VersionNumber=0x0230` ReadProfile response at
 candidate `0x024A` echoed the requested profile index/address/length and returned
 the expected block, including effect `0x04`, constant `0x09`, and 27 RGB bytes.
-SteamAddon therefore enables the existing four-write **Static** path only when
-both the detected model is exactly `msi.claw.a2vm.8` and the current PID1902
-control-HID attributes report firmware `0x0230`. The production apply boundary
-rejects the same firmware on CG3EM, A2VM 7, unknown models, or any other model.
+SteamAddon enables the existing four-write **Static** path on A2VM 7/8 only when
+the current PID1902 control-HID attributes report firmware `0x0230`. The production
+apply boundary rejects the same firmware on CG3EM, unknown models, or any other
+model. A2VM 7 uses the shared-family policy and is not individually hardware-tested.
 This exact admission does not add nearest-version fallback or a firmware range.
 
 The matching readback supports the address selection but does **not** prove that
 Static writes produce the desired physical LED behavior; that acceptance remains
-pending user testing. The explicit Developer-only A2VM 8 read probe remains
+pending user testing for both A2VM 7 and A2VM 8. The explicit Developer-only A2VM 8 read probe remains
 read-only: it issues one bounded `ReadProfile` query at candidate `0x024A`, index
 1, block length `0x20`, only on the current healthy Addon-owned PID1902
 `0xFFF0/0x0040` control HID with exact firmware `0x0230` and Center M exactly
@@ -120,13 +126,14 @@ command and does not claim a physical LED change.
 | --- | --- | --- |
 | A2VM `0x229` | on-device read/write RE; nearest firmware table entry | `02 4A` |
 | A2VM `0x308` | device control-surface RE | `02 4A` |
-| A2VM 8 / MS-1T52 `0x0230` | matching PID1902 ReadProfile response; scoped Static production admission | `02 4A` |
+| A2VM 7/8 `0x0230` | A2VM 8 matching PID1902 ReadProfile response; family-scoped Static production admission | `02 4A` |
 | EX `0x0411` | current HHC table | `02 4A` |
 | EX `0x0414` | current HHC table | `02 4A` |
 | EX `0x0419` | CG3EM/MS-1T91 field firmware; CTW nearest-match resolves to EX `0x0414` | `02 4A` |
 
 The table is evidence for address selection, not a SteamAddon hardware acceptance
-result. `0x0419` is an explicit exact SteamAddon entry but still awaits physical LED
+result. Neither A2VM 7 nor A2VM 8 has physical LED-effect acceptance recorded here;
+`0x0419` is an explicit exact SteamAddon entry but still awaits physical LED
 smoke-test confirmation. All other unknown versions remain unsupported; do not probe
 arbitrary EEPROM addresses or generalize CTW's nearest-match behavior.
 
@@ -146,7 +153,7 @@ The SteamAddon base packet contains the Static header and first frame. The three
 follow-on packets contain raw frames only (no effect header).
 
 The firmware version must exactly match an enabled entry: the exact versions in the
-table above or the separately scoped A2VM 8 / `0x0230` admission. Effective hardware
+table above or the separately scoped A2VM 7/8 / `0x0230` admission. Effective hardware
 brightness is the saved brightness while enabled and zero while disabled; the saved
 brightness and color are retained. SteamAddon sends no `0x22` SyncToROM command.
 

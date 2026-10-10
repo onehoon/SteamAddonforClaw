@@ -113,7 +113,7 @@ public sealed class MsiQuickSettingsProcessStartWatcherTests
         var startup = Method(host, "private async Task TryStartDisabledModeControllerAsync(");
         var watcherStart = startup.IndexOf("StartMsiQuickSettingsProcessStartWatcher()", StringComparison.Ordinal);
         var reconcile = startup.IndexOf("MsiQuickSettingsRuntimeQuiescer.QuiesceExisting()", StringComparison.Ordinal);
-        var owner = startup.IndexOf("CreatePhysicalOwnership(startupComposition)", StringComparison.Ordinal);
+        var owner = startup.IndexOf("CreatePhysicalOwnership(startupComposition, startupResult.HardwareDeviceModel)", StringComparison.Ordinal);
         var admission = startup.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal);
         Assert.True(watcherStart >= 0 && watcherStart < reconcile && reconcile < owner && owner < admission);
 

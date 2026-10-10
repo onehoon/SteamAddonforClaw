@@ -172,6 +172,19 @@
                                 Click="RightVibrationTestButton_Click" />
                         </Grid>
                     </ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard Header="Vibration Recovery">
+                        <StackPanel Spacing="8">
+                            <TextBlock
+                                Text="This temporarily disconnects the virtual controller. Save your game and close it before continuing. Finish pending strength edits or tests first."
+                                TextWrapping="Wrap" />
+                            <Button
+                                x:Name="RestoreVibrationButton"
+                                Content="Restore Vibration"
+                                HorizontalAlignment="Left"
+                                Click="RestoreVibrationButton_Click" />
+                            <TextBlock x:Name="RestoreVibrationStatusText" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </ctcontrols:SettingsCard>
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
             <InfoBar

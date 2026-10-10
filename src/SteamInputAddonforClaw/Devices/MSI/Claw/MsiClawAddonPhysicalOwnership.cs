@@ -6,6 +6,7 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Prerequisites;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -118,6 +119,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     private readonly Func<IReadOnlyCollection<string>, AddonHidHideBaselineResult> _applyHidHideTargets;
     private readonly Func<IReadOnlyList<string>> _captureExistingOwnedHiddenTargets;
     private readonly IMsiClawGamepadModeClient? _gamepadModeClient;
+    private readonly HandheldDeviceModelId? _hardwareDeviceModel;
+    private readonly Func<BootSessionAttemptResult> _claimA2vmBootAttempt;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly TimeSpan _directInputSettleWindow;
     private readonly TimeSpan _directInputSettleInterval;
@@ -159,7 +162,9 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         TimeSpan? directInputSettleWindow = null,
         TimeSpan? directInputSettleInterval = null,
-        IMsiClawGamepadModeClient? gamepadModeClient = null)
+        IMsiClawGamepadModeClient? gamepadModeClient = null,
+        HandheldDeviceModelId? hardwareDeviceModel = null,
+        Func<BootSessionAttemptResult>? claimA2vmBootAttempt = null)
     {
         _captureCenterMStartupState = captureCenterMStartupState;
         _captureStableNativeState = captureStableNativeState;
@@ -171,6 +176,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         _applyHidHideTargets = applyHidHideTargets;
         _captureExistingOwnedHiddenTargets = captureExistingOwnedHiddenTargets;
         _gamepadModeClient = gamepadModeClient;
+        _hardwareDeviceModel = hardwareDeviceModel;
+        _claimA2vmBootAttempt = claimA2vmBootAttempt ?? BootSession.TryClaimA2vmRumbleAttempt;
         _delay = delay ?? Task.Delay;
         _directInputSettleWindow = directInputSettleWindow ?? TimeSpan.FromSeconds(3);
         _directInputSettleInterval = directInputSettleInterval ?? TimeSpan.FromMilliseconds(150);
@@ -239,13 +246,78 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             ("Mode", initialMode), ("IdentityConfidence", initialIdentity.Confidence),
             ("ModeWriteRequired", initialMode == MsiClawNativeMode.XInput));
 
-        // 5. PID1901 -> PID1902 once, for the same strong physical MSI Claw. The mode write is the
-        //    first physical mutation, so the single required fresh authority read is immediately here.
+        var bootAttempt = BootSessionAttemptResult.Unavailable;
+        if (IsA2vmBootRumblePrimeModel(_hardwareDeviceModel))
+        {
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+                return Fail("AuthorityChangedBeforeBootRumbleAttempt", false);
+
+            bootAttempt = _claimA2vmBootAttempt();
+            AppLog.Info("ControllerOwnership", "A2VM boot-scoped rumble re-arm attempt marker was evaluated.",
+                ("Event", "A2vmBootRumbleAttemptMarker"),
+                ("Model", _hardwareDeviceModel!.Value.Value),
+                ("Outcome", bootAttempt),
+                ("WillRunBootCycle", initialMode == MsiClawNativeMode.DirectInput
+                    && bootAttempt == BootSessionAttemptResult.Claimed));
+        }
+
         var pidTransitionWriteIssued = false;
+        var bootRumbleCycleEnabled = initialMode == MsiClawNativeMode.DirectInput
+            && bootAttempt == BootSessionAttemptResult.Claimed;
+        if (bootRumbleCycleEnabled)
+        {
+            MsiClawControlHidDevice? controlHid = null;
+            try
+            {
+                controlHid = new MsiClawControlHidResolver().Resolve(
+                    _enumeratePnpDevices(), MsiClawNativeMode.DirectInput, initialIdentity);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("ControllerOwnership", "A2VM boot rumble re-arm control-HID preflight failed; optional mode cycle is skipped.", exception,
+                    ("Event", "A2vmBootRumbleControlHidPreflightFailed"));
+            }
+
+            if (controlHid is null)
+            {
+                bootRumbleCycleEnabled = false;
+                AppLog.Info("ControllerOwnership", "A2VM boot rumble re-arm skipped because the exact PID1902 control HID is unavailable or ambiguous.",
+                    ("Event", "A2vmBootRumbleCycleSkipped"),
+                    ("Reason", "ExactControlHidUnavailableOrAmbiguous"));
+            }
+        }
+
+        if (bootRumbleCycleEnabled)
+        {
+            // The one optional A2VM boot cycle starts from PID1902. Consume the marker before this
+            // first native write, then reuse the existing verified PID1901->PID1902 acquisition below.
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+                return Fail("AuthorityChangedBeforeBootRumblePid1901Transition", false);
+
+            var toXInput = await _switchMode(MsiClawNativeMode.XInput, initialIdentity, cancellationToken).ConfigureAwait(false);
+            pidTransitionWriteIssued = true;
+            if (!IsCrossModeTransitionProven(toXInput, out var toXInputFailure))
+                return Fail("BootRumblePid1901TransitionFailed:" + toXInputFailure, true);
+
+            var xInputCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
+            if (!TryReadIdentity(xInputCapture, out var xInputMode, out var xInputIdentity, out var xInputReason)
+                || xInputMode != MsiClawNativeMode.XInput
+                || xInputIdentity.ProductId != MsiClawHardware.XInputProductId)
+                return Fail("BootRumblePid1901StateUnverified:" + xInputReason, true);
+
+            AppLog.Info("ControllerOwnership", "A2VM boot rumble re-arm verified the fresh PID1901/XInput state.",
+                ("Event", "A2vmBootRumblePid1901Verified"),
+                ("IdentityConfidence", xInputIdentity.Confidence));
+            initialMode = xInputMode;
+            initialIdentity = xInputIdentity;
+        }
+
+        // Normal PID1901 -> PID1902 acquisition, including the second half of a boot-only A2VM cycle.
+        // Recheck Center M at the actual native mutation boundary in either case.
         if (initialMode == MsiClawNativeMode.XInput)
         {
             if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
-                return Fail("AuthorityChangedBeforeModeWrite", false);
+                return Fail("AuthorityChangedBeforeModeWrite", pidTransitionWriteIssued);
             var transition = await _switchMode(MsiClawNativeMode.DirectInput, initialIdentity, cancellationToken).ConfigureAwait(false);
             pidTransitionWriteIssued = true;
             // PR11 section 6.2: the Addon's own controlled transition is the cross-mode continuity
@@ -1063,6 +1135,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         failure = string.Empty;
         return true;
     }
+
+    internal static bool IsA2vmBootRumblePrimeModel(HandheldDeviceModelId? modelId) =>
+        modelId?.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8";
+
+    internal static bool SupportsManualRumbleRearm(HandheldDeviceModelId modelId) =>
+        modelId.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8" or "msi.claw.cg3em";
 
     internal static bool TryReadIdentity(NativeStateCaptureResult capture, out MsiClawNativeMode mode, out MsiClawPhysicalIdentity identity, out string reason)
     {

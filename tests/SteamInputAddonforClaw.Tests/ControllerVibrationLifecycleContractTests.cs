@@ -12,11 +12,16 @@ public sealed class ControllerVibrationLifecycleContractTests
             "private async Task TryStartDisabledModeControllerAsync(",
             "private VirtualOutput.Viiper.CanonicalViiperRuntime? LoadAndInitializeCanonicalViiper()");
         var liveSource = startup.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
+        var admissionGate = startup.IndexOf("if (startupResult.DisabledBootAdmission?.IsReady != true)", StringComparison.Ordinal);
+        var viiperReadyGate = startup.IndexOf("if (presentation.ViiperState != VirtualOutput.Viiper.CanonicalViiperRuntimeState.Ready)", StringComparison.Ordinal);
+        var acquisition = startup.IndexOf("var acquired = await owner.AcquireAsync(", StringComparison.Ordinal);
         var led = startup.IndexOf("ApplyOwnedControllerLedSettingsAsync(startupSettings.ControllerLed", StringComparison.Ordinal);
         var vibration = startup.IndexOf("ApplyOwnedControllerVibrationSettingsAsync(\n                startupSettings.ControllerVibration, \"Startup\"", StringComparison.Ordinal);
         var presentation = startup.IndexOf("presentation.AttachInitialAsync", StringComparison.Ordinal);
 
-        Assert.True(liveSource >= 0 && led > liveSource && vibration > led && presentation > vibration);
+        Assert.True(admissionGate >= 0 && viiperReadyGate > admissionGate && acquisition > viiperReadyGate);
+        Assert.Contains("return;", startup[viiperReadyGate..acquisition], StringComparison.Ordinal);
+        Assert.True(liveSource > acquisition && led > liveSource && vibration > led && presentation > vibration);
         Assert.Contains("startupSettings.ControllerVibration", vibration >= 0 ? startup[vibration..] : string.Empty, StringComparison.Ordinal);
     }
 
@@ -74,6 +79,21 @@ public sealed class ControllerVibrationLifecycleContractTests
         Assert.Contains("client.ApplyAsync(settings, identity, cancellationToken)", apply, StringComparison.Ordinal);
         Assert.Contains("ControllerVibrationSettingsApplied", apply, StringComparison.Ordinal);
         Assert.Contains("ControllerVibrationSettingsApplyFailed", apply, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Manual_restore_rejects_an_active_terminal_rumble_diagnostic_before_retiring_presentation()
+    {
+        var host = ReadHost();
+        var recovery = Method(host,
+            "private async Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmCoreAsync(",
+            "private string? GetDeveloperRumbleRearmAdmissionFailure(");
+        var capture = recovery.IndexOf("CaptureXbox360RumbleLoopDiagnosticAsync(", StringComparison.Ordinal);
+        var runningGuard = recovery.IndexOf("rumbleLoop.State == FrontendXbox360RumbleLoopState.Running", StringComparison.Ordinal);
+        var retire = recovery.IndexOf("presentation.RunDeveloperRumbleRearmAsync(", StringComparison.Ordinal);
+
+        Assert.True(capture >= 0 && runningGuard > capture && retire > runningGuard);
+        Assert.Contains("Stop the Xbox360 terminal STOP diagnostic before restoring vibration.", recovery, StringComparison.Ordinal);
     }
 
     private static string ReadHost()

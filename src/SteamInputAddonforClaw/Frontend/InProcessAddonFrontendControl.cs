@@ -1848,7 +1848,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         cancellationToken.ThrowIfCancellationRequested();
         if (_runDeveloperRumbleRearm is null)
             return Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable(
-                "The Developer rumble re-arm is unavailable in this Runtime."));
+                "Controller rumble recovery is unavailable in this Runtime."));
 
         // The UI/page/pipe token is admission-only. Once Runtime ownership accepts the attempt, a
         // closed page or disconnected frontend must not cancel the bounded physical cleanup.
