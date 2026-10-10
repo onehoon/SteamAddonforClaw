@@ -753,7 +753,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _overlayController.BindQuickSettingsAuthority(
             captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, profileTarget: null, token),
             captureProfilePage: token => CaptureOverlayProfileQuickSettingsPageAsync(token),
-            mutate: (intent, token) => HandleOverlayQuickSettingsMutationAsync(intent, token));
+            mutate: (intent, token) => HandleOverlayQuickSettingsMutationAsync(intent, token),
+            profileRecheckAllowed: () => Volatile.Read(ref _processShutdownStarted) == 0 && _overlayCaptureActive);
         _overlayController.BindClawHudAuthority(
             capture: token => _frontendControl!.CaptureClawHudAsync(token),
             setEnabled: (enabled, token) => _frontendControl!.SetClawHudEnabledAsync(enabled, token),

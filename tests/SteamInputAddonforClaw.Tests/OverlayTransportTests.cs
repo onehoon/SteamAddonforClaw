@@ -26,7 +26,7 @@ public sealed class OverlayTransportTests
     [Fact]
     public void Active_profile_show_remains_a_narrow_overlay_command()
     {
-        Assert.Equal(18, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(19, OverlayTransportProtocol.CurrentVersion);
         Assert.Equal(70, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
@@ -69,6 +69,32 @@ public sealed class OverlayTransportTests
         var mutationMessage = await RoundTripAsync(new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.QuickSettingsMutationRequest, QuickSettingsMutationRequest: request));
 
         Assert.Equal(target, mutationMessage.QuickSettingsMutationRequest!.Intent.ProfileTarget);
+    }
+
+    [Fact]
+    public async Task No_running_game_profile_recheck_request_is_payload_free_and_versioned()
+    {
+        var request = new OverlayWireMessage(
+            OverlayTransportProtocol.CurrentVersion,
+            OverlayWireMessageKind.NoRunningGameProfileRecheckRequest);
+
+        Assert.True(OverlayProfileRecheckWireValidation.IsValidRequest(request));
+        Assert.False(OverlayProfileRecheckWireValidation.IsValidRequest(request with
+        {
+            ProtocolVersion = OverlayTransportProtocol.CurrentVersion - 1,
+        }));
+        Assert.False(OverlayProfileRecheckWireValidation.IsValidRequest(request with
+        {
+            Error = "unexpected payload",
+        }));
+        Assert.False(OverlayProfileRecheckWireValidation.IsValidRequest(request with
+        {
+            QuickSettingsPage = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile),
+        }));
+
+        var roundTripped = await RoundTripAsync(request);
+        Assert.Equal(OverlayWireMessageKind.NoRunningGameProfileRecheckRequest, roundTripped.Kind);
+        Assert.True(OverlayProfileRecheckWireValidation.IsValidRequest(roundTripped));
     }
 
     [Fact]
@@ -388,6 +414,49 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Profile_recheck_request_is_ignored_while_hidden_and_does_not_block_the_pipe_reader()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var requestReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hiddenDismissalReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var visibleDismissalReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.NoRunningGameProfileRecheckRequested += (_, connectionToken, visibleSessionToken) =>
+        {
+            Assert.False(connectionToken.IsCancellationRequested);
+            Assert.False(visibleSessionToken.IsCancellationRequested);
+            requestReceived.TrySetResult();
+        };
+        var dismissalCount = 0;
+        server.DismissRequested += _ =>
+        {
+            if (Interlocked.Increment(ref dismissalCount) == 1) hiddenDismissalReceived.TrySetResult();
+            else visibleDismissalReceived.TrySetResult();
+        };
+        var run = client.RunAsync(_ => Task.CompletedTask);
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        await client.SendNoRunningGameProfileRecheckRequestAsync();
+        await client.SendDismissRequestedAsync();
+        await hiddenDismissalReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(requestReceived.Task.IsCompleted);
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        await client.SendNoRunningGameProfileRecheckRequestAsync();
+        await requestReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // This message is read while the recheck callback is still in flight.
+        await client.SendDismissRequestedAsync();
+        await visibleDismissalReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Active_profile_show_reaches_overlay_handler_and_settles_visible()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
@@ -648,6 +717,205 @@ public sealed class OverlayTransportTests
         }
         finally
         {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Conditional_profile_recheck_captures_and_publishes_only_the_profile_page()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        NamedPipeOverlayServer? testServer = null;
+        var deviceCaptureCount = 0;
+        var profileCaptureCount = 0;
+        var frames = new List<QuickSettingsPageSnapshot>();
+        var initialPagesReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recheckedPageReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartLongRunningTestProcess, _ => testServer = new NamedPipeOverlayServer(pipeName));
+            controller.BindQuickSettingsAuthority(
+                captureDevicePage: _ =>
+                {
+                    Interlocked.Increment(ref deviceCaptureCount);
+                    return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device, message: "device"));
+                },
+                captureProfilePage: _ =>
+                {
+                    var count = Interlocked.Increment(ref profileCaptureCount);
+                    var message = count == 1 ? "initial-profile" : "conditional-profile-recheck";
+                    return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, message: message));
+                },
+                mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")),
+                profileRecheckAllowed: () => true);
+
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var dismissalReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null, page =>
+            {
+                lock (frames)
+                {
+                    frames.Add(page);
+                    if (frames.Count >= 2) initialPagesReceived.TrySetResult();
+                    if (page.Message == "conditional-profile-recheck") recheckedPageReceived.TrySetResult();
+                }
+                return Task.CompletedTask;
+            });
+
+            Assert.True(await controller.ShowAsync());
+            testServer!.DismissRequested += _ => dismissalReceived.TrySetResult();
+            await controller.RefreshQuickSettingsAsync();
+            await initialPagesReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, Volatile.Read(ref deviceCaptureCount));
+            Assert.Equal(1, Volatile.Read(ref profileCaptureCount));
+
+            await client.SendNoRunningGameProfileRecheckRequestAsync();
+            await client.SendDismissRequestedAsync();
+            await dismissalReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await recheckedPageReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(1, Volatile.Read(ref deviceCaptureCount));
+            Assert.Equal(2, Volatile.Read(ref profileCaptureCount));
+            lock (frames)
+            {
+                Assert.Collection(frames,
+                    page => Assert.Equal(QuickSettingsPageId.Device, page.PageId),
+                    page => Assert.Equal("initial-profile", page.Message),
+                    page => Assert.Equal("conditional-profile-recheck", page.Message));
+            }
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("hide")]
+    [InlineData("disconnect")]
+    [InlineData("shutdown")]
+    public async Task Conditional_profile_recheck_delay_is_cancelled_when_its_session_ends(string ending)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var admitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var profileCaptureCount = 0;
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartLongRunningTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.BindQuickSettingsAuthority(
+                captureDevicePage: _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device)),
+                captureProfilePage: _ =>
+                {
+                    Interlocked.Increment(ref profileCaptureCount);
+                    return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile));
+                },
+                mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")),
+                profileRecheckAllowed: () =>
+                {
+                    admitted.TrySetResult();
+                    return true;
+                });
+
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(_ => Task.CompletedTask);
+            Assert.True(await controller.ShowAsync());
+            await client.SendNoRunningGameProfileRecheckRequestAsync();
+            await admitted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            switch (ending)
+            {
+                case "hide":
+                    Assert.True(await controller.EnsureHiddenAsync());
+                    break;
+                case "disconnect":
+                    await client.DisposeAsync();
+                    break;
+                case "shutdown":
+                    await controller.DisposeAsync();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(ending));
+            }
+
+            await Task.Delay(350);
+            Assert.Equal(0, Volatile.Read(ref profileCaptureCount));
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Conditional_profile_recheck_discards_a_capture_that_finishes_after_hide()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var captureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCapture = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var latePageReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var profileCaptureCount = 0;
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartLongRunningTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.BindQuickSettingsAuthority(
+                captureDevicePage: _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device)),
+                captureProfilePage: async _ =>
+                {
+                    Interlocked.Increment(ref profileCaptureCount);
+                    captureEntered.TrySetResult();
+                    await releaseCapture.Task;
+                    return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, message: "late-profile");
+                },
+                mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")),
+                profileRecheckAllowed: () => true);
+
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null, page =>
+            {
+                if (page.Message == "late-profile") latePageReceived.TrySetResult();
+                return Task.CompletedTask;
+            });
+            Assert.True(await controller.ShowAsync());
+            await client.SendNoRunningGameProfileRecheckRequestAsync();
+            await captureEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(await controller.EnsureHiddenAsync());
+            releaseCapture.TrySetResult();
+            await Task.Delay(100);
+
+            Assert.Equal(1, Volatile.Read(ref profileCaptureCount));
+            Assert.False(latePageReceived.Task.IsCompleted);
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            releaseCapture.TrySetResult();
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }

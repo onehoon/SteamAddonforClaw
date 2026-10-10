@@ -22,6 +22,22 @@ internal static class OverlayCommandWireValidation
         && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null;
 }
 
+internal static class OverlayProfileRecheckWireValidation
+{
+    internal static bool IsValidRequest(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.NoRunningGameProfileRecheckRequest
+        && message.Command is null && message.Navigation is null && message.State is null && message.Error is null
+        && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null
+        && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null
+        && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null
+        && !OverlayShortcutWireValidation.HasShortcutPayload(message)
+        && !OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message)
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null
+        && message.FrontendSettingsMutationRequest is null && message.FrontendSettingsMutationResponse is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null;
+}
+
 internal static class OverlayProductionControlsWireValidation
 {
     internal static bool HasPayload(OverlayWireMessage message) =>

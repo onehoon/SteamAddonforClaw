@@ -43,10 +43,12 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private long _readyGeneration;
     private long _lastDisconnectedGeneration;
     private OverlayState _state = OverlayState.Hidden;
+    private CancellationTokenSource? _visibleSessionCancellationTokenSource;
     private int _started;
     private int _disposed;
 
     internal event Action<NamedPipeOverlayServer>? DismissRequested;
+    internal event Action<NamedPipeOverlayServer, CancellationToken, CancellationToken>? NoRunningGameProfileRecheckRequested;
 
     internal NamedPipeOverlayServer(string pipeName,
         Func<CancellationToken, Task<AddonQuickSettingsTabOrderSnapshot>>? captureTabOrder = null,
@@ -485,6 +487,25 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 continue;
             }
 
+            if (message.Kind == OverlayWireMessageKind.NoRunningGameProfileRecheckRequest)
+            {
+                if (!OverlayProfileRecheckWireValidation.IsValidRequest(message))
+                    throw new FrontendProtocolException("Invalid no-running-game Profile recheck request.");
+
+                CancellationToken visibleSessionToken;
+                lock (_sync)
+                {
+                    if (!_readyState || _state != OverlayState.Visible || _visibleSessionCancellationTokenSource is null)
+                        continue;
+                    visibleSessionToken = _visibleSessionCancellationTokenSource.Token;
+                }
+
+                // The callback only schedules Runtime work. The read loop must remain available for
+                // Hide, disconnect, and other semantic messages while the bounded recheck is pending.
+                NoRunningGameProfileRecheckRequested?.Invoke(this, connection.Token, visibleSessionToken);
+                continue;
+            }
+
             if (message.Kind == OverlayWireMessageKind.TabOrderMoveRequest)
             {
                 if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderMove) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
@@ -554,20 +575,35 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
             if (message.Kind != OverlayWireMessageKind.State || message.State is null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                 throw new FrontendProtocolException("Invalid Overlay state message.");
 
+            CancellationTokenSource? visibleSessionToCancel = null;
             lock (_sync)
             {
                 if (message.State == OverlayState.Ready)
                 {
+                    visibleSessionToCancel = _visibleSessionCancellationTokenSource;
+                    _visibleSessionCancellationTokenSource = null;
                     _state = OverlayState.Hidden;
                     _readyState = true;
                     _ready.TrySetResult();
                 }
                 else
                 {
+                    if (message.State == OverlayState.Visible && _state != OverlayState.Visible)
+                        _visibleSessionCancellationTokenSource = new CancellationTokenSource();
+                    else if (message.State == OverlayState.Hidden && _state == OverlayState.Visible)
+                    {
+                        visibleSessionToCancel = _visibleSessionCancellationTokenSource;
+                        _visibleSessionCancellationTokenSource = null;
+                    }
                     _state = message.State.Value;
                 }
                 if (message.State is OverlayState.Visible or OverlayState.Hidden)
                     _acknowledgement?.TrySetResult();
+            }
+            if (visibleSessionToCancel is not null)
+            {
+                visibleSessionToCancel.Cancel();
+                visibleSessionToCancel.Dispose();
             }
         }
     }
@@ -865,6 +901,17 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _lifetime.Cancel();
+        CancellationTokenSource? visibleSessionCancellationTokenSource;
+        lock (_sync)
+        {
+            visibleSessionCancellationTokenSource = _visibleSessionCancellationTokenSource;
+            _visibleSessionCancellationTokenSource = null;
+        }
+        if (visibleSessionCancellationTokenSource is not null)
+        {
+            visibleSessionCancellationTokenSource.Cancel();
+            visibleSessionCancellationTokenSource.Dispose();
+        }
         Interlocked.Exchange(ref _activePipe, null)?.Dispose();
         if (_acceptLoop is not null) try { await _acceptLoop.ConfigureAwait(false); } catch { }
         _commandGate.Dispose();

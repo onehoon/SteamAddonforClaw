@@ -94,7 +94,7 @@ public sealed class XboxGameSessionRuntimeHostTests
         Assert.DoesNotContain("StartXboxSessionDiagnostic", wire + contracts + server + client + control, StringComparison.Ordinal);
         Assert.DoesNotContain("StopXboxSessionDiagnostic", wire + contracts + server + client + control, StringComparison.Ordinal);
         Assert.DoesNotContain("GenerateXboxSessionDiagnosticReport", wire + contracts + server + client + control, StringComparison.Ordinal);
-        Assert.Contains("CurrentVersion = 18", ReadSource("src/SteamInputAddonforClaw.FrontendTransport/OverlayWire.cs"), StringComparison.Ordinal);
+        Assert.Contains("CurrentVersion = 19", ReadSource("src/SteamInputAddonforClaw.FrontendTransport/OverlayWire.cs"), StringComparison.Ordinal);
     }
 
     private static string ReadSource(string relativePath)

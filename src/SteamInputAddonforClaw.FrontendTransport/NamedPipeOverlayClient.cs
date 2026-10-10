@@ -685,6 +685,16 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
             new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.DismissRequested), _writeGate, token).ConfigureAwait(false);
     }
 
+    internal async Task SendNoRunningGameProfileRecheckRequestAsync(CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+        await OverlayWireCodec.WriteAsync(pipe,
+            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.NoRunningGameProfileRecheckRequest),
+            _writeGate, linked.Token).ConfigureAwait(false);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)

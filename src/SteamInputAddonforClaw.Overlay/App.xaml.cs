@@ -31,6 +31,7 @@ public partial class App : Application
         _window.ControllerLedEditRequested += OnControllerLedEditRequested;
         _window.ControllerVibrationStrengthEditRequested += OnControllerVibrationStrengthEditRequested;
         _window.QuickSettingsCurrentPowerSourceOnlyRequested += OnQuickSettingsCurrentPowerSourceOnlyRequested;
+        _window.NoRunningGameProfileRecheckRequested += OnNoRunningGameProfileRecheckRequested;
         _window.ClawHudEnabledRequested += OnClawHudEnabledRequested;
         _window.ClawHudSettingMutationRequested += OnClawHudSettingMutationRequested;
         _window.ShortcutExecutionRequested += OnShortcutExecutionRequested;
@@ -238,6 +239,22 @@ public partial class App : Application
 
     private void OnQuickSettingsCurrentPowerSourceOnlyRequested(bool enabled) => _ = SendFrontendSettingsMutationAsync(
         () => _client!.SendCurrentPowerSourceMutationAsync(enabled), led: false);
+
+    private void OnNoRunningGameProfileRecheckRequested() => _ = SendNoRunningGameProfileRecheckAsync();
+
+    private async Task SendNoRunningGameProfileRecheckAsync()
+    {
+        try
+        {
+            if (_client is null) return;
+            await _client.SendNoRunningGameProfileRecheckRequestAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("QuickSettings", "No-running-game Profile recheck request failed.", null,
+                ("ExceptionType", exception.GetType().Name));
+        }
+    }
 
     private async Task SendFrontendSettingsMutationAsync(Func<Task<OverlayFrontendSettingsMutationResponse>> send, bool led)
     {
