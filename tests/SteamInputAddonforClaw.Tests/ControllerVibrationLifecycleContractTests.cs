@@ -10,19 +10,23 @@ public sealed class ControllerVibrationLifecycleContractTests
         var host = ReadHost();
         var startup = Method(host,
             "private async Task TryStartDisabledModeControllerAsync(",
-            "private VirtualOutput.Viiper.CanonicalViiperRuntime? LoadAndInitializeCanonicalViiper()");
-        var liveSource = startup.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
+            "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
+        var continuation = Method(host,
+            "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(",
+            "private async Task RunInitialControllerAcquisitionAsync(");
         var admissionGate = startup.IndexOf("if (startupResult.DisabledBootAdmission?.IsReady != true)", StringComparison.Ordinal);
         var viiperReadyGate = startup.IndexOf("if (presentation.ViiperState != VirtualOutput.Viiper.CanonicalViiperRuntimeState.Ready)", StringComparison.Ordinal);
         var acquisition = startup.IndexOf("var acquired = await owner.AcquireAsync(", StringComparison.Ordinal);
-        var led = startup.IndexOf("ApplyOwnedControllerLedSettingsAsync(startupSettings.ControllerLed", StringComparison.Ordinal);
-        var vibration = startup.IndexOf("ApplyOwnedControllerVibrationSettingsAsync(\n                startupSettings.ControllerVibration, \"Startup\"", StringComparison.Ordinal);
-        var presentation = startup.IndexOf("presentation.AttachInitialAsync", StringComparison.Ordinal);
+        var continuationCall = startup.IndexOf("CompleteInitialControllerOwnershipAsync(", acquisition, StringComparison.Ordinal);
+        var liveSource = continuation.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
+        var led = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(context.StartupSettings.ControllerLed", StringComparison.Ordinal);
+        var vibration = continuation.IndexOf("ApplyOwnedControllerVibrationSettingsAsync(\n            context.StartupSettings.ControllerVibration", StringComparison.Ordinal);
+        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync", StringComparison.Ordinal);
 
-        Assert.True(admissionGate >= 0 && viiperReadyGate > admissionGate && acquisition > viiperReadyGate);
+        Assert.True(admissionGate >= 0 && viiperReadyGate > admissionGate && acquisition > viiperReadyGate && continuationCall > acquisition);
         Assert.Contains("return;", startup[viiperReadyGate..acquisition], StringComparison.Ordinal);
-        Assert.True(liveSource > acquisition && led > liveSource && vibration > led && presentation > vibration);
-        Assert.Contains("startupSettings.ControllerVibration", vibration >= 0 ? startup[vibration..] : string.Empty, StringComparison.Ordinal);
+        Assert.True(liveSource >= 0 && led > liveSource && vibration > led && presentation > vibration);
+        Assert.Contains("context.StartupSettings.ControllerVibration", continuation[vibration..], StringComparison.Ordinal);
     }
 
     [Fact]

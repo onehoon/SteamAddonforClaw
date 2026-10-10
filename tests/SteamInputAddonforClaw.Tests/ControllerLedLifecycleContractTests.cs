@@ -8,11 +8,15 @@ public sealed class ControllerLedLifecycleContractTests
     public void Startup_applies_persisted_led_after_owned_input_is_healthy_and_before_presentation()
     {
         var host = ReadHost();
-        var startup = Method(host, "private async Task TryStartDisabledModeControllerAsync(", "private VirtualOutput.Viiper.CanonicalViiperRuntime? LoadAndInitializeCanonicalViiper()");
-        var liveSourceCheck = startup.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
-        var apply = startup.IndexOf("ApplyOwnedControllerLedSettingsAsync(startupSettings.ControllerLed", StringComparison.Ordinal);
-        var presentation = startup.IndexOf("presentation.AttachInitialAsync", StringComparison.Ordinal);
+        var startup = Method(host, "private async Task TryStartDisabledModeControllerAsync(", "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
+        var continuation = Method(host, "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(", "private async Task RunInitialControllerAcquisitionAsync(");
+        var ownedGate = startup.IndexOf("if (!acquired.IsOwned)", StringComparison.Ordinal);
+        var continuationCall = startup.IndexOf("CompleteInitialControllerOwnershipAsync(", ownedGate, StringComparison.Ordinal);
+        var liveSourceCheck = continuation.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
+        var apply = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(context.StartupSettings.ControllerLed", StringComparison.Ordinal);
+        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync", StringComparison.Ordinal);
 
+        Assert.True(ownedGate >= 0 && continuationCall > ownedGate);
         Assert.True(liveSourceCheck >= 0 && apply > liveSourceCheck && presentation > apply);
         Assert.Contains("controllerLedAvailable: startupResult.HardwareSupported", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled", host, StringComparison.Ordinal);

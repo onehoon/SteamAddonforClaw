@@ -258,6 +258,113 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Empty(h.HidHideApplied);
     }
 
+    [Fact]
+    public async Task A2vm_first_boot_transition_timeout_is_typed_and_retry_does_not_repeat_optional_prime()
+    {
+        var markerCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => ++markerCalls == 1 ? BootSessionAttemptResult.Claimed : BootSessionAttemptResult.AlreadyClaimed,
+            FailTransitionOnCall = 1,
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+        var owner = h.Build();
+
+        var first = await owner.AcquireAsync(default);
+        Assert.Equal(Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.BootRumbleTargetPidNotPresent, first.InitialAcquisitionRetryReason);
+        Assert.False(first.IsOwned);
+        Assert.False(h.InputSource.IsRunning);
+
+        var retry = await owner.AcquireAsync(default);
+
+        Assert.True(retry.IsOwned, retry.Reason);
+        Assert.Equal(2, markerCalls);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.True(h.InputSource.IsRunning);
+    }
+
+    [Fact]
+    public async Task A2vm_second_boot_transition_timeout_retries_from_current_pid1902_without_an_extra_mode_write()
+    {
+        var markerCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => ++markerCalls == 1 ? BootSessionAttemptResult.Claimed : BootSessionAttemptResult.AlreadyClaimed,
+            FailTransitionOnCall = 2,
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+        var owner = h.Build();
+
+        var first = await owner.AcquireAsync(default);
+        Assert.Equal(Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent, first.InitialAcquisitionRetryReason);
+
+        var retry = await owner.AcquireAsync(default);
+
+        Assert.True(retry.IsOwned, retry.Reason);
+        Assert.Equal(2, markerCalls);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.False(retry.ModeWriteIssued);
+    }
+
+    [Fact]
+    public async Task A2vm_initial_pid1901_timeout_retries_only_the_forward_pid1902_transition()
+    {
+        var markerCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => ++markerCalls == 1 ? BootSessionAttemptResult.Claimed : BootSessionAttemptResult.AlreadyClaimed,
+            FailTransitionOnCall = 1,
+            ModeAfterFailedTransition = MsiClawNativeMode.XInput,
+        };
+        var owner = h.Build();
+
+        var first = await owner.AcquireAsync(default);
+        Assert.Equal(Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent, first.InitialAcquisitionRetryReason);
+
+        var retry = await owner.AcquireAsync(default);
+
+        Assert.True(retry.IsOwned, retry.Reason);
+        Assert.Equal(2, markerCalls);
+        Assert.Equal([MsiClawNativeMode.DirectInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets);
+    }
+
+    [Fact]
+    public void Initial_transition_timeout_retry_predicate_requires_all_absence_proof()
+    {
+        static MsiClawModeTransitionResult Result(
+            MsiClawModeTransitionStatus status = MsiClawModeTransitionStatus.TargetDeviceDidNotAppear,
+            bool write = true, bool oldGone = true, bool targetPidPresent = false,
+            bool targetAppeared = false, bool sourceVerified = true, bool targetVerified = false,
+            MsiClawNativeMode from = MsiClawNativeMode.XInput) =>
+            new(status, from, MsiClawNativeMode.DirectInput, 0x1901, 0x1902,
+                write, oldGone, targetAppeared, sourceVerified, targetVerified, 5000,
+                "test", targetPidPresent);
+
+        Assert.True(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
+            Result(), MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
+            Result(targetPidPresent: true), MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
+            Result(status: MsiClawModeTransitionStatus.AmbiguousDevice), MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
+            Result(write: false), MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
+            Result(oldGone: false), MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
+            Result(sourceVerified: false), MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
+            Result(targetAppeared: true), MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
+            Result(), MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput));
+    }
+
     [Theory]
     [InlineData("msi.claw.a2vm.7", true, true)]
     [InlineData("msi.claw.a2vm.8", true, true)]
@@ -423,6 +530,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var result = await h.Build().AcquireAsync(default);
 
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Equal(status == "DeviceNotFound", result.NativeDeviceAbsentAtInitialCapture);
+        Assert.Equal(MsiClawInitialAcquisitionRetryReason.None, result.InitialAcquisitionRetryReason);
         Assert.Equal(0, h.SwitchCalls);
         Assert.Empty(h.HidHideApplied);
     }
@@ -1823,8 +1932,12 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public string FinalPhysKey { get; set; } = PhysKey;
         public string? SecondCapturePhysKey { get; set; }
         public MsiClawNativeMode? FinalModeAfterSwitch { get; set; }
+        public MsiClawNativeMode? ModeAfterFailedTransition { get; set; }
+        private bool _lastModeSwitchSucceeded;
         private int _nonRecoveringCaptureCount;
         public bool SwitchSucceeds { get; set; } = true;
+        public int FailTransitionOnCall { get; set; }
+        public bool FailureTargetPidPresent { get; set; }
         public bool RecordModeSwitchEvents { get; set; }
         public int DirectInputMissingAttempts { get; set; }
         public int DirectInputUnverifiedAttempts { get; set; }
@@ -1903,7 +2016,11 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                     ? _nonRecoveringCaptureCount > 1 ? SecondCapturePhysKey ?? PhysKey : PhysKey
                     : FinalPhysKey;
                 return Task.FromResult(Capture(
-                    SwitchCalls == 0 ? InitialMode : FinalModeAfterSwitch ?? LastSwitchTarget,
+                    SwitchCalls == 0
+                        ? InitialMode
+                        : !_lastModeSwitchSucceeded
+                            ? ModeAfterFailedTransition ?? FinalModeAfterSwitch ?? LastSwitchTarget
+                            : FinalModeAfterSwitch ?? LastSwitchTarget,
                     SwitchCalls == 0 ? InitialConfidence : MsiClawIdentityConfidence.Strong,
                     physKey));
             },
@@ -1914,13 +2031,30 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 LastSwitchTarget = target;
                 SwitchTargets.Add(target);
                 if (RecordModeSwitchEvents) Events.Add("ModeSwitch:" + target);
-                var ok = target == MsiClawNativeMode.XInput
+                var configuredFailure = FailTransitionOnCall != 0 && SwitchCalls == FailTransitionOnCall;
+                var ok = !configuredFailure && (target == MsiClawNativeMode.XInput
                     ? !SwitchFailsForRelease
-                    : Recovering ? RecoverySwitchSucceeds : SwitchSucceeds;
+                    : Recovering ? RecoverySwitchSucceeds : SwitchSucceeds);
+                _lastModeSwitchSucceeded = ok;
+                var transitionStatus = ok
+                    ? MsiClawModeTransitionStatus.Succeeded
+                    : configuredFailure
+                        ? MsiClawModeTransitionStatus.TargetDeviceDidNotAppear
+                        : MsiClawModeTransitionStatus.WriteFailed;
+                var sourceMode = target == MsiClawNativeMode.XInput ? MsiClawNativeMode.DirectInput : MsiClawNativeMode.XInput;
                 return Task.FromResult(new MsiClawModeTransitionResult(
-                    ok ? MsiClawModeTransitionStatus.Succeeded : MsiClawModeTransitionStatus.WriteFailed,
-                    MsiClawNativeMode.XInput, target, 0x1901, 0x1902, ok, ok, ok, ok, ok, 0,
-                    ok ? "ok" : "WriteFailed"));
+                    transitionStatus,
+                    sourceMode, target,
+                    sourceMode == MsiClawNativeMode.XInput ? (ushort)0x1901 : (ushort)0x1902,
+                    target == MsiClawNativeMode.XInput ? (ushort)0x1901 : (ushort)0x1902,
+                    ok || configuredFailure,
+                    ok || configuredFailure,
+                    ok,
+                    ok || configuredFailure,
+                    ok,
+                    0,
+                    ok ? "ok" : configuredFailure ? "Native mode re-enumeration did not complete." : "WriteFailed",
+                    ok || configuredFailure && FailureTargetPidPresent));
             },
             () =>
             {
