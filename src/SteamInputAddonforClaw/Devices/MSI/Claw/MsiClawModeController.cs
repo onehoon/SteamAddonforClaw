@@ -102,7 +102,8 @@ internal sealed class MsiClawModeController(
                 targetTopologyVerified,
                 (long)(_now() - started).TotalMilliseconds,
                 reason,
-                targetPidPresent);
+                targetPidPresent,
+                commandWrittenAt is { } resultWriteAt ? (long)(_now() - resultWriteAt).TotalMilliseconds : null);
             AppLog.Info("NativeMode", "Native mode transition completed.",
                 ("Event", "NativeModeTransitionCompleted"),
                 ("SourceMode", from), ("TargetMode", target),

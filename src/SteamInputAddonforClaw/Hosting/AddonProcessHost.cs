@@ -1409,6 +1409,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             instanceId => controllerDevices.EnumeratePresentDevices().FirstOrDefault(device =>
                 string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase)),
             () => controllerDevices.EnumeratePresentDevices(),
+            (vendorId, productId) => controllerDevices.EnumeratePresentDevices(vendorId, productId),
+            (vendorId, productId) => controllerDevices.IsPresent(vendorId, productId),
             directInputInputSource,
             targets => hidHideBaseline.ApplyDisabledModeBaseline(targets),
             () => hidHideBaseline.TryGetExistingOwnedTargets(
