@@ -475,22 +475,29 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.True(h.InputSource.IsRunning);
     }
 
-    [Fact]
-    public async Task A2vm_second_boot_transition_timeout_retries_from_current_pid1902_without_an_extra_mode_write()
+    [Theory]
+    [InlineData("msi.claw.a2vm.7")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task A2vm_boot_second_leg_partial_pid1902_arrival_defers_and_completes_without_repeating_prime(string modelId)
     {
         var markerCalls = 0;
         var h = new Harness
         {
             InitialMode = MsiClawNativeMode.DirectInput,
-            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            HardwareDeviceModel = new(modelId),
             ClaimBootAttempt = () => ++markerCalls == 1 ? BootSessionAttemptResult.Claimed : BootSessionAttemptResult.AlreadyClaimed,
             FailTransitionOnCall = 2,
+            FailureTargetPidPresent = true,
             PnpDevices = A2vmOwnedPnpDevices(),
         };
         var owner = h.Build();
 
         var first = await owner.AcquireAsync(default);
         Assert.Equal(Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent, first.InitialAcquisitionRetryReason);
+        Assert.False(first.IsOwned);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Empty(h.HidHideApplied);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
 
         var retry = await owner.AcquireAsync(default);
 
@@ -498,6 +505,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(2, markerCalls);
         Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
         Assert.False(retry.ModeWriteIssued);
+        Assert.True(h.InputSource.IsRunning);
+        Assert.Equal([PrimaryPnp, ControlPnp], h.HidHideApplied);
     }
 
     [Fact]
@@ -553,6 +562,92 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             Result(targetAppeared: true), MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput));
         Assert.False(MsiClawAddonPhysicalOwnership.IsTargetNotPresentAfterVerifiedWrite(
             Result(), MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput));
+    }
+
+    [Fact]
+    public void A2vm_boot_second_leg_partial_pid1902_classifier_requires_the_exact_verified_transition()
+    {
+        static MsiClawModeTransitionResult Result(
+            MsiClawModeTransitionStatus status = MsiClawModeTransitionStatus.TargetDeviceDidNotAppear,
+            bool write = true, bool oldGone = true, bool targetPidPresent = true,
+            bool targetAppeared = false, bool sourceVerified = true, bool targetVerified = false,
+            MsiClawNativeMode from = MsiClawNativeMode.XInput,
+            MsiClawNativeMode target = MsiClawNativeMode.DirectInput) =>
+            new(status, from, target, 0x1901, 0x1902,
+                write, oldGone, targetAppeared, sourceVerified, targetVerified, 5000,
+                "test", targetPidPresent);
+
+        Assert.True(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(), bootRumbleCycleEnabled: true));
+
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(), bootRumbleCycleEnabled: false));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(status: MsiClawModeTransitionStatus.WriteFailed), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(status: MsiClawModeTransitionStatus.AmbiguousDevice), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(write: false), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(oldGone: false), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(targetPidPresent: false), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(targetAppeared: true), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(sourceVerified: false), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(targetVerified: true), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(from: MsiClawNativeMode.DirectInput), bootRumbleCycleEnabled: true));
+        Assert.False(MsiClawAddonPhysicalOwnership.IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+            Result(target: MsiClawNativeMode.XInput), bootRumbleCycleEnabled: true));
+    }
+
+    [Fact]
+    public async Task Non_a2vm_partial_pid1902_arrival_remains_terminal()
+    {
+        var claimCount = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,
+            HardwareDeviceModel = new("msi.claw.cg3em"),
+            ClaimBootAttempt = () => { claimCount++; return BootSessionAttemptResult.Claimed; },
+            FailTransitionOnCall = 1,
+            FailureTargetPidPresent = true,
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Equal(MsiClawInitialAcquisitionRetryReason.None, result.InitialAcquisitionRetryReason);
+        Assert.Equal(0, claimCount);
+        Assert.Equal([MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Empty(h.HidHideApplied);
+    }
+
+    [Fact]
+    public async Task A2vm_initial_pid1901_partial_pid1902_arrival_remains_strict()
+    {
+        var markerCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => { markerCalls++; return BootSessionAttemptResult.Claimed; },
+            FailTransitionOnCall = 1,
+            FailureTargetPidPresent = true,
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Equal(MsiClawInitialAcquisitionRetryReason.None, result.InitialAcquisitionRetryReason);
+        Assert.Equal(1, markerCalls);
+        Assert.Equal([MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Empty(h.HidHideApplied);
     }
 
     [Theory]

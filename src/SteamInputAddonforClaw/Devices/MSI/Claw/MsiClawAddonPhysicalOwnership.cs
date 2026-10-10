@@ -379,10 +379,29 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             // Windows physical-root/container string legitimately changes across a real MSI native
             // mode switch, so it is NOT compared here.
             if (!IsCrossModeTransitionProven(transition, out var transitionFailure))
-                return Fail("Pid1902TransitionFailed:" + transitionFailure, true,
-                    IsTargetNotPresentAfterVerifiedWrite(transition, MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput)
-                        ? MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent
-                        : MsiClawInitialAcquisitionRetryReason.None);
+            {
+                var partialPid1902Arrival = IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+                    transition, bootRumbleCycleEnabled);
+                var retryEligible = IsTargetNotPresentAfterVerifiedWrite(
+                        transition, MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput)
+                    || partialPid1902Arrival;
+                var retryReason = retryEligible
+                    ? MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent
+                    : MsiClawInitialAcquisitionRetryReason.None;
+
+                if (partialPid1902Arrival)
+                    AppLog.Info("ControllerOwnership", "A2VM boot PID1902 arrival is partial; deferring initial acquisition until the control endpoint is ready.",
+                        ("Event", "A2vmBootRumblePid1902PartialArrivalDeferred"),
+                        ("Model", _hardwareDeviceModel?.Value ?? "unknown"),
+                        ("TargetPidPresent", transition.TargetPidPresent),
+                        ("TargetPidAppeared", transition.TargetPidAppeared),
+                        ("TargetTopologyVerified", transition.TargetTopologyVerified),
+                        ("WriteSucceeded", transition.WriteSucceeded),
+                        ("OldPidDisappeared", transition.OldPidDisappeared),
+                        ("RetryReason", retryReason));
+
+                return Fail("Pid1902TransitionFailed:" + transitionFailure, true, retryReason);
+            }
             AppLog.Info("ControllerOwnership", "PID1901->PID1902 transition verified.", ("Event", "Pid1902TransitionVerified"),
                 ("OldPidDisappeared", transition.OldPidDisappeared), ("TargetPidAppeared", transition.TargetPidAppeared),
                 ("SourceIdentityVerified", transition.SourceIdentityVerified), ("TargetTopologyVerified", transition.TargetTopologyVerified),
@@ -1374,6 +1393,20 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         && !transition.TargetPidPresent
         && !transition.TargetPidAppeared
         && transition.SourceIdentityVerified
+        && !transition.TargetTopologyVerified;
+
+    internal static bool IsA2vmBootRumbleSecondLegPartialPid1902ArrivalAfterVerifiedWrite(
+        MsiClawModeTransitionResult transition,
+        bool bootRumbleCycleEnabled) =>
+        bootRumbleCycleEnabled
+        && transition.Status == MsiClawModeTransitionStatus.TargetDeviceDidNotAppear
+        && transition.FromMode == MsiClawNativeMode.XInput
+        && transition.TargetMode == MsiClawNativeMode.DirectInput
+        && transition.WriteSucceeded
+        && transition.OldPidDisappeared
+        && transition.SourceIdentityVerified
+        && transition.TargetPidPresent
+        && !transition.TargetPidAppeared
         && !transition.TargetTopologyVerified;
 
     // TargetPidPresent can mean only that the PID1901 parent devnode appeared; the command HID
