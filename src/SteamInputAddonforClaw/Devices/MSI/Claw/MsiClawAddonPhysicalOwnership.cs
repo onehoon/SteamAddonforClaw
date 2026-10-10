@@ -22,11 +22,20 @@ internal enum MsiClawPhysicalOwnershipOutcome
     Failed,
 }
 
+internal enum MsiClawInitialAcquisitionRetryReason
+{
+    None,
+    BootRumbleTargetPidNotPresent,
+    Pid1902TargetPidNotPresent,
+}
+
 internal sealed record MsiClawPhysicalOwnershipResult(
     MsiClawPhysicalOwnershipOutcome Outcome,
     string Reason,
     bool ModeWriteIssued,
-    IReadOnlyList<string> HiddenTargets)
+    IReadOnlyList<string> HiddenTargets,
+    MsiClawInitialAcquisitionRetryReason InitialAcquisitionRetryReason = MsiClawInitialAcquisitionRetryReason.None,
+    bool NativeDeviceAbsentAtInitialCapture = false)
 {
     internal bool IsOwned => Outcome == MsiClawPhysicalOwnershipOutcome.Owned;
     internal string? PrimaryHiddenTarget => HiddenTargets.FirstOrDefault();
@@ -239,7 +248,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         //      during which the user could run Enable and Restart.
         var initialCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
         if (!TryReadIdentity(initialCapture, out var initialMode, out var initialIdentity, out var reason))
-            return Fail("InitialNativeState:" + reason, false);
+            return Fail("InitialNativeState:" + reason, false,
+                nativeDeviceAbsentAtInitialCapture: initialCapture.Status == NativeStateCaptureStatus.DeviceNotFound);
         if (initialMode is not (MsiClawNativeMode.XInput or MsiClawNativeMode.DirectInput))
             return Fail("UnsupportedInitialMode:" + initialMode, false);
         AppLog.Info("ControllerOwnership", "Native state captured.", ("Event", "NativeStateCaptured"),
@@ -297,7 +307,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             var toXInput = await _switchMode(MsiClawNativeMode.XInput, initialIdentity, cancellationToken).ConfigureAwait(false);
             pidTransitionWriteIssued = true;
             if (!IsCrossModeTransitionProven(toXInput, out var toXInputFailure))
-                return Fail("BootRumblePid1901TransitionFailed:" + toXInputFailure, true);
+                return Fail("BootRumblePid1901TransitionFailed:" + toXInputFailure, true,
+                    IsTargetNotPresentAfterVerifiedWrite(toXInput, MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput)
+                        ? MsiClawInitialAcquisitionRetryReason.BootRumbleTargetPidNotPresent
+                        : MsiClawInitialAcquisitionRetryReason.None);
 
             var xInputCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
             if (!TryReadIdentity(xInputCapture, out var xInputMode, out var xInputIdentity, out var xInputReason)
@@ -326,7 +339,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             // Windows physical-root/container string legitimately changes across a real MSI native
             // mode switch, so it is NOT compared here.
             if (!IsCrossModeTransitionProven(transition, out var transitionFailure))
-                return Fail("Pid1902TransitionFailed:" + transitionFailure, true);
+                return Fail("Pid1902TransitionFailed:" + transitionFailure, true,
+                    IsTargetNotPresentAfterVerifiedWrite(transition, MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput)
+                        ? MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent
+                        : MsiClawInitialAcquisitionRetryReason.None);
             AppLog.Info("ControllerOwnership", "PID1901->PID1902 transition verified.", ("Event", "Pid1902TransitionVerified"),
                 ("OldPidDisappeared", transition.OldPidDisappeared), ("TargetPidAppeared", transition.TargetPidAppeared),
                 ("SourceIdentityVerified", transition.SourceIdentityVerified), ("TargetTopologyVerified", transition.TargetTopologyVerified),
@@ -1136,6 +1152,20 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         return true;
     }
 
+    internal static bool IsTargetNotPresentAfterVerifiedWrite(
+        MsiClawModeTransitionResult transition,
+        MsiClawNativeMode expectedSource,
+        MsiClawNativeMode expectedTarget) =>
+        transition.Status == MsiClawModeTransitionStatus.TargetDeviceDidNotAppear
+        && transition.FromMode == expectedSource
+        && transition.TargetMode == expectedTarget
+        && transition.WriteSucceeded
+        && transition.OldPidDisappeared
+        && !transition.TargetPidPresent
+        && !transition.TargetPidAppeared
+        && transition.SourceIdentityVerified
+        && !transition.TargetTopologyVerified;
+
     internal static bool IsA2vmBootRumblePrimeModel(HandheldDeviceModelId? modelId) =>
         modelId?.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8";
 
@@ -1174,10 +1204,17 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         }
     }
 
-    private MsiClawPhysicalOwnershipResult Fail(string reason, bool modeWriteIssued)
+    private MsiClawPhysicalOwnershipResult Fail(
+        string reason,
+        bool modeWriteIssued,
+        MsiClawInitialAcquisitionRetryReason retryReason = MsiClawInitialAcquisitionRetryReason.None,
+        bool nativeDeviceAbsentAtInitialCapture = false)
     {
-        AppLog.Warn("ControllerOwnership", "Physical ownership failed.", null, ("Result", "Failed"), ("Reason", reason), ("ModeWriteIssued", modeWriteIssued));
-        return new(MsiClawPhysicalOwnershipOutcome.Failed, reason, modeWriteIssued, _ownedHiddenTargets);
+        AppLog.Warn("ControllerOwnership", "Physical ownership failed.", null,
+            ("Result", "Failed"), ("Reason", reason), ("ModeWriteIssued", modeWriteIssued),
+            ("InitialAcquisitionRetryReason", retryReason));
+        return new(MsiClawPhysicalOwnershipOutcome.Failed, reason, modeWriteIssued, _ownedHiddenTargets,
+            retryReason, nativeDeviceAbsentAtInitialCapture);
     }
 
     public async ValueTask DisposeAsync()
