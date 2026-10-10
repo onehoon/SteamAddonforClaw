@@ -12,7 +12,7 @@ public sealed class OverlayShortcutTransportTests
     [Fact]
     public void Overlay_protocol_is_v13_and_rejects_a_v12_peer()
     {
-        Assert.Equal(18, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(19, OverlayTransportProtocol.CurrentVersion);
     }
 
     [Fact]

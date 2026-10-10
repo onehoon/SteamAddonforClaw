@@ -63,6 +63,24 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Contains("_overlayController.BindQuickSettingsAuthority(", source);
         Assert.Contains("captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, profileTarget: null, token)", source);
         Assert.Contains("captureProfilePage: token => CaptureOverlayProfileQuickSettingsPageAsync(token)", source);
+        Assert.Contains("profileRecheckAllowed: () => Volatile.Read(ref _processShutdownStarted) == 0 && _overlayCaptureActive", source);
+    }
+
+    [Fact]
+    public void Conditional_profile_recheck_uses_the_existing_active_target_read_without_catalog_or_runtime_refresh()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var capture = ExtractMethod(source, "private Task<QuickSettingsPageSnapshot> CaptureOverlayProfileQuickSettingsPageAsync");
+        var target = ExtractMethod(source, "private QuickSettingsProfileTarget? CaptureActiveQuickSettingsProfileTarget()");
+        var activeTarget = ExtractMethod(source, "private ActiveProfileTarget CaptureActiveProfileTarget()");
+
+        Assert.Contains("CaptureActiveQuickSettingsProfileTarget()", capture);
+        Assert.Contains("CaptureActiveProfileTarget()", target);
+        Assert.Contains("_runtimeHost?.ActualRunningAppId ?? 0", activeTarget);
+        Assert.Contains("_xboxGameSessionRuntime?.ActiveGame", activeTarget);
+        Assert.DoesNotContain("RefreshGamesAsync", capture);
+        Assert.DoesNotContain("_runtimeHost.Refresh", capture);
+        Assert.DoesNotContain("SteamSessionRuntime.Refresh", capture);
     }
 
     [Fact]

@@ -33,6 +33,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private Func<CancellationToken, Task<QuickSettingsPageSnapshot>>? _captureDeviceQuickSettingsPage;
     private Func<CancellationToken, Task<QuickSettingsPageSnapshot>>? _captureProfileQuickSettingsPage;
     private Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? _mutateQuickSettings;
+    private Func<bool>? _profileRecheckAllowed;
     private Func<CancellationToken, Task<FrontendClawHudSnapshot>>? _captureClawHud;
     private Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
     private Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
@@ -89,11 +90,13 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     internal void BindQuickSettingsAuthority(
         Func<CancellationToken, Task<QuickSettingsPageSnapshot>> captureDevicePage,
         Func<CancellationToken, Task<QuickSettingsPageSnapshot>> captureProfilePage,
-        Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>> mutate)
+        Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>> mutate,
+        Func<bool>? profileRecheckAllowed = null)
     {
         _captureDeviceQuickSettingsPage = captureDevicePage ?? throw new ArgumentNullException(nameof(captureDevicePage));
         _captureProfileQuickSettingsPage = captureProfilePage ?? throw new ArgumentNullException(nameof(captureProfilePage));
         _mutateQuickSettings = mutate ?? throw new ArgumentNullException(nameof(mutate));
+        _profileRecheckAllowed = profileRecheckAllowed;
     }
 
     internal void BindClawHudAuthority(
@@ -457,6 +460,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     {
         if (!File.Exists(_executablePath)) return false;
         var server = _serverFactory(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
+        server.NoRunningGameProfileRecheckRequested += OnNoRunningGameProfileRecheckRequested;
         var startup = Stopwatch.StartNew();
         await server.StartAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("Overlay", "Overlay server ready; launch about to begin.", ("Path", _executablePath));
@@ -494,6 +498,84 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         }
         AppLog.Info("Overlay", "Overlay Ready confirmed.", ("PID", process.Id), ("ElapsedMs", startup.ElapsedMilliseconds));
         return true;
+    }
+
+    private void OnNoRunningGameProfileRecheckRequested(
+        NamedPipeOverlayServer source,
+        CancellationToken connectionToken,
+        CancellationToken visibleSessionToken)
+    {
+        if (!IsNoRunningGameProfileRecheckAllowed(source)) return;
+        _ = RecheckProfileQuickSettingsAsync(source, connectionToken, visibleSessionToken);
+    }
+
+    private async Task RecheckProfileQuickSettingsAsync(
+        NamedPipeOverlayServer source,
+        CancellationToken connectionToken,
+        CancellationToken visibleSessionToken)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(connectionToken, visibleSessionToken);
+        var token = linked.Token;
+        var gateHeld = false;
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), token).ConfigureAwait(false);
+            if (!IsNoRunningGameProfileRecheckAllowed(source)) return;
+
+            await _quickSettingsRefreshGate.WaitAsync(token).ConfigureAwait(false);
+            gateHeld = true;
+            if (token.IsCancellationRequested || !IsNoRunningGameProfileRecheckAllowed(source)) return;
+
+            var capture = _captureProfileQuickSettingsPage;
+            if (capture is null) return;
+
+            QuickSettingsPageSnapshot page;
+            try
+            {
+                page = await capture(token).ConfigureAwait(false);
+                if (page.PageId != QuickSettingsPageId.Profile)
+                {
+                    AppLog.Warn("Overlay", "Profile recheck returned a non-Profile page.", null, ("PageId", page.PageId));
+                    page = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile);
+                }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Overlay", "Overlay Profile recheck capture failed.", exception);
+                page = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile);
+            }
+
+            if (token.IsCancellationRequested || !IsNoRunningGameProfileRecheckAllowed(source)) return;
+            await source.SendQuickSettingsPageStateAsync(page, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Hide, connection loss, and Runtime shutdown cancel only this optional request.
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Overlay Profile recheck failed; the active surface remains available.", exception);
+        }
+        finally
+        {
+            if (gateHeld) _quickSettingsRefreshGate.Release();
+        }
+    }
+
+    private bool IsNoRunningGameProfileRecheckAllowed(NamedPipeOverlayServer source)
+    {
+        lock (_sync)
+        {
+            if (_stopping || !ReferenceEquals(_server, source)) return false;
+        }
+
+        if (!source.IsReady || source.State != OverlayState.Visible) return false;
+        try { return _profileRecheckAllowed?.Invoke() == true; }
+        catch { return false; }
     }
 
     private async void OnProcessExited(object? sender, EventArgs args)

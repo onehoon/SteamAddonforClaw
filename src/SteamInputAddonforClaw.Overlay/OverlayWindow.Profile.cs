@@ -13,6 +13,9 @@ public sealed partial class OverlayWindow
     private FrameworkElement? _profileDetailRoot;
     private TextBlock? _profileStatusMessage;
     private bool _activeProfileInitialLoadPending;
+    private bool _noGameRecheckRequestedForThisEntry;
+
+    internal event Action? NoRunningGameProfileRecheckRequested;
 
     private FrameworkElement BuildProfilePage()
     {
@@ -44,15 +47,23 @@ public sealed partial class OverlayWindow
 
     private void OnProfileTabSelectionChanged(bool selected)
     {
-        if (!selected || !_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface))
+        if (!selected)
+        {
+            _noGameRecheckRequestedForThisEntry = false;
+            return;
+        }
+
+        if (!_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface))
             return;
 
         ApplyProfilePresentation(surface.Binding?.AuthoritativePage);
+        TryRequestNoRunningGameRecheck(surface.Binding?.AuthoritativePage);
     }
 
     private void PrepareActiveProfileFirstShow()
     {
         if (!_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)) return;
+        _noGameRecheckRequestedForThisEntry = false;
         _activeProfileInitialLoadPending = true;
         var page = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Loading the active game profile.");
         surface.Binding?.ApplyAuthoritativePage(page);
@@ -69,6 +80,7 @@ public sealed partial class OverlayWindow
         surface.Binding?.ApplyAuthoritativePage(page);
         RenderQuickSettingsPage(surface);
         ApplyProfilePresentation(page);
+        TryRequestNoRunningGameRecheck(page);
     }
 
     private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)
@@ -94,6 +106,29 @@ public sealed partial class OverlayWindow
         _profileStatusMessage.Text = ResolveProfileStatusMessage(page);
         _profileStatusMessage.Visibility = Visibility.Visible;
     }
+
+    private void TryRequestNoRunningGameRecheck(QuickSettingsPageSnapshot? page)
+    {
+        if (!ShouldRequestNoRunningGameRecheck(
+                page,
+                _tabState.SelectedTab == AddonQuickSettingsTabId.Profile,
+                _activeProfileInitialLoadPending,
+                _noGameRecheckRequestedForThisEntry))
+            return;
+
+        _noGameRecheckRequestedForThisEntry = true;
+        NoRunningGameProfileRecheckRequested?.Invoke();
+    }
+
+    internal static bool ShouldRequestNoRunningGameRecheck(
+        QuickSettingsPageSnapshot? page,
+        bool profileSelected,
+        bool initialLoadPending,
+        bool alreadyRequestedForEntry) =>
+        profileSelected && !initialLoadPending && !alreadyRequestedForEntry && IsExactNoRunningGamePage(page);
+
+    internal static bool IsExactNoRunningGamePage(QuickSettingsPageSnapshot? page) =>
+        page is { PageId: QuickSettingsPageId.Profile, Available: false, ProfileTarget: null, Message: NoActiveGameMessage };
 
     internal static bool HasRenderableActiveProfile(QuickSettingsPageSnapshot? page) =>
         page is { PageId: QuickSettingsPageId.Profile, Available: true, ProfileTarget: { IsStructurallyValid: true } };

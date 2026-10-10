@@ -434,7 +434,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
 
-        Assert.Contains("if (preferActiveProfile) PrepareActiveProfileFirstShow();", shell);
+        Assert.Contains("PrepareActiveProfileFirstShow();", shell);
         Assert.Contains("if (preferActiveProfile) _tabState.Select(AddonQuickSettingsTabId.Profile);", shell);
         Assert.Contains("case OverlayCommand.ShowActiveProfile:", app);
         Assert.Contains("ShowForPocAsync(preferActiveProfile: true)", app);
@@ -516,6 +516,53 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("_profileDetailRoot.Visibility = Visibility.Visible;", presentation[readyIndex..readyReturnIndex]);
         Assert.Contains("_profileStatusMessage.Text = ResolveProfileStatusMessage(page);", presentation[unavailableIndex..]);
         Assert.Contains("_profileStatusMessage.Visibility = Visibility.Visible;", presentation[unavailableIndex..]);
+    }
+
+    [Fact]
+    public void Conditional_profile_recheck_only_accepts_the_exact_no_game_page_once_per_selected_entry()
+    {
+        const string noGameMessage = "No game is currently running. Start a game to configure its profile.";
+        var noGame = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, noGameMessage);
+        var loading = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Loading the active game profile.");
+        var activeSteam = new QuickSettingsPageSnapshot(
+            QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(42), true, null, [], []);
+        var activeXbox = new QuickSettingsPageSnapshot(
+            QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:active"), true, null, [], []);
+
+        Assert.True(OverlayWindow.IsExactNoRunningGamePage(noGame));
+        Assert.True(OverlayWindow.ShouldRequestNoRunningGameRecheck(noGame, true, false, false));
+        Assert.False(OverlayWindow.ShouldRequestNoRunningGameRecheck(activeSteam, true, false, false));
+        Assert.False(OverlayWindow.ShouldRequestNoRunningGameRecheck(activeXbox, true, false, false));
+        Assert.False(OverlayWindow.ShouldRequestNoRunningGameRecheck(noGame, false, false, false));
+        Assert.False(OverlayWindow.ShouldRequestNoRunningGameRecheck(noGame, true, true, false));
+        Assert.False(OverlayWindow.ShouldRequestNoRunningGameRecheck(noGame, true, false, true));
+        Assert.False(OverlayWindow.IsExactNoRunningGamePage(loading));
+        Assert.False(OverlayWindow.ShouldRequestNoRunningGameRecheck(loading, true, false, false));
+        Assert.False(OverlayWindow.IsExactNoRunningGamePage(
+            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Profile capture failed.")));
+        Assert.False(OverlayWindow.IsExactNoRunningGamePage(
+            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:active"), noGameMessage)));
+        Assert.False(OverlayWindow.IsExactNoRunningGamePage(
+            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device, null, noGameMessage)));
+
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var client = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "NamedPipeOverlayClient.cs");
+        var entry = ExtractMethod(profile, "private void OnProfileTabSelectionChanged(bool selected)");
+        var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
+        var apply = ExtractMethod(profile, "internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
+        var showReset = ExtractMethod(shell, "private void ResetUiForShow(bool preferActiveProfile = false)");
+
+        Assert.Contains("_noGameRecheckRequestedForThisEntry = false;", entry);
+        Assert.Contains("TryRequestNoRunningGameRecheck(surface.Binding?.AuthoritativePage);", entry);
+        Assert.Contains("_noGameRecheckRequestedForThisEntry = false;", prepare);
+        Assert.Contains("TryRequestNoRunningGameRecheck(page);", apply);
+        Assert.Contains("PrepareActiveProfileFirstShow();", showReset);
+        Assert.DoesNotContain("if (preferActiveProfile) PrepareActiveProfileFirstShow();", showReset);
+        Assert.Contains("_window.NoRunningGameProfileRecheckRequested += OnNoRunningGameProfileRecheckRequested;", app);
+        Assert.Contains("_client.SendNoRunningGameProfileRecheckRequestAsync()", app);
+        Assert.Contains("OverlayWireMessageKind.NoRunningGameProfileRecheckRequest", client);
     }
 
     // SF-V2-09 section 32/13.1: exactly one page-local surface type/dictionary backs both pages --

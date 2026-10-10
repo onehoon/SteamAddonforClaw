@@ -41,11 +41,12 @@ internal static class OverlayTransportProtocol
     // is now delivered only through the shared active-game Quick Settings page contract.
     // Version 17 adds the XBOX-only Profile Controller section/rows/commit group to that contract.
     // Version 18 adds the shared Profile Minimum GPU Clock section and AC/DC driver-clock indexes.
-    internal const int CurrentVersion = 18;
+    // Version 19 adds a payload-free conditional no-running-game Profile recheck request.
+    internal const int CurrentVersion = 19;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest }
 internal enum OverlayCommand { Show, Hide, Shutdown, ShowActiveProfile }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
