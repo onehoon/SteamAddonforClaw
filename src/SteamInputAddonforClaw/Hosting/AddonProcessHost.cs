@@ -157,6 +157,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // owned-session completion. Serialized inside the physical owner's own gate; tracked only so
     // controlled teardown drains it BEFORE the presentation reconcile it may itself request.
     private Task _ownedControllerRecovery = Task.CompletedTask;
+    // A first physical acquisition that ended only because a verified native-mode target PID was
+    // not present yet. This retains the existing owner/presentation and routes real arrivals through
+    // AcquireAsync until the one initial commit completes or an explicit teardown begins.
+    private InitialControllerAcquisitionContext? _initialControllerAcquisition;
     // PR10 review [P1]: a single "a Device Arrival landed while a recovery was in flight" bit, so the
     // only real arrival signal is never lost to coalescing. Consumed for exactly one follow-up.
     private int _pendingOwnedControllerArrival;
@@ -164,6 +168,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // ALL further owned-controller recovery (including Device Arrival) for the rest of this Runtime
     // lifetime -- native resources may still be retained. A Runtime restart resets it.
     private int _ownedControllerRecoveryBlockedByCleanup;
+    private int _controllerOwnershipReleaseStarted;
     // One Runtime-local arbitration fact for the Developer rumble re-arm and normal physical recovery.
     // The existing physical and presentation owner gates remain the resource authorities.
     private readonly object _controllerOwnershipOperationSync = new();
@@ -172,9 +177,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private long _controllerPowerLifecycleGeneration;
     private Task _developerRumbleRearmTask = Task.CompletedTask;
     // PR10: one Runtime-owned, event-driven Windows Device Arrival observer. Non-null once a physical
-    // owner has actually committed; it only wakes the existing recovery entrypoint, which re-proves
-    // the strong MSI Claw identity itself. Disposed at BeginProcessShutdown before recovery drains.
+    // owner has committed or an eligible first acquisition is deferred; it only wakes the existing
+    // owner, which re-proves the strong MSI Claw identity itself. Disposed before recovery drains.
     private Controllers.Detection.WindowsDeviceArrivalWatcher? _deviceArrivalWatcher;
+    private bool _deviceArrivalWatcherStarted;
+    private sealed record InitialControllerAcquisitionContext(
+        Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership Owner,
+        Devices.MSI.Claw.IMsiClawAddonPresentation Presentation,
+        Startup.StartupResult StartupResult,
+        Settings.StartupSettingsCoordinator StartupSettings,
+        Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason OriginRetryReason,
+        Func<bool> IsViiperReady);
     // Center M Disabled only: observes Gamebar_Widget starts and is stopped before stock authority
     // restoration or process teardown. The gate serializes Start/Stop; callback drain belongs to watcher.
     private readonly Lock _msiQuickSettingsWatcherGate = new();
@@ -508,6 +521,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         async Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult> ReleasePhysicalOwnershipAsync(
             CancellationToken token)
         {
+            Task inFlightControllerWork;
+            lock (_controllerOwnershipOperationSync)
+            {
+                Volatile.Write(ref _controllerOwnershipReleaseStarted, 1);
+                _initialControllerAcquisition = null;
+                Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0);
+                inFlightControllerWork = _ownedControllerRecovery;
+            }
+            // Close admission first, then drain the existing single task before retiring VIIPER or
+            // releasing the physical owner. No deferred initial AcquireAsync may outlive Enable.
+            await inFlightControllerWork.ConfigureAwait(false);
+
             // Full1902 A2 section 14: stop the feature-local front-button owner (WMI observation +
             // pulse callbacks into the presentation) before the presentation it targets is retired.
             if (_frontButtonRuntime is { } frontButtons)
@@ -981,84 +1006,66 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ("PrimaryHiddenTarget", acquired.PrimaryHiddenTarget ?? "None"), ("HiddenTargetCount", acquired.HiddenTargets.Count));
             if (!acquired.IsOwned)
             {
+                if (acquired.InitialAcquisitionRetryReason != Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.None
+                    && Volatile.Read(ref _processShutdownStarted) == 0
+                    && !_startupCancellationTokenSource.IsCancellationRequested
+                    && _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled
+                    && presentation.ViiperState == VirtualOutput.Viiper.CanonicalViiperRuntimeState.Ready)
+                {
+                    var context = new InitialControllerAcquisitionContext(
+                        owner, presentation, startupResult, startupSettings, acquired.InitialAcquisitionRetryReason,
+                        () => presentation.ViiperState == VirtualOutput.Viiper.CanonicalViiperRuntimeState.Ready);
+                    Task retryTask = Task.CompletedTask;
+                    bool watcherStarted;
+                    bool retryScheduled;
+                    bool releaseLocally;
+                    lock (_controllerOwnershipOperationSync)
+                    {
+                        if (Volatile.Read(ref _processShutdownStarted) != 0
+                            || _startupCancellationTokenSource.IsCancellationRequested
+                            || Volatile.Read(ref _controllerOwnershipReleaseStarted) != 0
+                            || _centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+                            || presentation.ViiperState != VirtualOutput.Viiper.CanonicalViiperRuntimeState.Ready)
+                        {
+                            watcherStarted = false;
+                            retryScheduled = false;
+                            releaseLocally = Volatile.Read(ref _processShutdownStarted) == 0
+                                && !_startupCancellationTokenSource.IsCancellationRequested
+                                && Volatile.Read(ref _controllerOwnershipReleaseStarted) == 0;
+                        }
+                        else
+                        {
+                            _initialControllerAcquisition = context;
+                            Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0);
+                            watcherStarted = StartControllerDeviceArrivalWatcher();
+                            AppLog.Warn("ControllerOwnership", "Initial controller acquisition deferred until a fresh native-mode target can be proven.", null,
+                                ("Event", "InitialControllerAcquisitionDeferred"),
+                                ("FailureReason", acquired.Reason), ("ModeWriteIssued", acquired.ModeWriteIssued),
+                                ("RetryReason", acquired.InitialAcquisitionRetryReason),
+                                ("DeviceArrivalWatcherStarted", watcherStarted),
+                                ("RetryRequested", "ImmediateRecheck"));
+                            retryTask = RequestOwnedControllerRecovery(owner, "ImmediateRecheck");
+                            retryScheduled = true;
+                            releaseLocally = false;
+                        }
+                    }
+
+                    if (retryScheduled)
+                        await retryTask.ConfigureAwait(false);
+                    else if (releaseLocally)
+                        await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+                    return;
+                }
+
                 await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
                 return;
             }
 
-            var source = owner.LiveInputSource;
-            if (source is null || !source.IsRunning)
-            {
-                AppLog.Warn("ControllerPresentation", "PR5 live input source is not running; no presentation attach.", null);
-                await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
-                return;
-            }
-
-            if (startupResult.HardwareDeviceModel is { } motionModel && MsiClawMotionSource.IsSupportedModel(motionModel))
-            {
-                _motionModel = motionModel;
-                _motionSource = new MsiClawMotionSource(motionModel);
-            }
-
-            // The LED is part of physical PID1902 ownership, not VIIPER presentation. Apply the
-            // persisted state once as soon as the normal owned DirectInput session is healthy,
-            // including the default Off state.
-            await ApplyOwnedControllerLedSettingsAsync(startupSettings.ControllerLed, _startupCancellationTokenSource.Token).ConfigureAwait(false);
-            await ApplyOwnedControllerVibrationSettingsAsync(
-                startupSettings.ControllerVibration, "Startup", _startupCancellationTokenSource.Token).ConfigureAwait(false);
-
-            // Full1902 Policy B section 5.2/5.3: while the Addon owns the controller, native Win+G /
-            // Xbox Game Bar must never surface. Arm suppression -- and PROVE it armed -- BEFORE the
-            // first live virtual presentation. A failed install/arm is fail-closed: no live X360 or
-            // SteamDeck presentation, no publisher, no front-button WING delivery, and no native Game
-            // Bar fallback while the Addon still owns PID1902. No retry loop -- an ordinary Runtime
-            // restart retries through this same path. PID1902 / HidHide stay owned so Enable-and-Restart
-            // can still release stock-safely.
-            if (!EnsureAddonAuthorityWinGSuppression())
-            {
-                await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
-                return;
-            }
-
-            // PR10: the owner has committed a real strong identity + exact hidden target, so a later
-            // physical disappearance can be recovered on a real Device Arrival even after the bounded
-            // PR8/PR9 attempt has already failed closed.
-            StartControllerDeviceArrivalWatcher();
-
-            var snapshot = _runtimeHost!.CapturePresentationSnapshot();
-            var presentationResult = await presentation.AttachInitialAsync(source, snapshot, _startupCancellationTokenSource.Token).ConfigureAwait(false);
-            AppLog.Info("ControllerPresentation", "First presentation attach completed.",
-                ("Succeeded", presentationResult.Succeeded), ("Presentation", presentationResult.Presentation?.ToString() ?? "None"), ("Reason", presentationResult.Reason));
-            await ReconcileMotionReadersAsync("StartupPresentation").ConfigureAwait(false);
-
-            // Full1902 A2 section 7: the feature-local OEM1/WING front-button action path is composed
-            // against the now-existing Full1902 presentation owner -- never AddonRoutingRuntime. Pulse
-            // requests self-gate on a live SteamDeck publication, so composing it even after a failed
-            // attach is safe (OEM1 Normal-domain hotkey/launch actions still work). A button-feature
-            // failure is feature-local: it never compromises PID1902 ownership or the presentation.
-            try
-            {
-                _frontButtonRuntime = Devices.MSI.Claw.MsiClawFrontButtonRuntime.Create(
-                    hardwareSupported: startupResult.HardwareSupported,
-                    frontButtonMappingPreference: startupSettings,
-                    isSteamDeckPresentationActive: () => _presentationOwnership?.ActivePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck,
-                    // App UI PR-C section 13: the QuickSettingsOverlay action routes through the
-                    // existing Runtime-owned coordinated Overlay toggle seam, never the Overlay process
-                    // controller / transport directly.
-                    requestOverlayToggle: RequestOverlayToggle,
-                    tryRequestQuickAccessPulse: RequestSteamQuickAccess,
-                    tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false,
-                    // Full1902 Policy B (already merged, #473): Gamebar / WING custom delivery is live
-                    // only while native Win+G suppression is proven armed for this Addon-authority
-                    // lifetime -- bound to the existing guard seam, not a new authority boolean.
-                    nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed,
-                    launchBigPictureOverride: () => CenterM.Oem1BigPictureLauncher.Launch(_userProcessLauncher),
-                    launchXboxAppOverride: () => CenterM.FrontButtonXboxAppLauncher.Launch(_userProcessLauncher),
-                    launchApplicationOverride: application => CenterM.Oem1ApplicationLauncher.Launch(application, _userProcessLauncher));
-            }
-            catch (Exception exception)
-            {
-                AppLog.Warn("CenterM.Oem1", "Front-button action path composition failed; controller ownership is unaffected.", exception);
-            }
+            _ = await CompleteInitialControllerOwnershipAsync(
+                new(owner, presentation, startupResult, startupSettings,
+                    Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.None,
+                    () => presentation.ViiperState == VirtualOutput.Viiper.CanonicalViiperRuntimeState.Ready),
+                "Startup").ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
         catch (Exception exception)
@@ -1066,6 +1073,193 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("ControllerOwnership", "Disabled-mode controller startup threw; Runtime remains available.", exception);
         }
     }
+
+    private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(
+        InitialControllerAcquisitionContext context,
+        string trigger)
+    {
+        if (IsDeferredInitialControllerAcquisition(context) && !IsInitialControllerAcquisitionCurrent(context))
+            return new(false, null, false, "InitialAcquisitionAdmissionClosed");
+
+        var source = context.Owner.LiveInputSource;
+        if (source is null || !source.IsRunning)
+        {
+            AppLog.Warn("ControllerPresentation", "PR5 live input source is not running; no presentation attach.", null,
+                ("Trigger", trigger));
+            await context.Presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            return new(false, null, false, "LiveInputSourceUnavailable");
+        }
+
+        if (_motionSource is null
+            && context.StartupResult.HardwareDeviceModel is { } motionModel
+            && MsiClawMotionSource.IsSupportedModel(motionModel))
+        {
+            _motionModel = motionModel;
+            _motionSource = new MsiClawMotionSource(motionModel);
+        }
+
+        // The LED and vibration settings are physical PID1902 state. Apply them only after the
+        // shared owner has completed its live DirectInput and exact HidHide proofs.
+        await ApplyOwnedControllerLedSettingsAsync(context.StartupSettings.ControllerLed, _startupCancellationTokenSource.Token).ConfigureAwait(false);
+        await ApplyOwnedControllerVibrationSettingsAsync(
+            context.StartupSettings.ControllerVibration, trigger, _startupCancellationTokenSource.Token).ConfigureAwait(false);
+
+        if (IsDeferredInitialControllerAcquisition(context) && !IsInitialControllerAcquisitionCurrent(context))
+            return new(false, null, false, "InitialAcquisitionAdmissionClosed");
+
+        // Full1902 Policy B: prove native Win+G suppression before the first virtual presentation.
+        if (!EnsureAddonAuthorityWinGSuppression())
+        {
+            await context.Presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            return new(false, null, false, "WinGSuppressionNotProven");
+        }
+
+        // One watcher is shared by a deferred first acquisition and all later owned-session loss.
+        _ = StartControllerDeviceArrivalWatcher();
+        var snapshot = _runtimeHost!.CapturePresentationSnapshot();
+        if (IsDeferredInitialControllerAcquisition(context) && !IsInitialControllerAcquisitionCurrent(context))
+            return new(false, null, false, "InitialAcquisitionAdmissionClosed");
+
+        var presentationResult = await context.Presentation.AttachInitialAsync(source, snapshot, _startupCancellationTokenSource.Token).ConfigureAwait(false);
+        AppLog.Info("ControllerPresentation", "First presentation attach completed.",
+            ("Succeeded", presentationResult.Succeeded), ("Presentation", presentationResult.Presentation?.ToString() ?? "None"), ("Reason", presentationResult.Reason),
+            ("Trigger", trigger));
+        await ReconcileMotionReadersAsync(trigger == "Startup" ? "StartupPresentation" : "DeferredInitialPresentation").ConfigureAwait(false);
+
+        // Preserve the existing feature-local OEM1/WING composition and ensure exactly one runtime.
+        try
+        {
+            _frontButtonRuntime ??= Devices.MSI.Claw.MsiClawFrontButtonRuntime.Create(
+                hardwareSupported: context.StartupResult.HardwareSupported,
+                frontButtonMappingPreference: context.StartupSettings,
+                isSteamDeckPresentationActive: () => _presentationOwnership?.ActivePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck,
+                requestOverlayToggle: RequestOverlayToggle,
+                tryRequestQuickAccessPulse: RequestSteamQuickAccess,
+                tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false,
+                nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed,
+                launchBigPictureOverride: () => CenterM.Oem1BigPictureLauncher.Launch(_userProcessLauncher),
+                launchXboxAppOverride: () => CenterM.FrontButtonXboxAppLauncher.Launch(_userProcessLauncher),
+                launchApplicationOverride: application => CenterM.Oem1ApplicationLauncher.Launch(application, _userProcessLauncher));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("CenterM.Oem1", "Front-button action path composition failed; controller ownership is unaffected.", exception);
+        }
+
+        return new(true, presentationResult.Presentation?.ToString(), presentationResult.Succeeded, presentationResult.Reason);
+    }
+
+    private async Task RunInitialControllerAcquisitionAsync(InitialControllerAcquisitionContext context, string trigger)
+    {
+        try
+        {
+            if (!IsInitialControllerAcquisitionCurrent(context)) return;
+            var result = await context.Owner.AcquireAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            AppLog.Info("ControllerOwnership", "Deferred initial controller acquisition attempt completed.",
+                ("Event", "DeferredInitialControllerAcquisitionAttemptCompleted"),
+                ("Trigger", trigger), ("Result", result.Outcome), ("Reason", result.Reason),
+                ("RetryReason", result.InitialAcquisitionRetryReason), ("ModeWriteIssued", result.ModeWriteIssued),
+                ("PrimaryHiddenTarget", result.PrimaryHiddenTarget ?? "None"), ("HiddenTargetCount", result.HiddenTargets.Count));
+
+            if (!IsInitialControllerAcquisitionCurrent(context)) return;
+            if (result.IsOwned)
+            {
+                var continuation = await CompleteInitialControllerOwnershipAsync(context, trigger).ConfigureAwait(false);
+                ClearInitialControllerAcquisition(context);
+                AppLog.Info("ControllerOwnership", "Deferred initial controller acquisition completed.",
+                    ("Event", "DeferredInitialControllerAcquisitionCompleted"),
+                    ("Trigger", trigger),
+                    ("CurrentMode", context.Owner.OwnedPhysicalIdentity?.ProductId == MsiClawHardware.DirectInputProductId ? "PID1902" : "Unverified"),
+                    ("ModeWriteIssued", result.ModeWriteIssued), ("OwnershipVerified", result.IsOwned),
+                    ("ContinuationCompleted", continuation.Continued), ("Presentation", continuation.Presentation ?? "None"),
+                    ("PublisherStarted", continuation.PublisherStarted), ("Reason", continuation.Reason));
+                return;
+            }
+
+            if (CanKeepInitialControllerAcquisitionDeferred(context, result))
+            {
+                AppLog.Warn("ControllerOwnership", "Deferred initial controller acquisition remains pending for a future Device Arrival.", null,
+                    ("Event", "DeferredInitialControllerAcquisitionFailed"), ("Trigger", trigger),
+                    ("Reason", result.Reason), ("RetryReason", result.InitialAcquisitionRetryReason),
+                    ("ModeWriteIssued", result.ModeWriteIssued));
+                return;
+            }
+
+            ClearInitialControllerAcquisition(context);
+            await context.Presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            ClearInitialControllerAcquisition(context);
+            AppLog.Error("ControllerOwnership", "Deferred initial controller acquisition failed; Runtime remains available.", exception,
+                ("Trigger", trigger));
+            try { await context.Presentation.ReleaseForCenterMEnableAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception teardownException)
+            {
+                AppLog.Warn("ControllerPresentation", "Deferred initial VIIPER teardown failed; Runtime shutdown remains available.", teardownException,
+                    ("Event", "DeferredInitialPresentationTeardownFailed"));
+            }
+        }
+        finally
+        {
+            SchedulePendingInitialControllerArrival(context);
+        }
+    }
+
+    private bool CanKeepInitialControllerAcquisitionDeferred(
+        InitialControllerAcquisitionContext context,
+        Devices.MSI.Claw.MsiClawPhysicalOwnershipResult result) =>
+        Volatile.Read(ref _processShutdownStarted) == 0
+        && Volatile.Read(ref _controllerOwnershipReleaseStarted) == 0
+        && !_startupCancellationTokenSource.IsCancellationRequested
+        && (result.InitialAcquisitionRetryReason != Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.None
+            || context.OriginRetryReason != Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.None
+                && result.NativeDeviceAbsentAtInitialCapture)
+        && _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled
+        && context.IsViiperReady();
+
+    private bool IsInitialControllerAcquisitionCurrent(InitialControllerAcquisitionContext context) =>
+        Volatile.Read(ref _processShutdownStarted) == 0
+        && Volatile.Read(ref _controllerOwnershipReleaseStarted) == 0
+        && !_startupCancellationTokenSource.IsCancellationRequested
+        && _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled
+        && context.IsViiperReady()
+        && ReferenceEquals(Volatile.Read(ref _initialControllerAcquisition), context);
+
+    private static bool IsDeferredInitialControllerAcquisition(InitialControllerAcquisitionContext context) =>
+        context.OriginRetryReason != Devices.MSI.Claw.MsiClawInitialAcquisitionRetryReason.None;
+
+    private void ClearInitialControllerAcquisition(InitialControllerAcquisitionContext context)
+    {
+        lock (_controllerOwnershipOperationSync)
+        {
+            if (!ReferenceEquals(_initialControllerAcquisition, context)) return;
+            _initialControllerAcquisition = null;
+            Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0);
+        }
+    }
+
+    private void SchedulePendingInitialControllerArrival(InitialControllerAcquisitionContext context)
+    {
+        lock (_controllerOwnershipOperationSync)
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0
+                || !ReferenceEquals(_initialControllerAcquisition, context)
+                || Volatile.Read(ref _controllerOwnershipReleaseStarted) != 0
+                || _centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+                || !context.IsViiperReady()
+                || Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0) == 0
+                || context.Owner.LiveInputSource is { IsRunning: true })
+                return;
+
+            AppLog.Info("ControllerOwnership", "Deferred initial controller acquisition requested.",
+                ("Event", "DeferredInitialControllerAcquisitionRequested"), ("Trigger", "DeferredDeviceArrival"));
+            _ownedControllerRecovery = Task.Run(() => RunInitialControllerAcquisitionAsync(context, "DeferredDeviceArrival"));
+        }
+    }
+
+    private sealed record InitialControllerCommitResult(bool Continued, string? Presentation, bool PublisherStarted, string Reason);
 
     private void StartMsiQuickSettingsProcessStartWatcher()
     {
@@ -1399,13 +1593,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         RequestOwnedControllerRecovery(physical, "UnexpectedDirectInputCompletion");
     }
 
-    private void StartControllerDeviceArrivalWatcher()
+    private bool StartControllerDeviceArrivalWatcher()
     {
-        if (_deviceArrivalWatcher is not null) return;
+        if (_deviceArrivalWatcher is not null) return _deviceArrivalWatcherStarted;
         var watcher = new Controllers.Detection.WindowsDeviceArrivalWatcher();
         watcher.DeviceArrived += OnControllerDeviceArrived;
         _deviceArrivalWatcher = watcher;
-        watcher.Start(); // logs DeviceArrivalWatcherStarted / DeviceArrivalWatcherUnavailable; no polling fallback
+        _deviceArrivalWatcherStarted = watcher.Start(); // logs availability; no polling fallback
+        return _deviceArrivalWatcherStarted;
     }
 
     /// <summary>PR10 section 7: a Windows Device Arrival is only a wake-up. Do almost no work here --
@@ -1437,22 +1632,44 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _ = StopMotionSourceAsync("DeviceArrival");
 
         AppLog.Info("ControllerOwnership", "Controller device arrival observed.", ("Event", "ControllerDeviceArrivalObserved"));
-        RequestOwnedControllerRecovery(physical, "DeviceArrival");
+        _ = RequestOwnedControllerRecovery(physical, "DeviceArrival");
     }
 
     /// <summary>The one owned-controller recovery scheduling seam, shared by the unexpected
     /// DirectInput completion (PR8) and the PR10 Device Arrival trigger. The physical owner's own
     /// gate remains the serialization authority.</summary>
-    private void RequestOwnedControllerRecovery(Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical, string trigger)
+    private Task RequestOwnedControllerRecovery(Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical, string trigger)
     {
         lock (_controllerOwnershipOperationSync)
         {
-            if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+            if (Volatile.Read(ref _processShutdownStarted) != 0
+                || Volatile.Read(ref _controllerOwnershipReleaseStarted) != 0)
+                return Task.CompletedTask;
             if (_developerRumbleRearmInProgress != 0)
             {
                 AppLog.Debug("ControllerOwnership", "Automatic recovery suppressed while the Developer rumble re-arm owns the stopped source.",
                     ("Event", "DeveloperRumbleRearmRecoverySuppressed"), ("Trigger", trigger));
-                return;
+                return Task.CompletedTask;
+            }
+
+            if (_initialControllerAcquisition is { } initial
+                && ReferenceEquals(initial.Owner, physical))
+            {
+                if (_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+                    || !initial.IsViiperReady())
+                    return Task.CompletedTask;
+                if (physical.LiveInputSource is { IsRunning: true }) return Task.CompletedTask;
+                if (!_ownedControllerRecovery.IsCompleted)
+                {
+                    if (trigger == "DeviceArrival")
+                        Interlocked.Exchange(ref _pendingOwnedControllerArrival, 1);
+                    return _ownedControllerRecovery;
+                }
+
+                AppLog.Info("ControllerOwnership", "Deferred initial controller acquisition requested.",
+                    ("Event", "DeferredInitialControllerAcquisitionRequested"), ("Trigger", trigger));
+                _ownedControllerRecovery = Task.Run(() => RunInitialControllerAcquisitionAsync(initial, trigger));
+                return _ownedControllerRecovery;
             }
 
             // Coalesce concurrent triggers to one in-flight attempt. A real Device Arrival that lands
@@ -1463,12 +1680,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             {
                 if (trigger == "DeviceArrival")
                     Interlocked.Exchange(ref _pendingOwnedControllerArrival, 1);
-                return;
+                return _ownedControllerRecovery;
             }
 
             AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.",
                 ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", trigger));
             _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, trigger, _startupCancellationTokenSource.Token);
+            return _ownedControllerRecovery;
         }
     }
 
@@ -1512,6 +1730,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // follow-up if the owned source is still not running and cleanup was never found unproven
             // in the meantime (review [P1]: the cleanup gate must not be bypassable via a queued arrival).
             if (Volatile.Read(ref _processShutdownStarted) == 0
+                && Volatile.Read(ref _controllerOwnershipReleaseStarted) == 0
                 && Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) == 0
                 && Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0) != 0
                 && physical.LiveInputSource is not { IsRunning: true })
@@ -2732,6 +2951,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         lock (_controllerOwnershipOperationSync)
         {
             if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
+            _initialControllerAcquisition = null;
+            Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0);
         }
         _motionSource?.InvalidateAndCancel();
         _ = StopMotionSourceAsync("ProcessShutdown");
@@ -2771,6 +2992,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // so no new arrival-triggered recovery can be scheduled.
         _deviceArrivalWatcher?.Dispose();
         _deviceArrivalWatcher = null;
+        _deviceArrivalWatcherStarted = false;
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
     }

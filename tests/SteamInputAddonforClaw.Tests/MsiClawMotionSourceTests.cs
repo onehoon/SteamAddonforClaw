@@ -321,18 +321,21 @@ public sealed class MsiClawMotionSourceTests
         var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
 
         var owned = host.IndexOf("if (!acquired.IsOwned)", StringComparison.Ordinal);
-        var live = host.IndexOf("if (source is null || !source.IsRunning)", owned, StringComparison.Ordinal);
+        var continuationCall = host.IndexOf("CompleteInitialControllerOwnershipAsync(", owned, StringComparison.Ordinal);
+        var continuation = host.IndexOf("private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(", StringComparison.Ordinal);
+        var live = host.IndexOf("if (source is null || !source.IsRunning)", continuation, StringComparison.Ordinal);
         var sourceCreated = host.IndexOf("_motionSource = new MsiClawMotionSource(motionModel)", live, StringComparison.Ordinal);
-        var firstPresentation = host.IndexOf("AttachInitialAsync", sourceCreated, StringComparison.Ordinal);
-        var motionReconcile = host.IndexOf("await ReconcileMotionReadersAsync(\"StartupPresentation\")", firstPresentation, StringComparison.Ordinal);
-        Assert.True(owned >= 0 && live > owned && sourceCreated > live && firstPresentation > sourceCreated && motionReconcile > firstPresentation);
+        var firstPresentation = host.IndexOf("context.Presentation.AttachInitialAsync", sourceCreated, StringComparison.Ordinal);
+        var motionReconcile = host.IndexOf("await ReconcileMotionReadersAsync(trigger == \"Startup\" ? \"StartupPresentation\"", firstPresentation, StringComparison.Ordinal);
+        Assert.True(owned >= 0 && continuationCall > owned && continuation > continuationCall && live > continuation && sourceCreated > live && firstPresentation > sourceCreated && motionReconcile > firstPresentation);
         Assert.Contains("motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable", host, StringComparison.Ordinal);
         Assert.DoesNotContain("await StartMotionSourceAsync(\"Startup\")", host, StringComparison.Ordinal);
         Assert.True(
             host.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal)
             < host.IndexOf("var acquired = await owner.AcquireAsync", StringComparison.Ordinal),
             "motion startup must remain behind the existing Disabled-boot admission and owned acquisition gates");
-        Assert.Contains("startupResult.HardwareDeviceModel is { } motionModel && MsiClawMotionSource.IsSupportedModel(motionModel)", host, StringComparison.Ordinal);
+        Assert.Contains("context.StartupResult.HardwareDeviceModel is { } motionModel", host, StringComparison.Ordinal);
+        Assert.Contains("MsiClawMotionSource.IsSupportedModel(motionModel)", host, StringComparison.Ordinal);
         Assert.Contains("physical.OwnedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong }", host, StringComparison.Ordinal);
 
         var presentationPath = Path.Combine(dir.FullName, "src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPresentation.cs");

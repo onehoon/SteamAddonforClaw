@@ -62,17 +62,60 @@ internal sealed class MsiClawModeController(
     IMsiClawModeWriter writer,
     TimeSpan? timeout = null,
     TimeSpan? pollInterval = null,
-    Func<DateTimeOffset>? now = null) : IMsiClawModeController
+    Func<DateTimeOffset>? now = null,
+    Func<TimeSpan, CancellationToken, Task>? delay = null) : IMsiClawModeController
 {
     private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromSeconds(5);
     private readonly TimeSpan _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(75);
     private readonly Func<DateTimeOffset> _now = now ?? (() => DateTimeOffset.UtcNow);
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? ((duration, token) => Task.Delay(duration, token));
 
     public async Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
     {
         var started = _now();
+        var sourceMode = MsiClawNativeMode.Other;
+        ushort? sourcePid = null;
+        var writeSucceeded = false;
+        var oldPidDisappeared = false;
+        var targetPidPresent = false;
+        var targetSeen = false;
+        var targetTopologyVerified = false;
+        DateTimeOffset? commandWrittenAt = null;
+        long? elapsedBeforeWriteMs = null;
+
+        MsiClawModeTransitionResult Complete(
+            MsiClawModeTransitionStatus status,
+            MsiClawNativeMode from,
+            string reason,
+            bool sourceIdentityVerified = false)
+        {
+            var result = new MsiClawModeTransitionResult(
+                status,
+                from,
+                target,
+                sourcePid,
+                MsiClawModeTopology.TryGet(target, out var resultTopology) ? resultTopology.ProductId : null,
+                writeSucceeded,
+                oldPidDisappeared,
+                targetSeen,
+                sourceIdentityVerified,
+                targetTopologyVerified,
+                (long)(_now() - started).TotalMilliseconds,
+                reason,
+                targetPidPresent);
+            AppLog.Info("NativeMode", "Native mode transition completed.",
+                ("Event", "NativeModeTransitionCompleted"),
+                ("SourceMode", from), ("TargetMode", target),
+                ("WriteSucceeded", writeSucceeded), ("ElapsedBeforeWriteMs", elapsedBeforeWriteMs),
+                ("SinceCommandWriteMs", commandWrittenAt is { } writeAt ? (long)(_now() - writeAt).TotalMilliseconds : null),
+                ("OldPidDisappeared", oldPidDisappeared), ("TargetPidPresent", targetPidPresent),
+                ("ExactTargetTopologyProven", targetTopologyVerified),
+                ("Result", status), ("FailureReason", status == MsiClawModeTransitionStatus.Succeeded ? "None" : reason));
+            return result;
+        }
+
         if (!MsiClawModeTopology.TryGet(target, out var targetTopology))
-            return Result(MsiClawModeTransitionStatus.UnsupportedDevice, MsiClawNativeMode.Other, target, started, "Unsupported target native mode.");
+            return Complete(MsiClawModeTransitionStatus.UnsupportedDevice, sourceMode, "Unsupported target native mode.");
 
         var devices = deviceEnumerator.EnumeratePresentDevices();
         var source = ResolveSource(devices, expectedIdentity);
@@ -83,13 +126,18 @@ internal sealed class MsiClawModeController(
                     ("Reason", source.Reason), ("TargetMode", target), ("WriteIssued", false));
             else
                 AppLog.Debug("NativeMode", "NativeModeSourceAmbiguous", ("Reason", source.Reason), ("TargetMode", target));
-            return Result(source.Status, source.Mode, target, started, source.Reason, source.ProductId);
+            sourceMode = source.Mode;
+            sourcePid = source.ProductId;
+            return Complete(source.Status, sourceMode, source.Reason);
         }
+        sourceMode = source.Mode;
+        sourcePid = source.ProductId;
         AppLog.Debug("NativeMode", "NativeModeSourceResolved", ("SourceMode", source.Mode), ("SourcePID", source.ProductId), ("SourceIdentityConfidence", expectedIdentity.Confidence));
 
-        var deadline = started + _timeout;
+        // Keep the original bounded source/HID-write phase. A successful write starts a separate
+        // full verification budget so native HID latency cannot consume the PnP settle window.
+        var writeDeadline = started + _timeout;
         MsiClawControlHidDevice? control = source.Control;
-        var commandWrittenAt = Stopwatch.GetTimestamp();
         var commandStartLogged = false;
         while (true)
         {
@@ -102,26 +150,35 @@ internal sealed class MsiClawModeController(
             }
             if (await writer.WriteAsync(control!, target, cancellationToken).ConfigureAwait(false))
             {
-                commandWrittenAt = Stopwatch.GetTimestamp();
+                writeSucceeded = true;
+                commandWrittenAt = _now();
+                elapsedBeforeWriteMs = (long)(commandWrittenAt.Value - started).TotalMilliseconds;
                 AppLog.Debug("RoutingTrace", "Native mode command written.",
                     ("Event", "NativeModeCommandWritten"), ("TargetMode", target));
                 AppLog.Debug("NativeMode", "NativeModeCommandWriteSucceeded", ("TargetMode", target));
                 break;
             }
-            if (_now() >= deadline)
-                return Result(MsiClawModeTransitionStatus.WriteFailed, source.Mode, target, started, "Control HID write failed.", source.ProductId, false, false, false, true);
-            await Task.Delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+            if (_now() >= writeDeadline)
+                return Complete(MsiClawModeTransitionStatus.WriteFailed, source.Mode, "Control HID write failed.", true);
+            await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
             devices = deviceEnumerator.EnumeratePresentDevices();
             source = ResolveSource(devices, expectedIdentity);
             if (source.Status is not MsiClawModeTransitionStatus.Succeeded)
-                return Result(source.Status, source.Mode, target, started, source.Reason, source.ProductId);
+            {
+                sourceMode = source.Mode;
+                sourcePid = source.ProductId;
+                return Complete(source.Status, sourceMode, source.Reason);
+            }
             control = source.Control;
         }
 
-        var oldPid = source.ProductId; var oldGone = false; var targetSeen = false; var firstPid1902Logged = false; var poll = 0;
+        var oldPid = source.ProductId;
+        var verificationDeadline = commandWrittenAt!.Value + _timeout;
+        var firstPid1902Logged = false;
+        var poll = 0;
         var logPid1902Arrival = target == MsiClawNativeMode.DirectInput
             && targetTopology.ProductId == MsiClawHardware.DirectInputProductId;
-        while (_now() < deadline)
+        while (_now() < verificationDeadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
             poll++;
@@ -130,8 +187,8 @@ internal sealed class MsiClawModeController(
             var current = deviceEnumerator.EnumeratePresentDevices(MsiClawHardware.VendorId, targetTopology.ProductId);
             var exactVerificationMs = Stopwatch.GetElapsedTime(verificationStarted).TotalMilliseconds;
             var targetProbeMs = Stopwatch.GetElapsedTime(probeStarted).TotalMilliseconds;
-            var targetPidPresent = current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId);
-            oldGone = oldPid is not { } sourcePid || !deviceEnumerator.IsPresent(MsiClawHardware.VendorId, sourcePid);
+            targetPidPresent = current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId);
+            oldPidDisappeared = oldPid is not { } oldProductId || !deviceEnumerator.IsPresent(MsiClawHardware.VendorId, oldProductId);
             // TargetPidPresent: any present node with the target PID, regardless of topology --
             // distinguishes "PID_1902 hasn't appeared yet" from "PID_1902 is present but the
             // strict control-HID candidate below hasn't shown up yet".
@@ -146,40 +203,41 @@ internal sealed class MsiClawModeController(
             AppLog.Debug("NativeMode", "NativeModeTransitionPoll",
                 ("Poll", poll),
                 ("ElapsedMs", (long)(_now() - started).TotalMilliseconds),
-                ("SinceCommandWriteMs", (long)Stopwatch.GetElapsedTime(commandWrittenAt).TotalMilliseconds),
+                ("SinceCommandWriteMs", (long)(_now() - commandWrittenAt.Value).TotalMilliseconds),
                 ("TargetProbeMs", (long)targetProbeMs),
                 ("ExactVerificationMs", (long)exactVerificationMs),
                 ("EnumerationMs", (long)exactVerificationMs),
-                ("OldPidPresent", !oldGone),
+                ("OldPidPresent", !oldPidDisappeared),
                 ("TargetPidPresent", targetPidPresent),
                 ("TargetControlCandidateCount", targets.Length),
                 ("LogicalCandidateCount", targetGroups.Length));
             if (targetGroups.Length > 1)
             {
                 AppLog.Debug("NativeMode", "NativeModeTargetAmbiguous", ("TargetMode", target), ("CandidateCount", targets.Length), ("LogicalCandidateCount", targetGroups.Length));
-                return Result(MsiClawModeTransitionStatus.AmbiguousDevice, source.Mode, target, started, "Target control HID was ambiguous.", oldPid, true, oldGone, true, true);
+                return Complete(MsiClawModeTransitionStatus.AmbiguousDevice, source.Mode, "Target control HID was ambiguous.", true);
             }
+            targetTopologyVerified = targetGroups.Length == 1;
             // PR11 section 5: cross-mode continuity needs BOTH exactly one present target logical
             // control group AND the old PID gone. A single target group while the old PID is still
             // present is a normal mid-transition state -- keep settling inside the bounded window.
-            if (targetGroups.Length == 1 && oldGone)
+            if (targetGroups.Length == 1 && oldPidDisappeared)
             {
                 var observed = targetGroups[0].First();
                 AppLog.Debug("NativeMode", "NativeModeTargetObserved", ("TargetPID", targetTopology.ProductId), ("TargetIdentityConfidence", MsiClawPhysicalIdentity.From(observed).Confidence), ("CrossModeIdentityChanged", !expectedIdentity.StronglyMatches(MsiClawPhysicalIdentity.From(observed))));
                 AppLog.Debug("NativeMode", "NativeModeTransitionSucceeded", ("SourceMode", source.Mode), ("TargetMode", target), ("OldPidDisappeared", true));
-                return Result(MsiClawModeTransitionStatus.Succeeded, source.Mode, target, started, "Native mode transition verified.", oldPid, true, true, true, true, true);
+                return Complete(MsiClawModeTransitionStatus.Succeeded, source.Mode, "Native mode transition verified.", true);
             }
-            await Task.Delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+            await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
         }
         // Bounded window expired. Distinguish "target never appeared" from "target appeared but the
         // old native-mode device stayed present" so the caller can fail closed with a real reason.
-        if (targetSeen && !oldGone)
+        if (targetSeen && !oldPidDisappeared)
         {
             AppLog.Debug("NativeMode", "NativeModeOldDeviceDidNotDisappear", ("SourceMode", source.Mode), ("TargetMode", target));
-            return Result(MsiClawModeTransitionStatus.OldDeviceDidNotDisappear, source.Mode, target, started, "The previous native-mode device did not disappear.", oldPid, true, oldGone, true, true);
+            return Complete(MsiClawModeTransitionStatus.OldDeviceDidNotDisappear, source.Mode, "The previous native-mode device did not disappear.", true);
         }
-        AppLog.Debug("NativeMode", "NativeModeTransitionTimedOut", ("SourceMode", source.Mode), ("TargetMode", target), ("OldPidDisappeared", oldGone));
-        return Result(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, source.Mode, target, started, "Native mode re-enumeration did not complete.", oldPid, true, oldGone, targetSeen, true);
+        AppLog.Debug("NativeMode", "NativeModeTransitionTimedOut", ("SourceMode", source.Mode), ("TargetMode", target), ("OldPidDisappeared", oldPidDisappeared));
+        return Complete(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, source.Mode, "Native mode re-enumeration did not complete.", true);
     }
 
     private SourceResolution ResolveSource(IReadOnlyList<ControllerDeviceInfo> devices, MsiClawPhysicalIdentity expectedIdentity)
@@ -200,8 +258,6 @@ internal sealed class MsiClawModeController(
             ? new(MsiClawModeTransitionStatus.AmbiguousDevice, modes[0], matching[0].ProductId, null, "Source control HID was not uniquely resolved.")
             : new(MsiClawModeTransitionStatus.Succeeded, modes[0], control.Device.ProductId, control, "Source control HID resolved.");
     }
-
-    private MsiClawModeTransitionResult Result(MsiClawModeTransitionStatus status, MsiClawNativeMode from, MsiClawNativeMode target, DateTimeOffset started, string reason, ushort? fromPid = null, bool write = false, bool oldGone = false, bool targetSeen = false, bool sourceVerified = false, bool targetVerified = false) => new(status, from, target, fromPid, MsiClawModeTopology.TryGet(target, out var topology) ? topology.ProductId : null, write, oldGone, targetSeen, sourceVerified, targetVerified, (long)(_now() - started).TotalMilliseconds, reason);
 
     private sealed record SourceResolution(MsiClawModeTransitionStatus Status, MsiClawNativeMode Mode, ushort? ProductId, MsiClawControlHidDevice? Control, string Reason);
 }

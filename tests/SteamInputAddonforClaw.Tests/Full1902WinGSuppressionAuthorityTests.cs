@@ -91,15 +91,15 @@ public sealed class Full1902WinGSuppressionAuthorityTests
     [Fact]
     public void Disabled_startup_arms_and_proves_suppression_before_the_first_AttachInitialAsync()
     {
-        var body = Method(HostSource(), "private async Task TryStartDisabledModeControllerAsync(");
+        var body = Method(HostSource(), "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
         var ensure = body.IndexOf("EnsureAddonAuthorityWinGSuppression()", StringComparison.Ordinal);
-        var attach = body.IndexOf("AttachInitialAsync(source, snapshot", StringComparison.Ordinal);
+        var attach = body.IndexOf("context.Presentation.AttachInitialAsync(source, snapshot", StringComparison.Ordinal);
         Assert.True(ensure > 0 && ensure < attach, "suppression must be armed/proven before the first live presentation attach");
 
         // The arm check gates the attach: a false result releases the presentation and returns.
         var gate = body[ensure..attach];
         Assert.Contains("ReleaseForCenterMEnableAsync", gate);
-        Assert.Contains("return;", gate);
+        Assert.Contains("return new(false", gate);
     }
 
     [Fact]
@@ -185,13 +185,16 @@ public sealed class Full1902WinGSuppressionAuthorityTests
     [Fact]
     public void Center_m_enabled_startup_never_arms_full1902_suppression()
     {
-        var body = Method(HostSource(), "private async Task TryStartDisabledModeControllerAsync(");
+        var source = HostSource();
+        var body = Method(source, "private async Task TryStartDisabledModeControllerAsync(");
         // The whole method is gated on exactly-Disabled; the arm call lives inside it, so a non-Disabled
         // (Enabled/Partial/Unavailable) boot returns before EnsureAddonAuthorityWinGSuppression().
         Assert.Contains("startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled", body);
         var guardReturn = body.IndexOf("!= FrontendCenterMStartupState.Disabled", StringComparison.Ordinal);
-        var ensure = body.IndexOf("EnsureAddonAuthorityWinGSuppression()", StringComparison.Ordinal);
-        Assert.True(guardReturn < ensure);
+        var continuation = body.IndexOf("CompleteInitialControllerOwnershipAsync(", StringComparison.Ordinal);
+        Assert.True(guardReturn >= 0 && continuation > guardReturn);
+        var ensure = Method(source, "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
+        Assert.Contains("EnsureAddonAuthorityWinGSuppression()", ensure, StringComparison.Ordinal);
     }
 
     // ---- 14.9: PR #470 legacy-routing removal is not regressed ----
