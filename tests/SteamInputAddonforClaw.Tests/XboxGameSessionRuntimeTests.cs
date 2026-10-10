@@ -37,6 +37,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
 
         await runtime.StartAsync();
 
+        Assert.True(runtime.CanReliablyReportNoActiveGame);
         Assert.Equal(new ActiveXboxGame("store:9NABC123", "Sample Display"), runtime.ActiveGame);
         Assert.Equal([runtime.ActiveGame], changes);
         Assert.Equal(1, windows.StartCount);
@@ -59,6 +60,17 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         Assert.Equal(1, windows.EnumerationCount);
         Assert.Equal(512, windows.LastEnumerationLimit);
         Assert.Equal(2, probe.InspectionCount);
+    }
+
+    [Fact]
+    public async Task Successful_startup_reconcile_can_confirm_idle_without_a_game()
+    {
+        await using var runtime = CreateRuntime(new FakeWindowSource(), new FakeProcessProbe());
+
+        await runtime.StartAsync();
+
+        Assert.Null(runtime.ActiveGame);
+        Assert.True(runtime.CanReliablyReportNoActiveGame);
     }
 
     [Theory]
@@ -186,12 +198,29 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
 
         await runtime.StartAsync();
         Assert.Null(runtime.ActiveGame);
+        Assert.False(runtime.CanReliablyReportNoActiveGame);
         Assert.Equal(1, windows.StartCount);
 
         await runtime.ReconcileAfterResumeAsync();
 
+        Assert.True(runtime.CanReliablyReportNoActiveGame);
         Assert.Equal(2, windows.StartCount);
         Assert.Equal("store:9NABC123", runtime.ActiveGame?.Key);
+    }
+
+    [Fact]
+    public async Task Failed_initial_bounded_reconcile_stays_unready_until_a_later_resume_reconcile_succeeds()
+    {
+        var windows = new FakeWindowSource { EnumerationException = new InvalidOperationException("window enumeration failed") };
+        await using var runtime = CreateRuntime(windows, new FakeProcessProbe());
+
+        await runtime.StartAsync();
+
+        Assert.False(runtime.CanReliablyReportNoActiveGame);
+        windows.EnumerationException = null;
+        await runtime.ReconcileAfterResumeAsync();
+
+        Assert.True(runtime.CanReliablyReportNoActiveGame);
     }
 
     [Fact]
@@ -234,6 +263,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
 
         await runtime.ReconcileAfterResumeAsync();
 
+        Assert.False(runtime.CanReliablyReportNoActiveGame);
         Assert.Null(runtime.ActiveGame);
         Assert.Equal(2, windows.StartCount);
         Assert.Null(changes[^1]);
@@ -251,11 +281,13 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
 
         windows.Fail(new InvalidOperationException("WinEvent message loop failed."));
         await WaitUntilAsync(() => windows.StopCount == 1);
+        Assert.False(runtime.CanReliablyReportNoActiveGame);
         Assert.Equal("store:9NABC123", runtime.ActiveGame?.Key);
 
         generation.Signal();
         await WaitUntilAsync(() => runtime.ActiveGame is null);
         Assert.Null(runtime.ActiveGame);
+        Assert.False(runtime.CanReliablyReportNoActiveGame);
     }
 
     [Fact]
@@ -555,6 +587,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         public uint ForegroundProcessId { get; set; }
         public IReadOnlyList<uint> ProcessIds { get; set; } = [];
         public int FailOnStartNumber { get; set; }
+        public Exception? EnumerationException { get; set; }
         public int StartCount { get; private set; }
         public int StopCount { get; private set; }
         public int EnumerationCount { get; private set; }
@@ -585,6 +618,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         {
             EnumerationCount++;
             LastEnumerationLimit = maximumProcessCount;
+            if (EnumerationException is not null) throw EnumerationException;
             return ProcessIds.Take(maximumProcessCount).ToArray();
         }
 

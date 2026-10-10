@@ -19,6 +19,8 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     private ActiveXboxGame? _activeGame;
     private GameProcessGenerationKey? _activeGeneration;
     private int _acceptWindowEvents;
+    private int _eventSourceFailureObserved;
+    private int _canReliablyReportNoActiveGame;
     private int _startAttempted;
     private int _disposed;
 
@@ -32,8 +34,10 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     }
 
     internal ActiveXboxGame? ActiveGame => Volatile.Read(ref _activeGame);
+    internal bool CanReliablyReportNoActiveGame => Volatile.Read(ref _canReliablyReportNoActiveGame) != 0;
 
     internal event Action<ActiveXboxGame?>? ActiveGameChanged;
+    internal event Action<bool>? ObservationReadinessChanged;
 
     internal async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -48,11 +52,13 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
             _sessionCancellation = new CancellationTokenSource();
             try
             {
+                Volatile.Write(ref _eventSourceFailureObserved, 0);
                 await StartWindowSourceAsync(_sessionCancellation.Token, cancellationToken).ConfigureAwait(false);
-                Volatile.Write(ref _acceptWindowEvents, 1);
+                Volatile.Write(ref _acceptWindowEvents, Volatile.Read(ref _eventSourceFailureObserved) == 0 ? 1 : 0);
                 AppLog.Info("XboxSession", "Production XBOX game-session runtime started.",
                     ("Hooks", "EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW"));
-                await ReconcileSafelyAsync(cancellationToken, "startup").ConfigureAwait(false);
+                var reconciled = await ReconcileSafelyAsync(cancellationToken, "startup").ConfigureAwait(false);
+                SetReadinessAfterReconcile(reconciled);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -62,11 +68,13 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
                 _sessionCancellation.Dispose();
                 _sessionCancellation = null;
                 Interlocked.Exchange(ref _startAttempted, 0);
+                SetCanReliablyReportNoActiveGame(false);
                 throw;
             }
             catch (Exception exception)
             {
                 Volatile.Write(ref _acceptWindowEvents, 0);
+                SetCanReliablyReportNoActiveGame(false);
                 _sessionCancellation.Cancel();
                 await StopWindowSourceSafelyAsync().ConfigureAwait(false);
                 AppLog.Warn("XboxSession", "Production XBOX game-session observer could not start; Runtime will continue without active XBOX detection.", exception);
@@ -80,6 +88,10 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
 
     internal async Task ReconcileAfterResumeAsync(CancellationToken cancellationToken = default)
     {
+        if (Volatile.Read(ref _disposed) != 0 || Volatile.Read(ref _startAttempted) == 0)
+            return;
+
+        SetCanReliablyReportNoActiveGame(false);
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -93,15 +105,18 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
 
             _sessionCancellation?.Dispose();
             _sessionCancellation = new CancellationTokenSource();
+            Volatile.Write(ref _eventSourceFailureObserved, 0);
             try
             {
                 await StartWindowSourceAsync(_sessionCancellation.Token, CancellationToken.None).ConfigureAwait(false);
-                Volatile.Write(ref _acceptWindowEvents, 1);
-                await ReconcileSafelyAsync(CancellationToken.None, "resume").ConfigureAwait(false);
+                Volatile.Write(ref _acceptWindowEvents, Volatile.Read(ref _eventSourceFailureObserved) == 0 ? 1 : 0);
+                var reconciled = await ReconcileSafelyAsync(CancellationToken.None, "resume").ConfigureAwait(false);
+                SetReadinessAfterReconcile(reconciled);
             }
             catch (Exception exception)
             {
                 Volatile.Write(ref _acceptWindowEvents, 0);
+                SetCanReliablyReportNoActiveGame(false);
                 _sessionCancellation.Cancel();
                 await StopWindowSourceSafelyAsync().ConfigureAwait(false);
                 await SendAndWaitAsync(new RetireNonActiveMessage(NewCompletion()), CancellationToken.None).ConfigureAwait(false);
@@ -144,11 +159,11 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     {
         await _windowSource.StartAsync(
             observation => TryQueue(new WindowObservationMessage(observation, sessionToken)),
-            exception => TryQueue(new EventSourceFailureMessage(exception)),
+            exception => OnEventSourceFailure(exception, sessionToken),
             startToken).ConfigureAwait(false);
     }
 
-    private async Task ReconcileSafelyAsync(CancellationToken cancellationToken, string reason)
+    private async Task<bool> ReconcileSafelyAsync(CancellationToken cancellationToken, string reason)
     {
         try
         {
@@ -157,6 +172,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
             var inspectedWindowCount = await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             AppLog.Info("XboxSession", "Bounded production XBOX session reconcile completed.",
                 ("Reason", reason), ("EnumeratedProcessCount", inspectedWindowCount), ("ActiveKey", ActiveGame?.Key ?? "<none>"));
+            return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -166,7 +182,54 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
         {
             AppLog.Warn("XboxSession", "Bounded production XBOX session reconcile failed; Runtime will continue.", exception,
                 ("Reason", reason));
+            return false;
         }
+    }
+
+    private void OnEventSourceFailure(Exception exception, CancellationToken sessionToken)
+    {
+        if (sessionToken.IsCancellationRequested)
+            return;
+
+        Volatile.Write(ref _eventSourceFailureObserved, 1);
+        Volatile.Write(ref _acceptWindowEvents, 0);
+        SetCanReliablyReportNoActiveGame(false);
+        TryQueue(new EventSourceFailureMessage(exception, sessionToken));
+    }
+
+    private void SetCanReliablyReportNoActiveGame(bool canReport)
+    {
+        var value = canReport ? 1 : 0;
+        if (Interlocked.Exchange(ref _canReliablyReportNoActiveGame, value) == value)
+            return;
+
+        var handlers = ObservationReadinessChanged;
+        if (handlers is null)
+            return;
+        foreach (Action<bool> handler in handlers.GetInvocationList())
+        {
+            try { handler(canReport); }
+            catch (Exception exception)
+            {
+                AppLog.Debug("XboxSession", "An observation-readiness notification handler failed.",
+                    ("Reason", exception.GetType().Name));
+            }
+        }
+    }
+
+    private void SetReadinessAfterReconcile(bool reconciled)
+    {
+        var canReport = reconciled
+            && Volatile.Read(ref _acceptWindowEvents) != 0
+            && Volatile.Read(ref _eventSourceFailureObserved) == 0;
+        SetCanReliablyReportNoActiveGame(canReport);
+
+        // The native event source can fail concurrently with the bounded reconcile. Recheck after
+        // publishing readiness so a failure racing the first read cannot leave stale idle authority.
+        if (canReport
+            && (Volatile.Read(ref _acceptWindowEvents) == 0
+                || Volatile.Read(ref _eventSourceFailureObserved) != 0))
+            SetCanReliablyReportNoActiveGame(false);
     }
 
     private async Task ProcessMessagesAsync()
@@ -209,7 +272,8 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
                         shutdown.Completion.TrySetResult();
                         break;
                     case EventSourceFailureMessage failure:
-                        await ProcessEventSourceFailureAsync(failure.Exception).ConfigureAwait(false);
+                        if (!failure.SessionToken.IsCancellationRequested)
+                            await ProcessEventSourceFailureAsync(failure.Exception).ConfigureAwait(false);
                         break;
                 }
             }
@@ -452,6 +516,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     private async Task ProcessEventSourceFailureAsync(Exception exception)
     {
         Volatile.Write(ref _acceptWindowEvents, 0);
+        SetCanReliablyReportNoActiveGame(false);
         _sessionCancellation?.Cancel();
         await StopWindowSourceSafelyAsync().ConfigureAwait(false);
         RetireProcessesExceptActive();
@@ -511,7 +576,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     private abstract record SessionMessage;
     private sealed record WindowObservationMessage(GameWindowObservation Observation, CancellationToken SessionToken) : SessionMessage;
     private sealed record ProcessExitedMessage(GameProcessGenerationKey Key) : SessionMessage;
-    private sealed record EventSourceFailureMessage(Exception Exception) : SessionMessage;
+    private sealed record EventSourceFailureMessage(Exception Exception, CancellationToken SessionToken) : SessionMessage;
     private sealed record ReconcileMessage(TaskCompletionSource<int> Completion, CancellationToken CancellationToken) : SessionMessage;
     private sealed record PrepareForResumeMessage(TaskCompletionSource Completion) : SessionMessage;
     private sealed record RetireNonActiveMessage(TaskCompletionSource Completion) : SessionMessage;

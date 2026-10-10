@@ -13,6 +13,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     private static readonly int M1AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M1);
     private static readonly int M2AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M2);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(4);
+    private static readonly TimeSpan IdlePollInterval = TimeSpan.FromMilliseconds(8);
     private static readonly TimeSpan CadenceDiagnosticPollInterval = TimeSpan.FromMilliseconds(1);
     private static readonly TimeSpan CadenceDiagnosticDuration = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ProductionCadenceSummaryWindow = TimeSpan.FromSeconds(10);
@@ -21,6 +22,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     private readonly Func<WindowsHighResolutionOneShotTimer> _cadenceDiagnosticTimerFactory;
     private readonly Func<WindowsHighResolutionOneShotTimer> _productionTimerFactory;
     private readonly Func<long> _timestampProvider;
+    private readonly Func<bool> _requires250Hz;
     private readonly Lock _sync = new();
     private InputSession? _currentSession;
     private MsiClawInputTestSummary? _lastCompletionSummary;
@@ -36,12 +38,14 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         Func<IDirectInputDeviceEnumerator> enumeratorFactory,
         Func<WindowsHighResolutionOneShotTimer> cadenceDiagnosticTimerFactory,
         Func<WindowsHighResolutionOneShotTimer>? productionTimerFactory = null,
-        Func<long>? timestampProvider = null)
+        Func<long>? timestampProvider = null,
+        Func<bool>? requires250Hz = null)
     {
         _enumeratorFactory = enumeratorFactory ?? throw new ArgumentNullException(nameof(enumeratorFactory));
         _cadenceDiagnosticTimerFactory = cadenceDiagnosticTimerFactory ?? throw new ArgumentNullException(nameof(cadenceDiagnosticTimerFactory));
         _productionTimerFactory = productionTimerFactory ?? (static () => new WindowsHighResolutionOneShotTimer());
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
+        _requires250Hz = requires250Hz ?? (static () => true);
     }
 
     public MsiClawInputSource(IDirectInputDeviceEnumerator enumerator)
@@ -140,10 +144,14 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             return new(MsiClawInputStartStatus.AcquireFailed, "DirectInput device acquisition failed. No controller settings were changed.");
         }
 
+        var initialPeriodMilliseconds = 250;
         try
         {
+            var initialPeriod = ResolveProductionPeriod(_requires250Hz());
+            initialPeriodMilliseconds = (int)initialPeriod.TotalMilliseconds;
             session.ProductionTimer = _productionTimerFactory();
-            session.ProductionPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(PollInterval, Stopwatch.Frequency);
+            session.ProductionPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(initialPeriod, Stopwatch.Frequency);
+            session.ProductionPeriodMilliseconds = initialPeriodMilliseconds;
             var origin = _timestampProvider();
             session.NextProductionDeadlineTicks = checked(origin + session.ProductionPeriodTicks);
             ArmForDeadline(session.ProductionTimer, session.NextProductionDeadlineTicks, origin);
@@ -157,11 +165,13 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             session.PollingThread = worker;
             _currentSession = session;
             (WorkerThreadStartOverrideForTests ?? (static thread => thread.Start()))(worker);
+            LogCadenceApplied("DirectInput", "Physical", 0, initialPeriodMilliseconds);
         }
         catch (Exception exception)
         {
             if (ReferenceEquals(_currentSession, session))
                 _currentSession = null;
+            LogCadenceApplyFailed("DirectInput", "Physical", 0, initialPeriodMilliseconds, exception);
             AppLog.Warn("DirectInput", "Physical input worker initialization failed.", exception,
                 ("TestSession", session.Id), ("Reason", "InputWorkerInitializationFailed"), ("Action", "AbortInput"));
             CleanupBeforePolling(session);
@@ -259,7 +269,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         AppLog.Info("Diagnostics", "PID1902 input cadence diagnostic started.",
             ("DurationMs", requestedDurationMs),
             ("DiagnosticPollIntervalMs", (long)CadenceDiagnosticPollInterval.TotalMilliseconds),
-            ("ProductionPollIntervalMs", (long)PollInterval.TotalMilliseconds));
+            ("ProductionPollIntervalMs", session.ProductionPeriodMilliseconds));
 
         using var cancellationRegistration = cancellationToken.Register(static state =>
         {
@@ -405,7 +415,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                             ("WindowMs", (long)(elapsedSeconds * 1000)),
                             ("SuccessfulReadCount", productionCadenceReadCount),
                             ("ObservedReadHz", elapsedSeconds > 0 ? Math.Round(productionCadenceReadCount / elapsedSeconds, 1) : 0),
-                            ("TargetPeriodMs", (long)PollInterval.TotalMilliseconds));
+                            ("TargetPeriodMs", session.ProductionPeriodMilliseconds));
                     }
                 }
 
@@ -618,6 +628,9 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     internal static TimeSpan ResolvePollInterval(bool cadenceDiagnosticActive) =>
         cadenceDiagnosticActive ? CadenceDiagnosticPollInterval : PollInterval;
 
+    internal static TimeSpan ResolveProductionPeriod(bool requires250Hz) =>
+        requires250Hz ? PollInterval : IdlePollInterval;
+
     private bool WaitForNextPoll(
         InputSession session,
         MsiClawInputCadenceCollector? cadenceDiagnostic,
@@ -651,19 +664,61 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         try
         {
             var now = _timestampProvider();
+            var desiredPeriod = ResolveProductionPeriod(_requires250Hz());
+            var desiredPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(desiredPeriod, Stopwatch.Frequency);
+            var desiredPeriodMilliseconds = (int)desiredPeriod.TotalMilliseconds;
+            var previousPeriodMilliseconds = session.ProductionPeriodMilliseconds;
+
             if (diagnosticModeActive)
             {
                 diagnosticModeActive = false;
-                nextProductionDeadlineTicks = checked(now + session.ProductionPeriodTicks);
-                ArmForDeadline(session.ProductionTimer!, nextProductionDeadlineTicks, now);
+                nextProductionDeadlineTicks = checked(now + desiredPeriodTicks);
+                if (desiredPeriodTicks != session.ProductionPeriodTicks)
+                {
+                    try
+                    {
+                        ArmForDeadline(session.ProductionTimer!, nextProductionDeadlineTicks, now);
+                    }
+                    catch (Exception exception)
+                    {
+                        LogCadenceApplyFailed("DirectInput", "Physical", previousPeriodMilliseconds, desiredPeriodMilliseconds, exception);
+                        throw;
+                    }
+                    session.ProductionPeriodTicks = desiredPeriodTicks;
+                    session.ProductionPeriodMilliseconds = desiredPeriodMilliseconds;
+                    LogCadenceApplied("DirectInput", "Physical", previousPeriodMilliseconds, desiredPeriodMilliseconds);
+                }
+                else
+                {
+                    ArmForDeadline(session.ProductionTimer!, nextProductionDeadlineTicks, now);
+                }
+                firstProductionWait = false;
             }
-            else if (firstProductionWait)
+            else if (firstProductionWait && desiredPeriodTicks == session.ProductionPeriodTicks)
             {
                 // The initial production deadline was armed synchronously before the worker started.
                 firstProductionWait = false;
             }
+            else if (desiredPeriodTicks != session.ProductionPeriodTicks)
+            {
+                nextProductionDeadlineTicks = checked(now + desiredPeriodTicks);
+                try
+                {
+                    ArmForDeadline(session.ProductionTimer!, nextProductionDeadlineTicks, now);
+                }
+                catch (Exception exception)
+                {
+                    LogCadenceApplyFailed("DirectInput", "Physical", previousPeriodMilliseconds, desiredPeriodMilliseconds, exception);
+                    throw;
+                }
+                session.ProductionPeriodTicks = desiredPeriodTicks;
+                session.ProductionPeriodMilliseconds = desiredPeriodMilliseconds;
+                firstProductionWait = false;
+                LogCadenceApplied("DirectInput", "Physical", previousPeriodMilliseconds, desiredPeriodMilliseconds);
+            }
             else
             {
+                firstProductionWait = false;
                 var advance = CanonicalPublisherDeadlineMath.AdvanceDeadline(
                     nextProductionDeadlineTicks,
                     session.ProductionPeriodTicks,
@@ -683,6 +738,18 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             return false;
         }
     }
+
+    private static void LogCadenceApplied(string category, string stage, int previousPeriodMilliseconds, int appliedPeriodMilliseconds) =>
+        AppLog.Debug(category, "Controller cadence timer armed.",
+            ("Event", "CadenceApplied"), ("Stage", stage),
+            ("PreviousHz", previousPeriodMilliseconds == 0 ? 0 : 1000 / previousPeriodMilliseconds),
+            ("AppliedHz", 1000 / appliedPeriodMilliseconds), ("PeriodMs", appliedPeriodMilliseconds), ("Result", "Success"));
+
+    private static void LogCadenceApplyFailed(string category, string stage, int previousPeriodMilliseconds, int desiredPeriodMilliseconds, Exception exception) =>
+        AppLog.Warn(category, "Controller cadence timer arm failed; physical input will fail closed.", exception,
+            ("Event", "CadenceApplyFailed"), ("Stage", stage),
+            ("PreviousHz", previousPeriodMilliseconds == 0 ? 0 : 1000 / previousPeriodMilliseconds),
+            ("DesiredHz", 1000 / desiredPeriodMilliseconds), ("Result", "Failed"), ("Reason", "TimerArmFailed"));
 
     private void ArmForDeadline(WindowsHighResolutionOneShotTimer timer, long deadlineTicks, long nowTicks)
     {
@@ -729,6 +796,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         public TaskCompletionSource<bool> PollingCompletion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public WindowsHighResolutionOneShotTimer? ProductionTimer { get; set; }
         public long ProductionPeriodTicks { get; set; }
+        public int ProductionPeriodMilliseconds { get; set; }
         public long NextProductionDeadlineTicks { get; set; }
         public long StartedAt { get; } = Stopwatch.GetTimestamp();
         public long AcquiredAt { get; set; }
