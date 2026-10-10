@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ControllerVibrationStrengthUiTests
 {
     [Fact]
-    public void Controller_page_exposes_collapsed_icon_vibration_group_with_two_slider_rows_and_recovery_card()
+    public void Controller_page_exposes_collapsed_icon_vibration_group_with_two_slider_rows_and_compact_recovery_card()
     {
         var root = FindRepositoryRoot();
         var path = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
@@ -37,19 +37,38 @@ public sealed class ControllerVibrationStrengthUiTests
         AssertSliderRow(expander, x, "Left Motor", "LeftVibrationStrengthSlider", "LeftVibrationStrengthPercentText", "LeftVibrationTestButton");
         AssertSliderRow(expander, x, "Right Motor", "RightVibrationStrengthSlider", "RightVibrationStrengthPercentText", "RightVibrationTestButton");
 
-        var cards = expander.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
+        var items = expander.Elements().Single(element => element.Name.LocalName == "SettingsExpander.Items");
+        var cards = items.Elements().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
+        Assert.Equal(3, cards.Length);
         Assert.Equal(["Left Motor", "Right Motor", "Vibration Recovery"], cards.Select(card => (string?)card.Attribute("Header")));
-        var recoveryButton = cards[2].Descendants().Single(element =>
-            element.Name.LocalName == "Button" && (string?)element.Attribute(x + "Name") == "RestoreVibrationButton");
+        var recoveryButton = Assert.Single(cards[2].Elements());
+        Assert.Equal("Button", recoveryButton.Name.LocalName);
+        Assert.Equal("RestoreVibrationButton", (string?)recoveryButton.Attribute(x + "Name"));
         Assert.Equal("Restore Vibration", (string?)recoveryButton.Attribute("Content"));
         Assert.Equal("RestoreVibrationButton_Click", (string?)recoveryButton.Attribute("Click"));
-        Assert.Contains("temporarily disconnects the virtual controller", cards[2].ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("save your game and close it", cards[2].ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Right", (string?)recoveryButton.Attribute("HorizontalAlignment"));
+        Assert.Contains("Temporarily disconnects virtual controller input", (string?)recoveryButton.Attribute("ToolTipService.ToolTip"), StringComparison.Ordinal);
+        Assert.DoesNotContain(cards[2].Descendants(), element => element.Name.LocalName is "TextBlock" or "StackPanel" or "Grid");
+        Assert.DoesNotContain("RestoreVibrationStatusText", cards[2].ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("RestoreVibrationStatusText", File.ReadAllText(path), StringComparison.Ordinal);
         var pageCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
-        Assert.Contains("frontend.RunDeveloperRumbleRearmAsync()", pageCode, StringComparison.Ordinal);
+        var rearmHandlerStart = pageCode.IndexOf("private async void RestoreVibrationButton_Click", StringComparison.Ordinal);
+        var rearmHandlerEnd = pageCode.IndexOf("private void ShowRumbleRearmMessageUnlessFailure", rearmHandlerStart, StringComparison.Ordinal);
+        Assert.True(rearmHandlerStart >= 0 && rearmHandlerEnd > rearmHandlerStart);
+        var rearmHandler = pageCode[rearmHandlerStart..rearmHandlerEnd];
+        Assert.Contains("frontend.RunDeveloperRumbleRearmAsync()", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("CanStartVibrationRearm(", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("_vibrationRearmInProgress = true", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("RestoreVibrationButton.Content = \"Restoring…\"", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("await RefreshVibrationStrengthAsync(preserveFailure)", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("(\"Status\", result.Status)", rearmHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("result.Status;", rearmHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("RestoreVibrationStatusText", pageCode, StringComparison.Ordinal);
+        Assert.Contains("Controller restored. Test both motors to confirm vibration.", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("Could not restore the controller. See the application log.", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("RestoreVibrationButton.IsEnabled = _frontend is not null && CanStartVibrationRearm(", pageCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("_vibrationSnapshot.Writable", pageCode[pageCode.IndexOf("private async void RestoreVibrationButton_Click", StringComparison.Ordinal)..pageCode.IndexOf("private async Task CommitVibrationStrengthAsync", StringComparison.Ordinal)], StringComparison.Ordinal);
-        Assert.Contains("Physical vibration is not verified", pageCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("_vibrationSnapshot.Writable", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("CanShowRumbleRearmMessage(", pageCode, StringComparison.Ordinal);
         var developerPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml"));
         var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
         Assert.DoesNotContain("Rearm A2VM 8", developerPage, StringComparison.OrdinalIgnoreCase);
@@ -58,6 +77,17 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("Vibration Profile 0/100 Probe", developerPage, StringComparison.Ordinal);
         Assert.Contains("A2VM LED Profile Read-Only Probe", developerPage, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, true)]
+    public void Rumble_recovery_message_does_not_replace_an_open_error(
+        bool existingMessageOpen,
+        bool existingError,
+        bool expected) =>
+        Assert.Equal(expected, ControllerPage.CanShowRumbleRearmMessage(existingMessageOpen, existingError));
 
     [Theory]
     [InlineData(false, false, false, false, false, true)]

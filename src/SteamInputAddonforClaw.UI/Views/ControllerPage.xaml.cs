@@ -402,37 +402,60 @@ public sealed partial class ControllerPage : UserControl
             return;
 
         _vibrationRearmInProgress = true;
-        RestoreVibrationStatusText.Text = "Restoring controller vibration. Keep the game closed until this completes.";
+        RestoreVibrationButton.Content = "Restoring…";
         UpdateVibrationControls();
         try
         {
             var result = await frontend.RunDeveloperRumbleRearmAsync();
-            RestoreVibrationStatusText.Text = result.Outcome == FrontendDeveloperRumbleRearmOutcome.Completed
-                ? "Controller mode and software restoration completed. Physical vibration is not verified; use Left Test and Right Test to check the motors."
-                : result.Status;
             AppLog.Info("ControllerOwnership", "Controller-page rumble recovery UI result.",
                 ("Event", result.Outcome == FrontendDeveloperRumbleRearmOutcome.Completed
                     ? "ControllerRumbleRecoveryUiCompleted" : "ControllerRumbleRecoveryUiResult"),
-                ("Outcome", result.Outcome), ("XInputTransitionVerified", result.XInputTransitionVerified),
+                ("Outcome", result.Outcome), ("Status", result.Status),
+                ("XInputTransitionVerified", result.XInputTransitionVerified),
                 ("DirectInputTransitionVerified", result.DirectInputTransitionVerified),
                 ("PhysicalOwnershipRestored", result.PhysicalOwnershipRestored),
                 ("PresentationRestored", result.PresentationRestored),
                 ("PhysicalMotorEffectVerified", result.PhysicalMotorEffectVerified));
             if (result.Succeeded)
-                await RefreshVibrationStrengthAsync();
+            {
+                var preserveFailure = VibrationStrengthInfoBar.IsOpen
+                    && VibrationStrengthInfoBar.Severity == InfoBarSeverity.Error;
+                await RefreshVibrationStrengthAsync(preserveFailure);
+                ShowRumbleRearmMessageUnlessFailure(
+                    "Controller restored. Test both motors to confirm vibration.",
+                    InfoBarSeverity.Informational);
+            }
+            else if (result.Outcome == FrontendDeveloperRumbleRearmOutcome.Unavailable)
+                ShowRumbleRearmMessageUnlessFailure("Vibration recovery is unavailable right now.", InfoBarSeverity.Warning);
+            else
+                ShowRumbleRearmMessageUnlessFailure("Could not restore the controller. See the application log.", InfoBarSeverity.Error);
         }
         catch (Exception exception)
         {
-            RestoreVibrationStatusText.Text = "Controller recovery failed. See the application log.";
             AppLog.Warn("ControllerOwnership", "Controller-page rumble recovery request failed.", exception,
                 ("Event", "ControllerRumbleRecoveryUiFailed"), ("Reason", exception.GetType().Name));
+            ShowRumbleRearmMessageUnlessFailure("Could not restore the controller. See the application log.", InfoBarSeverity.Error);
         }
         finally
         {
             _vibrationRearmInProgress = false;
+            RestoreVibrationButton.Content = "Restore Vibration";
             UpdateVibrationControls();
         }
     }
+
+    private void ShowRumbleRearmMessageUnlessFailure(string message, InfoBarSeverity severity)
+    {
+        if (!CanShowRumbleRearmMessage(
+                VibrationStrengthInfoBar.IsOpen,
+                VibrationStrengthInfoBar.Severity == InfoBarSeverity.Error))
+            return;
+
+        ShowVibrationMessage(message, severity);
+    }
+
+    internal static bool CanShowRumbleRearmMessage(bool existingMessageOpen, bool existingError) =>
+        !existingMessageOpen || !existingError;
 
     private async Task CommitVibrationStrengthAsync(int leftPercent, int rightPercent)
     {
@@ -620,7 +643,8 @@ public sealed partial class ControllerPage : UserControl
             ApplyVibrationStrengthSnapshot(
                 FrontendControllerVibrationStrengthSnapshot.Unavailable("The saved vibration setting could not be loaded."),
                 preserveDraft: false);
-            ShowVibrationMessage("The saved vibration setting could not be loaded.", InfoBarSeverity.Error);
+            if (!preserveFailure)
+                ShowVibrationMessage("The saved vibration setting could not be loaded.", InfoBarSeverity.Error);
         }
     }
 
