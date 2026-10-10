@@ -345,7 +345,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             var toXInput = await _switchMode(MsiClawNativeMode.XInput, initialIdentity, cancellationToken).ConfigureAwait(false);
             pidTransitionWriteIssued = true;
             var latePid1901Target = !toXInput.Succeeded
-                && IsTargetNotPresentAfterVerifiedWrite(toXInput, MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput);
+                && IsBootRumblePid1901CommandEndpointPendingAfterVerifiedWrite(
+                    toXInput, MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput);
             if (!IsCrossModeTransitionProven(toXInput, out var toXInputFailure) && !latePid1901Target)
                 return Fail("BootRumblePid1901TransitionFailed:" + toXInputFailure, true,
                     IsTargetNotPresentAfterVerifiedWrite(toXInput, MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput)
@@ -1371,6 +1372,21 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         && transition.WriteSucceeded
         && transition.OldPidDisappeared
         && !transition.TargetPidPresent
+        && !transition.TargetPidAppeared
+        && transition.SourceIdentityVerified
+        && !transition.TargetTopologyVerified;
+
+    // TargetPidPresent can mean only that the PID1901 parent devnode appeared; the command HID
+    // child may still be pending. Keep this broader classification private to the A2VM boot prime.
+    private static bool IsBootRumblePid1901CommandEndpointPendingAfterVerifiedWrite(
+        MsiClawModeTransitionResult transition,
+        MsiClawNativeMode expectedSource,
+        MsiClawNativeMode expectedTarget) =>
+        transition.Status == MsiClawModeTransitionStatus.TargetDeviceDidNotAppear
+        && transition.FromMode == expectedSource
+        && transition.TargetMode == expectedTarget
+        && transition.WriteSucceeded
+        && transition.OldPidDisappeared
         && !transition.TargetPidAppeared
         && transition.SourceIdentityVerified
         && !transition.TargetTopologyVerified;

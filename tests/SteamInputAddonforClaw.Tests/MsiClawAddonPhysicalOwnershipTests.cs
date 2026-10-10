@@ -75,13 +75,14 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             HardwareDeviceModel = new(modelId),
             ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
             FailTransitionOnCall = 1,
+            FailureTargetPidPresent = true,
             FailNativeCaptureAfterFirstModeSwitch = true,
             ThrowGlobalPnpSnapshotAfterFirstModeSwitch = true,
             PnpDevices = A2vmOwnedPnpDevices(),
         };
         h.Pid1901DeviceSnapshot = () => h.ElapsedSettleMilliseconds >= 3000
-            ? [Pid1901ControlDevice("A2VM_XINPUT_123")]
-            : [];
+            ? [Pid1901ParentDevice("A2VM_XINPUT_123"), Pid1901ControlDevice("A2VM_XINPUT_123")]
+            : [Pid1901ParentDevice("A2VM_XINPUT_123")];
 
         var result = await h.Build().AcquireAsync(default);
 
@@ -2120,6 +2121,14 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             VendorId: 0x0DB0, ProductId: 0x1901, Present: true, FriendlyName: "MSI Claw",
             UsagePage: usagePage, Usage: usage);
     }
+
+    private static ControllerDeviceInfo Pid1901ParentDevice(string serial) => new(
+        InstanceId: $@"USB\VID_0DB0&PID_1901\{serial}",
+        ContainerId: null,
+        ParentInstanceId: null,
+        AncestorInstanceIds: [],
+        EnumeratorName: "USB", HardwareIds: [], CompatibleIds: [], ClassName: "USB", ClassGuid: null, Service: null,
+        VendorId: 0x0DB0, ProductId: 0x1901, Present: true, FriendlyName: "MSI Claw");
 
     // ---- harness ----
 
