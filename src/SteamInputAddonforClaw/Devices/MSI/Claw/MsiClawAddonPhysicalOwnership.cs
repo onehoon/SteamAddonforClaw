@@ -141,6 +141,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _ownsInputSource;
+    private bool _a2vmBootPid1902SecondLegPending;
     private string? _ownedPrimaryHiddenTarget;
     private IReadOnlyList<string> _ownedHiddenTargets = [];
     // Production rumble physical identity/generation (work order section 6). Guarded by its own tiny
@@ -185,6 +186,26 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         MsiClawPhysicalIdentity? Identity,
         string Reason,
         bool CanDeferInitialAcquisition);
+
+    private enum A2vmBootPid1902ControlHidProbeStatus
+    {
+        Ready,
+        StillEnumerating,
+        TargetPidNotPresent,
+        OldPidStillPresent,
+        AmbiguousPhysicalRoot,
+        UnverifiedPhysicalIdentity,
+        AmbiguousCommandEndpoint,
+        UnverifiedControlEndpoint,
+        ReadFailed,
+    }
+
+    private sealed record A2vmBootPid1902ControlHidProbeResult(
+        A2vmBootPid1902ControlHidProbeStatus Status,
+        int TargetDeviceCount = 0,
+        int PhysicalRootCount = 0,
+        int CommandEndpointCount = 0,
+        Exception? ReadException = null);
 
     internal MsiClawAddonPhysicalOwnership(
         Func<FrontendCenterMStartupState> captureCenterMStartupState,
@@ -279,6 +300,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     private async Task<MsiClawPhysicalOwnershipResult> AcquireCoreAsync(CancellationToken cancellationToken)
     {
         AppLog.Info("ControllerOwnership", "Physical ownership started.", ("Event", "PhysicalOwnershipStarted"));
+        var recheckingA2vmBootPid1902SecondLeg = _a2vmBootPid1902SecondLegPending;
+        _a2vmBootPid1902SecondLegPending = false;
 
         // 1-4. Stable current native state + strong initial physical identity. The authoritative
         //      fresh Center M authority read happens at the ACTUAL first mutation boundary below --
@@ -390,6 +413,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                     : MsiClawInitialAcquisitionRetryReason.None;
 
                 if (partialPid1902Arrival)
+                {
+                    _a2vmBootPid1902SecondLegPending = true;
                     AppLog.Info("ControllerOwnership", "A2VM boot PID1902 arrival is partial; deferring initial acquisition until the control endpoint is ready.",
                         ("Event", "A2vmBootRumblePid1902PartialArrivalDeferred"),
                         ("Model", _hardwareDeviceModel?.Value ?? "unknown"),
@@ -399,6 +424,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                         ("WriteSucceeded", transition.WriteSucceeded),
                         ("OldPidDisappeared", transition.OldPidDisappeared),
                         ("RetryReason", retryReason));
+                }
 
                 return Fail("Pid1902TransitionFailed:" + transitionFailure, true, retryReason);
             }
@@ -420,6 +446,35 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         // controlled-transition evidence above plus the live-DirectInput proof below (PR11 section 4).
         if (!pidTransitionWriteIssued && !initialIdentity.StronglyMatches(finalIdentity))
             return Fail("SameModeIdentityMismatch", pidTransitionWriteIssued);
+
+        if (recheckingA2vmBootPid1902SecondLeg)
+        {
+            var probe = ObserveA2vmBootPid1902ControlHid(finalIdentity);
+            AppLog.Info("ControllerOwnership", "A2VM boot PID1902 command endpoint was probed before gamepad-mode verification.",
+                ("Event", "A2vmBootRumblePid1902ControlHidProbe"),
+                ("Model", _hardwareDeviceModel?.Value ?? "unknown"),
+                ("ProbeResult", probe.Status),
+                ("TargetDeviceCount", probe.TargetDeviceCount),
+                ("PhysicalRootCount", probe.PhysicalRootCount),
+                ("CommandEndpointCount", probe.CommandEndpointCount),
+                ("ReadExceptionType", probe.ReadException?.GetType().Name ?? "None"));
+
+            if (IsA2vmBootPid1902ControlHidStillEnumerating(
+                    probe, _hardwareDeviceModel, bootAttempt, initialMode, pidTransitionWriteIssued,
+                    _captureCenterMStartupState() == FrontendCenterMStartupState.Disabled))
+            {
+                _a2vmBootPid1902SecondLegPending = true;
+                AppLog.Warn("ControllerOwnership", "A2VM boot PID1902 parent is present but the unique command HID is still enumerating; keeping initial acquisition pending.", null,
+                    ("Event", "A2vmBootRumblePid1902ControlHidStillEnumerating"),
+                    ("Model", _hardwareDeviceModel?.Value ?? "unknown"),
+                    ("RetryReason", MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent),
+                    ("ModeWriteIssued", false));
+                return Fail("Pid1902ControlHidStillEnumerating", false,
+                    MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent);
+            }
+
+            _a2vmBootPid1902SecondLegPending = false;
+        }
 
         var gamepadMode = await EnsureDirectInputGamepadModeAsync(
             finalIdentity, "Startup", cancellationToken).ConfigureAwait(false);
@@ -1365,6 +1420,102 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             return new(A2vmBootPid1901ProbeStatus.ReadFailed, ReadException: exception);
         }
     }
+
+    private A2vmBootPid1902ControlHidProbeResult ObserveA2vmBootPid1902ControlHid(
+        MsiClawPhysicalIdentity expectedIdentity)
+    {
+        if (expectedIdentity.Confidence != MsiClawIdentityConfidence.Strong
+            || expectedIdentity.VendorId != MsiClawHardware.VendorId
+            || expectedIdentity.ProductId != MsiClawHardware.DirectInputProductId)
+            return new(A2vmBootPid1902ControlHidProbeStatus.UnverifiedPhysicalIdentity);
+
+        try
+        {
+            var oldPidDevices = _enumeratePnpDevicesByVidPid(MsiClawHardware.VendorId, MsiClawHardware.XInputProductId)
+                .Where(device => device.Present
+                    && device.VendorId == MsiClawHardware.VendorId
+                    && device.ProductId == MsiClawHardware.XInputProductId)
+                .ToArray();
+            if (oldPidDevices.Length != 0)
+                return new(A2vmBootPid1902ControlHidProbeStatus.OldPidStillPresent);
+
+            var targetDevices = _enumeratePnpDevicesByVidPid(MsiClawHardware.VendorId, MsiClawHardware.DirectInputProductId)
+                .Where(device => device.Present
+                    && device.VendorId == MsiClawHardware.VendorId
+                    && device.ProductId == MsiClawHardware.DirectInputProductId)
+                .ToArray();
+            if (targetDevices.Length == 0)
+                return new(A2vmBootPid1902ControlHidProbeStatus.TargetPidNotPresent);
+
+            var roots = targetDevices
+                .Select(MsiClawPhysicalIdentity.ResolvePhysicalRoot)
+                .Where(root => root is not null)
+                .Cast<MsiClawPhysicalRootResolution>()
+                .DistinctBy(root => root.RawRootInstanceId, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (roots.Length > 1)
+                return new(A2vmBootPid1902ControlHidProbeStatus.AmbiguousPhysicalRoot,
+                    targetDevices.Length, roots.Length);
+            if (roots.Length != 1 || targetDevices.Any(device => MsiClawPhysicalIdentity.ResolvePhysicalRoot(device) is null))
+                return new(A2vmBootPid1902ControlHidProbeStatus.UnverifiedPhysicalIdentity,
+                    targetDevices.Length, roots.Length);
+
+            var hidDevices = targetDevices
+                .Where(device => device.InstanceId.StartsWith("HID\\", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (hidDevices.Length == 0
+                || hidDevices.Any(device => !MsiClawPhysicalIdentity.From(device).StronglyMatches(expectedIdentity)))
+                return new(A2vmBootPid1902ControlHidProbeStatus.UnverifiedPhysicalIdentity,
+                    targetDevices.Length, roots.Length);
+
+            var controlCollections = targetDevices
+                .Where(device => device.InstanceId.StartsWith(
+                    MsiClawHardware.DirectInputControlHidCollectionPrefix,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var exactCommandEndpoints = controlCollections
+                .Where(device => device.UsagePage == MsiClawHardware.DirectInputControlUsagePage
+                    && device.Usage == MsiClawHardware.DirectInputControlUsage)
+                .ToArray();
+            var commandEndpointCount = targetDevices.Count(device =>
+                device.UsagePage == 0xFFA0 && device.Usage == 0x0001
+                || device.UsagePage == MsiClawHardware.DirectInputControlUsagePage
+                    && device.Usage == MsiClawHardware.DirectInputControlUsage);
+
+            if (exactCommandEndpoints.Length > 1 || controlCollections.Length > 1 || commandEndpointCount > 1)
+                return new(A2vmBootPid1902ControlHidProbeStatus.AmbiguousCommandEndpoint,
+                    targetDevices.Length, roots.Length, commandEndpointCount);
+            if (exactCommandEndpoints.Length == 1
+                && controlCollections.Length == 1
+                && commandEndpointCount == 1)
+                return new(A2vmBootPid1902ControlHidProbeStatus.Ready,
+                    targetDevices.Length, roots.Length, commandEndpointCount);
+            if (controlCollections.Length != 0 || commandEndpointCount != 0)
+                return new(A2vmBootPid1902ControlHidProbeStatus.UnverifiedControlEndpoint,
+                    targetDevices.Length, roots.Length, commandEndpointCount);
+
+            return new(A2vmBootPid1902ControlHidProbeStatus.StillEnumerating,
+                targetDevices.Length, roots.Length);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return new(A2vmBootPid1902ControlHidProbeStatus.ReadFailed, ReadException: exception);
+        }
+    }
+
+    private static bool IsA2vmBootPid1902ControlHidStillEnumerating(
+        A2vmBootPid1902ControlHidProbeResult probe,
+        HandheldDeviceModelId? modelId,
+        BootSessionAttemptResult bootAttempt,
+        MsiClawNativeMode initialMode,
+        bool pidTransitionWriteIssued,
+        bool centerMDisabled) =>
+        probe.Status == A2vmBootPid1902ControlHidProbeStatus.StillEnumerating
+        && IsA2vmBootRumblePrimeModel(modelId)
+        && bootAttempt == BootSessionAttemptResult.AlreadyClaimed
+        && initialMode == MsiClawNativeMode.DirectInput
+        && !pidTransitionWriteIssued
+        && centerMDisabled;
 
     private static long GetElapsedMilliseconds(long startedAt, long currentTimestamp) =>
         Math.Max(0, (long)((currentTimestamp - startedAt) * 1000d / Stopwatch.Frequency));

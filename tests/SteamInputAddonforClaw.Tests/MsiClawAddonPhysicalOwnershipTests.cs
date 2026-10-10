@@ -23,6 +23,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     private const string OtherPhysKey = @"USB\VID_0DB0\SERIAL999";
     private const string PrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&abcdef&0&0000";
     private const string ControlPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL02\7&abcdef&0&0001";
+    private const string SecondControlPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL02\7&abcdef&0&0003";
     private const string ConsumerPnp = @"HID\VID_0DB0&PID_1902&MI_01&COL03\7&abcdef&0&0002";
     private const string OtherPrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&999999&0&0000";
     private const string NonPrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_03\7&abcdef&0&0003";
@@ -481,6 +482,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     public async Task A2vm_boot_second_leg_partial_pid1902_arrival_defers_and_completes_without_repeating_prime(string modelId)
     {
         var markerCalls = 0;
+        var pid1901ProbeCalls = 0;
         var h = new Harness
         {
             InitialMode = MsiClawNativeMode.DirectInput,
@@ -489,6 +491,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             FailTransitionOnCall = 2,
             FailureTargetPidPresent = true,
             PnpDevices = A2vmOwnedPnpDevices(),
+            Pid1901DeviceSnapshot = () => ++pid1901ProbeCalls == 1
+                ? [Pid1901ParentDevice("A2VM_XINPUT_123"), Pid1901ControlDevice("A2VM_XINPUT_123")]
+                : [],
         };
         var owner = h.Build();
 
@@ -507,6 +512,131 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.False(retry.ModeWriteIssued);
         Assert.True(h.InputSource.IsRunning);
         Assert.Equal([PrimaryPnp, ControlPnp], h.HidHideApplied);
+    }
+
+    [Theory]
+    [InlineData("msi.claw.a2vm.7")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task A2vm_boot_second_leg_parent_only_recheck_stays_pending_until_exact_control_hid_arrives(string modelId)
+    {
+        var markerCalls = 0;
+        var pid1901ProbeCalls = 0;
+        var targetProbeCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new(modelId),
+            ClaimBootAttempt = () => ++markerCalls == 1 ? BootSessionAttemptResult.Claimed : BootSessionAttemptResult.AlreadyClaimed,
+            FailTransitionOnCall = 2,
+            FailureTargetPidPresent = true,
+            PnpDevices = A2vmOwnedPnpDevices(),
+            Pid1901DeviceSnapshot = () => ++pid1901ProbeCalls == 1
+                ? [Pid1901ParentDevice("A2VM_XINPUT_123"), Pid1901ControlDevice("A2VM_XINPUT_123")]
+                : [],
+            Pid1902DeviceSnapshot = () => ++targetProbeCalls == 1
+                ? [PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00")]
+                : A2vmOwnedPnpDevices(),
+        };
+        var owner = h.Build();
+
+        var partialTransition = await owner.AcquireAsync(default);
+        var parentOnlyRecheck = await owner.AcquireAsync(default);
+
+        Assert.Equal(MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent, partialTransition.InitialAcquisitionRetryReason);
+        Assert.Equal(MsiClawInitialAcquisitionRetryReason.Pid1902TargetPidNotPresent, parentOnlyRecheck.InitialAcquisitionRetryReason);
+        Assert.Equal("Pid1902ControlHidStillEnumerating", parentOnlyRecheck.Reason);
+        Assert.False(parentOnlyRecheck.IsOwned);
+        Assert.False(parentOnlyRecheck.ModeWriteIssued);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.Empty(h.GamepadMode.QueryIdentities);
+        Assert.Empty(h.GamepadMode.SwitchTargets);
+        Assert.False(h.InputSource.StartCalled);
+        Assert.Empty(h.HidHideApplied);
+
+        var completed = await owner.AcquireAsync(default);
+
+        Assert.True(completed.IsOwned, completed.Reason);
+        Assert.Equal(3, markerCalls);
+        Assert.Equal(2, targetProbeCalls);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.Single(h.GamepadMode.QueryIdentities);
+        Assert.Empty(h.GamepadMode.SwitchTargets);
+        Assert.True(h.InputSource.IsRunning);
+        Assert.Equal([PrimaryPnp, ControlPnp], h.HidHideApplied);
+    }
+
+    [Theory]
+    [InlineData("multiple-roots")]
+    [InlineData("ambiguous-command-hid")]
+    [InlineData("unverified-control")]
+    [InlineData("old-pid-present")]
+    [InlineData("target-pid-absent")]
+    [InlineData("marker-unavailable")]
+    [InlineData("read-failure")]
+    public async Task A2vm_boot_second_leg_recheck_does_not_defer_when_proof_is_incomplete(string topology)
+    {
+        var markerCalls = 0;
+        var pid1901ProbeCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => ++markerCalls == 1
+                ? BootSessionAttemptResult.Claimed
+                : topology == "marker-unavailable"
+                    ? BootSessionAttemptResult.Unavailable
+                    : BootSessionAttemptResult.AlreadyClaimed,
+            FailTransitionOnCall = 2,
+            FailureTargetPidPresent = true,
+            PnpDevices = A2vmOwnedPnpDevices(),
+            Pid1901DeviceSnapshot = () => ++pid1901ProbeCalls == 1
+                ? [Pid1901ParentDevice("A2VM_XINPUT_123"), Pid1901ControlDevice("A2VM_XINPUT_123")]
+                : [],
+        };
+        h.GamepadMode.QuerySucceeds = false;
+        h.GamepadMode.SwitchSucceeds = false;
+        h.GamepadMode.SwitchWriteIssued = false;
+        h.Pid1902DeviceSnapshot = topology switch
+        {
+            "multiple-roots" => () =>
+            [
+                PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+                PnpCollection(OtherPrimaryPnp, OtherPhysKey, 0x0001, 0x0005, "MI_00"),
+            ],
+            "ambiguous-command-hid" => () =>
+            [
+                PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+                PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+                PnpCollection(SecondControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+            ],
+            "unverified-control" => () =>
+            [
+                PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+                PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0041, "MI_00"),
+            ],
+            "old-pid-present" => A2vmOwnedPnpDevices,
+            "target-pid-absent" => static () => [],
+            "marker-unavailable" => () => [PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00")],
+            "read-failure" => () => throw new InvalidOperationException("Simulated target PnP read failure."),
+            _ => throw new ArgumentOutOfRangeException(nameof(topology)),
+        };
+        if (topology == "old-pid-present")
+            h.Pid1901DeviceSnapshot = static () => [Pid1901ParentDevice("A2VM_XINPUT_123"), Pid1901ControlDevice("A2VM_XINPUT_123")];
+
+        var owner = h.Build();
+        _ = await owner.AcquireAsync(default);
+        var result = await owner.AcquireAsync(default);
+
+        Assert.False(result.IsOwned);
+        Assert.True(h.GamepadMode.QueryIdentities.Count == 1, $"{topology}: {result.Reason}");
+        Assert.Equal(MsiClawInitialAcquisitionRetryReason.None, result.InitialAcquisitionRetryReason);
+        Assert.NotEqual("Pid1902ControlHidStillEnumerating", result.Reason);
+        Assert.False(result.ModeWriteIssued);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.Single(h.GamepadMode.QueryIdentities);
+        Assert.Equal([MsiClawGamepadMode.DirectInput], h.GamepadMode.SwitchTargets);
+        Assert.Empty(h.HidHideApplied);
+        Assert.False(h.InputSource.StartCalled);
     }
 
     [Fact]
@@ -2252,6 +2382,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public IReadOnlyList<ControllerDeviceInfo>? PnpDevices { get; set; }
         public Func<IReadOnlyList<ControllerDeviceInfo>>? PnpDeviceSnapshot { get; set; }
         public Func<IReadOnlyList<ControllerDeviceInfo>>? Pid1901DeviceSnapshot { get; set; }
+        public Func<IReadOnlyList<ControllerDeviceInfo>>? Pid1902DeviceSnapshot { get; set; }
         public Func<FrontendCenterMStartupState>? AuthoritySnapshot { get; set; }
         public bool FailNativeCaptureAfterFirstModeSwitch { get; set; }
         public bool ThrowGlobalPnpSnapshotAfterFirstModeSwitch { get; set; }
@@ -2406,8 +2537,18 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             },
             (vendorId, productId) =>
             {
-                Pid1901TargetProbeCalls++;
-                return Pid1901DeviceSnapshot?.Invoke() ?? [Pid1901ControlDevice("A2VM_XINPUT_123")];
+                if (vendorId != MsiClawHardware.VendorId)
+                    return [];
+                if (productId == MsiClawHardware.XInputProductId)
+                {
+                    Pid1901TargetProbeCalls++;
+                    return Pid1901DeviceSnapshot?.Invoke() ?? [Pid1901ControlDevice("A2VM_XINPUT_123")];
+                }
+                if (productId == MsiClawHardware.DirectInputProductId)
+                    return Pid1902DeviceSnapshot?.Invoke()
+                        ?? (PnpDeviceSnapshot?.Invoke() ?? PnpDevices ?? []).Where(device => device.Present
+                            && device.VendorId == vendorId && device.ProductId == productId).ToArray();
+                return [];
             },
             (_, productId) => productId == MsiClawHardware.DirectInputProductId && OldPid1902PresentDuringSettle,
             InputSource,
@@ -2476,6 +2617,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public bool QuerySucceeds { get; set; } = true;
         public bool? RecoveryQuerySucceeds { get; set; }
         public bool SwitchSucceeds { get; set; } = true;
+        public bool SwitchWriteIssued { get; set; } = true;
         public bool? RecoverySwitchSucceeds { get; set; }
         public List<MsiClawGamepadMode> SwitchTargets { get; } = [];
         public List<MsiClawPhysicalIdentity> QueryIdentities { get; } = [];
@@ -2499,7 +2641,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             SwitchTargets.Add(targetMode);
             var recovering = IsRecovering?.Invoke() == true;
             var succeeds = recovering ? RecoverySwitchSucceeds ?? SwitchSucceeds : SwitchSucceeds;
-            return Task.FromResult(new MsiClawGamepadModeWriteResult(succeeds, succeeds ? targetMode : null, true, succeeds, succeeds ? "ok" : "failed"));
+            return Task.FromResult(new MsiClawGamepadModeWriteResult(succeeds, succeeds ? targetMode : null, SwitchWriteIssued, succeeds, succeeds ? "ok" : "failed"));
         }
     }
 
