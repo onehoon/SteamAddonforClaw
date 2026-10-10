@@ -137,9 +137,8 @@ public sealed class ControllerLedTests : IDisposable
 
     [Theory]
     [InlineData("msi.claw.cg3em")]
-    [InlineData("msi.claw.a2vm.7")]
     [InlineData("unknown")]
-    public async Task Firmware_0230_static_writes_are_rejected_for_every_model_except_A2VM8(string modelId)
+    public async Task Firmware_0230_static_writes_are_rejected_for_non_A2vm_models(string modelId)
     {
         var device = ControlDevice(Guid.NewGuid(), "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_A");
         var transport = new RecordingLedTransport(0x0230);
@@ -149,15 +148,17 @@ public sealed class ControllerLedTests : IDisposable
         Assert.Empty(transport.Writes);
     }
 
-    [Fact]
-    public async Task A2VM8_firmware_0230_uses_the_existing_four_write_static_path()
+    [Theory]
+    [InlineData("msi.claw.a2vm.7")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task A2vm_firmware_0230_uses_the_existing_four_write_static_path(string modelId)
     {
         var device = ControlDevice(Guid.NewGuid(), "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CONTROL_A");
         var transport = new RecordingLedTransport(0x0230);
         var controller = CreateController([device], [new("exact-control-path", device.InstanceId, device.ContainerId)], transport);
         var settings = new ControllerLedSettings(true, 100, 0x12, 0x34, 0x56);
 
-        Assert.True(await controller.ApplyAsync(settings, MsiClawPhysicalIdentity.From(device), "msi.claw.a2vm.8", CancellationToken.None));
+        Assert.True(await controller.ApplyAsync(settings, MsiClawPhysicalIdentity.From(device), modelId, CancellationToken.None));
         Assert.Equal(4, transport.Writes.Count);
         Assert.All(transport.Writes, write => Assert.Equal(64, write.Bytes.Length));
         Assert.Equal(new[] { 0x024A, 0x026A, 0x0285, 0x02A0 }, transport.Writes.Select(write => write.Bytes[6] * 256 + write.Bytes[7]));

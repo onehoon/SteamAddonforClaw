@@ -48,6 +48,7 @@ public sealed partial class ControllerPage : UserControl
     private bool _vibrationPointerGestureInProgress;
     private bool _vibrationMutationInProgress;
     private bool _vibrationTestInProgress;
+    private bool _vibrationRearmInProgress;
     private bool _vibrationPageUnloaded;
     /// <summary>Suppresses change handlers while the page writes persisted state INTO the controls,
     /// so restoring the UI never looks like a user edit and re-saves.</summary>
@@ -269,7 +270,10 @@ public sealed partial class ControllerPage : UserControl
         if (_vibrationPageUnloaded
             || _frontend is null
             || _vibrationPointerGestureInProgress
-            || !CanEditVibrationSliders(_vibrationSnapshot.Available, _vibrationSnapshot.Writable, _vibrationTestInProgress))
+            || !CanEditVibrationSliders(
+                _vibrationSnapshot.Available,
+                _vibrationSnapshot.Writable,
+                _vibrationTestInProgress || _vibrationRearmInProgress))
             return;
 
         var slider = sender as Slider;
@@ -322,7 +326,8 @@ public sealed partial class ControllerPage : UserControl
             || _frontend is null
             || !_vibrationSnapshot.Available
             || !_vibrationSnapshot.Writable
-            || _vibrationTestInProgress)
+            || _vibrationTestInProgress
+            || _vibrationRearmInProgress)
             return;
 
         var pair = (Left: ToPercent(LeftVibrationStrengthSlider.Value), Right: ToPercent(RightVibrationStrengthSlider.Value));
@@ -382,6 +387,52 @@ public sealed partial class ControllerPage : UserControl
 
     private async void RightVibrationTestButton_Click(object sender, RoutedEventArgs args) =>
         await TestVibrationMotorAsync(FrontendControllerVibrationMotor.Right);
+
+    private async void RestoreVibrationButton_Click(object sender, RoutedEventArgs args)
+    {
+        var frontend = _frontend;
+        if (frontend is null)
+            return;
+        if (!CanStartVibrationRearm(
+                HasUncommittedVibrationDraft,
+                _vibrationPointerGestureInProgress,
+                _vibrationMutationInProgress,
+                _vibrationTestInProgress,
+                _vibrationRearmInProgress))
+            return;
+
+        _vibrationRearmInProgress = true;
+        RestoreVibrationStatusText.Text = "Restoring controller vibration. Keep the game closed until this completes.";
+        UpdateVibrationControls();
+        try
+        {
+            var result = await frontend.RunDeveloperRumbleRearmAsync();
+            RestoreVibrationStatusText.Text = result.Outcome == FrontendDeveloperRumbleRearmOutcome.Completed
+                ? "Controller mode and software restoration completed. Physical vibration is not verified; use Left Test and Right Test to check the motors."
+                : result.Status;
+            AppLog.Info("ControllerOwnership", "Controller-page rumble recovery UI result.",
+                ("Event", result.Outcome == FrontendDeveloperRumbleRearmOutcome.Completed
+                    ? "ControllerRumbleRecoveryUiCompleted" : "ControllerRumbleRecoveryUiResult"),
+                ("Outcome", result.Outcome), ("XInputTransitionVerified", result.XInputTransitionVerified),
+                ("DirectInputTransitionVerified", result.DirectInputTransitionVerified),
+                ("PhysicalOwnershipRestored", result.PhysicalOwnershipRestored),
+                ("PresentationRestored", result.PresentationRestored),
+                ("PhysicalMotorEffectVerified", result.PhysicalMotorEffectVerified));
+            if (result.Succeeded)
+                await RefreshVibrationStrengthAsync();
+        }
+        catch (Exception exception)
+        {
+            RestoreVibrationStatusText.Text = "Controller recovery failed. See the application log.";
+            AppLog.Warn("ControllerOwnership", "Controller-page rumble recovery request failed.", exception,
+                ("Event", "ControllerRumbleRecoveryUiFailed"), ("Reason", exception.GetType().Name));
+        }
+        finally
+        {
+            _vibrationRearmInProgress = false;
+            UpdateVibrationControls();
+        }
+    }
 
     private async Task CommitVibrationStrengthAsync(int leftPercent, int rightPercent)
     {
@@ -465,7 +516,7 @@ public sealed partial class ControllerPage : UserControl
                 _vibrationSnapshot,
                 HasUncommittedVibrationDraft,
                 _vibrationPointerGestureInProgress,
-                _vibrationMutationInProgress,
+                _vibrationMutationInProgress || _vibrationRearmInProgress,
                 _vibrationTestInProgress,
                 () =>
                 {
@@ -620,7 +671,7 @@ public sealed partial class ControllerPage : UserControl
         var slidersEnabled = CanEditVibrationSliders(
             _vibrationSnapshot.Available,
             _vibrationSnapshot.Writable,
-            _vibrationTestInProgress);
+            _vibrationTestInProgress || _vibrationRearmInProgress);
         LeftVibrationStrengthSlider.IsEnabled = slidersEnabled;
         RightVibrationStrengthSlider.IsEnabled = slidersEnabled;
 
@@ -628,14 +679,32 @@ public sealed partial class ControllerPage : UserControl
             _vibrationSnapshot,
             HasUncommittedVibrationDraft,
             _vibrationPointerGestureInProgress,
-            _vibrationMutationInProgress,
+            _vibrationMutationInProgress || _vibrationRearmInProgress,
             _vibrationTestInProgress);
         LeftVibrationTestButton.IsEnabled = testsEnabled;
         RightVibrationTestButton.IsEnabled = testsEnabled;
+        RestoreVibrationButton.IsEnabled = _frontend is not null && CanStartVibrationRearm(
+            HasUncommittedVibrationDraft,
+            _vibrationPointerGestureInProgress,
+            _vibrationMutationInProgress,
+            _vibrationTestInProgress,
+            _vibrationRearmInProgress);
     }
 
     private bool HasUncommittedVibrationDraft =>
         _vibrationDraft is not null || _vibrationDebounce?.HasPendingDraft == true;
+
+    internal static bool CanStartVibrationRearm(
+        bool hasUncommittedDraft,
+        bool pointerGestureInProgress,
+        bool mutationInProgress,
+        bool testInProgress,
+        bool rearmInProgress) =>
+        !hasUncommittedDraft
+        && !pointerGestureInProgress
+        && !mutationInProgress
+        && !testInProgress
+        && !rearmInProgress;
 
     internal static bool CanEditVibrationSliders(bool available, bool writable, bool testInProgress) =>
         available && writable && !testInProgress;

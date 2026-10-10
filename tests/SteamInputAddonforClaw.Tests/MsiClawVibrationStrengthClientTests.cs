@@ -28,6 +28,9 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
     [InlineData("msi.claw.cg3em", 100, 0, 0x64, 0x00)]
     [InlineData("msi.claw.a2vm.8", 50, 50, 0x32, 0x32)]
     [InlineData("msi.claw.a2vm.8", 37, 63, 0x25, 0x3F)]
+    [InlineData("msi.claw.a2vm.7", 50, 50, 0x32, 0x32)]
+    [InlineData("msi.claw.a2vm.7", 0, 100, 0x00, 0x64)]
+    [InlineData("msi.claw.a2vm.7", 37, 63, 0x25, 0x3F)]
     public async Task Production_apply_sends_one_exact_pair_write_to_the_owned_PID1902_control_HID(
         string modelId,
         int left,
@@ -52,9 +55,8 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
     }
 
     [Theory]
-    [InlineData("msi.claw.a2vm.7")]
     [InlineData("unknown")]
-    public async Task Production_apply_is_unavailable_for_unverified_models_before_HID_enumeration(string modelId)
+    public async Task Production_apply_is_unavailable_for_unknown_models_before_HID_enumeration(string modelId)
     {
         var io = new FakeProfileIo();
         var (client, devices) = CreateClient(io, modelId);

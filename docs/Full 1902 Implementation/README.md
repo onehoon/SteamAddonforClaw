@@ -17,6 +17,10 @@ For controller ownership work, use the following precedence when statements conf
 4. `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` for the Full1902 process-privilege model and startup-task RunLevel. It supersedes conflicting least-privilege / non-elevated Runtime and RunLevel statements in items 1–3. It does not change their controller-authority, task identity, trigger, or repair/readback semantics.
 5. Historical `docs/work-order/*` files describe the implementation contract at the time each PR was prepared. Later policy revisions and the active work order/addendum take precedence for new implementation work.
 
+## Narrow A2VM boot rumble exception
+
+The A2VM 7/8 rumble initialization is a model-scoped, once-per-actual-Windows-boot exception to the ordinary “already PID1902 means keep PID1902” startup path. It runs only inside the existing Center M Disabled admission and after VIIPER is Ready. An initially PID1902 A2VM may make one verified PID1902 → PID1901 → PID1902 cycle before ownership/settings/presentation; an initially PID1901 device uses the existing single PID1901 → PID1902 takeover. CG3EM is unchanged. This attempt marker is not controller authority: Disabled-mode desired PID1902, persistent HidHide, no ordinary shutdown release, and no repeat on Runtime restart/resume remain in force. User-invoked **Restore Vibration** is an explicit recovery action, not a stock authority release. See [the 2026-10-10 work order](../work-order/2026-10-10_A2VM_FAMILY_BOOT_RUMBLE_REARM_LED_VIBRATION_AND_RECOVERY_UI_WORK_ORDER.md).
+
 ## Related process-privilege architecture
 
 `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` is the active process-privilege authority for administrator-game compatibility.

@@ -94,42 +94,49 @@ public sealed class ControllerVibrationStrengthFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task Unsupported_A2VM7_preserves_saved_values_without_apply()
+    public async Task A2VM7_snapshot_is_writable_under_Addon_authority_and_stock_authority_keeps_it_read_only()
     {
         var original = new ControllerVibrationSettings(25, 75);
         var (settings, store) = CreateSettings(original);
         var devices = new CountingEnumerator([]);
-        var unsupportedClient = CreateClient("msi.claw.a2vm.7", devices, new NoOpVibrationProfileIo());
+        var client = CreateClient("msi.claw.a2vm.7", devices, new NoOpVibrationProfileIo());
         var applyCount = 0;
         var testCount = 0;
-        var control = CreateControl(
+        var addonControl = CreateControl(
             settings,
-            CenterM(FrontendCenterMStartupState.Enabled),
-            unsupportedClient,
+            CenterM(FrontendCenterMStartupState.Disabled),
+            client,
             testAvailable: () => true,
             test: (_, _) =>
             {
                 testCount++;
                 return Task.FromResult(new FrontendControllerVibrationTestResult(FrontendControllerVibrationTestOutcome.Succeeded, null));
             },
+            apply: (pair, _) => { applyCount++; Assert.Equal(pair, store.Load().ControllerVibration); return Task.FromResult(true); });
+
+        var snapshot = await addonControl.CaptureControllerVibrationStrengthAsync();
+        Assert.True(snapshot.Available);
+        Assert.True(snapshot.Writable);
+        Assert.Equal<int?>(original.LeftPercent, snapshot.LeftPercent);
+        Assert.Equal<int?>(original.RightPercent, snapshot.RightPercent);
+        Assert.True((await addonControl.SetControllerVibrationStrengthAsync(10, 90)).Succeeded);
+        Assert.Equal(new ControllerVibrationSettings(10, 90), store.Load().ControllerVibration);
+        Assert.Equal(1, applyCount);
+        Assert.Equal(0, devices.EnumerationCount);
+        var test = await addonControl.TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor.Left);
+
+        var stockControl = CreateControl(settings, CenterM(FrontendCenterMStartupState.Enabled), client,
             apply: (_, _) => { applyCount++; return Task.FromResult(true); });
+        var stockSnapshot = await stockControl.CaptureControllerVibrationStrengthAsync();
+        var blocked = await stockControl.SetControllerVibrationStrengthAsync(0, 100);
 
-        var snapshot = await control.CaptureControllerVibrationStrengthAsync();
-        var blocked = await control.SetControllerVibrationStrengthAsync(10, 90);
-        var test = await control.TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor.Left);
-
-        Assert.False(snapshot.Available);
-        Assert.False(snapshot.Writable);
-        Assert.Contains("profile-write mapping has not been verified", snapshot.Status, StringComparison.Ordinal);
-        Assert.Contains("no profile write was issued", snapshot.Status, StringComparison.Ordinal);
-        Assert.True(snapshot.TestAvailable);
-        Assert.Equal(25, snapshot.LeftPercent);
-        Assert.Equal(75, snapshot.RightPercent);
+        Assert.True(stockSnapshot.Available);
+        Assert.False(stockSnapshot.Writable);
         Assert.Equal(FrontendControllerVibrationStrengthMutationOutcome.Unavailable, blocked.Outcome);
-        Assert.Equal(original, store.Load().ControllerVibration);
+        Assert.Equal(new ControllerVibrationSettings(10, 90), store.Load().ControllerVibration);
         Assert.True(test.Succeeded);
         Assert.Equal(1, testCount);
-        Assert.Equal(0, applyCount);
+        Assert.Equal(1, applyCount);
         Assert.Equal(0, devices.EnumerationCount);
     }
 

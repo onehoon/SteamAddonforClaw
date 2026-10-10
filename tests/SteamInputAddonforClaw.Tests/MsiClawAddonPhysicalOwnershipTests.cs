@@ -7,6 +7,7 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Prerequisites;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -38,6 +39,235 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(0, h.SwitchCalls);
         Assert.Equal([PrimaryPnp], result.HiddenTargets);
         Assert.Equal(new[] { PrimaryPnp }, h.HidHideApplied);
+    }
+
+    [Fact]
+    public async Task A2vm_boot_prime_cycles_already_pid1902_through_fresh_pid1901_before_acquisition()
+    {
+        var claimCount = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.7"),
+            ClaimBootAttempt = () => { claimCount++; return BootSessionAttemptResult.Claimed; },
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.True(result.ModeWriteIssued);
+        Assert.Equal(1, claimCount);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.True(h.InputSource.IsRunning);
+    }
+
+    [Theory]
+    [InlineData("AlreadyClaimed")]
+    [InlineData("Unavailable")]
+    public async Task A2vm_boot_prime_skips_optional_cycle_when_marker_is_not_claimed(string markerName)
+    {
+        var marker = Enum.Parse<BootSessionAttemptResult>(markerName);
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => marker,
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.False(result.ModeWriteIssued);
+        Assert.Empty(h.SwitchTargets);
+        Assert.True(h.InputSource.IsRunning);
+    }
+
+    [Fact]
+    public async Task A2vm_initial_pid1901_consumes_boot_attempt_and_uses_only_normal_transition()
+    {
+        var claimCount = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => { claimCount++; return BootSessionAttemptResult.Claimed; },
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.Equal(1, claimCount);
+        Assert.Equal([MsiClawNativeMode.DirectInput], h.SwitchTargets);
+    }
+
+    [Fact]
+    public async Task A2vm_pid1901_first_boot_consumes_marker_so_same_boot_pid1902_restart_does_not_cycle()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var marker = Path.Combine(directory, "a2vm-rumble-boot-attempt.txt");
+            var windowsStartId = BootSession.TryCreateWindowsStartId(
+                100,
+                new DateTime(2026, 10, 10, 12, 0, 0, DateTimeKind.Utc),
+                "0");
+            var first = new Harness
+            {
+                InitialMode = MsiClawNativeMode.XInput,
+                HardwareDeviceModel = new("msi.claw.a2vm.7"),
+                ClaimBootAttempt = () => BootSession.TryClaimA2vmRumbleAttempt(marker, windowsStartId),
+            };
+            var firstOwner = first.Build();
+            Assert.True((await firstOwner.AcquireAsync(default)).IsOwned);
+            Assert.Equal([MsiClawNativeMode.DirectInput], first.SwitchTargets);
+            await firstOwner.DisposeAsync();
+
+            var restarted = new Harness
+            {
+                InitialMode = MsiClawNativeMode.DirectInput,
+                HardwareDeviceModel = new("msi.claw.a2vm.7"),
+                PnpDevices = A2vmOwnedPnpDevices(),
+                ClaimBootAttempt = () => BootSession.TryClaimA2vmRumbleAttempt(marker, windowsStartId),
+            };
+            var restartedOwner = restarted.Build();
+            Assert.True((await restartedOwner.AcquireAsync(default)).IsOwned);
+            Assert.Empty(restarted.SwitchTargets);
+            await restartedOwner.DisposeAsync();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Non_A2vm_models_never_claim_or_run_the_boot_prime_cycle()
+    {
+        var claimCount = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.cg3em"),
+            ClaimBootAttempt = () => { claimCount++; return BootSessionAttemptResult.Claimed; },
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.Equal(0, claimCount);
+        Assert.Empty(h.SwitchTargets);
+    }
+
+    [Fact]
+    public async Task A2vm_boot_prime_transition_failure_fails_closed_before_directinput_acquisition()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.7"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
+            SwitchFailsForRelease = true,
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.True(result.ModeWriteIssued);
+        Assert.Equal([MsiClawNativeMode.XInput], h.SwitchTargets);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Empty(h.HidHideApplied);
+    }
+
+    [Fact]
+    public async Task A2vm_boot_prime_skips_mode_writes_when_exact_control_hid_is_not_resolved()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.7"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
+            PnpDevices = [PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00")],
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.Empty(h.SwitchTargets);
+    }
+
+    [Fact]
+    public async Task A2vm_boot_prime_does_not_claim_or_cycle_when_center_m_is_not_disabled()
+    {
+        var claimCount = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            Authority = FrontendCenterMStartupState.Enabled,
+            ClaimBootAttempt = () => { claimCount++; return BootSessionAttemptResult.Claimed; },
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Equal(0, claimCount);
+        Assert.Empty(h.SwitchTargets);
+        Assert.False(h.InputSource.IsRunning);
+    }
+
+    [Fact]
+    public async Task A2vm_boot_prime_fails_closed_when_fresh_pid1901_state_is_not_proven()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
+            FinalModeAfterSwitch = MsiClawNativeMode.DirectInput,
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Equal([MsiClawNativeMode.XInput], h.SwitchTargets);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Empty(h.HidHideApplied);
+    }
+
+    [Fact]
+    public async Task A2vm_boot_prime_fails_closed_when_second_native_transition_is_not_proven()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
+            SwitchSucceeds = false,
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Empty(h.HidHideApplied);
+    }
+
+    [Theory]
+    [InlineData("msi.claw.a2vm.7", true, true)]
+    [InlineData("msi.claw.a2vm.8", true, true)]
+    [InlineData("msi.claw.cg3em", false, true)]
+    [InlineData("unknown", false, false)]
+    public void Rumble_recovery_model_policy_is_exact(string modelId, bool bootPrime, bool manualRecovery)
+    {
+        var model = new HandheldDeviceModelId(modelId);
+        Assert.Equal(bootPrime, MsiClawAddonPhysicalOwnership.IsA2vmBootRumblePrimeModel(model));
+        Assert.Equal(manualRecovery, MsiClawAddonPhysicalOwnership.SupportsManualRumbleRearm(model));
     }
 
     [Fact]
@@ -163,6 +393,12 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             PnpCollection(ConsumerPnp, PhysKey, 0x000C, 0x0001, "MI_01"),
         ],
     };
+
+    private static IReadOnlyList<ControllerDeviceInfo> A2vmOwnedPnpDevices() =>
+    [
+        PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+        PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+    ];
 
     // ---- 25.3 fail closed before mutation ----
 
@@ -1549,7 +1785,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         // release seam is constructed on ANY exact Disabled boot (including a Blocked one).
         var host = File.ReadAllText(Path.Combine(dir.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
         Assert.Contains("startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled", host, StringComparison.Ordinal);
-        Assert.Contains("var owner = CreatePhysicalOwnership(startupComposition);", host, StringComparison.Ordinal);
+        Assert.Contains("var owner = CreatePhysicalOwnership(startupComposition, startupResult.HardwareDeviceModel);", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.DisabledBootAdmission?.IsReady != true", host, StringComparison.Ordinal);
         Assert.Contains("var allowPrerequisiteRepairWhileRecoveryUnsafe =", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady", host, StringComparison.Ordinal);
@@ -1580,6 +1816,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     {
         public FrontendCenterMStartupState Authority { get; set; } = FrontendCenterMStartupState.Disabled;
         public MsiClawNativeMode InitialMode { get; set; } = MsiClawNativeMode.DirectInput;
+        public HandheldDeviceModelId? HardwareDeviceModel { get; set; }
+        public Func<BootSessionAttemptResult>? ClaimBootAttempt { get; set; }
         public NativeStateCaptureStatus InitialCaptureStatus { get; set; } = NativeStateCaptureStatus.Success;
         public MsiClawIdentityConfidence InitialConfidence { get; set; } = MsiClawIdentityConfidence.Strong;
         public string FinalPhysKey { get; set; } = PhysKey;
@@ -1716,7 +1954,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             delay: (_, _) => Task.CompletedTask,
             directInputSettleWindow: TimeSpan.FromMilliseconds(200),
             directInputSettleInterval: TimeSpan.FromMilliseconds(1),
-            gamepadModeClient: GamepadMode);
+            gamepadModeClient: GamepadMode,
+            hardwareDeviceModel: HardwareDeviceModel,
+            claimA2vmBootAttempt: ClaimBootAttempt);
         }
 
         private NativeStateCaptureResult Capture(MsiClawNativeMode mode, MsiClawIdentityConfidence confidence, string physKey)

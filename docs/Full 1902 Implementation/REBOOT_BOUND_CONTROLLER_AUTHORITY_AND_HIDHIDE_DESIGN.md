@@ -398,7 +398,7 @@ Startup should inspect current reality.
 ```text
 verify same supported MSI Claw
 → keep PID1902
-→ do NOT force PID1902 → PID1901 → PID1902
+→ ordinary startup/recovery does NOT force PID1902 → PID1901 → PID1902; see the A2VM 7/8 once-per-boot exception above
 → acquire DirectInput
 → verify/reconcile HidHide
 ```
@@ -430,6 +430,12 @@ Current = 1901 → switch
 ```
 
 is sufficient.
+
+### A2VM 7/8 once-per-boot rumble initialization exception
+
+For A2VM 7/8 only, after exact Center M Disabled startup admission and VIIPER Ready, the first eligible acquisition in an actual Windows boot consumes a narrow attempt marker. If the first strong native state is already PID1902 and the exact PID1902 control HID is resolved, the Addon verifies PID1902 → PID1901, captures fresh strong PID1901 state, then uses the existing verified PID1901 → PID1902 acquisition. If the initial state is PID1901, it consumes the marker and performs only that normal single takeover. CG3EM is unchanged. Marker I/O failure skips the optional cycle and cannot block ordinary ownership. This does not change the desired PID1902 authority, persistent HidHide state, stock release path, or shutdown behavior. User-invoked **Restore Vibration** is a temporary recovery, not a Center M authority release.
+
+The marker prevents a second optional cycle in the same Windows boot after Addon/update restart or process crash. It is not consulted by ordinary ownership, PnP recovery, suspend/resume, or Steam/BPM presentation changes. See the [2026-10-10 A2VM work order](../work-order/2026-10-10_A2VM_FAMILY_BOOT_RUMBLE_REARM_LED_VIBRATION_AND_RECOVERY_UI_WORK_ORDER.md).
 
 ---
 
@@ -490,9 +496,13 @@ The next Addon Runtime startup does not care which occurred. It reconciles curre
 
 This removes unnecessary PID/PnP churn at every system restart.
 
+The optional A2VM cycle is performed only by the next eligible Windows startup once for that boot; it is not performed by the shutdown path. Manual **Restore Vibration** does not change Center M state or release persistent HidHide ownership.
+
 ---
 
 ## 12. Controlled Addon Runtime restart while Disabled
+
+The once-per-boot A2VM rumble initialization is not repeated for a controlled Runtime or update restart. The new process uses the ordinary actual-mode reconcile below; if it starts already at PID1902, it keeps that mode and reacquires ownership.
 
 A controlled Addon process restart caused by update/relaunch is also not an authority release.
 
@@ -682,6 +692,7 @@ different or ambiguous device
 Center M Disabled authority survives sleep/hibernate.
 
 Do not intentionally restore PID1901 merely for suspend.
+Resume is ordinary ownership recovery and never triggers the once-per-Windows-boot A2VM rumble cycle.
 
 Before suspend:
 
@@ -1073,7 +1084,7 @@ Blocking examples:
 - Disabled mode allows the user to intentionally stop the only controller Runtime and leave Windows running;
 - Disabled transition can complete without guaranteeing next-logon Addon Runtime startup;
 - Windows restart unnecessarily forces PID1901 and introduces avoidable PnP churn;
-- current PID1902 is needlessly round-tripped through PID1901 on startup;
+- current PID1902 is needlessly round-tripped through PID1901 on ordinary startup/recovery; the scoped A2VM 7/8 once-per-Windows-boot rumble initialization above is the only exception;
 - virtual controller attaches before physical isolation;
 - Enable transition leaves PID1902/HidHide ownership behind;
 - real PnP/resume/crash failures cannot converge to a usable controller.
@@ -1136,7 +1147,7 @@ Final principles:
 2. **The frontend may close; the controller Runtime must remain.**
 3. **PID1902 is the desired physical state for the entire Disabled-mode lifetime.**
 4. **Windows shutdown/restart is not an authority-release boundary and should not deliberately force PID1901.**
-5. **Startup keeps PID1902 if already present and switches PID1901 only when necessary.**
+5. **Ordinary startup/recovery keeps PID1902 if already present; the A2VM 7/8 once-per-Windows-boot rumble initialization above is the only scoped exception.**
 6. **HidHide remains persistent across reboot.**
 7. **Steam/BPM only chooses X360 vs SteamDeck.**
 8. **Explicit Enable Center M / uninstall is the normal PID1901 restoration boundary.**

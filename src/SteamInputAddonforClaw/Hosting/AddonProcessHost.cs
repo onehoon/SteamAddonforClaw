@@ -932,7 +932,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         // Construct the narrow PR5 owner on ANY exact Disabled boot -- even a Blocked one -- so
         // Enable-and-Restart can always release existing PID1902 / persisted PR5 HidHide ownership.
-        var owner = CreatePhysicalOwnership(startupComposition);
+        var owner = CreatePhysicalOwnership(startupComposition, startupResult.HardwareDeviceModel);
         if (owner is null)
             return;
         _physicalOwnership = owner;
@@ -1173,7 +1173,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     // Returns the concrete owner (not just IMsiClawAddonPhysicalOwnership): the Full1902 rumble sink
     // consumes its IMsiClawPhysicalInputIdentityProvider face for the verified current PID1902 session.
-    private Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? CreatePhysicalOwnership(AddonStartupComposition startupComposition)
+    private Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? CreatePhysicalOwnership(
+        AddonStartupComposition startupComposition,
+        HandheldDeviceModelId? hardwareDeviceModel)
     {
         if (startupComposition.HandheldDeviceAdapter.NativeState is not Devices.MSI.Claw.MsiClawNativeStateManager nativeState)
         {
@@ -1208,7 +1210,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             targets => hidHideBaseline.ApplyDisabledModeBaseline(targets),
             () => hidHideBaseline.TryGetExistingOwnedTargets(
                 Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets),
-            gamepadModeClient: gamepadModeClient);
+            gamepadModeClient: gamepadModeClient,
+            hardwareDeviceModel: hardwareDeviceModel);
     }
 
     private async Task StartMotionSourceAsync(string trigger)
@@ -1781,6 +1784,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             var physical = _physicalOwnership!;
             var presentation = _presentationOwnership!;
+            var rumbleLoop = await presentation.CaptureXbox360RumbleLoopDiagnosticAsync(
+                _runtimeHost?.ActualRunningAppId ?? 0, CancellationToken.None).ConfigureAwait(false);
+            if (rumbleLoop.State == FrontendXbox360RumbleLoopState.Running)
+            {
+                AppLog.Info("ControllerOwnership", "Controller rumble recovery was rejected while the Xbox360 terminal STOP diagnostic is running.",
+                    ("Event", "ControllerRumbleRecoveryUnavailable"),
+                    ("Reason", "Xbox360RumbleDiagnosticRunning"));
+                return FrontendDeveloperRumbleRearmResult.Unavailable(
+                    "Stop the Xbox360 terminal STOP diagnostic before restoring vibration.");
+            }
+
             var physicalAdmissionFailure = await physical.CheckDeveloperRumbleRearmAdmissionAsync().ConfigureAwait(false);
             if (physicalAdmissionFailure is not null)
             {
@@ -1892,8 +1906,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return "RuntimeShuttingDown";
         if (_runtimeInitialized == 0 || _startupOutcome != AddonProcessStartupOutcome.RuntimeReady || _runtimeHost is null)
             return "RuntimeNotReady";
-        if (_startupResult?.HardwareDeviceModel is not { Value: "msi.claw.a2vm.8" })
-            return "SupportedModelIsA2vm8Only";
+        if (_startupResult?.HardwareDeviceModel is not { } model
+            || !Devices.MSI.Claw.MsiClawAddonPhysicalOwnership.SupportsManualRumbleRearm(model))
+            return "UnsupportedHardwareModel";
         if (_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled)
             return "CenterMAuthorityNotDisabled";
         if (Volatile.Read(ref _disabledControllerStartupPending) != 0)

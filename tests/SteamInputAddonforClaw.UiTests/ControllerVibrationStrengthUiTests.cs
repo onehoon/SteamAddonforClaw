@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ControllerVibrationStrengthUiTests
 {
     [Fact]
-    public void Controller_page_exposes_collapsed_icon_vibration_group_with_two_independent_slider_rows()
+    public void Controller_page_exposes_collapsed_icon_vibration_group_with_two_slider_rows_and_recovery_card()
     {
         var root = FindRepositoryRoot();
         var path = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
@@ -36,7 +36,45 @@ public sealed class ControllerVibrationStrengthUiTests
 
         AssertSliderRow(expander, x, "Left Motor", "LeftVibrationStrengthSlider", "LeftVibrationStrengthPercentText", "LeftVibrationTestButton");
         AssertSliderRow(expander, x, "Right Motor", "RightVibrationStrengthSlider", "RightVibrationStrengthPercentText", "RightVibrationTestButton");
+
+        var cards = expander.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
+        Assert.Equal(["Left Motor", "Right Motor", "Vibration Recovery"], cards.Select(card => (string?)card.Attribute("Header")));
+        var recoveryButton = cards[2].Descendants().Single(element =>
+            element.Name.LocalName == "Button" && (string?)element.Attribute(x + "Name") == "RestoreVibrationButton");
+        Assert.Equal("Restore Vibration", (string?)recoveryButton.Attribute("Content"));
+        Assert.Equal("RestoreVibrationButton_Click", (string?)recoveryButton.Attribute("Click"));
+        Assert.Contains("temporarily disconnects the virtual controller", cards[2].ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("save your game and close it", cards[2].ToString(), StringComparison.OrdinalIgnoreCase);
+        var pageCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
+        Assert.Contains("frontend.RunDeveloperRumbleRearmAsync()", pageCode, StringComparison.Ordinal);
+        Assert.Contains("RestoreVibrationButton.IsEnabled = _frontend is not null && CanStartVibrationRearm(", pageCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("_vibrationSnapshot.Writable", pageCode[pageCode.IndexOf("private async void RestoreVibrationButton_Click", StringComparison.Ordinal)..pageCode.IndexOf("private async Task CommitVibrationStrengthAsync", StringComparison.Ordinal)], StringComparison.Ordinal);
+        Assert.Contains("Physical vibration is not verified", pageCode, StringComparison.Ordinal);
+        var developerPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml"));
+        var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
+        Assert.DoesNotContain("Rearm A2VM 8", developerPage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("RearmRumble_Click", developerCode, StringComparison.Ordinal);
+        Assert.Contains("Xbox360 Terminal STOP Loop", developerPage, StringComparison.Ordinal);
+        Assert.Contains("Vibration Profile 0/100 Probe", developerPage, StringComparison.Ordinal);
+        Assert.Contains("A2VM LED Profile Read-Only Probe", developerPage, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(false, false, false, false, false, true)]
+    [InlineData(true, false, false, false, false, false)]
+    [InlineData(false, true, false, false, false, false)]
+    [InlineData(false, false, true, false, false, false)]
+    [InlineData(false, false, false, true, false, false)]
+    [InlineData(false, false, false, false, true, false)]
+    public void Vibration_recovery_is_blocked_by_pending_edits_tests_and_duplicate_requests(
+        bool hasDraft,
+        bool pointerGesture,
+        bool mutation,
+        bool test,
+        bool rearm,
+        bool expected) =>
+        Assert.Equal(expected, ControllerPage.CanStartVibrationRearm(
+            hasDraft, pointerGesture, mutation, test, rearm));
 
     [Fact]
     public async Task Keyboard_settle_waits_300ms_and_only_commits_the_latest_complete_pair()

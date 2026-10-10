@@ -8,6 +8,12 @@ firmware `0x0230`. Production applies the Addon's persisted desired pair to the
 owned PID1902 controller state; it does not read firmware values as user settings
 and does not issue `SyncToROM`.
 
+## 2026-10-10 production support and recovery update
+
+Production pair writes are enabled on CG3EM and A2VM 8 from prior hardware evidence, and are now enabled on A2VM 7 by the explicitly scoped shared-A2VM protocol policy. A2VM 7 has **not** been physically tested; this is family-level rollout, not device-level validation. On A2VM 8, the user physically confirmed that the manual PID1902 → PID1901 → PID1902 recovery restores previously silent physical rumble. A2VM 7/8 also receive one optional mode initialization per actual Windows boot when their first strong state is already PID1902. These software transitions do not themselves verify motor output or firmware register state.
+
+Keep the three paths distinct: runtime game rumble uses the controller's output report path (including the investigated report `0x05`); saved left/right strength uses one profile command `0x3C/0x21`, index 1, offset `0x22`, length 2; Joystick LED uses separate `0x3C/0x21` profile-frame writes at the exact firmware-mapped RGB base. None is evidence for either of the other mechanisms. See [Joystick LED RE](RE_MSI_Joystick_LED.md).
+
 ## Two different meanings of “vibration”
 
 ### Runtime game rumble
@@ -56,8 +62,9 @@ The inspected binaries were `UC_ControlMode.dll 1.0.2608.1201` and
 `API_ControlMode.dll 1.0.2606.2401`; their versions do not match. These are
 static findings within the individually inspected files and do not establish
 cross-assembly runtime compatibility. A serialization offset by itself is not a
-firmware address guarantee. The model-specific hardware evidence below is what
-authorizes the current CG3EM and A2VM 8 production pair writes.
+firmware address guarantee. The CG3EM and A2VM 8 entries below have direct hardware
+evidence; A2VM 7 is additionally enabled only by the explicit shared-family policy
+and remains untested on that model.
 
 ## Hardware evidence — CG3EM / MS-1T91 / firmware `0x0419`
 
@@ -118,15 +125,14 @@ refreshes.
 | Addon model | Board | Production pair write |
 | --- | --- | --- |
 | `msi.claw.cg3em` | MS-1T91 | Enabled; validated on firmware `0x0419` |
-| `msi.claw.a2vm.7` | MS-1T42 | Disabled pending physical validation |
+| `msi.claw.a2vm.7` | MS-1T42 | Enabled by shared-A2VM protocol policy; not individually hardware-tested |
 | `msi.claw.a2vm.8` | MS-1T52 | Enabled; `0/100` motor asymmetry observed on firmware `0x0230` |
 
-The A2VM 8 production policy is model-only, matching the existing CG3EM policy;
-the observed `0x0230` firmware is documented evidence, not a new vibration
-firmware gate. A2VM 7 remains unavailable and the frontend must report that its
-profile-write mapping is unverified and that no production pair write was issued.
-Runtime game rumble remains a separate path and is not evidence for profile-strength
-support.
+The CG3EM and A2VM 8 production policies are model-only, matching the existing
+family policy; the observed `0x0230` firmware is documented evidence, not a new
+vibration firmware gate. A2VM 7 now uses the same contiguous profile pair write
+based on shared A2VM evidence, without a claim of direct A2VM 7 validation. Runtime
+game rumble remains a separate path and is not evidence for profile-strength support.
 
 Production writes require Center M startup authority exactly `Disabled`, a
 healthy Addon-owned live PID1902 session, a Strong matching physical identity,
@@ -158,19 +164,19 @@ software rumble multipliers, or EEPROM-persistence controls.
 
 ## Developer diagnostics
 
-Developer → Vibration Test exposes a bounded profile probe for CG3EM and an
-explicit A2VM 8 write/restore diagnostic:
+Developer → Vibration Test retains a bounded profile probe for CG3EM and an
+explicit A2VM 8 strength write/restore diagnostic:
 
 | Action | Pair written | Required follow-up |
 | --- | --- | --- |
 | Apply Left `0` / Right `100` | index `1`, offset `0x22`, length `2`, bytes `00 64` | Press physical Left Test once, then Right Test once |
 | Restore `50/50` | index `1`, offset `0x22`, length `2`, bytes `32 32` | Explicit user action; no automatic retry |
 
-These are explicit Developer actions, use the same profile transaction gate as
+These are explicit Developer profile-write actions, use the same profile transaction gate as
 production writes, and do not change production settings. They require Center M
 authority exactly `Disabled`, a healthy live Addon-owned physical PID1902 session,
-and one strongly identified PID1902 control HID. A2VM eligibility is restricted
-to `msi.claw.a2vm.8`; it does not include A2VM 7. The user observed the expected
+and one strongly identified PID1902 control HID. A2VM eligibility for this
+diagnostic remains restricted to `msi.claw.a2vm.8`; it does not include A2VM 7. The user observed the expected
 left-silent/right-vibrating response for the A2VM 8 `0/100` motor tests. An
 individual probe result still reports transport acceptance, not a fresh physical
 observation. `50/50` is the Addon default, not readback of the firmware's original
@@ -179,9 +185,12 @@ restore must be surfaced and retried only by another explicit button press.
 Neither model uses `SyncToROM` in this probe.
 
 The existing physical Left / Right Test remains independent of whether
-production strength setting is available. A2VM 8 production strength is enabled
-for the model; A2VM 7 remains unsupported. The Developer probe remains a separate
-explicit action and is not used by normal production apply.
+production strength setting is available. The separate **Restore Vibration**
+manual recovery is now on Controller for all three supported models; it temporarily
+retires the virtual presentation, verifies both native transitions, restores owned
+input/settings, and selects a fresh Steam/BPM presentation. It is not a Developer
+probe or stock authority release. The Developer profile-write probe remains a
+separate explicit diagnostic and is not used by normal production apply.
 
 The former index-0 / index-1 pair-read capture was a one-off Developer
 investigation. It is no longer run implicitly by normal Controller-page capture,
@@ -190,7 +199,8 @@ and its obsolete runtime read path has been removed. Its recorded 0/100 and
 
 ## Still unproven
 
-- Production pair-write behavior on A2VM 7 / MS-1T42 remains unsupported.
+- Direct physical pair-write and motor-effect validation on A2VM 7 / MS-1T42 remains unperformed; enabled support is based on shared-family protocol evidence.
+- A2VM 7 boot re-arm behavior and A2VM 7 physical motor effect have not been tested.
 - Physical effect of the A2VM 8 `50/50` restore was not separately established;
   its transport acceptance does not prove device-side durability.
 - Controller-side durable profile persistence across power loss; production
