@@ -150,6 +150,7 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
         Assert.True(result.TargetPidAppeared);
         Assert.True(result.SourceIdentityVerified);
         Assert.True(result.TargetTopologyVerified);
+        Assert.Equal(4000, result.SinceCommandWriteMs);
         Assert.InRange(clock.Now - writer.CompletedAt!.Value, TimeSpan.Zero, TimeSpan.FromSeconds(5));
     }
 
@@ -185,6 +186,7 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
         Assert.False(result.TargetPidPresent);
         Assert.False(result.TargetPidAppeared);
         Assert.False(result.TargetTopologyVerified);
+        Assert.Equal(5000, result.SinceCommandWriteMs);
         Assert.True(clock.Now - writer.CompletedAt!.Value >= TimeSpan.FromSeconds(5));
     }
 
