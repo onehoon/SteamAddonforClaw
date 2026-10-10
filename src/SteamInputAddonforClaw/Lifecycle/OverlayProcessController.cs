@@ -519,12 +519,12 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         var gateHeld = false;
         try
         {
-            await _quickSettingsRefreshGate.WaitAsync(token).ConfigureAwait(false);
-            gateHeld = true;
-            if (!IsNoRunningGameProfileRecheckAllowed(source)) return;
-
             await Task.Delay(TimeSpan.FromMilliseconds(250), token).ConfigureAwait(false);
             if (!IsNoRunningGameProfileRecheckAllowed(source)) return;
+
+            await _quickSettingsRefreshGate.WaitAsync(token).ConfigureAwait(false);
+            gateHeld = true;
+            if (token.IsCancellationRequested || !IsNoRunningGameProfileRecheckAllowed(source)) return;
 
             var capture = _captureProfileQuickSettingsPage;
             if (capture is null) return;

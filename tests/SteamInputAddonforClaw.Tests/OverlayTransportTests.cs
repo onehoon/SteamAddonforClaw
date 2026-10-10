@@ -799,6 +799,90 @@ public sealed class OverlayTransportTests
         }
     }
 
+    [Fact]
+    public async Task Conditional_profile_recheck_delay_does_not_block_an_ordinary_quick_settings_refresh()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var firstDeviceCaptureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstDeviceCapture = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recheckAdmitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recheckSecondCheck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recheckCaptureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ordinaryDeviceCaptureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deviceCaptureCount = 0;
+        var profileCaptureCount = 0;
+        var profileCheckCount = 0;
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartLongRunningTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.BindQuickSettingsAuthority(
+                captureDevicePage: async _ =>
+                {
+                    var count = Interlocked.Increment(ref deviceCaptureCount);
+                    if (count == 1)
+                    {
+                        firstDeviceCaptureEntered.TrySetResult();
+                        await releaseFirstDeviceCapture.Task;
+                    }
+                    else if (count == 2)
+                    {
+                        ordinaryDeviceCaptureEntered.TrySetResult();
+                    }
+
+                    return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device);
+                },
+                captureProfilePage: _ =>
+                {
+                    if (Interlocked.Increment(ref profileCaptureCount) == 2)
+                        recheckCaptureEntered.TrySetResult();
+                    return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile));
+                },
+                mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")),
+                profileRecheckAllowed: () =>
+                {
+                    var count = Interlocked.Increment(ref profileCheckCount);
+                    if (count == 1) recheckAdmitted.TrySetResult();
+                    if (count == 2) recheckSecondCheck.TrySetResult();
+                    return true;
+                });
+
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(_ => Task.CompletedTask);
+            Assert.True(await controller.ShowAsync());
+
+            var firstRefresh = controller.RefreshQuickSettingsAsync();
+            await firstDeviceCaptureEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await client.SendNoRunningGameProfileRecheckRequestAsync();
+            await recheckAdmitted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            releaseFirstDeviceCapture.TrySetResult();
+            await firstRefresh.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // In the original ordering, the optional request obtains the shared gate and starts
+            // its 250 ms delay here. In the corrected ordering, it remains outside that gate.
+            await Task.WhenAny(recheckSecondCheck.Task, Task.Delay(75));
+            Assert.False(recheckCaptureEntered.Task.IsCompleted);
+
+            var ordinaryRefresh = controller.RefreshQuickSettingsAsync();
+            await ordinaryDeviceCaptureEntered.Task.WaitAsync(TimeSpan.FromMilliseconds(150));
+            await ordinaryRefresh.WaitAsync(TimeSpan.FromSeconds(5));
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            releaseFirstDeviceCapture.TrySetResult();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("hide")]
     [InlineData("disconnect")]
