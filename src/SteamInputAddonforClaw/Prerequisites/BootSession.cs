@@ -1,4 +1,6 @@
+using System.Diagnostics.Eventing.Reader;
 using System.Globalization;
+using System.Xml.Linq;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
@@ -12,6 +14,9 @@ internal enum BootSessionAttemptResult
 internal static class BootSession
 {
     private const long MaximumA2vmRumbleAttemptMarkerLength = 128;
+    private const string A2vmRumbleAttemptMarkerPrefix = "v1:";
+    private const string WindowsBootStartEventQuery =
+        "*[System[Provider[@Name='Microsoft-Windows-Kernel-Boot'] and EventID=27] and EventData[Data[@Name='BootType']='0' or Data[@Name='BootType']='1' or Data[@Name='BootType']='0x0' or Data[@Name='BootType']='0x1']]";
 
     internal static bool HasChangedSince(DateTimeOffset startedAtUtc)
     {
@@ -20,14 +25,14 @@ internal static class BootSession
     }
 
     internal static BootSessionAttemptResult TryClaimA2vmRumbleAttempt() =>
-        TryClaimA2vmRumbleAttempt(GetA2vmRumbleAttemptPath(), DateTimeOffset.UtcNow, Environment.TickCount64);
+        TryClaimA2vmRumbleAttempt(GetA2vmRumbleAttemptPath(), GetCurrentWindowsStartId());
 
     internal static BootSessionAttemptResult TryClaimA2vmRumbleAttempt(
         string? markerPath,
-        DateTimeOffset nowUtc,
-        long tickCount64)
+        string? currentWindowsStartId)
     {
-        if (string.IsNullOrWhiteSpace(markerPath) || tickCount64 < 0)
+        if (string.IsNullOrWhiteSpace(markerPath)
+            || !IsValidWindowsStartId(currentWindowsStartId))
             return BootSessionAttemptResult.Unavailable;
 
         try
@@ -40,7 +45,7 @@ internal static class BootSession
             if (!File.Exists(markerPath))
             {
                 using var created = new FileStream(markerPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                WriteAttemptTimestamp(created, nowUtc);
+                WriteAttemptIdentity(created, currentWindowsStartId!);
                 return BootSessionAttemptResult.Claimed;
             }
 
@@ -49,20 +54,29 @@ internal static class BootSession
                 return BootSessionAttemptResult.Unavailable;
             using var reader = new StreamReader(stream, leaveOpen: true);
             var contents = reader.ReadToEnd();
-            if (!DateTimeOffset.TryParse(
+            if (string.Equals(contents, currentWindowsStartId, StringComparison.Ordinal))
+                return BootSessionAttemptResult.AlreadyClaimed;
+
+            if (DateTimeOffset.TryParse(
                     contents,
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.RoundtripKind,
-                    out var previousAttemptUtc))
-                return BootSessionAttemptResult.Unavailable;
-
-            var bootAtUtc = nowUtc - TimeSpan.FromMilliseconds(tickCount64);
-            if (bootAtUtc <= previousAttemptUtc)
+                    out _))
+            {
+                // A pre-v1 timestamp marker may have been written earlier in this same boot.
+                // Conservatively consume this boot once while migrating it to the Windows start ID.
+                stream.SetLength(0);
+                stream.Position = 0;
+                WriteAttemptIdentity(stream, currentWindowsStartId!);
                 return BootSessionAttemptResult.AlreadyClaimed;
+            }
+
+            if (!IsValidWindowsStartId(contents))
+                return BootSessionAttemptResult.Unavailable;
 
             stream.SetLength(0);
             stream.Position = 0;
-            WriteAttemptTimestamp(stream, nowUtc);
+            WriteAttemptIdentity(stream, currentWindowsStartId!);
             return BootSessionAttemptResult.Claimed;
         }
         catch
@@ -81,10 +95,83 @@ internal static class BootSession
             : Path.Combine(localData, "SteamInputAddonforClaw", "State", "a2vm-rumble-boot-attempt.txt");
     }
 
-    private static void WriteAttemptTimestamp(Stream stream, DateTimeOffset nowUtc)
+    private static string? GetCurrentWindowsStartId()
+    {
+        try
+        {
+            var query = new EventLogQuery("System", PathType.LogName, WindowsBootStartEventQuery)
+            {
+                ReverseDirection = true,
+            };
+            using var reader = new EventLogReader(query);
+            using var record = reader.ReadEvent();
+            if (record?.RecordId is not long recordId || record.TimeCreated is not DateTime timeCreated)
+                return null;
+
+            var eventXml = XDocument.Parse(record.ToXml());
+            var bootType = eventXml
+                .Descendants()
+                .FirstOrDefault(element =>
+                    element.Name.LocalName == "Data"
+                    && string.Equals((string?)element.Attribute("Name"), "BootType", StringComparison.Ordinal))
+                ?.Value;
+            return TryCreateWindowsStartId(recordId, timeCreated, bootType);
+        }
+        catch
+        {
+            // Event log access is optional for the A2VM boot-only cycle. Never infer a fresh boot.
+            return null;
+        }
+    }
+
+    internal static string? TryCreateWindowsStartId(long? recordId, DateTime? timeCreated, string? bootTypeValue)
+    {
+        if (recordId is not > 0 || timeCreated is null)
+            return null;
+
+        var bootType = ParseBootType(bootTypeValue);
+        if (bootType is not (0 or 1))
+            return null;
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{A2vmRumbleAttemptMarkerPrefix}{recordId.Value}:{bootType}:{timeCreated.Value.ToUniversalTime().Ticks}");
+    }
+
+    private static int? ParseBootType(string? value)
+    {
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var decimalValue))
+            return decimalValue;
+
+        if (value is { Length: > 2 }
+            && value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(value.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexValue))
+            return hexValue;
+
+        return null;
+    }
+
+    private static bool IsValidWindowsStartId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > MaximumA2vmRumbleAttemptMarkerLength)
+            return false;
+
+        var parts = value.Split(':');
+        return parts.Length == 4
+            && string.Equals(parts[0], A2vmRumbleAttemptMarkerPrefix.TrimEnd(':'), StringComparison.Ordinal)
+            && long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var recordId)
+            && recordId > 0
+            && int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var bootType)
+            && bootType is 0 or 1
+            && long.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out var utcTicks)
+            && utcTicks > DateTime.MinValue.Ticks
+            && utcTicks <= DateTime.MaxValue.Ticks;
+    }
+
+    private static void WriteAttemptIdentity(Stream stream, string windowsStartId)
     {
         using var writer = new StreamWriter(stream, leaveOpen: true);
-        writer.Write(nowUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        writer.Write(windowsStartId);
         writer.Flush();
         if (stream is FileStream fileStream)
             fileStream.Flush(flushToDisk: true);

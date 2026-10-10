@@ -109,12 +109,15 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         try
         {
             var marker = Path.Combine(directory, "a2vm-rumble-boot-attempt.txt");
-            var firstTime = new DateTimeOffset(2026, 10, 10, 12, 5, 0, TimeSpan.Zero);
+            var windowsStartId = BootSession.TryCreateWindowsStartId(
+                100,
+                new DateTime(2026, 10, 10, 12, 0, 0, DateTimeKind.Utc),
+                "0");
             var first = new Harness
             {
                 InitialMode = MsiClawNativeMode.XInput,
                 HardwareDeviceModel = new("msi.claw.a2vm.7"),
-                ClaimBootAttempt = () => BootSession.TryClaimA2vmRumbleAttempt(marker, firstTime, tickCount64: 5 * 60 * 1000),
+                ClaimBootAttempt = () => BootSession.TryClaimA2vmRumbleAttempt(marker, windowsStartId),
             };
             var firstOwner = first.Build();
             Assert.True((await firstOwner.AcquireAsync(default)).IsOwned);
@@ -126,8 +129,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 InitialMode = MsiClawNativeMode.DirectInput,
                 HardwareDeviceModel = new("msi.claw.a2vm.7"),
                 PnpDevices = A2vmOwnedPnpDevices(),
-                ClaimBootAttempt = () => BootSession.TryClaimA2vmRumbleAttempt(
-                    marker, firstTime.AddHours(1), tickCount64: 65 * 60 * 1000),
+                ClaimBootAttempt = () => BootSession.TryClaimA2vmRumbleAttempt(marker, windowsStartId),
             };
             var restartedOwner = restarted.Build();
             Assert.True((await restartedOwner.AcquireAsync(default)).IsOwned);
