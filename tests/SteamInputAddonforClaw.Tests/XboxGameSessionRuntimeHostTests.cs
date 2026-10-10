@@ -57,6 +57,8 @@ public sealed class XboxGameSessionRuntimeHostTests
         var transition = host[handlerEnd..transitionEnd];
 
         Assert.Contains("ReconcileActiveXboxGameTransition(", handler, StringComparison.Ordinal);
+        Assert.True(handler.IndexOf("UpdateControllerCadenceDecision(", StringComparison.Ordinal)
+            < handler.IndexOf("ReconcileActiveXboxGameTransition(", StringComparison.Ordinal));
         Assert.Contains("() => ReconcileEffectiveBackButtonMapping(\"XboxActiveGameChanged\")", handler, StringComparison.Ordinal);
         Assert.Contains("() => ReconcileEffectiveGameProfile(\"ActiveXboxGameChanged\")", handler, StringComparison.Ordinal);
         Assert.True(transition.IndexOf("reconcileBackButtonMapping();", StringComparison.Ordinal)
@@ -76,6 +78,27 @@ public sealed class XboxGameSessionRuntimeHostTests
         Assert.Contains("? activeGame.DisplayName", host, StringComparison.Ordinal);
         Assert.Contains("if (string.IsNullOrWhiteSpace(displayName))", frontend, StringComparison.Ordinal);
         Assert.Contains("displayName = _activeXboxDisplayNameSource?.Invoke(key);", frontend, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Existing_Steam_BPM_XBOX_and_resume_callbacks_update_the_cached_cadence_decision()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs").Replace("\r\n", "\n", StringComparison.Ordinal);
+        var runningAppIdStart = host.IndexOf("private void OnActualRunningAppIdChanged(uint appId)", StringComparison.Ordinal);
+        var runningAppIdEnd = host.IndexOf("private void OnActiveXboxGameChanged(", runningAppIdStart, StringComparison.Ordinal);
+        var runningAppId = host[runningAppIdStart..runningAppIdEnd];
+        var bigPictureStart = host.IndexOf("private void OnBigPictureStateChanged(bool active)", StringComparison.Ordinal);
+        var bigPictureEnd = host.IndexOf("private void OnXboxObservationReadinessChanged(", bigPictureStart, StringComparison.Ordinal);
+        var bigPicture = host[bigPictureStart..bigPictureEnd];
+        var resumeStart = host.IndexOf("private void OnPowerResumeObserved()", StringComparison.Ordinal);
+        var resumeEnd = host.IndexOf("internal static async Task ReconcilePerformanceAfterResumeAsync", resumeStart, StringComparison.Ordinal);
+        var resume = host[resumeStart..resumeEnd];
+
+        Assert.Contains("UpdateControllerCadenceDecision(\"SteamRunningAppIdChanged\")", runningAppId, StringComparison.Ordinal);
+        Assert.Contains("UpdateControllerCadenceDecision(\"BigPictureChanged\")", bigPicture, StringComparison.Ordinal);
+        Assert.Contains("UpdateControllerCadenceDecision(\"PowerResume\")", resume, StringComparison.Ordinal);
+        Assert.Equal(2, CountOccurrences(host, "requires250Hz: RequiresController250Hz"));
+        Assert.Contains("Volatile.Read(ref _controllerCadenceRequires250Hz) != 0", host, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -103,5 +126,17 @@ public sealed class XboxGameSessionRuntimeHostTests
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
             directory = directory.Parent;
         return File.ReadAllText(Path.Combine(directory!.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var offset = 0;
+        while ((offset = source.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += value.Length;
+        }
+        return count;
     }
 }

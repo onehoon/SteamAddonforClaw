@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
@@ -16,6 +17,8 @@ public sealed class MsiClawInputCadenceDiagnosticTests
     {
         Assert.Equal(TimeSpan.FromMilliseconds(4), MsiClawInputSource.ResolvePollInterval(false));
         Assert.Equal(TimeSpan.FromMilliseconds(1), MsiClawInputSource.ResolvePollInterval(true));
+        Assert.Equal(TimeSpan.FromMilliseconds(4), MsiClawInputSource.ResolveProductionPeriod(requires250Hz: true));
+        Assert.Equal(TimeSpan.FromMilliseconds(8), MsiClawInputSource.ResolveProductionPeriod(requires250Hz: false));
     }
 
     [Fact]
@@ -82,15 +85,27 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         var enumerator = new TestEnumerator();
         using var timerApi = new FakeWaitableTimerNativeApi();
         using var productionTimerApi = new FakeWaitableTimerNativeApi { AutoPulse = false };
+        var requires250Hz = 1;
+        var productionIntervals = new ConcurrentQueue<long>();
         await using var source = new MsiClawInputSource(
             () => enumerator,
             () => new WindowsHighResolutionOneShotTimer(timerApi),
-            () => new WindowsHighResolutionOneShotTimer(productionTimerApi));
+            () => new WindowsHighResolutionOneShotTimer(productionTimerApi),
+            requires250Hz: () => Volatile.Read(ref requires250Hz) != 0)
+        {
+            ArmForDeadlineOverrideForTests = (timer, deadline, now) =>
+            {
+                productionIntervals.Enqueue(deadline - now);
+                timer.ArmRelative(TimeSpan.FromSeconds(30));
+            },
+        };
 
         Assert.True(source.StartPrepared(Device()).Started);
         await enumerator.Device.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var diagnostic = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        var diagnostic = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(250));
         productionTimerApi.Pulse();
+        await timerApi.FirstArm.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Volatile.Write(ref requires250Hz, 0);
         var result = await diagnostic;
         await productionTimerApi.SecondArm.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -100,12 +115,17 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         Assert.Equal(1, timerApi.CancelWaitableTimerCallCount);
         Assert.Equal(1, productionTimerApi.CreateWaitableTimerExCallCount);
         Assert.True(productionTimerApi.SetWaitableTimerExCallCount >= 2);
-        Assert.InRange(Math.Abs(productionTimerApi.ArmedDueTime100ns + TimeSpan.FromMilliseconds(4).Ticks), 0, 1);
+        Assert.Contains(
+            CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(TimeSpan.FromMilliseconds(4), Stopwatch.Frequency),
+            productionIntervals);
+        Assert.Contains(
+            CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(TimeSpan.FromMilliseconds(8), Stopwatch.Frequency),
+            productionIntervals);
         Assert.NotEqual(timerApi.SignalHandle, productionTimerApi.SignalHandle);
         Assert.Equal(1, enumerator.CreateCount);
         Assert.Equal(1, enumerator.Device.AcquireCount);
         Assert.True(source.IsRunning);
-        Assert.Equal(TimeSpan.FromMilliseconds(4), MsiClawInputSource.ResolvePollInterval(false));
+        Assert.Equal(TimeSpan.FromMilliseconds(8), MsiClawInputSource.ResolveProductionPeriod(requires250Hz: false));
     }
 
     [Fact]

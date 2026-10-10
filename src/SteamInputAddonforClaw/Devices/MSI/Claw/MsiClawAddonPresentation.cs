@@ -306,6 +306,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly TimeSpan _rumbleLoopTerminalCallbackTimeout;
     private readonly Func<bool>? _physicalRumbleTestAvailabilityProvider;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly Func<bool> _requires250Hz;
 
     /// <summary>Full1902 production rumble: the one shared physical MSI writer, bound to the same
     /// process-owned PID1902 physical session that feeds this presentation. Null in unit tests and on
@@ -357,7 +358,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         TimeSpan? rumbleLoopCycleIdle = null,
         Func<bool>? physicalRumbleTestAvailabilityProvider = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        Func<MsiClawMotionState>? motionSnapshotProvider = null)
+        Func<MsiClawMotionState>? motionSnapshotProvider = null,
+        Func<bool>? requires250Hz = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
@@ -370,6 +372,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         _physicalRumbleTestAvailabilityProvider = physicalRumbleTestAvailabilityProvider;
         _delay = delay ?? Task.Delay;
         _motionSnapshotProvider = motionSnapshotProvider;
+        _requires250Hz = requires250Hz ?? (static () => true);
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
         _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
         _xbox360PublisherFactory = xbox360PublisherFactory
@@ -377,6 +380,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 source,
                 setState,
                 fault: fault,
+                requires250Hz: _requires250Hz,
                 backButtonMappingProvider: _backButtonMappingProvider,
                 rearButtonSuppressionProvider: ShouldSuppressRearButton)));
         _deckPublisherFactory = deckPublisherFactory

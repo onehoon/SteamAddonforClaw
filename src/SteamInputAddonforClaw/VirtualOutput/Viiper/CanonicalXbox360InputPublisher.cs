@@ -8,14 +8,13 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// <summary>
 /// Publishes <see cref="IControllerStateSnapshotSource.LatestState"/>, mapped through
 /// <see cref="Xbox360DeviceStateMapper"/>, to a caller-supplied Xbox360 state sink on a monotonic
-/// absolute ~250 Hz (4 ms) deadline schedule, driven by a dedicated worker thread waiting on
+/// absolute 4 ms / 250 Hz active or 8 ms / 125 Hz idle deadline schedule, driven by a dedicated worker thread waiting on
 /// <see cref="WindowsHighResolutionOneShotTimer"/> and re-armed via
 /// <see cref="CanonicalPublisherDeadlineMath"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the Xbox360 publisher used by the production temporary Game Bar presentation
-/// (see docs/VIIPER_MIGRATION_TODO.md, SD7).
+/// This is the Xbox360 publisher used by the production Full1902 presentation when Steam and Big Picture are inactive.
 /// It reuses the same scheduling primitives, locking-free single-worker design, and fail-closed
 /// lifecycle discipline already proven by <see cref="CanonicalSteamDeckInputPublisher"/> against real
 /// MSI Claw hardware -- see that class's remarks for the timing rationale. Nothing in this class
@@ -26,13 +25,13 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// ordering, not this class.
 /// </para>
 /// <para>
-/// Production composes this publisher only for the temporary Game Bar presentation while an outer
-/// Steam route is active. It remains detached and unpublished when that presentation is inactive.
+/// Its cadence follows the Runtime's existing cached game/BPM decision; it never owns presentation selection.
 /// </para>
 /// </remarks>
 internal sealed class CanonicalXbox360InputPublisher
 {
-    private static readonly TimeSpan ProductionPeriod = TimeSpan.FromMilliseconds(4);
+    private static readonly TimeSpan ActiveProductionPeriod = TimeSpan.FromMilliseconds(4);
+    private static readonly TimeSpan IdleProductionPeriod = TimeSpan.FromMilliseconds(8);
     private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>Test-only seam so the join-timeout fail-closed path can be exercised deterministically.</summary>
@@ -43,6 +42,7 @@ internal sealed class CanonicalXbox360InputPublisher
     private readonly IInputReportTickSource? _ticks;
     private readonly Action<Exception>? _fault;
     private readonly Func<long> _timestampProvider;
+    private readonly Func<bool> _requires250Hz;
     private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
     private readonly Func<ControllerState, AuxiliaryButtonSlot, bool> _rearButtonSuppressionProvider;
     private CancellationTokenSource? _stop;
@@ -59,6 +59,7 @@ internal sealed class CanonicalXbox360InputPublisher
 
     private long _periodTicks;
     private long _nextDeadlineTicks;
+    private int _periodMilliseconds;
 
     internal CanonicalXbox360InputPublisher(
         IControllerStateSnapshotSource snapshot,
@@ -67,13 +68,15 @@ internal sealed class CanonicalXbox360InputPublisher
         Action<Exception>? fault = null,
         Func<long>? timestampProvider = null,
         Func<BackButtonMappingSettings>? backButtonMappingProvider = null,
-        Func<ControllerState, AuxiliaryButtonSlot, bool>? rearButtonSuppressionProvider = null)
+        Func<ControllerState, AuxiliaryButtonSlot, bool>? rearButtonSuppressionProvider = null,
+        Func<bool>? requires250Hz = null)
     {
         _snapshot = snapshot;
         _setState = setState;
         _ticks = ticks;
         _fault = fault;
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
+        _requires250Hz = requires250Hz ?? (static () => true);
         _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
         _rearButtonSuppressionProvider = rearButtonSuppressionProvider ?? (static (_, _) => false);
     }
@@ -147,6 +150,9 @@ internal sealed class CanonicalXbox360InputPublisher
 
     private void StartProductionWorker()
     {
+        var initialRequires250Hz = _requires250Hz();
+        var initialPeriod = ResolveProductionPeriod(initialRequires250Hz);
+        var initialPeriodMilliseconds = (int)initialPeriod.TotalMilliseconds;
         WindowsHighResolutionOneShotTimer timer;
         try
         {
@@ -154,10 +160,12 @@ internal sealed class CanonicalXbox360InputPublisher
         }
         catch (Exception exception)
         {
+            LogCadenceApplyFailed(0, initialPeriodMilliseconds, exception);
             throw new InvalidOperationException("Failed to create the canonical Xbox360 publisher's high-resolution timer.", exception);
         }
 
-        _periodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(ProductionPeriod, Stopwatch.Frequency);
+        var initialPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(initialPeriod, Stopwatch.Frequency);
+        _periodTicks = initialPeriodTicks;
         var origin = _timestampProvider();
         _nextDeadlineTicks = origin + _periodTicks;
 
@@ -168,6 +176,7 @@ internal sealed class CanonicalXbox360InputPublisher
         catch (Exception exception)
         {
             timer.Dispose();
+            LogCadenceApplyFailed(0, initialPeriodMilliseconds, exception);
             throw new InvalidOperationException("Failed to arm the canonical Xbox360 publisher's high-resolution timer.", exception);
         }
 
@@ -187,13 +196,19 @@ internal sealed class CanonicalXbox360InputPublisher
         {
             timer.Dispose();
             stopEvent.Dispose();
+            LogCadenceApplyFailed(0, initialPeriodMilliseconds, exception);
             throw new InvalidOperationException("Failed to start the canonical Xbox360 publisher worker thread.", exception);
         }
 
         _timer = timer;
         _workerStopEvent = stopEvent;
         _workerThread = thread;
+        _periodMilliseconds = initialPeriodMilliseconds;
+        LogCadenceApplied(0, initialPeriodMilliseconds);
     }
+
+    internal static TimeSpan ResolveProductionPeriod(bool requires250Hz) =>
+        requires250Hz ? ActiveProductionPeriod : IdleProductionPeriod;
 
     private static void ArmForDeadline(WindowsHighResolutionOneShotTimer timer, long deadlineTicks, long nowTicks)
     {
@@ -262,10 +277,33 @@ internal sealed class CanonicalXbox360InputPublisher
                 if (stopEvent.WaitOne(0)) return;
 
                 var now = _timestampProvider();
-                var advance = CanonicalPublisherDeadlineMath.AdvanceDeadline(_nextDeadlineTicks, _periodTicks, now);
-                _nextDeadlineTicks = advance.NextDeadlineTicks;
+                var desiredPeriod = ResolveProductionPeriod(_requires250Hz());
+                var desiredPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(desiredPeriod, Stopwatch.Frequency);
+                if (desiredPeriodTicks != _periodTicks)
+                {
+                    var desiredPeriodMilliseconds = (int)desiredPeriod.TotalMilliseconds;
+                    var previousPeriodMilliseconds = _periodMilliseconds;
+                    _nextDeadlineTicks = checked(now + desiredPeriodTicks);
+                    try
+                    {
+                        ArmForDeadlineViaSeam(timer, _nextDeadlineTicks, now);
+                    }
+                    catch (Exception exception)
+                    {
+                        LogCadenceApplyFailed(previousPeriodMilliseconds, desiredPeriodMilliseconds, exception);
+                        throw;
+                    }
 
-                ArmForDeadlineViaSeam(timer, _nextDeadlineTicks, now);
+                    _periodTicks = desiredPeriodTicks;
+                    _periodMilliseconds = desiredPeriodMilliseconds;
+                    LogCadenceApplied(previousPeriodMilliseconds, desiredPeriodMilliseconds);
+                }
+                else
+                {
+                    var advance = CanonicalPublisherDeadlineMath.AdvanceDeadline(_nextDeadlineTicks, _periodTicks, now);
+                    _nextDeadlineTicks = advance.NextDeadlineTicks;
+                    ArmForDeadlineViaSeam(timer, _nextDeadlineTicks, now);
+                }
             }
         }
         catch (Exception exception)
@@ -317,4 +355,16 @@ internal sealed class CanonicalXbox360InputPublisher
             ("PublishedStateCount", _publishedStateCount));
         _fault?.Invoke(exception);
     }
+
+    private static void LogCadenceApplied(int previousPeriodMilliseconds, int appliedPeriodMilliseconds) =>
+        AppLog.Debug("SteamOutput", "Controller cadence timer armed.",
+            ("Event", "CadenceApplied"), ("Stage", "Xbox360Publisher"),
+            ("PreviousHz", previousPeriodMilliseconds == 0 ? 0 : 1000 / previousPeriodMilliseconds),
+            ("AppliedHz", 1000 / appliedPeriodMilliseconds), ("PeriodMs", appliedPeriodMilliseconds), ("Result", "Success"));
+
+    private static void LogCadenceApplyFailed(int previousPeriodMilliseconds, int desiredPeriodMilliseconds, Exception exception) =>
+        AppLog.Error("SteamOutput", "Xbox360 publisher cadence timer arm failed.", exception,
+            ("Event", "CadenceApplyFailed"), ("Stage", "Xbox360Publisher"),
+            ("PreviousHz", previousPeriodMilliseconds == 0 ? 0 : 1000 / previousPeriodMilliseconds),
+            ("DesiredHz", 1000 / desiredPeriodMilliseconds), ("Result", "Failed"), ("Reason", "TimerArmFailed"));
 }

@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
@@ -13,6 +15,7 @@ namespace SteamInputAddonforClaw.Tests;
 /// down to what the Xbox360 publisher foundation actually needs (no timing-decomposition heartbeat
 /// diagnostics -- this publisher intentionally does not carry that surface).
 /// </summary>
+[Collection("AppLog")]
 public sealed class CanonicalXbox360InputPublisherTests
 {
     [Fact]
@@ -386,6 +389,125 @@ public sealed class CanonicalXbox360InputPublisherTests
         Assert.Equal(expectedPeriodTicks, observedDeadline - observedNow);
         Assert.Equal(ThreadPriority.AboveNormal, observedPriority);
         Assert.NotEqual(0, qosThreadId);
+    }
+
+    [Fact]
+    public async Task Production_worker_starts_idle_at_8ms_and_changes_live_period_without_restart_or_state_loss()
+    {
+        var origin = 123_456L;
+        var now = origin;
+        var requires250Hz = 0;
+        var arms = new ConcurrentQueue<(WindowsHighResolutionOneShotTimer Timer, long Deadline, long Now)>();
+        var buttons = new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false);
+        var expectedState = Xbox360DeviceStateMapper.Map(new ControllerState(
+            buttons, default, default, default, new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        using var armObserved = new ManualResetEventSlim(false);
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(buttons, default, default, default, new AuxiliaryButtonState([false, false]))),
+            sink.SetState,
+            timestampProvider: () => Volatile.Read(ref now),
+            requires250Hz: () => Volatile.Read(ref requires250Hz) != 0)
+        {
+            ArmForDeadlineOverrideForTests = (activeTimer, deadline, at) =>
+            {
+                activeTimer.ArmRelative(TimeSpan.FromSeconds(30));
+                arms.Enqueue((activeTimer, deadline, at));
+                armObserved.Set();
+            },
+        };
+
+        try
+        {
+            publisher.Start();
+            Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
+            Assert.True(arms.TryDequeue(out var initial));
+            var idleTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(TimeSpan.FromMilliseconds(8), Stopwatch.Frequency);
+            Assert.Equal(idleTicks, initial.Deadline - initial.Now);
+
+            armObserved.Reset();
+            Volatile.Write(ref requires250Hz, 1);
+            now = checked(origin + idleTicks);
+            initial.Timer.ArmRelative(TimeSpan.FromTicks(1));
+            Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
+            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
+            Assert.Equal(expectedState, sink.States[0]);
+            Assert.True(arms.TryDequeue(out var active));
+            var activeTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(TimeSpan.FromMilliseconds(4), Stopwatch.Frequency);
+            Assert.Equal(activeTicks, active.Deadline - active.Now);
+            Assert.Same(initial.Timer, active.Timer);
+            Assert.True(publisher.IsRunning);
+
+            armObserved.Reset();
+            Volatile.Write(ref requires250Hz, 0);
+            now = checked(now + activeTicks);
+            active.Timer.ArmRelative(TimeSpan.FromTicks(1));
+            Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
+            await sink.WaitForCountAsync(2, TimeSpan.FromSeconds(2));
+            Assert.True(arms.TryDequeue(out var idleAgain));
+            Assert.Equal(idleTicks, idleAgain.Deadline - idleAgain.Now);
+            Assert.Same(initial.Timer, idleAgain.Timer);
+            Assert.True(publisher.IsRunning);
+            Assert.All(sink.States, state => Assert.Equal(expectedState, state));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Cadence_rearm_failure_reports_fail_closed_without_a_false_applied_success_log()
+    {
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousLevel = AppLog.MinimumLevelOverride;
+        var directory = Path.Combine(Path.GetTempPath(), $"SteamInput.CadenceLog.{Guid.NewGuid():N}");
+        AppLog.DirectoryOverride = directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        var origin = 123_456L;
+        var now = origin;
+        var requires250Hz = 0;
+        var armCount = 0;
+        WindowsHighResolutionOneShotTimer? timer = null;
+        var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            _ => true,
+            fault: _ => fault.TrySetResult(),
+            timestampProvider: () => Volatile.Read(ref now),
+            requires250Hz: () => Volatile.Read(ref requires250Hz) != 0)
+        {
+            ArmForDeadlineOverrideForTests = (activeTimer, _, _) =>
+            {
+                if (Interlocked.Increment(ref armCount) == 2)
+                    throw new InvalidOperationException("simulated cadence re-arm failure");
+                timer = activeTimer;
+                activeTimer.ArmRelative(TimeSpan.FromSeconds(30));
+            },
+        };
+
+        try
+        {
+            publisher.Start();
+            Volatile.Write(ref requires250Hz, 1);
+            now = checked(origin + CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(TimeSpan.FromMilliseconds(8), Stopwatch.Frequency));
+            timer!.ArmRelative(TimeSpan.FromTicks(1));
+            await fault.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await publisher.StopAsync();
+
+            AppLog.DrainForTests();
+            var log = AppLog.ReadAllTextForTests(AppLog.CurrentLogFilePath);
+            Assert.Contains("Event=CadenceApplyFailed", log, StringComparison.Ordinal);
+            Assert.DoesNotContain("AppliedHz=250", log, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await publisher.StopAsync();
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousLevel;
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]

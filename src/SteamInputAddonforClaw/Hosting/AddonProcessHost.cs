@@ -52,6 +52,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeInitialized;
     private int _disposed;
     private int _startupStarted;
+    private int _controllerCadenceRequires250Hz = 1;
+    private int _controllerCadenceInitialDecisionLogged;
     private IAddonFrontendControl? _frontendControl;
     // One shared MSI Center M startup reader: the Device-page frontend feature, the mandatory
     // Runtime termination policy, and the mandatory launch-at-startup predicate all read from it
@@ -667,6 +669,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupResult.CenterMStartupState);
         _xboxGameSessionRuntime = new XboxGameSessionRuntime();
         _xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;
+        _xboxGameSessionRuntime.ObservationReadinessChanged += OnXboxObservationReadinessChanged;
         try
         {
             await _xboxGameSessionRuntime.StartAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
@@ -679,6 +682,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Warn("XboxSession", "Production XBOX game-session observer could not start; Runtime will continue without active XBOX detection.", exception);
         }
+        UpdateControllerCadenceDecision("StartupObservationReconciled", logInitialDecision: true);
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost,
             setupExecutor: setupExecutor,
@@ -989,7 +993,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                         SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture.CommandTimeout)),
                 physicalRumbleTestAvailabilityProvider: () =>
                     owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null,
-                motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable);
+                motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable,
+                requires250Hz: RequiresController250Hz);
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));
@@ -1380,7 +1385,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         var controllerDevices = GetMsiControllerDevices();
         var gamepadModeClient = GetGamepadModeClient(startupComposition);
-        var directInputInputSource = new Devices.MSI.Claw.MsiClawInputSource(() => new Input.DirectInput.VorticeDirectInputDeviceEnumerator(IntPtr.Zero));
+        var directInputInputSource = new Devices.MSI.Claw.MsiClawInputSource(
+            () => new Input.DirectInput.VorticeDirectInputDeviceEnumerator(IntPtr.Zero),
+            static () => new WindowsHighResolutionOneShotTimer(),
+            requires250Hz: RequiresController250Hz);
         // PR8 section 7: the one Full-1902 owned-input completion signal. MsiClawInputSource already
         // neutralizes LatestState and cleans up the dead session before raising this, so the callback
         // only decides whether an unexpected owned-session loss should request recovery.
@@ -3164,7 +3172,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _runtimeHost.PowerResumeObserved -= OnPowerResumeObserved;
         }
         if (_xboxGameSessionRuntime is not null)
+        {
             _xboxGameSessionRuntime.ActiveGameChanged -= OnActiveXboxGameChanged;
+            _xboxGameSessionRuntime.ObservationReadinessChanged -= OnXboxObservationReadinessChanged;
+        }
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.BeginProcessShutdown();
         try { _displayResolutionRuntime.Shutdown(); } catch (Exception exception) { AppLog.Error("Profiles.Display", "Display resolution shutdown restore failed.", exception); }
@@ -3173,6 +3184,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnActualRunningAppIdChanged(uint appId)
     {
+        UpdateControllerCadenceDecision("SteamRunningAppIdChanged");
         // PR7 section 8: request the Full-1902 X360 <-> SteamDeck reconcile up front, so it does not
         // wait behind the unrelated CPU Boost / Power Mode / Resolution / TDP / FPS profile work
         // below. The switch itself runs asynchronously, serialized by the presentation owner's gate.
@@ -3184,6 +3196,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnActiveXboxGameChanged(ActiveXboxGame? activeGame)
     {
+        UpdateControllerCadenceDecision(activeGame is null ? "XboxGameExited" : "XboxGameStarted");
         ReconcileActiveXboxGameTransition(
             Volatile.Read(ref _processShutdownStarted) != 0,
             Volatile.Read(ref _profileRuntimeStartupReady) != 0,
@@ -3331,8 +3344,47 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnBigPictureStateChanged(bool active)
     {
         if (_headlessUninstallPreparation) return;
+        UpdateControllerCadenceDecision("BigPictureChanged");
         RequestControllerPresentationReconcile("BigPictureChanged");
     }
+
+    private void OnXboxObservationReadinessChanged(bool canReliablyReportNoActiveGame) =>
+        UpdateControllerCadenceDecision(canReliablyReportNoActiveGame ? "XboxObserverReady" : "XboxObserverUnavailable");
+
+    private void UpdateControllerCadenceDecision(string trigger, bool logInitialDecision = false)
+    {
+        if (_headlessUninstallPreparation || Volatile.Read(ref _processShutdownStarted) != 0
+            || _runtimeHost is not { } runtimeHost
+            || _xboxGameSessionRuntime is not { } xboxRuntime)
+            return;
+
+        var snapshot = runtimeHost.CapturePresentationSnapshot();
+        var xboxActive = xboxRuntime.ActiveGame is not null;
+        var xboxReady = xboxRuntime.CanReliablyReportNoActiveGame;
+        var requires250Hz = RequiresFastControllerCadence(snapshot, xboxActive, xboxReady);
+        var next = requires250Hz ? 1 : 0;
+        var previous = Interlocked.Exchange(ref _controllerCadenceRequires250Hz, next);
+
+        var shouldLogInitial = logInitialDecision
+            && Interlocked.CompareExchange(ref _controllerCadenceInitialDecisionLogged, 1, 0) == 0;
+        if (!shouldLogInitial
+            && (previous == next || Volatile.Read(ref _controllerCadenceInitialDecisionLogged) == 0))
+            return;
+
+        AppLog.Debug("ControllerCadence", "Full1902 controller cadence decision updated.",
+            ("Event", "CadenceDecisionChanged"), ("Trigger", trigger),
+            ("PreviousHz", previous != 0 ? 250 : 125), ("DesiredHz", requires250Hz ? 250 : 125),
+            ("SteamRunningAppId", snapshot.RunningAppId), ("BPM", snapshot.BigPictureActive),
+            ("XboxActive", xboxActive), ("XboxObserverReady", xboxReady), ("Initial", shouldLogInitial));
+    }
+
+    internal static bool RequiresFastControllerCadence(
+        SteamPresentationSnapshot steam,
+        bool xboxGameActive,
+        bool xboxCanReliablyReportNoActiveGame) =>
+        steam.WantsSteamDeck || xboxGameActive || !xboxCanReliablyReportNoActiveGame;
+
+    private bool RequiresController250Hz() => Volatile.Read(ref _controllerCadenceRequires250Hz) != 0;
 
     /// <summary>PR7: schedule one asynchronous Full-1902 presentation reconcile. Event-driven only --
     /// no timer, no polling. The desired X360/SteamDeck kind is captured fresh AFTER the presentation
@@ -3485,6 +3537,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         if (_xboxGameSessionRuntime is { } xboxGameSessionRuntime)
             _ = xboxGameSessionRuntime.ReconcileAfterResumeAsync();
+        UpdateControllerCadenceDecision("PowerResume");
 
         // Full1902 Suspend/Resume section 11: request the Full1902 controller-presentation reconcile
         // immediately -- it carries the suspend-pause release pre-step and must not wait behind the
