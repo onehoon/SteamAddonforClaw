@@ -47,6 +47,21 @@ public sealed class AddonProcessHostInitialControllerAcquisitionTests
     }
 
     [Fact]
+    public void Deferred_partial_pid1902_recheck_returns_before_context_clear_or_viiper_release()
+    {
+        var host = ReadHost();
+        var retry = DeclarationContaining(host, "if (CanKeepInitialControllerAcquisitionDeferred(context, result))");
+        var pending = retry.IndexOf("if (CanKeepInitialControllerAcquisitionDeferred(context, result))", StringComparison.Ordinal);
+        var pendingReturn = retry.IndexOf("return;", pending, StringComparison.Ordinal);
+        var clear = retry.IndexOf("ClearInitialControllerAcquisition(context);", pending, StringComparison.Ordinal);
+        var release = retry.IndexOf("context.Presentation.ReleaseForCenterMEnableAsync", pending, StringComparison.Ordinal);
+        var arrivalReschedule = retry.IndexOf("SchedulePendingInitialControllerArrival(context);", pending, StringComparison.Ordinal);
+
+        Assert.True(pending >= 0 && pendingReturn > pending && clear > pendingReturn && release > clear);
+        Assert.True(arrivalReschedule > pendingReturn);
+    }
+
+    [Fact]
     public void Initial_commit_preserves_hardware_and_presentation_order_for_both_entry_paths()
     {
         var host = ReadHost();
