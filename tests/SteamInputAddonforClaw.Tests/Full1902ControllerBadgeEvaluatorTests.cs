@@ -83,18 +83,39 @@ public sealed class Full1902ControllerBadgeEvaluatorTests
         Assert.Equal(FrontendControllerBadgeState.Unavailable, Evaluate(centerM: null));
 
     [Fact]
-    public void Unsafe_recovery_overrides_initializing_and_active_states()
+    public void Disabled_authority_uses_controller_facts_when_stock_recovery_is_unsafe()
     {
-        Assert.Equal(FrontendControllerBadgeState.NeedsAttention, Evaluate(
-            recoverySafe: false,
-            centerM: FrontendCenterMStartupState.Disabled,
-            startupPending: true));
-        Assert.Equal(FrontendControllerBadgeState.NeedsAttention, Evaluate(
+        Assert.Equal(FrontendControllerBadgeState.Xbox360Active, Evaluate(
             recoverySafe: false,
             centerM: FrontendCenterMStartupState.Disabled,
             physicalInputRunning: true,
             presentation: AddonPresentationKind.Xbox360,
             presentationLive: true));
+        Assert.Equal(FrontendControllerBadgeState.SteamDeckActive, Evaluate(
+            recoverySafe: false,
+            centerM: FrontendCenterMStartupState.Disabled,
+            physicalInputRunning: true,
+            presentation: AddonPresentationKind.SteamDeck,
+            presentationLive: true));
+        Assert.Equal(FrontendControllerBadgeState.Initializing, Evaluate(
+            recoverySafe: false,
+            centerM: FrontendCenterMStartupState.Disabled,
+            startupPending: true));
+        Assert.Equal(FrontendControllerBadgeState.Reconnecting, Evaluate(
+            recoverySafe: false,
+            centerM: FrontendCenterMStartupState.Disabled,
+            physicalInputRunning: false,
+            recoveryPending: true,
+            presentation: AddonPresentationKind.Xbox360,
+            presentationLive: false));
+    }
+
+    [Fact]
+    public void Unsafe_recovery_blocks_enabled_stock_authority()
+    {
+        Assert.Equal(FrontendControllerBadgeState.NeedsAttention, Evaluate(
+            recoverySafe: false,
+            centerM: FrontendCenterMStartupState.Enabled));
     }
 
     [Fact]

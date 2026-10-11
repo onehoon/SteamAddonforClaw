@@ -20,12 +20,14 @@ internal static class Full1902ControllerBadgeEvaluator
         bool ownedControllerRecoveryBlocked,
         bool controllerOwnershipReleaseStarted)
     {
-        if (!recoverySafe || ownedControllerRecoveryBlocked || controllerOwnershipReleaseStarted
+        if (ownedControllerRecoveryBlocked || controllerOwnershipReleaseStarted
             || centerMStartupState == FrontendCenterMStartupState.Partial)
             return FrontendControllerBadgeState.NeedsAttention;
 
         if (centerMStartupState == FrontendCenterMStartupState.Enabled)
-            return FrontendControllerBadgeState.MsiNative;
+            return recoverySafe
+                ? FrontendControllerBadgeState.MsiNative
+                : FrontendControllerBadgeState.NeedsAttention;
 
         if (centerMStartupState != FrontendCenterMStartupState.Disabled)
             return FrontendControllerBadgeState.Unavailable;
