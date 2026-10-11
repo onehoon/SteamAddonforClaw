@@ -66,7 +66,7 @@ Do not run another controller-management or virtual-controller-routing applicati
 4. To let the Addon manage the built-in controller, choose **Disable** for **MSI Center M** and confirm **Disable and Restart**. Windows must restart for this controller-authority change to take effect.
 5. After Windows starts again, the Addon runs in the background. Open the Main App to configure controls, performance settings, profiles, or ClawHUD.
 
-On A2VM 7/8, the Addon attempts its optional controller-mode rumble initialization once per actual Windows boot; EX/CG3EM is excluded. It does not repeat for an Addon restart or sleep/resume, and it never switches back to PID1901 just for shutdown.
+On A2VM 7/8, the Addon attempts its optional controller-mode rumble initialization once per actual Windows boot; EX/CG3EM is excluded. During a real Windows shutdown or restart, it may make one best-effort PID1901 command only after controller output and input have been safely retired. This does not release MSI Center M authority or change HidHide, and PID1901 arrival is not verified before Windows exits. Addon restarts, logoff, sleep, hibernate, and resume do not use this path.
 
 If you prefer the stock MSI controller behavior, leave MSI Center M enabled or use **Enable and Restart** on the Device page.
 

@@ -917,6 +917,92 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
+    public async Task Windows_session_end_retires_publisher_stops_feedback_detaches_and_tears_down_viiper()
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var publisher = new FakePublisher { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
+                    events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, publisher, new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        events.Clear();
+
+        var retired = await owner.PrepareForWindowsSessionEndAsync(CancellationToken.None);
+
+        Assert.True(retired);
+        Assert.Null(owner.ActivePresentation);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        Assert.True(events.IndexOf("PublisherStop") >= 0);
+        Assert.True(events.IndexOf("PublisherStop") < events.IndexOf("PhysicalStop"));
+        Assert.True(events.IndexOf("PhysicalStop") < events.IndexOf("ViiperDetach"));
+        Assert.Contains("CloseUSBServer", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Windows_session_end_does_not_detach_when_physical_rumble_stop_is_unconfirmed()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var publisher = new FakePublisher();
+        var owner = BuildWithSink(native, publisher, new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "StopFailed"));
+        native.Calls.Clear();
+
+        var retired = await owner.PrepareForWindowsSessionEndAsync(CancellationToken.None);
+
+        Assert.False(retired);
+        Assert.True(publisher.StopCalled);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+        Assert.Equal(CanonicalViiperRuntimeState.Ready, owner.ViiperState);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Windows_session_end_does_not_teardown_viiper_when_typed_detach_fails()
+    {
+        var native = new FakeNative();
+        var publisher = new FakePublisher();
+        var owner = BuildWithSink(native, publisher, new FakePublisher(), new FakeRumbleSink());
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure);
+        native.Calls.Clear();
+
+        var retired = await owner.PrepareForWindowsSessionEndAsync(CancellationToken.None);
+
+        Assert.False(retired);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+        Assert.Equal(CanonicalViiperRuntimeState.Ready, owner.ViiperState);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Windows_session_end_does_not_report_safe_when_viiper_server_teardown_fails()
+    {
+        var native = new FakeNative();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), new FakeRumbleSink());
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        native.CloseServerResults.Enqueue(false);
+
+        var retired = await owner.PrepareForWindowsSessionEndAsync(CancellationToken.None);
+
+        Assert.False(retired);
+        Assert.Contains("CloseUSBServer", native.Calls);
+        Assert.NotEqual(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Developer_rearm_keeps_viiper_but_does_not_reattach_after_physical_recovery_fails()
     {
         var events = new List<string>();
@@ -2101,6 +2187,7 @@ public sealed class MsiClawAddonPresentationTests
     {
         public bool Started { get; private set; }
         public bool StopCalled { get; private set; }
+        public List<string>? LifecycleEvents { get; set; }
         public bool StartThrows { get; set; }
         public bool StopThrows { get; set; }
         public TaskCompletionSource? StopGate { get; set; }
@@ -2116,6 +2203,7 @@ public sealed class MsiClawAddonPresentationTests
         public async Task StopAsync()
         {
             StopCalled = true;
+            LifecycleEvents?.Add("PublisherStop");
             if (StopGate is not null) await StopGate.Task.ConfigureAwait(false);
             if (StopThrows) throw new InvalidOperationException("join failed");
             _running = false;
@@ -2141,20 +2229,22 @@ public sealed class MsiClawAddonPresentationTests
     {
         public bool SetDiagnosticLogDirectory(string _) => true;
         internal readonly List<string> Calls = [];
+        internal List<string>? LifecycleEvents { get; set; }
         internal Queue<USBDeviceAttachResult> AttachResults { get; } = [];
         internal Queue<USBDeviceDetachResult> DetachResults { get; } = [];
         internal Queue<USBDeviceAttachmentState> AttachmentStates { get; } = [];
         internal Queue<bool> StateResults { get; } = [];
+        internal Queue<bool> CloseServerResults { get; } = [];
         private readonly Dictionary<nuint, USBDeviceAttachmentState> _attachmentByHandle = [];
         public bool NewUSBServer(ref USBServerConfig config, out nuint handle, ViiperLogCallback? callback = null) { Calls.Add("NewUSBServer"); handle = 10; return true; }
-        public bool CloseUSBServer(nuint handle) { Calls.Add("CloseUSBServer"); return true; }
+        public bool CloseUSBServer(nuint handle) { Calls.Add("CloseUSBServer"); return CloseServerResults.Count == 0 || CloseServerResults.Dequeue(); }
         public bool CreateUSBBus(nuint handle, ref uint bus) { Calls.Add("CreateUSBBus"); bus = 42; return true; }
         public bool RemoveUSBBus(nuint handle, uint bus) { Calls.Add("RemoveUSBBus"); return true; }
         public bool GetUSBDeviceIdentity(nuint handle, out uint bus, out uint id) { Calls.Add("GetUSBDeviceIdentity"); bus = 42; id = handle == 20 ? 9u : 10u; return true; }
         public bool AttachUSBDevice(nuint handle) => throw new NotSupportedException();
         public bool DetachUSBDevice(nuint handle) => throw new NotSupportedException();
         public USBDeviceAttachResult AttachUSBDeviceEx(nuint handle) { Calls.Add("AttachUSBDeviceEx"); var r = AttachResults.Count > 0 ? AttachResults.Dequeue() : USBDeviceAttachResult.Success; if (r == USBDeviceAttachResult.Success) _attachmentByHandle[handle] = USBDeviceAttachmentState.Attached; return r; }
-        public USBDeviceDetachResult DetachUSBDeviceEx(nuint handle) { Calls.Add("DetachUSBDeviceEx"); var r = DetachResults.Count > 0 ? DetachResults.Dequeue() : USBDeviceDetachResult.Success; if (r == USBDeviceDetachResult.Success) _attachmentByHandle[handle] = USBDeviceAttachmentState.Detached; return r; }
+        public USBDeviceDetachResult DetachUSBDeviceEx(nuint handle) { Calls.Add("DetachUSBDeviceEx"); LifecycleEvents?.Add("ViiperDetach"); var r = DetachResults.Count > 0 ? DetachResults.Dequeue() : USBDeviceDetachResult.Success; if (r == USBDeviceDetachResult.Success) _attachmentByHandle[handle] = USBDeviceAttachmentState.Detached; return r; }
         public bool GetUSBDeviceAttachmentState(nuint handle, out USBDeviceAttachmentState state) { Calls.Add("GetUSBDeviceAttachmentState"); state = AttachmentStates.Count > 0 ? AttachmentStates.Dequeue() : (_attachmentByHandle.TryGetValue(handle, out var s) ? s : USBDeviceAttachmentState.Detached); return true; }
         public bool CreateSteamDeckDevice(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid) { Calls.Add("CreateSteamDeckDevice"); handle = 20; return true; }
         public bool SetSteamDeckDeviceState(nuint handle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); return StateResults.Count == 0 || StateResults.Dequeue(); }

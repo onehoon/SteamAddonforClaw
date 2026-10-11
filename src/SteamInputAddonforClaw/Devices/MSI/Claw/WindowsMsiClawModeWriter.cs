@@ -31,6 +31,7 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter, IMsiClawGam
         var matching = SelectDeviceInformation(device, infos);
         if (matching is null) return false;
         var bytes = MsiClawModeCommand.BuildSwitch(mode);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!await _transport.WriteAsync(matching.Id, bytes, cancellationToken).ConfigureAwait(false)) return false;
         AppLog.Debug("NativeMode", "MSI Claw mode command written.", ("PID", device.Device.ProductId), ("UsagePage", device.UsagePage), ("Usage", device.Usage), ("ReportLength", bytes.Length), ("Mode", mode));
         return true;

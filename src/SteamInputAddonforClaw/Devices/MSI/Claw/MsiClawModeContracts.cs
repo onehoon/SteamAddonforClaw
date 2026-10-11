@@ -84,7 +84,13 @@ internal sealed record MsiClawModeTransitionResult(MsiClawModeTransitionStatus S
 {
     internal bool Succeeded => Status == MsiClawModeTransitionStatus.Succeeded;
 }
+
+internal sealed record MsiClawModeCommandWriteResult(bool WriteAttempted, bool WriteSucceeded, string Reason);
+
 internal interface IMsiClawModeController
 {
     Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken);
+
+    Task<MsiClawModeCommandWriteResult> WriteXInputCommandAsync(MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken) =>
+        Task.FromResult(new MsiClawModeCommandWriteResult(false, false, "WriteOnlyModeCommandUnavailable"));
 }

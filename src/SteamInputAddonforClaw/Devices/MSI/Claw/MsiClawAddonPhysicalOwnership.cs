@@ -52,6 +52,13 @@ internal sealed record PhysicalOwnershipReleaseResult(bool Succeeded, string Rea
     internal static PhysicalOwnershipReleaseResult NothingOwned { get; } = new(true, "NoPhysicalOwnership", []);
 }
 
+internal enum A2vmWindowsSessionEndOutcome { CommandWritten, Skipped, WriteFailed }
+
+internal sealed record A2vmWindowsSessionEndResult(A2vmWindowsSessionEndOutcome Outcome, string Reason)
+{
+    internal static A2vmWindowsSessionEndResult Skipped(string reason) => new(A2vmWindowsSessionEndOutcome.Skipped, reason);
+}
+
 internal enum DeveloperRumbleRearmPhysicalOutcome { Completed, Unavailable, Failed }
 
 internal sealed record DeveloperRumbleRearmPhysicalResult(
@@ -96,6 +103,11 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
     /// commits. Never issues a PID mode write and never restores PID1901.</summary>
     Task<MsiClawPhysicalOwnershipResult> RecoverLostInputAsync(CancellationToken cancellationToken);
 
+    /// <summary>Windows shutdown/restart only: stop the already-owned A2VM PID1902 DirectInput
+    /// session after presentation retirement, then issue at most one existing XInput command. It
+    /// does not verify PID1901 arrival, change Center M, or mutate persistent HidHide state.</summary>
+    Task<A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(CancellationToken cancellationToken);
+
     /// <summary>One explicit Developer-only A2VM rumble re-arm. The caller has already stopped and
     /// drained the active virtual presentation. This method owns the physical serialization gate,
     /// stops the current DirectInput session with cleanup proof, verifies PID1902->PID1901->PID1902,
@@ -113,14 +125,16 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
 ///
 /// It deliberately does NOT use the old route-scoped native-mode session coordinator or physical
 /// isolation stage, does not journal anything in the routing recovery journal, and never attaches a
-/// virtual X360/SteamDeck presentation. On failure it releases only process-owned handles: durable
-/// Addon authority is never silently released and PID1902 is never converted back to PID1901.
+/// virtual X360/SteamDeck presentation. Ordinary failure releases only process-owned handles:
+/// durable Addon authority is never silently released and PID1902 is not converted back to PID1901.
+/// The separately gated A2VM Windows session-end preparation is the only best-effort exception.
 /// </summary>
 internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwnership, IMsiClawPhysicalInputIdentityProvider
 {
     private readonly Func<FrontendCenterMStartupState> _captureCenterMStartupState;
     private readonly Func<CancellationToken, Task<NativeStateCaptureResult>> _captureStableNativeState;
     private readonly Func<MsiClawNativeMode, MsiClawPhysicalIdentity, CancellationToken, Task<MsiClawModeTransitionResult>> _switchMode;
+    private readonly Func<MsiClawPhysicalIdentity, CancellationToken, Task<MsiClawModeCommandWriteResult>>? _writeXInputCommand;
     private readonly Func<IReadOnlyList<DirectInputDeviceDescriptor>> _enumerateDirectInputDevices;
     private readonly Func<string, ControllerDeviceInfo?> _resolvePnpDevice;
     private readonly Func<IReadOnlyList<ControllerDeviceInfo>> _enumeratePnpDevices;
@@ -227,11 +241,13 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         Func<BootSessionAttemptResult>? claimA2vmBootAttempt = null,
         Func<long>? getTimestamp = null,
         TimeSpan? a2vmBootPid1901SettleWindow = null,
-        TimeSpan? a2vmBootPid1901SettleInterval = null)
+        TimeSpan? a2vmBootPid1901SettleInterval = null,
+        Func<MsiClawPhysicalIdentity, CancellationToken, Task<MsiClawModeCommandWriteResult>>? writeXInputCommand = null)
     {
         _captureCenterMStartupState = captureCenterMStartupState;
         _captureStableNativeState = captureStableNativeState;
         _switchMode = switchMode;
+        _writeXInputCommand = writeXInputCommand;
         _enumerateDirectInputDevices = enumerateDirectInputDevices;
         _resolvePnpDevice = resolvePnpDevice;
         _enumeratePnpDevices = enumeratePnpDevices;
@@ -719,6 +735,125 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 return new(MsiClawPhysicalOwnershipOutcome.Failed, "ReleasedForCenterMEnable", false, _ownedHiddenTargets);
             }
             return await RecoverLostInputCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+            return A2vmWindowsSessionEndResult.Skipped("OwnerDisposed");
+        if (!IsA2vmBootRumblePrimeModel(_hardwareDeviceModel))
+            return A2vmWindowsSessionEndResult.Skipped("UnsupportedModel");
+
+        try
+        {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return A2vmWindowsSessionEndResult.Skipped("DeadlineExceededBeforePhysicalOwner");
+        }
+        catch (ObjectDisposedException)
+        {
+            return A2vmWindowsSessionEndResult.Skipped("OwnerDisposed");
+        }
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Volatile.Read(ref _disposed) != 0) return A2vmWindowsSessionEndResult.Skipped("OwnerDisposed");
+            if (_releasedForEnable) return A2vmWindowsSessionEndResult.Skipped("AuthorityReleaseInProgress");
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+                return A2vmWindowsSessionEndResult.Skipped("CenterMAuthorityNotDisabled");
+            if (!_ownsInputSource || !_inputSource.IsRunning)
+                return A2vmWindowsSessionEndResult.Skipped("OwnedDirectInputSourceUnavailable");
+            if (_ownedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong } identity
+                || identity.VendorId != MsiClawHardware.VendorId
+                || identity.ProductId != MsiClawHardware.DirectInputProductId
+                || _ownedPrimaryHiddenTarget is not { } target
+                || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(target)
+                || !_ownedHiddenTargets.Contains(target, StringComparer.OrdinalIgnoreCase))
+                return A2vmWindowsSessionEndResult.Skipped("StrongOwnedPid1902TargetUnavailable");
+
+            var liveSession = CurrentIdentity;
+            if (liveSession is null
+                || string.IsNullOrWhiteSpace(liveSession.PhysicalIdentity)
+                || !string.Equals(liveSession.PnpInstanceId, target, StringComparison.OrdinalIgnoreCase))
+                return A2vmWindowsSessionEndResult.Skipped("LiveDirectInputIdentityDoesNotMatchOwnedTarget");
+
+            IReadOnlyList<ControllerDeviceInfo> devices;
+            try
+            {
+                devices = _enumeratePnpDevices();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("ControllerOwnership", "Windows session-end PID1901 preparation could not enumerate the owned PID1902 topology.", exception,
+                    ("Event", "A2vmWindowsSessionEndPreflightFailed"));
+                return A2vmWindowsSessionEndResult.Skipped("OwnedPid1902EnumerationFailed");
+            }
+
+            var primary = devices.SingleOrDefault(device =>
+                device.Present
+                && string.Equals(device.InstanceId, target, StringComparison.OrdinalIgnoreCase));
+            if (primary is null
+                || !MsiClawHardware.IsDirectInputHidCollection(primary)
+                || !identity.StronglyMatches(MsiClawPhysicalIdentity.From(primary)))
+                return A2vmWindowsSessionEndResult.Skipped("ExactOwnedPid1902PrimaryNotPresent");
+
+            if (new MsiClawControlHidResolver().Resolve(devices, MsiClawNativeMode.DirectInput, identity) is null)
+                return A2vmWindowsSessionEndResult.Skipped("UniquePid1902CommandHidUnavailable");
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+                return A2vmWindowsSessionEndResult.Skipped("CenterMAuthorityChangedBeforeDirectInputStop");
+
+            // Invalidate any stale rumble writer identity before stopping the same process-owned
+            // DirectInput session. Presentation retirement has already drained its callback.
+            _ownsInputSource = false;
+            ClearLivePhysicalSession();
+            _inputSource.ResetLatestStateToNeutral();
+
+            bool cleanupProven;
+            try
+            {
+                cleanupProven = await _inputSource.StopAndConfirmCleanupAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("ControllerOwnership", "Windows session-end DirectInput cleanup threw; skipping the PID1901 command.", exception,
+                    ("Event", "A2vmWindowsSessionEndDirectInputStopFailed"));
+                return A2vmWindowsSessionEndResult.Skipped("DirectInputCleanupUnproven");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!cleanupProven || _inputSource.IsRunning)
+                return A2vmWindowsSessionEndResult.Skipped("DirectInputCleanupUnproven");
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+                return A2vmWindowsSessionEndResult.Skipped("CenterMAuthorityChangedBeforeModeWrite");
+            if (_writeXInputCommand is null)
+                return A2vmWindowsSessionEndResult.Skipped("WriteOnlyModeCommandUnavailable");
+
+            // The write-only mode-controller seam re-enumerates and resolves the exact strong
+            // PID1902 command endpoint again, then performs one HID write with no PnP wait.
+            cancellationToken.ThrowIfCancellationRequested();
+            var write = await _writeXInputCommand(identity, cancellationToken).ConfigureAwait(false);
+            if (write.WriteSucceeded)
+                return new(A2vmWindowsSessionEndOutcome.CommandWritten, "XInputCommandWritten");
+            return write.WriteAttempted
+                ? new(A2vmWindowsSessionEndOutcome.WriteFailed, write.Reason)
+                : A2vmWindowsSessionEndResult.Skipped(write.Reason);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return A2vmWindowsSessionEndResult.Skipped("DeadlineExceededBeforeModeWrite");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerOwnership", "Windows session-end PID1901 preparation failed closed.", exception,
+                ("Event", "A2vmWindowsSessionEndPreparationFailed"));
+            return A2vmWindowsSessionEndResult.Skipped("PreparationFailed:" + exception.GetType().Name);
         }
         finally { _gate.Release(); }
     }

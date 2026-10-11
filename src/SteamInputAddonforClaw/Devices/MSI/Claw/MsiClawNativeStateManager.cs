@@ -19,6 +19,11 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
             ? Task.FromResult(new MsiClawModeTransitionResult(MsiClawModeTransitionStatus.UnsupportedDevice, MsiClawNativeMode.Other, target, null, null, false, false, false, false, false, 0, "ModeControllerUnavailable"))
             : modeController.SwitchModeAsync(target, identity, cancellationToken);
 
+    internal Task<MsiClawModeCommandWriteResult> WriteXInputCommandAsync(MsiClawPhysicalIdentity identity, CancellationToken cancellationToken) =>
+        modeController is null
+            ? Task.FromResult(new MsiClawModeCommandWriteResult(false, false, "ModeControllerUnavailable"))
+            : modeController.WriteXInputCommandAsync(identity, cancellationToken);
+
     public NativeStateCaptureResult CaptureSnapshot()
     {
         var stopwatch = Stopwatch.StartNew();

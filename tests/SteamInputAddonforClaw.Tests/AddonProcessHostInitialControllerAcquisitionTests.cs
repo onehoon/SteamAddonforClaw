@@ -98,7 +98,7 @@ public sealed class AddonProcessHostInitialControllerAcquisitionTests
         var physicalRelease = release.IndexOf("owner.ReleaseForCenterMEnableAsync", StringComparison.Ordinal);
         Assert.True(closeAdmission >= 0 && drain > closeAdmission && presentationRelease > drain && physicalRelease > presentationRelease);
 
-        var shutdown = Method(host, "internal void BeginProcessShutdown()");
+        var shutdown = Method(host, "private bool TryBeginProcessShutdownCore()");
         Assert.Contains("_initialControllerAcquisition = null", shutdown, StringComparison.Ordinal);
         Assert.Contains("_deviceArrivalWatcher?.Dispose()", shutdown, StringComparison.Ordinal);
         var dispose = Method(host, "public async ValueTask DisposeAsync()");

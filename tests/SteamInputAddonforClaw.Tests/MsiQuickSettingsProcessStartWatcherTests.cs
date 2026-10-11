@@ -122,7 +122,7 @@ public sealed class MsiQuickSettingsProcessStartWatcherTests
         var restoredStop = host.IndexOf("StopMsiQuickSettingsProcessStartWatcher();", restored, StringComparison.Ordinal);
         Assert.True(restored >= 0 && restoredStop > restored && restoredStop < restoredDisarm);
 
-        var shutdown = Method(host, "internal void BeginProcessShutdown()");
+        var shutdown = Method(host, "private bool TryBeginProcessShutdownCore()");
         var shutdownFlag = shutdown.IndexOf("Interlocked.Exchange(ref _processShutdownStarted, 1)", StringComparison.Ordinal);
         var shutdownStop = shutdown.IndexOf("StopMsiQuickSettingsProcessStartWatcher();", StringComparison.Ordinal);
         Assert.True(shutdownFlag >= 0 && shutdownStop > shutdownFlag

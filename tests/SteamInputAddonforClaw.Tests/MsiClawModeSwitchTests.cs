@@ -255,6 +255,21 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Raw_transport_cancels_an_inflight_synchronous_write_when_deadline_expires()
+    {
+        var fake = new BlockingNativeHidApi();
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+        using var cancellation = new CancellationTokenSource();
+        var write = Task.Run(() => transport.WriteAsync("hid-path", new byte[64], cancellation.Token));
+
+        Assert.True(fake.WriteStarted.Wait(TimeSpan.FromSeconds(1)));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write.WaitAsync(TimeSpan.FromSeconds(1)));
+        Assert.Equal(1, fake.CancelWriteCallCount);
+    }
+
+    [Fact]
     public async Task Raw_transport_requires_an_exact_full_input_report()
     {
         var fake = new FakeNativeHidApi { ReadResult = true, BytesRead = 64 };
@@ -334,6 +349,67 @@ public sealed class MsiClawModeSwitchTests
         var controller = new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(1), TimeSpan.Zero);
         var result = await controller.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(oldDevice), CancellationToken.None);
         Assert.True(result.Succeeded); Assert.True(result.OldPidDisappeared); Assert.True(result.TargetPidAppeared); Assert.True(result.SourceIdentityVerified); Assert.True(result.TargetTopologyVerified); Assert.Equal(MsiClawNativeMode.DirectInput, writer.Mode);
+    }
+
+    [Fact]
+    public async Task Session_end_write_only_mode_command_resolves_once_and_does_not_wait_for_pnp()
+    {
+        var source = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var enumerator = new SequenceEnumerator([source]);
+        var writer = new RecordingWriter();
+        var delayCalls = 0;
+        var controller = new MsiClawModeController(
+            enumerator,
+            new MsiClawControlHidResolver(),
+            writer,
+            delay: (_, _) => { delayCalls++; return Task.CompletedTask; });
+
+        var result = await controller.WriteXInputCommandAsync(MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.WriteAttempted);
+        Assert.True(result.WriteSucceeded);
+        Assert.Equal("CommandWritten", result.Reason);
+        Assert.Equal(1, enumerator.EnumerationCount);
+        Assert.Equal(1, writer.CallCount);
+        Assert.Equal(MsiClawNativeMode.XInput, writer.Mode);
+        Assert.Equal(0, delayCalls);
+    }
+
+    [Fact]
+    public async Task Session_end_write_only_mode_command_rejects_ambiguous_control_endpoints()
+    {
+        var container = Guid.NewGuid();
+        var first = Device(container, "USB\\ROOT", "HID\\MSI_A", 0x1902, 0xFFF0, 0x0040);
+        var second = Device(container, "USB\\ROOT", "HID\\MSI_B", 0x1902, 0xFFF0, 0x0040);
+        var writer = new RecordingWriter();
+        var controller = new MsiClawModeController(
+            new SequenceEnumerator([first, second]),
+            new MsiClawControlHidResolver(),
+            writer);
+
+        var result = await controller.WriteXInputCommandAsync(MsiClawPhysicalIdentity.From(first), CancellationToken.None);
+
+        Assert.False(result.WriteAttempted);
+        Assert.False(result.WriteSucceeded);
+        Assert.Contains("CommandSourceNotProven", result.Reason);
+        Assert.Equal(0, writer.CallCount);
+    }
+
+    [Fact]
+    public async Task Session_end_write_only_mode_command_checks_cancellation_before_enumeration_or_write()
+    {
+        var source = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var enumerator = new SequenceEnumerator([source]);
+        var writer = new RecordingWriter();
+        var controller = new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            controller.WriteXInputCommandAsync(MsiClawPhysicalIdentity.From(source), cancellation.Token));
+
+        Assert.Equal(0, enumerator.EnumerationCount);
+        Assert.Equal(0, writer.CallCount);
     }
 
     [Fact]
@@ -539,7 +615,11 @@ public sealed class MsiClawModeSwitchTests
         new(instance, Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), parent, [root], "HID", [], [], "HIDClass", null, null, 0x0DB0, 0x1902, true, UsagePage: 0xFFF0, Usage: 0x0040);
 
     private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] states) : IControllerDeviceEnumerator
-    { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Length - 1)]; }
+    {
+        private int _index;
+        public int EnumerationCount => _index;
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Length - 1)];
+    }
     private sealed class StaticEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
     { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices; }
     private sealed class RecordingWriter : IMsiClawModeWriter
@@ -658,6 +738,37 @@ public sealed class MsiClawModeSwitchTests
             }
             bytesRead = BytesRead;
             return ReadResult;
+        }
+        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
+        {
+            inputReportLength = 0;
+            outputReportLength = 0;
+            usagePage = 0;
+            usage = 0;
+            hidStatus = 0;
+            return false;
+        }
+    }
+
+    private sealed class BlockingNativeHidApi : IMsiClawNativeHidApi
+    {
+        private readonly ManualResetEventSlim _cancelled = new();
+        public ManualResetEventSlim WriteStarted { get; } = new();
+        public int CancelWriteCallCount { get; private set; }
+        public int LastError => 995;
+        public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition) =>
+            new(new IntPtr(1), ownsHandle: false);
+        public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+        {
+            WriteStarted.Set();
+            _cancelled.Wait(TimeSpan.FromSeconds(2));
+            bytesWritten = 0;
+            return false;
+        }
+        public void CancelWrite(SafeFileHandle handle)
+        {
+            CancelWriteCallCount++;
+            _cancelled.Set();
         }
         public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
         {

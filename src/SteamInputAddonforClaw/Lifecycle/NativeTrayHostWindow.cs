@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Lifecycle;
 
@@ -12,14 +13,17 @@ internal sealed class NativeTrayHostWindow : IDisposable
     private readonly WndProc _windowProc;
     private readonly string _className;
     private readonly IntPtr _instance;
+    private readonly Action? _windowsSessionEnd;
     private readonly ushort _classAtom;
     private IntPtr _handle;
     private int _disposed;
+    private int _windowsSessionEndStarted;
 
     internal IntPtr Handle => _handle;
 
-    internal NativeTrayHostWindow()
+    internal NativeTrayHostWindow(Action? windowsSessionEnd = null)
     {
+        _windowsSessionEnd = windowsSessionEnd;
         _windowProc = WindowProcedure;
         _className = $"SteamInputAddonforClaw.TrayHost.{Guid.NewGuid():N}";
         _instance = GetModuleHandleW(null);
@@ -79,8 +83,21 @@ internal sealed class NativeTrayHostWindow : IDisposable
         }
     }
 
-    private IntPtr WindowProcedure(IntPtr window, uint message, IntPtr wParam, IntPtr lParam) =>
-        DefWindowProcW(window, message, wParam, lParam);
+    private IntPtr WindowProcedure(IntPtr window, uint message, IntPtr wParam, IntPtr lParam)
+    {
+        if (_windowsSessionEnd is not null
+            && WindowsSessionEndMessage.TryStartOnce(ref _windowsSessionEndStarted, message, wParam, lParam))
+        {
+            try { _windowsSessionEnd(); }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Lifecycle", "Best-effort Windows session-end controller preparation failed; Windows shutdown will continue.", exception,
+                    ("Event", "A2vmWindowsSessionEndCallbackFailed"));
+            }
+        }
+
+        return DefWindowProcW(window, message, wParam, lParam);
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct WNDCLASSEXW
@@ -130,4 +147,25 @@ internal sealed class NativeTrayHostWindow : IDisposable
 
     [DllImport("user32.dll")]
     private static extern IntPtr DefWindowProcW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+}
+
+internal static class WindowsSessionEndMessage
+{
+    internal const uint WmQueryEndSession = 0x0011;
+    internal const uint WmEndSession = 0x0016;
+    internal const uint EndSessionCloseApp = 0x00000001;
+    internal const uint EndSessionLogoff = 0x80000000;
+
+    internal static bool IsRealWindowsPowerSessionEnd(uint message, IntPtr wParam, IntPtr lParam)
+    {
+        if (message != WmEndSession || wParam == IntPtr.Zero)
+            return false;
+
+        var flags = unchecked((uint)lParam.ToInt64());
+        return (flags & (EndSessionLogoff | EndSessionCloseApp)) == 0;
+    }
+
+    internal static bool TryStartOnce(ref int started, uint message, IntPtr wParam, IntPtr lParam) =>
+        IsRealWindowsPowerSessionEnd(message, wParam, lParam)
+        && Interlocked.Exchange(ref started, 1) == 0;
 }
