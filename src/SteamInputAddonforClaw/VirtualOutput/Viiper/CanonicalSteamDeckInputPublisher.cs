@@ -102,6 +102,18 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private long _maxWakeLatenessTicksSinceHeartbeat;
     private long _skippedDeadlineCountSinceHeartbeat;
 
+    // Motion summaries piggyback the existing publisher operation and are touched only by its tick thread.
+    private bool _motionImuDiagnosticsActive;
+    private long _motionImuDiagnosticsWindowStart;
+    private long _motionImuPublishTickCount;
+    private long _motionImuUsableTickCount;
+    private long _motionImuUnavailableTickCount;
+    private long _motionGyroUnavailableTickCount;
+    private long _motionAccelUnavailableTickCount;
+    private long _motionGyroUniqueReceiveTickCount;
+    private long _motionGyroRepeatedReceiveTickCount;
+    private long _motionPreviousGyroReceiveTicks;
+
     internal CanonicalSteamDeckInputPublisher(
         IControllerStateSnapshotSource snapshot,
         ICanonicalSteamDeckStateSink sink,
@@ -358,6 +370,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
 
     private void ResetTimingDiagnosticsForNewRun()
     {
+        ResetMotionImuPublishDiagnostics();
         _setStateCallsSinceHeartbeat = 0;
         _maxSetStateTicksSinceHeartbeat = 0;
         _totalSetStateFailures = 0;
@@ -377,6 +390,85 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _wakeLatenessTicksSumSinceHeartbeat = 0;
         _maxWakeLatenessTicksSinceHeartbeat = 0;
         _skippedDeadlineCountSinceHeartbeat = 0;
+    }
+
+    private void ResetMotionImuPublishDiagnostics()
+    {
+        _motionImuDiagnosticsActive = false;
+        _motionImuDiagnosticsWindowStart = 0;
+        _motionImuPublishTickCount = 0;
+        _motionImuUsableTickCount = 0;
+        _motionImuUnavailableTickCount = 0;
+        _motionGyroUnavailableTickCount = 0;
+        _motionAccelUnavailableTickCount = 0;
+        _motionGyroUniqueReceiveTickCount = 0;
+        _motionGyroRepeatedReceiveTickCount = 0;
+        _motionPreviousGyroReceiveTicks = 0;
+    }
+
+    private void StartMotionImuDiagnosticsWindow(long now)
+    {
+        ResetMotionImuPublishDiagnostics();
+        _motionImuDiagnosticsActive = true;
+        _motionImuDiagnosticsWindowStart = now;
+    }
+
+    private void TrackMotionImuPublishDiagnostics(MsiClawMotionState motion, bool enabled)
+    {
+        try
+        {
+            if (!enabled)
+            {
+                if (_motionImuDiagnosticsActive)
+                    ResetMotionImuPublishDiagnostics();
+                return;
+            }
+
+            var now = _timestampProvider();
+            if (!_motionImuDiagnosticsActive || now < _motionImuDiagnosticsWindowStart)
+                StartMotionImuDiagnosticsWindow(now);
+
+            _motionImuPublishTickCount++;
+            if (motion.IsUsableForSteamDeckImu)
+                _motionImuUsableTickCount++;
+            else
+                _motionImuUnavailableTickCount++;
+
+            if (!motion.HasGyro)
+                _motionGyroUnavailableTickCount++;
+            else if (motion.GyroReceiveTicks > 0)
+            {
+                if (motion.GyroReceiveTicks == _motionPreviousGyroReceiveTicks)
+                    _motionGyroRepeatedReceiveTickCount++;
+                else
+                    _motionGyroUniqueReceiveTickCount++;
+                _motionPreviousGyroReceiveTicks = motion.GyroReceiveTicks;
+            }
+
+            if (!motion.HasAccelerometer)
+                _motionAccelUnavailableTickCount++;
+
+            var elapsedTicks = now - _motionImuDiagnosticsWindowStart;
+            if (elapsedTicks < Stopwatch.Frequency * 10L)
+                return;
+
+            AppLog.Debug("SteamOutput", "MotionImuPublishDiagnosticsSummary",
+                ("Event", "MotionImuPublishDiagnosticsSummary"),
+                ("WindowMs", Stopwatch.GetElapsedTime(_motionImuDiagnosticsWindowStart, now).TotalMilliseconds),
+                ("PublishTickCount", _motionImuPublishTickCount),
+                ("ImuUsableTickCount", _motionImuUsableTickCount),
+                ("ImuUnavailableTickCount", _motionImuUnavailableTickCount),
+                ("GyroUnavailableTickCount", _motionGyroUnavailableTickCount),
+                ("AccelUnavailableTickCount", _motionAccelUnavailableTickCount),
+                ("GyroUniqueReceiveTickCount", _motionGyroUniqueReceiveTickCount),
+                ("GyroRepeatedReceiveTickCount", _motionGyroRepeatedReceiveTickCount));
+            StartMotionImuDiagnosticsWindow(now);
+        }
+        catch
+        {
+            // Optional telemetry must remain fail-passive if a diagnostic clock or formatter fails.
+            ResetMotionImuPublishDiagnostics();
+        }
     }
 
     private async Task PublishAsync(IInputReportTickSource ticks, CancellationToken token)
@@ -419,6 +511,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
             _setStateCallsSinceHeartbeat++;
             if (callDuration > _maxSetStateTicksSinceHeartbeat) _maxSetStateTicksSinceHeartbeat = callDuration;
         }
+
+        TrackMotionImuPublishDiagnostics(motion, pulseDiagnosticsEnabled);
 
         if (!accepted)
         {

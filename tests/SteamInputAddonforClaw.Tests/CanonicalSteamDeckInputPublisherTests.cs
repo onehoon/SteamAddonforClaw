@@ -107,6 +107,90 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Motion_imu_summary_counts_fresh_reuse_and_stale_snapshots_without_changing_native_reports()
+    {
+        var state = new ControllerState(new AuxiliaryButtonState([false, false]));
+        var source = new Snapshot(state);
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var clock = new FakeStopwatchClock();
+        var motions = new[]
+        {
+            Motion(0, 0, 0, 0, 0, 0) with { GyroReceiveTicks = 10, AccelReceiveTicks = 10 },
+            Motion(0, 0, 0, 0, 0, 0) with { GyroReceiveTicks = 10, AccelReceiveTicks = 10 },
+            Motion(1, 0, 0, 0, 0, 0) with { GyroReceiveTicks = 20, AccelReceiveTicks = 20 },
+            Motion(1, 0, 0, 0, 0, 0) with { GyroReceiveTicks = 0, HasGyro = false },
+            Motion(1, 0, 0, 0, 0, 0) with { GyroReceiveTicks = 30, AccelReceiveTicks = 0, HasAccelerometer = false }
+        };
+        var motionIndex = 0;
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            source,
+            sink,
+            ticks,
+            timestampProvider: clock.Read,
+            motionSnapshotProvider: () => motions[motionIndex++]);
+
+        publisher.Start();
+        for (var i = 0; i < motions.Length; i++)
+        {
+            await ticks.TickAsync();
+            await sink.WaitForCountAsync(i + 1);
+            if (i < motions.Length - 1)
+                clock.Advance(TimeSpan.FromSeconds(i switch { 0 => 3, 1 => 3, 2 => 2, _ => 2 }));
+        }
+        await publisher.StopAsync();
+
+        Assert.Equal(motions.Length, motionIndex);
+        for (var i = 0; i < motions.Length; i++)
+            Assert.Equal(SteamDeckDeviceStateMapper.Map(state, false, false, motions[i]), sink.States[i]);
+
+        AppLog.DrainForTests();
+        var log = AppLog.ReadAllTextForTests(AppLog.CurrentLogFilePath);
+        Assert.Contains("Event=MotionImuPublishDiagnosticsSummary", log);
+        Assert.Contains("WindowMs=10000", log);
+        Assert.Contains("PublishTickCount=5", log);
+        Assert.Contains("ImuUsableTickCount=3", log);
+        Assert.Contains("ImuUnavailableTickCount=2", log);
+        Assert.Contains("GyroUnavailableTickCount=1", log);
+        Assert.Contains("AccelUnavailableTickCount=1", log);
+        Assert.Contains("GyroUniqueReceiveTickCount=3", log);
+        Assert.Contains("GyroRepeatedReceiveTickCount=1", log);
+    }
+
+    [Fact]
+    public async Task Motion_imu_debug_toggle_discards_old_partial_window()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var clock = new FakeStopwatchClock();
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            source, sink, ticks,
+            timestampProvider: clock.Read,
+            motionSnapshotProvider: () => Motion(0, 0, 0, 0, 0, 0));
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        publisher.Start();
+
+        await PublishOneTickAsync(ticks, sink, clock, elapsedBeforeTick: TimeSpan.Zero);
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        await PublishOneTickAsync(ticks, sink, clock, elapsedBeforeTick: TimeSpan.FromSeconds(9));
+        await PublishOneTickAsync(ticks, sink, clock, elapsedBeforeTick: TimeSpan.FromSeconds(9));
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        await PublishOneTickAsync(ticks, sink, clock, elapsedBeforeTick: TimeSpan.Zero);
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        await PublishOneTickAsync(ticks, sink, clock, elapsedBeforeTick: TimeSpan.FromSeconds(2));
+        await PublishOneTickAsync(ticks, sink, clock, elapsedBeforeTick: TimeSpan.FromSeconds(10));
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var log = AppLog.ReadAllTextForTests(AppLog.CurrentLogFilePath);
+        var summaries = log.Split("Event=MotionImuPublishDiagnosticsSummary", StringSplitOptions.None).Length - 1;
+        Assert.Equal(1, summaries);
+        Assert.Contains("PublishTickCount=2", log);
+        Assert.Contains("WindowMs=10000", log);
+    }
+
+    [Fact]
     public async Task Each_tick_uses_the_current_rear_suppression_decision_without_restarting()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));
@@ -1071,6 +1155,22 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         private DateTimeOffset _now = DateTimeOffset.UnixEpoch;
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan by) => _now += by;
+    }
+
+    private static async Task PublishOneTickAsync(ManualTicks ticks, FakeSink sink, FakeStopwatchClock clock, TimeSpan elapsedBeforeTick)
+    {
+        if (elapsedBeforeTick > TimeSpan.Zero)
+            clock.Advance(elapsedBeforeTick);
+        var expectedCount = sink.Count + 1;
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(expectedCount);
+    }
+
+    private sealed class FakeStopwatchClock
+    {
+        private long _ticks;
+        internal long Read() => Interlocked.Read(ref _ticks);
+        internal void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, (long)(by.TotalSeconds * Stopwatch.Frequency));
     }
 
     private sealed class Snapshot(ControllerState value) : IControllerStateSnapshotSource

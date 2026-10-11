@@ -332,32 +332,134 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
         IClawSensorProbeSourceHandle? handle = null;
         DateTimeOffset? previousSensorTimestamp = null;
         var pollDelayMs = PollDelayMilliseconds(candidate);
+        var diagnostics = default(MsiClawMotionReaderDiagnostics);
+        var diagnosticsActive = false;
+        var diagnosticsConfigurationLogged = false;
         try
         {
             handle = _openSource(candidate);
             while (!cancellationToken.IsCancellationRequested)
             {
+                try
+                {
+                    SynchronizeReaderDiagnostics(
+                        role, candidate, handle, pollDelayMs,
+                        ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
+                }
+                catch
+                {
+                    diagnostics.Reset();
+                    diagnosticsActive = false;
+                }
+
+                var measureRead = diagnosticsActive;
+                long readStartedTicks = 0;
+                if (measureRead)
+                {
+                    try { readStartedTicks = _getTimestamp(); }
+                    catch
+                    {
+                        diagnostics.Reset();
+                        diagnosticsActive = false;
+                        measureRead = false;
+                    }
+                }
+
                 var sample = handle.Read();
+                long readCompletedTicks = 0;
+                if (measureRead)
+                {
+                    try { readCompletedTicks = _getTimestamp(); }
+                    catch
+                    {
+                        diagnostics.Reset();
+                        diagnosticsActive = false;
+                        measureRead = false;
+                    }
+                }
+                var debugStillEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
+                try
+                {
+                    if (measureRead && debugStillEnabled && diagnosticsActive)
+                        diagnostics.ObserveRead(readCompletedTicks - readStartedTicks, _timestampFrequency);
+                    else if (!debugStillEnabled && diagnosticsActive)
+                    {
+                        diagnostics.Reset();
+                        diagnosticsActive = false;
+                    }
+                    else if (debugStillEnabled && !diagnosticsActive)
+                    {
+                        StartReaderDiagnostics(
+                            role, candidate, handle, pollDelayMs,
+                            ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
+                    }
+                }
+                catch
+                {
+                    diagnostics.Reset();
+                    diagnosticsActive = false;
+                    measureRead = false;
+                }
+
+                var recordThisRead = measureRead && debugStillEnabled && diagnosticsActive;
                 if (cancellationToken.IsCancellationRequested)
                     break;
 
                 if (!sample.HasData)
                 {
+                    if (recordThisRead)
+                        diagnostics.ObserveNoData();
                     WaitForNextRead(cancellationToken, pollDelayMs);
+                    EmitReaderDiagnosticsIfDue(role, candidate, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
                     continue;
                 }
 
                 DateTimeOffset? sensorTimestamp = sample.SensorTimestamp == default ? null : sample.SensorTimestamp;
                 if (IsDuplicateSensorTimestamp(previousSensorTimestamp, sensorTimestamp))
                 {
+                    if (recordThisRead)
+                        diagnostics.ObserveDuplicateTimestamp();
                     WaitForNextRead(cancellationToken, pollDelayMs);
+                    EmitReaderDiagnosticsIfDue(role, candidate, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
                     continue;
                 }
 
                 previousSensorTimestamp = sensorTimestamp;
+                if (recordThisRead && sensorTimestamp is null)
+                    diagnostics.ObserveMissingSensorTimestamp();
                 if (!PublishSample(role, candidate, sample, sensorTimestamp))
                     return;
+
+                if (recordThisRead)
+                {
+                    try
+                    {
+                        var published = Volatile.Read(ref _latestState);
+                        var sensorAgeNow = sensorTimestamp is null ? (DateTimeOffset?)null : DateTimeOffset.UtcNow;
+                        if (role == MotionRole.Gyroscope)
+                        {
+                            diagnostics.ObserveFresh(
+                                published.GyroXDegPerSecond, published.GyroYDegPerSecond, published.GyroZDegPerSecond,
+                                published.GyroReceiveTicks, published.GyroSensorTimestamp, sensorAgeNow,
+                                _timestampFrequency);
+                        }
+                        else
+                        {
+                            diagnostics.ObserveFresh(
+                                published.AccelXG, published.AccelYG, published.AccelZG,
+                                published.AccelReceiveTicks, published.AccelSensorTimestamp, sensorAgeNow,
+                                _timestampFrequency);
+                        }
+                    }
+                    catch
+                    {
+                        diagnostics.Reset();
+                        diagnosticsActive = false;
+                    }
+                }
+
                 WaitForNextRead(cancellationToken, pollDelayMs);
+                EmitReaderDiagnosticsIfDue(role, candidate, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -380,6 +482,150 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
                     ("Event", "MotionReaderDisposeFailed"), ("Model", _modelId.Value), ("Role", role),
                     ("Backend", candidate.Backend), ("SensorId", candidate.SensorId));
             }
+        }
+    }
+
+    private void SynchronizeReaderDiagnostics(
+        MotionRole role,
+        ClawSensorProbeCandidate candidate,
+        IClawSensorProbeSourceHandle handle,
+        int pollDelayMs,
+        ref MsiClawMotionReaderDiagnostics diagnostics,
+        ref bool diagnosticsActive,
+        ref bool diagnosticsConfigurationLogged)
+    {
+        if (!AppLog.IsEnabled(AppLogLevel.Debug))
+        {
+            if (diagnosticsActive)
+            {
+                diagnostics.Reset();
+                diagnosticsActive = false;
+            }
+            return;
+        }
+
+        if (!diagnosticsActive)
+            StartReaderDiagnostics(role, candidate, handle, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
+    }
+
+    private void StartReaderDiagnostics(
+        MotionRole role,
+        ClawSensorProbeCandidate candidate,
+        IClawSensorProbeSourceHandle handle,
+        int pollDelayMs,
+        ref MsiClawMotionReaderDiagnostics diagnostics,
+        ref bool diagnosticsActive,
+        ref bool diagnosticsConfigurationLogged)
+    {
+        try
+        {
+            if (!AppLog.IsEnabled(AppLogLevel.Debug))
+                return;
+
+            diagnostics.StartWindow(_getTimestamp());
+            diagnosticsActive = true;
+            if (diagnosticsConfigurationLogged)
+                return;
+
+            var configuration = handle.Configuration;
+            var isWinRt = configuration.Backend is ClawSensorProbeBackend.WinRtGyrometer or ClawSensorProbeBackend.WinRtAccelerometer;
+            uint? candidateMinimum = uint.TryParse(candidate.MinimumReportInterval, NumberStyles.None, CultureInfo.InvariantCulture, out var minimum)
+                ? minimum
+                : null;
+            AppLog.Debug("ControllerMotion", "MotionReaderDiagnosticsStarted",
+                ("Event", "MotionReaderDiagnosticsStarted"),
+                ("Model", _modelId.Value),
+                ("Role", role),
+                ("Backend", configuration.Backend),
+                ("SensorId", candidate.SensorId),
+                ("CandidateMinimumReportIntervalMs", candidateMinimum),
+                ("WinRtMinimumReportIntervalMs", isWinRt ? configuration.MinimumReportIntervalMs : null),
+                ("WinRtRequestedReportIntervalMs", isWinRt ? configuration.RequestedReportIntervalMs : null),
+                ("WinRtEffectiveReportIntervalMs", isWinRt ? configuration.EffectiveReportIntervalMs : null),
+                ("PollDelayMs", pollDelayMs),
+                ("PollDelayMeaning", "ExtraApplicationWaitAfterEachRead"));
+            diagnosticsConfigurationLogged = true;
+        }
+        catch
+        {
+            diagnostics.Reset();
+            diagnosticsActive = false;
+        }
+    }
+
+    private void EmitReaderDiagnosticsIfDue(
+        MotionRole role,
+        ClawSensorProbeCandidate candidate,
+        int pollDelayMs,
+        ref MsiClawMotionReaderDiagnostics diagnostics,
+        ref bool diagnosticsActive,
+        ref bool diagnosticsConfigurationLogged,
+        IClawSensorProbeSourceHandle handle)
+    {
+        try
+        {
+            if (!AppLog.IsEnabled(AppLogLevel.Debug))
+            {
+                if (diagnosticsActive)
+                {
+                    diagnostics.Reset();
+                    diagnosticsActive = false;
+                }
+                return;
+            }
+
+            if (!diagnosticsActive)
+            {
+                StartReaderDiagnostics(role, candidate, handle, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
+                return;
+            }
+
+            var nowTicks = _getTimestamp();
+            if (!diagnostics.IsSummaryDue(nowTicks, _timestampFrequency))
+                return;
+
+            var summary = diagnostics.CreateSummary(nowTicks, _timestampFrequency);
+            AppLog.Debug("ControllerMotion", "MotionReaderDiagnosticsSummary",
+                ("Event", "MotionReaderDiagnosticsSummary"),
+                ("Model", _modelId.Value),
+                ("Role", role),
+                ("Backend", candidate.Backend),
+                ("SensorId", candidate.SensorId),
+                ("WindowMs", summary.WindowMs),
+                ("ReadAttempts", summary.ReadAttempts),
+                ("FreshAcceptedCount", summary.FreshAcceptedCount),
+                ("DuplicateTimestampCount", summary.DuplicateTimestampCount),
+                ("NoDataCount", summary.NoDataCount),
+                ("MissingSensorTimestampCount", summary.MissingSensorTimestampCount),
+                ("ActualFreshHz", summary.ActualFreshHz),
+                ("PollDelayMs", pollDelayMs),
+                ("ReadDurationMeanMs", summary.ReadDurationMeanMs),
+                ("ReadDurationMaxMs", summary.ReadDurationMaxMs),
+                ("FreshReceiveIntervalMeanMs", summary.FreshReceiveIntervalMeanMs),
+                ("FreshReceiveIntervalMaxMs", summary.FreshReceiveIntervalMaxMs),
+                ("GapOver20MsCount", summary.GapOver20MsCount),
+                ("GapOver50MsCount", summary.GapOver50MsCount),
+                ("GapOver100MsCount", summary.GapOver100MsCount),
+                ("SensorTimestampIntervalMeanMs", summary.SensorTimestampIntervalMeanMs),
+                ("SensorTimestampIntervalMaxMs", summary.SensorTimestampIntervalMaxMs),
+                ("SensorTimestampNonMonotonicCount", summary.SensorTimestampNonMonotonicCount),
+                ("SensorAgeSampleCount", summary.SensorAgeSampleCount),
+                ("SensorAgeMeanMs", summary.SensorAgeMeanMs),
+                ("SensorAgeMaxMs", summary.SensorAgeMaxMs),
+                ("SensorAgeNegativeCount", summary.SensorAgeNegativeCount),
+                ("AxisSampleCount", summary.AxisSampleCount),
+                ("AxisVariationStage", "NormalizedRawInputBeforeBiasOrFilter"),
+                ("AxisUnits", role == MotionRole.Gyroscope ? "deg/s" : "g"),
+                ("MeanX", summary.MeanX), ("StdDevX", summary.StdDevX),
+                ("MeanY", summary.MeanY), ("StdDevY", summary.StdDevY),
+                ("MeanZ", summary.MeanZ), ("StdDevZ", summary.StdDevZ));
+            diagnostics.RestartWindow(nowTicks);
+        }
+        catch
+        {
+            // Optional summary formatting and time sampling must never disable a production sensor reader.
+            diagnostics.Reset();
+            diagnosticsActive = false;
         }
     }
 
@@ -594,3 +840,212 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
         Accelerometer
     }
 }
+
+internal struct MsiClawMotionReaderDiagnostics
+{
+    private const double SummaryWindowSeconds = 10;
+    private long _windowStartTicks;
+    private bool _started;
+    private long _readAttempts;
+    private long _freshAcceptedCount;
+    private long _duplicateTimestampCount;
+    private long _noDataCount;
+    private long _missingSensorTimestampCount;
+    private long _sensorTimestampNonMonotonicCount;
+    private long _sensorAgeNegativeCount;
+    private long _gapOver20MsCount;
+    private long _gapOver50MsCount;
+    private long _gapOver100MsCount;
+    private long _previousReceiveTicks;
+    private bool _hasPreviousReceiveTicks;
+    private DateTimeOffset? _previousSensorTimestamp;
+    private RunningStatistics _readDurations;
+    private RunningStatistics _freshReceiveIntervals;
+    private RunningStatistics _sensorTimestampIntervals;
+    private RunningStatistics _sensorAges;
+    private RunningStatistics _x;
+    private RunningStatistics _y;
+    private RunningStatistics _z;
+
+    internal void StartWindow(long startTicks)
+    {
+        this = default;
+        _started = true;
+        _windowStartTicks = startTicks;
+    }
+
+    internal void Reset() => this = default;
+
+    internal void RestartWindow(long startTicks)
+    {
+        var wasStarted = _started;
+        this = default;
+        _started = wasStarted;
+        _windowStartTicks = startTicks;
+    }
+
+    internal bool IsSummaryDue(long nowTicks, long timestampFrequency) =>
+        _started
+        && timestampFrequency > 0
+        && nowTicks >= _windowStartTicks
+        && nowTicks - _windowStartTicks >= timestampFrequency * SummaryWindowSeconds;
+
+    internal void ObserveRead(long durationTicks, long timestampFrequency)
+    {
+        _readAttempts++;
+        if (timestampFrequency > 0 && durationTicks >= 0)
+            _readDurations.Add(durationTicks * 1000d / timestampFrequency);
+    }
+
+    internal void ObserveNoData() => _noDataCount++;
+
+    internal void ObserveDuplicateTimestamp() => _duplicateTimestampCount++;
+
+    internal void ObserveMissingSensorTimestamp() => _missingSensorTimestampCount++;
+
+    internal void ObserveFresh(
+        double x,
+        double y,
+        double z,
+        long receiveTicks,
+        DateTimeOffset? sensorTimestamp,
+        DateTimeOffset? ageMeasuredAt,
+        long timestampFrequency)
+    {
+        _freshAcceptedCount++;
+        _x.Add(x);
+        _y.Add(y);
+        _z.Add(z);
+
+        if (_hasPreviousReceiveTicks && timestampFrequency > 0 && receiveTicks >= _previousReceiveTicks)
+        {
+            var intervalMs = (receiveTicks - _previousReceiveTicks) * 1000d / timestampFrequency;
+            _freshReceiveIntervals.Add(intervalMs);
+            if (intervalMs > 20) _gapOver20MsCount++;
+            if (intervalMs > 50) _gapOver50MsCount++;
+            if (intervalMs > 100) _gapOver100MsCount++;
+        }
+        _previousReceiveTicks = receiveTicks;
+        _hasPreviousReceiveTicks = true;
+
+        if (sensorTimestamp is { } currentSensorTimestamp)
+        {
+            if (_previousSensorTimestamp is { } previousSensorTimestamp)
+            {
+                var interval = currentSensorTimestamp - previousSensorTimestamp;
+                if (interval > TimeSpan.Zero)
+                    _sensorTimestampIntervals.Add(interval.TotalMilliseconds);
+                else if (interval < TimeSpan.Zero)
+                    _sensorTimestampNonMonotonicCount++;
+            }
+            _previousSensorTimestamp = currentSensorTimestamp;
+
+            if (ageMeasuredAt is { } measuredAt)
+            {
+                var ageMs = (measuredAt - currentSensorTimestamp).TotalMilliseconds;
+                if (ageMs < 0)
+                    _sensorAgeNegativeCount++;
+                else
+                    _sensorAges.Add(ageMs);
+            }
+        }
+        else
+        {
+            _previousSensorTimestamp = null;
+        }
+    }
+
+    internal MsiClawMotionReaderDiagnosticSummary CreateSummary(long nowTicks, long timestampFrequency)
+    {
+        var elapsedTicks = timestampFrequency > 0 && nowTicks >= _windowStartTicks
+            ? nowTicks - _windowStartTicks
+            : 0;
+        var elapsedSeconds = timestampFrequency > 0 ? elapsedTicks / (double)timestampFrequency : 0;
+        return new MsiClawMotionReaderDiagnosticSummary(
+            elapsedTicks * 1000d / Math.Max(timestampFrequency, 1),
+            _readAttempts,
+            _freshAcceptedCount,
+            _duplicateTimestampCount,
+            _noDataCount,
+            _missingSensorTimestampCount,
+            elapsedSeconds > 0 ? _freshAcceptedCount / elapsedSeconds : 0,
+            _readDurations.Mean,
+            _readDurations.Maximum,
+            _freshReceiveIntervals.Mean,
+            _freshReceiveIntervals.Maximum,
+            _gapOver20MsCount,
+            _gapOver50MsCount,
+            _gapOver100MsCount,
+            _sensorTimestampIntervals.Mean,
+            _sensorTimestampIntervals.Maximum,
+            _sensorTimestampNonMonotonicCount,
+            _sensorAges.Count,
+            _sensorAges.Mean,
+            _sensorAges.Maximum,
+            _sensorAgeNegativeCount,
+            _x.Count,
+            _x.Mean,
+            _x.StandardDeviation,
+            _y.Mean,
+            _y.StandardDeviation,
+            _z.Mean,
+            _z.StandardDeviation);
+    }
+
+    private struct RunningStatistics
+    {
+        private double _mean;
+        private double _sumSquaredDelta;
+        private double _maximum;
+
+        internal long Count { get; private set; }
+        internal double? Mean => Count > 0 && double.IsFinite(_mean) ? _mean : null;
+        internal double? Maximum => Count > 0 && double.IsFinite(_maximum) ? _maximum : null;
+        internal double? StandardDeviation => Count >= 2 && double.IsFinite(_sumSquaredDelta)
+            ? Math.Sqrt(Math.Max(0, _sumSquaredDelta / Count))
+            : null;
+
+        internal void Add(double value)
+        {
+            if (!double.IsFinite(value))
+                return;
+
+            Count++;
+            var delta = value - _mean;
+            _mean += delta / Count;
+            _sumSquaredDelta += delta * (value - _mean);
+            if (Count == 1 || value > _maximum)
+                _maximum = value;
+        }
+    }
+}
+
+internal sealed record MsiClawMotionReaderDiagnosticSummary(
+    double WindowMs,
+    long ReadAttempts,
+    long FreshAcceptedCount,
+    long DuplicateTimestampCount,
+    long NoDataCount,
+    long MissingSensorTimestampCount,
+    double ActualFreshHz,
+    double? ReadDurationMeanMs,
+    double? ReadDurationMaxMs,
+    double? FreshReceiveIntervalMeanMs,
+    double? FreshReceiveIntervalMaxMs,
+    long GapOver20MsCount,
+    long GapOver50MsCount,
+    long GapOver100MsCount,
+    double? SensorTimestampIntervalMeanMs,
+    double? SensorTimestampIntervalMaxMs,
+    long SensorTimestampNonMonotonicCount,
+    long SensorAgeSampleCount,
+    double? SensorAgeMeanMs,
+    double? SensorAgeMaxMs,
+    long SensorAgeNegativeCount,
+    long AxisSampleCount,
+    double? MeanX,
+    double? StdDevX,
+    double? MeanY,
+    double? StdDevY,
+    double? MeanZ,
+    double? StdDevZ);
