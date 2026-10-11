@@ -3793,7 +3793,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 Interlocked.Exchange(ref _developerRumbleRearmPresentationReconcilePending, 1);
                 deferredForDeveloperRearm = true;
             }
-            else if (_presentationOwnership is { } presentation && _physicalOwnership is { } physical)
+            else if (_presentationOwnership is { } presentation
+                && _physicalOwnership is { } physical
+                && (physical.LiveInputSource is not null
+                    || presentation.ActivePresentation is not null))
             {
                 previousBadge = CaptureCurrentControllerBadge();
                 reconcile = Task.Run(() => ReconcileControllerPresentationAsync(

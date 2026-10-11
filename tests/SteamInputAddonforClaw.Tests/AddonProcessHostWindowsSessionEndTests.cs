@@ -79,6 +79,21 @@ public sealed class AddonProcessHostWindowsSessionEndTests
     }
 
     [Fact]
+    public void Pre_ownership_presentation_events_do_not_publish_a_reconcile_but_active_recovery_stays_tracked()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
+        var request = Method(host, "private void RequestControllerPresentationReconcile(");
+
+        Assert.Contains("lock (_controllerOwnershipOperationSync)", request, StringComparison.Ordinal);
+        Assert.Contains(
+            "else if (_presentationOwnership is { } presentation\n                && _physicalOwnership is { } physical\n                && (physical.LiveInputSource is not null\n                    || presentation.ActivePresentation is not null))",
+            request,
+            StringComparison.Ordinal);
+        Assert.Contains("Task.Run(() => ReconcileControllerPresentationAsync", request, StringComparison.Ordinal);
+        Assert.Contains("_presentationReconcile = reconcile", request, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Session_end_keeps_one_global_budget_and_reports_actual_stage_and_command_outcomes()
     {
         var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
