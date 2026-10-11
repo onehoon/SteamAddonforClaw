@@ -139,6 +139,27 @@ public sealed class XboxGameSessionRuntimeHostTests
     }
 
     [Fact]
+    public void Steam_and_BigPicture_session_changes_invalidate_frontend_status_without_a_badge_change()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs").Replace("\r\n", "\n", StringComparison.Ordinal);
+        var runningAppIdStart = host.IndexOf("private void OnActualRunningAppIdChanged(uint appId)", StringComparison.Ordinal);
+        var runningAppIdEnd = host.IndexOf("private void OnActiveXboxGameChanged(", runningAppIdStart, StringComparison.Ordinal);
+        var runningAppId = host[runningAppIdStart..runningAppIdEnd];
+        var bigPictureStart = host.IndexOf("private void OnBigPictureStateChanged(bool active)", StringComparison.Ordinal);
+        var bigPictureEnd = host.IndexOf("private void OnXboxObservationReadinessChanged(", bigPictureStart, StringComparison.Ordinal);
+        var bigPicture = host[bigPictureStart..bigPictureEnd];
+        var invalidationStart = host.IndexOf("private void NotifySteamSessionStatusInvalidated()", StringComparison.Ordinal);
+        var invalidationEnd = host.IndexOf("internal static async Task NotifyControllerBadgeIfChangedAfterAsync", invalidationStart, StringComparison.Ordinal);
+        var invalidation = host[invalidationStart..invalidationEnd];
+
+        Assert.Contains("NotifySteamSessionStatusInvalidated();", runningAppId, StringComparison.Ordinal);
+        Assert.Contains("NotifySteamSessionStatusInvalidated();", bigPicture, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotifyControllerBadgeIfChanged(", runningAppId, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotifyControllerBadgeIfChanged(", bigPicture, StringComparison.Ordinal);
+        Assert.Contains("NotifyControllerBadgeStateInvalidated()", invalidation, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Frontend_contract_removes_diagnostic_rpc_and_advances_only_frontend_protocol()
     {
         var wire = ReadSource("src/SteamInputAddonforClaw.FrontendTransport/FrontendWire.cs");

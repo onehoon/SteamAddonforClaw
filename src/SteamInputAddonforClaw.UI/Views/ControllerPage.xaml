@@ -9,6 +9,23 @@
                 <TextBlock Opacity="0.7" Text="Configure controller buttons and controller-specific settings." TextWrapping="Wrap" />
             </StackPanel>
 
+            <ctcontrols:SettingsCard x:Name="SteamVirtualControllerCard" Header="Steam Virtual Controller">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Contact" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ctcontrols:SettingsCard.Description>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="Choose the virtual controller used by Steam." />
+                        <TextBlock x:Name="SteamVirtualControllerActivityText" Text="Selection is disabled while a Steam game or Big Picture Mode is active." />
+                    </StackPanel>
+                </ctcontrols:SettingsCard.Description>
+                <ComboBox x:Name="SteamVirtualControllerComboBox" MinWidth="240" SelectionChanged="SteamVirtualControllerComboBox_SelectionChanged">
+                    <ComboBoxItem Content="Steam Deck (Default)" Tag="SteamDeck" />
+                    <ComboBoxItem Content="DualSense Edge" Tag="DualSenseEdge" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+            <InfoBar x:Name="SteamVirtualControllerInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+
             <TextBlock x:Name="MappingUnavailableText" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
 
             <StackPanel x:Name="MappingContent" Spacing="12">

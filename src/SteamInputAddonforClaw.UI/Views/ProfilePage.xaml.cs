@@ -10,6 +10,8 @@ public sealed partial class ProfilePage : UserControl
 {
     private IAddonFrontendControl? _frontend;
     private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents, _suppressGpuEvents;
+    private bool? _steamActive;
+    private int _steamVirtualControllerMutationInProgress;
     private IReadOnlyList<FrontendProfileGameCatalogEntry> _catalog = [];
     private FrontendProfileGameCatalogEntry? _selectedGame;
     private FrontendGameProfileSnapshot? _snapshot;
@@ -26,6 +28,7 @@ public sealed partial class ProfilePage : UserControl
     {
         InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; SetEditorsEnabled(false);
 }
+    internal event EventHandler? SteamActivityRefreshRequested;
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
     internal void Activate() { _active = true; if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated; _ = RefreshGamesAsync(); }
     internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; CancelGpuMinimumClockDebounce(); }
@@ -73,9 +76,9 @@ public sealed partial class ProfilePage : UserControl
     }
 
     private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
-    private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = true; CancelFpsDebounce(); try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = false; } SetEditorsEnabled(false); }
+    private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = true; CancelFpsDebounce(); try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = false; } SetEditorsEnabled(false); }
     private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty, _gpuDraftDirty); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) ShowError("Profile settings could not be loaded.", exception); } }
-    private void ClearSelection() { CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
+    private void ClearSelection() { CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressEvents = true; try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; } finally { _suppressEvents = false; } ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false, bool preserveDirtyGpuDraft = false)
     {
@@ -84,6 +87,7 @@ public sealed partial class ProfilePage : UserControl
         {
             ProfileEnabledToggle.IsOn = snapshot.Enabled; ProfileEnabledToggle.IsEnabled = snapshot.PersistenceWritable; CpuBoostEnabledToggle.IsOn = snapshot.CpuBoost.Enabled; TdpEnabledToggle.IsOn = snapshot.Tdp.Enabled; PowerModeEnabledToggle.IsOn = snapshot.PowerMode?.Enabled == true; FpsEnabledToggle.IsOn = snapshot.FpsLimit?.Enabled == true; CpuBoostEnabledToggle.IsEnabled = TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; PowerModeEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.PowerMode is not null; FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true; _acFpsDraft = snapshot.FpsLimit?.AcFps ?? 60; _dcFpsDraft = snapshot.FpsLimit?.DcFps ?? 60; AcFpsSlider.Value = _acFpsDraft.Value; DcFpsSlider.Value = _dcFpsDraft.Value; AcFpsText.Text = $"{_acFpsDraft} FPS"; DcFpsText.Text = $"{_dcFpsDraft} FPS"; IntelFpsExpander.Description = snapshot.FpsLimit?.Available == true ? "Uses Intel's official API. Some games may not support FPS limiting." : snapshot.FpsLimit?.UnavailableReason ?? "Intel FPS Limit is unavailable.";
             CpuBoostAcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Ac); CpuBoostDcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Dc); PowerModeAcComboBox.SelectedItem = snapshot.PowerMode is { } power ? PowerModes.FirstOrDefault(x => x.Mode == power.Ac) : null; PowerModeDcComboBox.SelectedItem = snapshot.PowerMode is { } powerDc ? PowerModes.FirstOrDefault(x => x.Mode == powerDc.Dc) : null;
+            RenderSteamVirtualController(snapshot.SteamVirtualController);
             ResolutionComboBox.SelectedItem = ResolutionItems.FirstOrDefault(x => x.Width == snapshot.Resolution?.Width && x.Height == snapshot.Resolution?.Height);
             RenderGpuMinimumClock(snapshot, preserveDirtyGpuDraft);
             if (!preserveDirtyTdpDraft || !_tdpDraftDirty)
@@ -98,7 +102,121 @@ public sealed partial class ProfilePage : UserControl
         SetEditorsEnabled(snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable); ResolutionComboBox.IsEnabled = snapshot.PersistenceWritable; RenderProfileStatus(snapshot);
     }
     private void RenderProfileStatus(FrontendGameProfileSnapshot snapshot) { if (!snapshot.PersistenceWritable) { ShowError("Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.", null); return; } if (snapshot.Exists && snapshot.Enabled && snapshot.Limits is null) { ProfileInfoBar.Severity = InfoBarSeverity.Warning; ProfileInfoBar.Message = "TDP Control is unavailable on this device."; ProfileInfoBar.IsOpen = true; return; } ClearError(); }
-    private void SetEditorsEnabled(bool enabled) { var cpu = enabled && _snapshot?.CpuBoost.Enabled == true; CpuBoostAcComboBox.IsEnabled = CpuBoostDcComboBox.IsEnabled = cpu; var powerModeEditable = enabled && _snapshot?.PowerMode is { Enabled: true }; PowerModeAcComboBox.IsEnabled = PowerModeDcComboBox.IsEnabled = powerModeEditable; var tdp = enabled && _snapshot?.Tdp.Enabled == true && _snapshot.Limits is not null; foreach (var slider in new[] { AcPl1Slider, AcPl2Slider, DcPl1Slider, DcPl2Slider }) slider.IsEnabled = tdp; var fps = enabled && _snapshot?.FpsLimit?.Available == true && FpsEnabledToggle.IsOn; AcFpsSlider.IsEnabled = DcFpsSlider.IsEnabled = fps; var gpu = enabled && _snapshot?.GpuMinimumClock is { Available: true, Enabled: true }; GpuMinimumClockAcSlider.IsEnabled = GpuMinimumClockDcSlider.IsEnabled = gpu; GpuMinimumClockEnabledToggle.IsEnabled = enabled && _snapshot?.GpuMinimumClock?.Available == true && !_gpuDraftDirty; ProfileEnabledToggle.IsEnabled = _snapshot?.PersistenceWritable == true && !_gpuDraftDirty; }
+    private void SetEditorsEnabled(bool enabled) { var cpu = enabled && _snapshot?.CpuBoost.Enabled == true; CpuBoostAcComboBox.IsEnabled = CpuBoostDcComboBox.IsEnabled = cpu; var powerModeEditable = enabled && _snapshot?.PowerMode is { Enabled: true }; PowerModeAcComboBox.IsEnabled = PowerModeDcComboBox.IsEnabled = powerModeEditable; var tdp = enabled && _snapshot?.Tdp.Enabled == true && _snapshot.Limits is not null; foreach (var slider in new[] { AcPl1Slider, AcPl2Slider, DcPl1Slider, DcPl2Slider }) slider.IsEnabled = tdp; var fps = enabled && _snapshot?.FpsLimit?.Available == true && FpsEnabledToggle.IsOn; AcFpsSlider.IsEnabled = DcFpsSlider.IsEnabled = fps; var gpu = enabled && _snapshot?.GpuMinimumClock is { Available: true, Enabled: true }; GpuMinimumClockAcSlider.IsEnabled = GpuMinimumClockDcSlider.IsEnabled = gpu; GpuMinimumClockEnabledToggle.IsEnabled = enabled && _snapshot?.GpuMinimumClock?.Available == true && !_gpuDraftDirty; ProfileEnabledToggle.IsEnabled = _snapshot?.PersistenceWritable == true && !_gpuDraftDirty; SteamVirtualControllerComboBox.IsEnabled = CanEditGameSteamVirtualController(_steamActive, _snapshot, Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0); }
+
+    internal void SetSteamActivity(bool? active)
+    {
+        _steamActive = active;
+        SetEditorsEnabled(_snapshot is { Exists: true, Enabled: true, PersistenceWritable: true });
+    }
+
+    internal static bool CanEditGameSteamVirtualController(
+        bool? steamActive,
+        FrontendGameProfileSnapshot? snapshot,
+        bool mutationInProgress) =>
+        steamActive == false
+        && snapshot is { Exists: true, Enabled: true, PersistenceWritable: true }
+        && !mutationInProgress;
+
+    private void RenderSteamVirtualController(SteamVirtualControllerPreference? preference)
+    {
+        var tag = preference?.ToString() ?? "Default";
+        SteamVirtualControllerComboBox.SelectedItem = SteamVirtualControllerComboBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, tag, StringComparison.Ordinal));
+    }
+
+    private async void SteamVirtualControllerComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_suppressEvents || _frontend is null || _selectedGame is null || _snapshot is null
+            || SteamVirtualControllerComboBox.SelectedItem is not ComboBoxItem { Tag: string tag })
+            return;
+
+        SteamVirtualControllerPreference? requested = tag switch
+        {
+            "Default" => null,
+            "SteamDeck" => SteamVirtualControllerPreference.SteamDeck,
+            "DualSenseEdge" => SteamVirtualControllerPreference.DualSenseEdge,
+            _ => (SteamVirtualControllerPreference?)null
+        };
+        if (tag is not ("Default" or "SteamDeck" or "DualSenseEdge")) return;
+
+        var appId = _selectedGame.AppId;
+        if (!CanEditGameSteamVirtualController(_steamActive, _snapshot, Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0))
+        {
+            RenderSteamVirtualController(_snapshot.SteamVirtualController);
+            SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+        if (requested == _snapshot.SteamVirtualController) return;
+        if (Interlocked.Exchange(ref _steamVirtualControllerMutationInProgress, 1) != 0)
+        {
+            RenderSteamVirtualController(_snapshot.SteamVirtualController);
+            SetEditorsEnabled(_snapshot.Exists && _snapshot.Enabled && _snapshot.PersistenceWritable);
+            return;
+        }
+
+        var saved = _snapshot.SteamVirtualController;
+        RenderSteamVirtualController(saved);
+        SetEditorsEnabled(_snapshot.Exists && _snapshot.Enabled && _snapshot.PersistenceWritable);
+        try
+        {
+            var result = await _frontend.SetGameProfileSteamVirtualControllerAsync(appId, requested).ConfigureAwait(true);
+            if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)
+                || !IsCurrentProfileResponse(_selectedGame?.AppId, result.Snapshot.AppId))
+                return;
+
+            RenderControllerMutationSnapshot(result.Snapshot);
+            if (!result.Succeeded)
+            {
+                ShowError(result.FailureMessage ?? "Virtual Controller could not be updated.", null);
+                SetSteamActivity(null);
+                SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        catch (Exception exception)
+        {
+            await RestoreSelectedAfterMutationFailureAsync(
+                appId,
+                "Virtual Controller could not be updated.",
+                exception,
+                preservePendingProfileDrafts: true);
+            SetSteamActivity(null);
+            SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+        }
+        finally
+        {
+            Volatile.Write(ref _steamVirtualControllerMutationInProgress, 0);
+            SetEditorsEnabled(_snapshot is { Exists: true, Enabled: true, PersistenceWritable: true });
+        }
+    }
+
+    private void RenderControllerMutationSnapshot(FrontendGameProfileSnapshot snapshot)
+    {
+        var appId = snapshot.AppId;
+        var acFpsDraft = _acFpsDraft;
+        var dcFpsDraft = _dcFpsDraft;
+        var acFpsPending = _acFpsDebounce is { IsCancellationRequested: false } && acFpsDraft.HasValue;
+        var dcFpsPending = _dcFpsDebounce is { IsCancellationRequested: false } && dcFpsDraft.HasValue;
+        Render(snapshot, preserveDirtyTdpDraft: _tdpDraftDirty, preserveDirtyGpuDraft: _gpuDraftDirty);
+        _suppressFpsEvents = true;
+        try
+        {
+            if (acFpsPending && acFpsDraft is { } acFps && _selectedGame?.AppId == appId)
+            {
+                _acFpsDraft = acFps;
+                AcFpsSlider.Value = acFps;
+                AcFpsText.Text = $"{acFps} FPS";
+            }
+            if (dcFpsPending && dcFpsDraft is { } dcFps && _selectedGame?.AppId == appId)
+            {
+                _dcFpsDraft = dcFps;
+                DcFpsSlider.Value = dcFps;
+                DcFpsText.Text = $"{dcFps} FPS";
+            }
+        }
+        finally { _suppressFpsEvents = false; }
+    }
     private void RenderGpuMinimumClock(FrontendGameProfileSnapshot snapshot, bool preserveDraft)
     {
         var gpu = snapshot.GpuMinimumClock;
@@ -294,11 +412,12 @@ public sealed partial class ProfilePage : UserControl
         uint appId,
         string message,
         Exception exception,
-        bool preserveDirtyGpuDraft = false)
+        bool preserveDirtyGpuDraft = false,
+        bool preservePendingProfileDrafts = false)
     {
         ShowError(message, exception);
         if (_frontend is null || _selectedGame?.AppId != appId) return;
-        try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (_selectedGame?.AppId == appId) { Render(snapshot, preserveDirtyGpuDraft: preserveDirtyGpuDraft); ShowError(message, null); } } catch { }
+        try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (_selectedGame?.AppId == appId) { if (preservePendingProfileDrafts) RenderControllerMutationSnapshot(snapshot); else Render(snapshot, preserveDirtyGpuDraft: preserveDirtyGpuDraft); ShowError(message, null); } } catch { }
     }
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
     private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];

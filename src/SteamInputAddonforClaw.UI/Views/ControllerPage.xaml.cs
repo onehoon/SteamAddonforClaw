@@ -50,6 +50,10 @@ public sealed partial class ControllerPage : UserControl
     private bool _vibrationTestInProgress;
     private bool _vibrationRearmInProgress;
     private bool _vibrationPageUnloaded;
+    private bool _applyingSteamVirtualControllerState;
+    private int _steamVirtualControllerMutationInProgress;
+    private SteamVirtualControllerPreference _lastKnownSteamVirtualController = SteamVirtualControllerPreference.SteamDeck;
+    private bool? _steamActive;
     /// <summary>Suppresses change handlers while the page writes persisted state INTO the controls,
     /// so restoring the UI never looks like a user edit and re-saves.</summary>
     private bool _isLoading;
@@ -66,6 +70,7 @@ public sealed partial class ControllerPage : UserControl
     internal event EventHandler<FrontButtonMappingSettings>? MappingEditRequested;
     internal event EventHandler<BackButtonMappingSettings>? BackButtonMappingEditRequested;
     internal event EventHandler<ControllerLedSettings>? ControllerLedEditRequested;
+    internal event EventHandler? SteamActivityRefreshRequested;
 
     internal void Initialize(
         FrontendBootstrapSnapshot bootstrap,
@@ -77,6 +82,9 @@ public sealed partial class ControllerPage : UserControl
         _available = bootstrap.FrontButtonMappingAvailable;
         _backButtonAvailable = bootstrap.BackButtonMappingAvailable;
         _controllerLedAvailable = bootstrap.ControllerLedAvailable;
+        _steamActive = null;
+        _lastKnownSteamVirtualController = bootstrap.Settings.SteamVirtualController;
+        RenderSteamVirtualController(_lastKnownSteamVirtualController);
         FrontButtonMappingContent.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
         BackButtonMappingExpander.Visibility = _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
         ControllerSettingsHeader.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
@@ -113,7 +121,120 @@ public sealed partial class ControllerPage : UserControl
     {
         _vibrationPageUnloaded = false;
         if (_frontend is not null)
+            _ = RefreshSteamVirtualControllerAsync();
+        if (_frontend is not null)
             _ = RefreshVibrationStrengthAsync();
+    }
+
+    internal void SetSteamActivity(bool? active)
+    {
+        _steamActive = active;
+        SteamVirtualControllerActivityText.Text = active switch
+        {
+            true => "Steam or Big Picture is active. Selection is locked.",
+            false => "Selection is disabled while a Steam game or Big Picture Mode is active.",
+            _ => "Steam activity is unavailable. Selection is disabled."
+        };
+        UpdateSteamVirtualControllerControls();
+    }
+
+    internal static bool CanEditSteamVirtualController(bool? steamActive, bool mutationInProgress) =>
+        steamActive == false && !mutationInProgress;
+
+    private void RenderSteamVirtualController(SteamVirtualControllerPreference preference)
+    {
+        _applyingSteamVirtualControllerState = true;
+        try
+        {
+            SteamVirtualControllerComboBox.SelectedItem = SteamVirtualControllerComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, preference.ToString(), StringComparison.Ordinal));
+        }
+        finally { _applyingSteamVirtualControllerState = false; }
+        UpdateSteamVirtualControllerControls();
+    }
+
+    private void UpdateSteamVirtualControllerControls() =>
+        SteamVirtualControllerComboBox.IsEnabled = CanEditSteamVirtualController(
+            _steamActive,
+            Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0);
+
+    private async Task RefreshSteamVirtualControllerAsync()
+    {
+        if (_frontend is null || Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0) return;
+        try
+        {
+            var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
+            if (Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0) return;
+            _lastKnownSteamVirtualController = bootstrap.Settings.SteamVirtualController;
+            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Controller", "Steam virtual controller preference refresh failed.", exception);
+        }
+    }
+
+    private async void SteamVirtualControllerComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_applyingSteamVirtualControllerState || _frontend is null
+            || SteamVirtualControllerComboBox.SelectedItem is not ComboBoxItem { Tag: string selectionText }
+            || !Enum.TryParse<SteamVirtualControllerPreference>(selectionText, ignoreCase: false, out var requested)
+            || !Enum.IsDefined(requested))
+            return;
+
+        if (!CanEditSteamVirtualController(_steamActive, Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0))
+        {
+            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+            SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+        if (requested == _lastKnownSteamVirtualController) return;
+        if (Interlocked.Exchange(ref _steamVirtualControllerMutationInProgress, 1) != 0)
+        {
+            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+            return;
+        }
+
+        RenderSteamVirtualController(_lastKnownSteamVirtualController);
+        SteamVirtualControllerInfoBar.IsOpen = false;
+        UpdateSteamVirtualControllerControls();
+        try
+        {
+            var settings = await _frontend.SetSteamVirtualControllerAsync(requested).ConfigureAwait(true);
+            _lastKnownSteamVirtualController = settings.SteamVirtualController;
+            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+            if (_lastKnownSteamVirtualController != requested)
+            {
+                SteamVirtualControllerInfoBar.Message = "The saved controller choice was not changed.";
+                SteamVirtualControllerInfoBar.IsOpen = true;
+                SetSteamActivity(null);
+                SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Controller", "Steam virtual controller preference update failed.", exception);
+            SetSteamActivity(null);
+            try
+            {
+                var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
+                _lastKnownSteamVirtualController = bootstrap.Settings.SteamVirtualController;
+            }
+            catch (Exception refreshException)
+            {
+                AppLog.Warn("Controller", "Steam virtual controller rollback could not refresh Runtime settings.", refreshException);
+            }
+            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+            SteamVirtualControllerInfoBar.Message = "The change could not be confirmed. The last confirmed choice is selected.";
+            SteamVirtualControllerInfoBar.IsOpen = true;
+            SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+        }
+        finally
+        {
+            Volatile.Write(ref _steamVirtualControllerMutationInProgress, 0);
+            UpdateSteamVirtualControllerControls();
+        }
     }
 
     internal void Deactivate()
