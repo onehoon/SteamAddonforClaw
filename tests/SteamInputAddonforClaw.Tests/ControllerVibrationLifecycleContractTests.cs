@@ -5,7 +5,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ControllerVibrationLifecycleContractTests
 {
     [Fact]
-    public void Startup_applies_vibration_after_healthy_owned_input_and_before_first_presentation()
+    public void Startup_applies_vibration_after_first_presentation_and_runtime_composition()
     {
         var host = ReadHost();
         var startup = Method(host,
@@ -19,13 +19,23 @@ public sealed class ControllerVibrationLifecycleContractTests
         var acquisition = startup.IndexOf("var acquired = await owner.AcquireAsync(", StringComparison.Ordinal);
         var continuationCall = startup.IndexOf("CompleteInitialControllerOwnershipAsync(", acquisition, StringComparison.Ordinal);
         var liveSource = continuation.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
-        var led = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(context.StartupSettings.ControllerLed", StringComparison.Ordinal);
-        var vibration = continuation.IndexOf("ApplyOwnedControllerVibrationSettingsAsync(\n            context.StartupSettings.ControllerVibration", StringComparison.Ordinal);
-        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync", StringComparison.Ordinal);
+        var suppression = continuation.IndexOf("EnsureAddonAuthorityWinGSuppression()", StringComparison.Ordinal);
+        var watcher = continuation.IndexOf("StartControllerDeviceArrivalWatcher()", suppression, StringComparison.Ordinal);
+        var snapshot = continuation.IndexOf("CapturePresentationSnapshot()", watcher, StringComparison.Ordinal);
+        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync", snapshot, StringComparison.Ordinal);
+        var presentationLog = continuation.IndexOf("First presentation attach completed.", presentation, StringComparison.Ordinal);
+        var motion = continuation.IndexOf("ReconcileMotionReadersAsync(", presentationLog, StringComparison.Ordinal);
+        var frontButtons = continuation.IndexOf("MsiClawFrontButtonRuntime.Create", motion, StringComparison.Ordinal);
+        var cancellationCheck = continuation.IndexOf("_startupCancellationTokenSource.Token.ThrowIfCancellationRequested()", frontButtons, StringComparison.Ordinal);
+        var led = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(", cancellationCheck, StringComparison.Ordinal);
+        var vibration = continuation.IndexOf("ApplyOwnedControllerVibrationSettingsAsync(\n            context.StartupSettings.ControllerVibration", led, StringComparison.Ordinal);
 
         Assert.True(admissionGate >= 0 && viiperReadyGate > admissionGate && acquisition > viiperReadyGate && continuationCall > acquisition);
         Assert.Contains("return;", startup[viiperReadyGate..acquisition], StringComparison.Ordinal);
-        Assert.True(liveSource >= 0 && led > liveSource && vibration > led && presentation > vibration);
+        Assert.True(liveSource >= 0 && suppression > liveSource && watcher > suppression
+            && snapshot > watcher && presentation > snapshot && presentationLog > presentation
+            && motion > presentationLog && frontButtons > motion && cancellationCheck > frontButtons
+            && led > cancellationCheck && vibration > led);
         Assert.Contains("context.StartupSettings.ControllerVibration", continuation[vibration..], StringComparison.Ordinal);
     }
 

@@ -5,19 +5,24 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ControllerLedLifecycleContractTests
 {
     [Fact]
-    public void Startup_applies_persisted_led_after_owned_input_is_healthy_and_before_presentation()
+    public void Startup_applies_persisted_led_after_first_presentation()
     {
         var host = ReadHost();
         var startup = Method(host, "private async Task TryStartDisabledModeControllerAsync(", "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
         var continuation = Method(host, "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(", "private async Task RunInitialControllerAcquisitionAsync(");
         var ownedGate = startup.IndexOf("if (!acquired.IsOwned)", StringComparison.Ordinal);
+        var acquisition = startup.IndexOf("var acquired = await owner.AcquireAsync(", StringComparison.Ordinal);
         var continuationCall = startup.IndexOf("CompleteInitialControllerOwnershipAsync(", ownedGate, StringComparison.Ordinal);
         var liveSourceCheck = continuation.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
-        var apply = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(context.StartupSettings.ControllerLed", StringComparison.Ordinal);
-        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync", StringComparison.Ordinal);
+        var suppression = continuation.IndexOf("EnsureAddonAuthorityWinGSuppression()", StringComparison.Ordinal);
+        var watcher = continuation.IndexOf("StartControllerDeviceArrivalWatcher()", suppression, StringComparison.Ordinal);
+        var snapshot = continuation.IndexOf("CapturePresentationSnapshot()", watcher, StringComparison.Ordinal);
+        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync", snapshot, StringComparison.Ordinal);
+        var apply = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(", presentation, StringComparison.Ordinal);
 
-        Assert.True(ownedGate >= 0 && continuationCall > ownedGate);
-        Assert.True(liveSourceCheck >= 0 && apply > liveSourceCheck && presentation > apply);
+        Assert.True(acquisition >= 0 && ownedGate > acquisition && continuationCall > ownedGate);
+        Assert.True(liveSourceCheck >= 0 && suppression > liveSourceCheck && watcher > suppression
+            && snapshot > watcher && presentation > snapshot && apply > presentation);
         Assert.Contains("controllerLedAvailable: startupResult.HardwareSupported", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled", host, StringComparison.Ordinal);
     }

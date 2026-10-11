@@ -534,6 +534,12 @@ read freshest Steam/BPM state
 
 This handles Steam starting directly into BPM without an unnecessary X360 attach/switch cycle.
 
+After that first presentation and its publisher start, initial controller setup reconciles motion
+readers and composes the front-button runtime before it best-effort applies persisted LED and
+vibration settings. Those existing writes remain awaited in the owning initialization path, but do
+not delay the first game-facing publisher or change its success result. Physical recovery and
+power-resume reapplication keep their separate existing ordering.
+
 ---
 
 ## 15. Presentation switching

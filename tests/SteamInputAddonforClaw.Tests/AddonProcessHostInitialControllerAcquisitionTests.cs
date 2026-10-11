@@ -65,18 +65,29 @@ public sealed class AddonProcessHostInitialControllerAcquisitionTests
     public void Initial_commit_preserves_hardware_and_presentation_order_for_both_entry_paths()
     {
         var host = ReadHost();
-        var continuation = DeclarationContaining(host, "ApplyOwnedControllerLedSettingsAsync(context.StartupSettings.ControllerLed");
+        var continuation = DeclarationContaining(host, "if (source is null || !source.IsRunning)");
         var source = continuation.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
-        var led = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(context.StartupSettings.ControllerLed", StringComparison.Ordinal);
-        var vibration = continuation.IndexOf("ApplyOwnedControllerVibrationSettingsAsync(", led, StringComparison.Ordinal);
-        var suppression = continuation.IndexOf("EnsureAddonAuthorityWinGSuppression()", vibration, StringComparison.Ordinal);
+        var suppression = continuation.IndexOf("EnsureAddonAuthorityWinGSuppression()", source, StringComparison.Ordinal);
         var watcher = continuation.IndexOf("StartControllerDeviceArrivalWatcher()", suppression, StringComparison.Ordinal);
-        var attach = continuation.IndexOf("context.Presentation.AttachInitialAsync(source, snapshot", watcher, StringComparison.Ordinal);
-        var frontButton = continuation.IndexOf("MsiClawFrontButtonRuntime.Create", attach, StringComparison.Ordinal);
+        var snapshot = continuation.IndexOf("CapturePresentationSnapshot()", watcher, StringComparison.Ordinal);
+        var attach = continuation.IndexOf("context.Presentation.AttachInitialAsync(source, snapshot", snapshot, StringComparison.Ordinal);
+        var firstPresentationLog = continuation.IndexOf("First presentation attach completed.", attach, StringComparison.Ordinal);
+        var motion = continuation.IndexOf("ReconcileMotionReadersAsync(trigger", firstPresentationLog, StringComparison.Ordinal);
+        var frontButton = continuation.IndexOf("MsiClawFrontButtonRuntime.Create", motion, StringComparison.Ordinal);
+        var cancellationCheck = continuation.IndexOf("_startupCancellationTokenSource.Token.ThrowIfCancellationRequested()", frontButton, StringComparison.Ordinal);
+        var led = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(", cancellationCheck, StringComparison.Ordinal);
+        var vibration = continuation.IndexOf("ApplyOwnedControllerVibrationSettingsAsync(", led, StringComparison.Ordinal);
 
-        Assert.True(source >= 0 && led > source && vibration > led && suppression > vibration && watcher > suppression && attach > watcher && frontButton > attach);
-        Assert.Contains("CapturePresentationSnapshot()", continuation, StringComparison.Ordinal);
-        Assert.Contains("ReconcileMotionReadersAsync(trigger", continuation, StringComparison.Ordinal);
+        var directStartup = Method(host,
+            "private async Task TryStartDisabledModeControllerAsync(",
+            "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
+        var deferredStartup = DeclarationContaining(host, "context.Owner.AcquireAsync");
+
+        Assert.True(source >= 0 && suppression > source && watcher > suppression && snapshot > watcher
+            && attach > snapshot && firstPresentationLog > attach && motion > firstPresentationLog
+            && frontButton > motion && cancellationCheck > frontButton && led > cancellationCheck && vibration > led);
+        Assert.Equal(1, Count(directStartup, "CompleteInitialControllerOwnershipAsync("));
+        Assert.Equal(1, Count(deferredStartup, "CompleteInitialControllerOwnershipAsync("));
         Assert.Contains("_frontButtonRuntime ??=", continuation, StringComparison.Ordinal);
         Assert.Equal(1, Count(host, "context.Presentation.AttachInitialAsync("));
         Assert.Contains("DeferredInitialControllerAcquisitionCompleted", host, StringComparison.Ordinal);
