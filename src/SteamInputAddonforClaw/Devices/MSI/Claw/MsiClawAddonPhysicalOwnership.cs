@@ -1422,7 +1422,6 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         var deadline = finalWriteTimestamp + (long)(_a2vmInitialFinalReadinessWindow.TotalSeconds * Stopwatch.Frequency);
         DirectInputDeviceDescriptor? descriptor = null;
         ControllerDeviceInfo? primaryDevice = null;
-        IReadOnlyList<ControllerDeviceInfo>? currentPid1902Devices = null;
         var finalPid1901Absent = false;
         var firstValidState = false;
         var hidHideCompliant = false;
@@ -1494,7 +1493,6 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                     if (identity.Confidence != MsiClawIdentityConfidence.Strong)
                         return FailFinal("FinalPid1902IdentityUnavailable");
                     primaryDevice = primaries[0];
-                    currentPid1902Devices = pid1902Devices;
                     descriptor = selection.Descriptor;
                 }
                 else if (selection.Status == MsiClawDirectInputSelectionStatus.Indeterminate
@@ -1595,11 +1593,40 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
 
         var target = descriptor!.PnpInstanceId!;
         var identityAtFinalPid1902 = MsiClawPhysicalIdentity.From(primaryDevice!);
+        ControllerDeviceInfo[] currentPid1902Devices;
+        try
+        {
+            currentPid1902Devices = _enumeratePnpDevicesByVidPid(
+                    MsiClawHardware.VendorId, MsiClawHardware.DirectInputProductId)
+                .Where(device => device.Present
+                    && device.VendorId == MsiClawHardware.VendorId
+                    && device.ProductId == MsiClawHardware.DirectInputProductId)
+                .ToArray();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerOwnership", "A2VM fresh PID1902 HidHide enumeration failed.", exception,
+                ("Event", "A2vmInitialFastHidHideEnumerationFailed"));
+            await SafeStopAsync().ConfigureAwait(false);
+            return FailFinal("FreshPid1902EnumerationFailedBeforeHidHide");
+        }
+
+        var freshPrimaries = currentPid1902Devices.Where(device =>
+            string.Equals(device.InstanceId, target, StringComparison.OrdinalIgnoreCase)
+            && MsiClawHardware.IsDirectInputHidCollection(device)).ToArray();
+        if (freshPrimaries.Length != 1)
+        {
+            await SafeStopAsync().ConfigureAwait(false);
+            return FailFinal(freshPrimaries.Length == 0
+                ? "PrimaryMissingBeforeHidHide"
+                : "AmbiguousPrimaryBeforeHidHide");
+        }
+
         MsiClawHidHideTargetResolution targetResolution;
         try
         {
             targetResolution = MsiClawHardware.ResolveOwnedPid1902HidHideTargets(
-                primaryDevice!, currentPid1902Devices!);
+                freshPrimaries[0], currentPid1902Devices);
         }
         catch (Exception exception)
         {

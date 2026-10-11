@@ -89,6 +89,66 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
+    public async Task A2vm_initial_fast_path_refreshes_hidhide_collections_after_first_input()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
+            PnpDevices = [PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00")],
+        };
+        h.InputSource.FirstValidStateWait = async cancellationToken =>
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            h.PnpDevices =
+            [
+                PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+                PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+                PnpCollection(ConsumerPnp, PhysKey, 0x000C, 0x0001, "MI_01"),
+            ];
+            return true;
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned, result.Reason);
+        Assert.Equal([PrimaryPnp, ControlPnp, ConsumerPnp], result.HiddenTargets);
+        Assert.Equal([PrimaryPnp, ControlPnp, ConsumerPnp], h.HidHideApplied);
+    }
+
+    [Fact]
+    public async Task A2vm_initial_fast_path_fails_closed_if_primary_disappears_before_hidhide()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
+            PnpDevices = [PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00")],
+        };
+        h.InputSource.FirstValidStateWait = async cancellationToken =>
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            h.PnpDevices =
+            [
+                PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+                PnpCollection(ConsumerPnp, PhysKey, 0x000C, 0x0001, "MI_01"),
+            ];
+            return true;
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.False(result.IsOwned);
+        Assert.Contains("PrimaryMissingBeforeHidHide", result.Reason, StringComparison.Ordinal);
+        Assert.True(h.InputSource.StopCalled);
+        Assert.Empty(h.HidHideApplied);
+    }
+
+    [Fact]
     public async Task A2vm_initial_pid1901_waits_for_one_unique_command_endpoint_within_one_bound()
     {
         var h = new Harness
@@ -734,7 +794,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         Assert.True(completed.IsOwned, completed.Reason);
         Assert.Equal(1, markerCalls);
-        Assert.Equal(2, targetProbeCalls);
+        Assert.Equal(3, targetProbeCalls); // boot write endpoint, final primary readiness, fresh HidHide commit snapshot
         Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.FastWriteTargets);
         Assert.Empty(h.GamepadMode.QueryIdentities);
         Assert.Empty(h.SwitchTargets);
@@ -2978,6 +3038,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public bool DisposeCalled { get; private set; }
         public bool IsRunning { get; private set; }
         public List<string>? Events { get; set; }
+        public Func<CancellationToken, Task<bool>>? FirstValidStateWait { get; set; }
 
         public event EventHandler<SteamInputAddonforClaw.Input.ControllerState>? StateChanged { add { } remove { } }
 
@@ -2997,6 +3058,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken)
         {
             Events?.Add("FirstValidState");
+            if (FirstValidStateWait is { } wait)
+                return wait(cancellationToken);
             if (!FirstValidState) IsRunning = true; // still running, just never valid
             return Task.FromResult(FirstValidState);
         }
