@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Views;
 using Xunit;
@@ -50,8 +51,17 @@ public sealed class SteamVirtualControllerUiTests
         var profileCode = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml.cs");
         var selector = profileXaml.IndexOf("x:Name=\"SteamVirtualControllerComboBox\"", StringComparison.Ordinal);
         var tdp = profileXaml.IndexOf("x:Name=\"TdpExpander\"", StringComparison.Ordinal);
+        var profileDocument = XDocument.Parse(profileXaml);
+        var controllerCard = Assert.Single(profileDocument.Descendants(), element =>
+            element.Name.LocalName == "SettingsCard" &&
+            (string?)element.Attribute("Header") == "Virtual Controller");
+        var headerIcon = Assert.Single(controllerCard.Elements(), element =>
+            element.Name.LocalName == "SettingsCard.HeaderIcon");
+        var controllerGlyph = Assert.Single(headerIcon.Elements(), element =>
+            element.Name.LocalName == "FontIcon");
 
         Assert.True(selector >= 0 && tdp > selector);
+        Assert.Equal("\uE7FC", (string?)controllerGlyph.Attribute("Glyph"));
         Assert.Contains("Header=\"Virtual Controller\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Description=\"Overrides the Controller default for this Steam game.\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Use default\" Tag=\"Default\"", profileXaml, StringComparison.Ordinal);
