@@ -1,7 +1,11 @@
 # Full1902 DualSense Edge Virtual Presentation — Architecture and Integration Plan
 
 **Date:** 2026-10-11  
-**Status:** PR-A typed backend is merged in PR #754. PR-B Settings and runtime integration is implemented on a topic branch for review; physical DualSense Edge verification remains with the user after merge.
+**Status:** PR-A typed backend merged in PR #754; PR-B Settings and runtime
+integration merged in PR #755. This follow-up fixes the user's confirmed
+reversed Y direction on both Edge sticks and stops shared motion readers after
+successful Overlay capture. Physical Edge recognition, controls, motion,
+PS/QAM, rumble, and lifecycle verification remain with the user after merge.
 **Repository:** onehoon/SteamAddonforClaw  
 **Product:** Standalone Steam Addon for Claw / Full PID1902  
 **Scope:** Settings-selectable Steam/BPM virtual-controller presentation: existing Steam Deck or new Sony DualSense Edge. Xbox360 stays the normal Windows output.
@@ -38,7 +42,10 @@ Center M Disabled / healthy Full1902 PID1902 ownership
                                           start ONLY its one input publisher
 ~~~
 
-The current shipped behavior is **Xbox360 <-> Steam Deck**, with no modification unless the user explicitly selects experimental Edge on Settings.
+The current selector uses **Xbox360** in Windows mode and **Steam Deck** by
+default during Steam/BPM; the user may select the experimental **DualSense
+Edge** in Settings. Exactly one virtual output is attached and published at a
+time.
 
 ### 1.1 What is and is not changing
 
@@ -110,7 +117,7 @@ Current code wins over historical work-order implementation sketches. Useful imp
 | CenterM/FrontButtonActionExecutor.cs | Shared SteamButton/SteamQuickAccess semantic action names | Keep action names; active presentation resolves the pulse behavior |
 | Status/Full1902ControllerBadgeEvaluator.cs | Read-only virtual controller identity projection | Add Edge active badge, no false SteamDeck label |
 
-There is currently **no production Edge presentation** in the Addon. Existing headers from bundled VIIPER can contain Edge declarations; that is not equivalent to managed runtime/publisher implementation.
+PR-A (#754) added the managed typed Edge backend and PR-B (#755) added the production Settings selection and runtime integration. Edge is now an optional production presentation; its logical device remains lazy, and code-level integration does not establish physical Sony recognition or Steam Input compatibility.
 
 ### 2.3 Invariants that cannot change
 
@@ -477,15 +484,15 @@ Never log every input packet or add a new polling diagnostic loop. Avoid marking
 
 ### PR-A — completed in PR #754
 
-Implementation work order: [DualSense Edge PR-A typed backend](work-order/DUALSENSE_EDGE_PR_A_TYPED_BACKEND_WORK_ORDER_2026-10-11.md). The user separately updates the VIIPER dependency.
+Implementation work order: [DualSense Edge PR-A typed backend](work-order/DUALSENSE_EDGE_PR_A_TYPED_BACKEND_WORK_ORDER_2026-10-11.md). The VIIPER dependency was separately updated in PR #753.
 
 1. Add managed typed Edge ABI/state/callback and classified removal. **The user independently updates the VIIPER DLL/header/dependency pin; PR-A must not change dependency artifacts.**
 2. Extend same canonical VIIPER owner with lazy/optional Edge logical device and complete teardown.
 3. Add Edge state mapper/publisher, native neutral, motion encoding and basic ordinary rumble callback.
 4. Add code-level tests for struct ABI, controls/M1/M2, gyro scales and neutrality, publisher stop/join, attach/retire, ownership/callback cleanup.
-5. Do **not** change the shipped Xbox360/Deck selection policy. Edge is not production-selected in this PR.
+5. At PR-A implementation time, the shipped Xbox360/Deck selection policy stayed unchanged; Edge became selectable in the later PR-B.
 
-### PR-B — Settings preference and runtime integration (implemented for review)
+### PR-B — Settings preference and runtime integration (merged in PR #755)
 
 Implementation work order (written after PR #754 merged): [DualSense Edge PR-B Settings and Full1902 integration](work-order/DUALSENSE_EDGE_PR_B_SETTINGS_AND_RUNTIME_INTEGRATION_WORK_ORDER_2026-10-11.md). VIIPER dependency was independently updated in PR #753; PR-B must not re-update its binaries/header/lock.
 

@@ -13,12 +13,16 @@
 > `CenterMMainUiRouting*` graph. The PR-by-PR notes below are retained as history;
 > their present-tense references to those types no longer describe the tree.
 > Current presentation authority is `MsiClawAddonPresentation` →
-> `CanonicalViiperRuntime` → one live X360 **or** Steam Deck publisher.
+> one `CanonicalViiperRuntime` → one attached Xbox360, Deck, or Edge device
+> and one publisher at a time.
 
 ## Current state
 
-The Addon has one active Steam virtual-output architecture: the canonical
-Steam Deck typed VIIPER path with identity `28DE:1205`.
+The Addon has one active virtual-output owner and one attached presentation at
+a time. Windows mode uses the typed Xbox360 path. Steam/Big Picture uses the
+Steam Deck by default or the experimental DualSense Edge when selected in
+Settings. The existing Steam Deck identity `28DE:1205` is Deck-only and does
+not describe the Edge device.
 
 The embedded VIIPER revision is:
 
@@ -26,10 +30,12 @@ The embedded VIIPER revision is:
 onehoon/VIIPER@0689d18416cf6cde9ba4fed04eb373a1a3383ddc
 ```
 
-The Addon-side session, mapper, publisher, PnP identity resolver, and safety
-stage are implemented. MSI Claw EX hardware has validated the basic non-gyro
-controller input path. That result does not by itself validate every lifecycle,
-recovery, native teardown, or failure-path condition.
+The Addon-side Deck and Edge sessions, mappers, publishers, and shared
+presentation selector are implemented. DualSense Edge's typed backend was
+completed in PR #754 and its Settings/runtime selection was completed in PR
+#755. MSI Claw EX hardware has validated the basic non-gyro controller input
+path. Physical Edge recognition, controls, motion, PS/QAM, rumble, and lifecycle
+remain unvalidated and must not be inferred from code or ABI tests.
 
 Phase 2B1 tooling status: `scripts/update-viiper.ps1` can fetch and
 independently verify the canonical Windows libVIIPER artifact for an exact,

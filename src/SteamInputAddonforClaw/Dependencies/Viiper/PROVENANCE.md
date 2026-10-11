@@ -12,9 +12,10 @@ Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
 
-This revision provides the typed Steam Deck ABI used by the active Addon
-runtime (see "ABI review" below for the current revision's reviewed ABI
-delta). The active virtual output identity is `VID=0x28DE`, `PID=0x1205`.
+This revision provides the typed Steam Deck and optional DualSense Edge ABI
+used by the active Addon runtime. The active Steam Deck identity is
+`VID=0x28DE`, `PID=0x1205`; this identity applies only to Steam Deck and does
+not describe the Edge device.
 
 ## Build attestation
 
@@ -42,12 +43,36 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
+This source-alignment review compares the checked-in generated
+`Dependencies/Viiper/libVIIPER.h` with `CanonicalViiperNativeApi.cs`,
+`CanonicalViiperNativeTypes.cs`, and `CanonicalViiperNativeAbiTests.cs` for the
+pinned artifact above.
+
+- `DSDeviceHandle` is native `uintptr_t` and managed `nuint`. The generated
+  header also retains classified `AttachUSBDeviceEx` / `DetachUSBDeviceEx` and
+  `GetUSBDeviceAttachmentState`, alongside typed Steam Deck and Xbox360 state,
+  callback, and removal exports.
+- The Edge exports `CreateDualSenseEdgeDevice`, `SetDualSenseDeviceState`,
+  `SetDualSenseOutputCallback`, and `RemoveDualSenseDeviceEx` are present in the
+  pinned generated header. The Addon resolves them lazily and keeps them out of
+  `RequiredExports`; a DLL without those optional symbols can still support
+  ordinary startup, while an explicit Edge request reports the missing
+  capability.
+- `DSDeviceState` is passed by value with native default alignment and managed
+  sequential layout. On x64 the struct is 36 bytes; the checked-in ABI tests
+  assert `Buttons` at offset 4, `DPad` at 8, `GyroX` at 24, and `AccelX` at 30.
+- `DSDeviceRemoveResult` is a four-byte C enum mirrored with values Success=0,
+  RetryableFailure=1, UnsafeOutcomeUnknown=2, and Invalid=3.
+- `DSOutputCallback` is a C `cdecl` callback with a pointer-width handle and
+  six byte parameters: small/large rumble, RGB LED values, and player LEDs. The
+  managed delegate and ABI tests assert that signature. The Addon uses only
+  ordinary two-motor rumble and ignores LED values; it does not translate
+  LED-only commands, adaptive triggers, audio, or specialized haptics.
+
+These checked-in source and ABI tests establish the managed/native contract;
+they do not establish Sony recognition, Steam Input compatibility, or physical
+controller behavior. This review records the current contract and does not
+claim a complete list of changes relative to an earlier header revision.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
@@ -62,7 +87,10 @@ The following Addon files must remain aligned with this artifact:
 - this provenance record
 - `Dependencies/Viiper/viiper.lock.json` (machine-readable identity; verified by `scripts/verify-viiper.ps1`)
 
-The active Addon composition uses the Steam Deck session, mapper, publisher,
-identity resolver, and output stage. MSI Claw EX basic non-gyro controller
-input is validated; lifecycle, recovery, rumble, haptics, gyro, and IMU
-claims require separate evidence.
+The active Addon composition uses one canonical runtime: Xbox360 for Windows
+mode and Steam Deck (default) or optionally selected DualSense Edge for
+Steam/Big Picture, with only one attached output and publisher at a time. Edge
+logical-device creation remains lazy. The Steam Deck identity `28DE:1205` is
+Deck-only. MSI Claw EX basic non-gyro controller input is validated; physical
+Edge recognition, controls, motion orientation, PS/QAM, rumble, and lifecycle
+require separate user validation after merge.
