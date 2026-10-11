@@ -56,6 +56,8 @@ internal interface IMsiClawPreparedInputSource : IAsyncDisposable, IControllerSt
     }
     Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
+    Task<FrontendRawDirectInputButtonTransitionResult> RunRawDirectInputButtonTransitionDiagnosticAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendRawDirectInputButtonTransitionResult.Unavailable());
     Task StopAsync();
 }
 

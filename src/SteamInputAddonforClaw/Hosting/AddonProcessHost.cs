@@ -725,6 +725,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     "The live Full1902 physical rumble path is unavailable.")),
             controllerLedProfileReadProbe: token => RunA2vmLedProfileReadProbeAsync(
                 startupResult.HardwareDeviceModel is { } ledModel ? ledModel.Value : "unknown", token),
+            runMsiBackButtonProfileAndRawInputDiagnostic: token => RunMsiBackButtonProfileAndRawInputDiagnosticAsync(
+                startupResult.HardwareDeviceModel is { } backButtonModel ? backButtonModel.Value : "unknown", token),
             runDeveloperRumbleRearm: RunDeveloperRumbleRearmAsync,
             // This is a presentation capability derived from the existing supported-hardware and
             // startup authority facts. The apply callback re-checks live authority and ownership.
@@ -1829,6 +1831,61 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             CaptureLiveOwnedPhysicalIdentityForDeveloperProbe,
             () => _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled,
             cancellationToken);
+    }
+
+    private async Task<FrontendMsiBackButtonDiagnosticResult> RunMsiBackButtonProfileAndRawInputDiagnosticAsync(
+        string modelId,
+        CancellationToken cancellationToken)
+    {
+        var ownedInput = _physicalOwnership?.LiveInputSource;
+        var ownedIdentity = CaptureLiveOwnedPhysicalIdentityForDeveloperProbe();
+        var rawInputTask = ownedInput is { IsRunning: true }
+            && ownedIdentity is not null
+            && _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled
+                ? ownedInput.RunRawDirectInputButtonTransitionDiagnosticAsync(cancellationToken)
+                : Task.FromResult(FrontendRawDirectInputButtonTransitionResult.Unavailable(
+                    "No healthy, exact Addon-owned PID1902 DirectInput session is available."));
+
+        SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawBackButtonProfileReadSet profile;
+        try
+        {
+            var profileReader = new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawBackButtonProfileReader(
+                GetMsiControllerDevices(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawHidDeviceInformationLookup(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawRawHidTransport());
+            profile = await profileReader.ReadAsync(
+                modelId,
+                CaptureLiveOwnedPhysicalIdentityForDeveloperProbe,
+                () => _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            var cancelled = new FrontendMsiBackButtonProfileSlotResult(
+                "M1", 0x00BA, 0x01, 0x08, FrontendMsiBackButtonProfileReadOutcome.Cancelled,
+                FrontendMsiBackButtonProfileClassification.NotApplicable, "Cancelled");
+            profile = new(null, cancelled, cancelled with
+            {
+                Slot = "M2",
+                Address = 0x0163,
+            });
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AppLog.Warn("ControllerBackButton", "M1/M2 profile read diagnostic failed before completing both slots.",
+                null, ("Reason", exception.GetType().Name), ("FirmwareMutationIssued", false));
+            var failed = new FrontendMsiBackButtonProfileSlotResult(
+                "M1", 0x00BA, 0x01, 0x08, FrontendMsiBackButtonProfileReadOutcome.Failed,
+                FrontendMsiBackButtonProfileClassification.NotApplicable, exception.GetType().Name);
+            profile = new(null, failed, failed with { Slot = "M2", Address = 0x0163 });
+        }
+
+        var rawInput = await rawInputTask.ConfigureAwait(false);
+        var status = modelId == "msi.claw.a2vm.7"
+            ? "A2VM 7 profile bytes are diagnostic evidence only; factory values are not validated. No firmware mutation was issued."
+            : "Profile and raw input results are independent. No firmware mutation was issued.";
+        return new(modelId, profile.FirmwareVersion, status, profile.M1, profile.M2, rawInput);
     }
 
     private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawPhysicalIdentity? CaptureLiveOwnedPhysicalIdentityForDeveloperProbe()

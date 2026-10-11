@@ -1383,12 +1383,32 @@ public sealed class UiArchitectureTests
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
+        Assert.True(page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal) < page.IndexOf("M1 / M2 Physical Input &amp; Firmware Profile", StringComparison.Ordinal));
+        Assert.True(page.IndexOf("M1 / M2 Physical Input &amp; Firmware Profile", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
         Assert.Contains("Content=\"Run 10s Test\"", page, StringComparison.Ordinal);
         Assert.True(page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
         Assert.DoesNotContain("Header=\"Logging\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("LogLevelComboBox", page, StringComparison.Ordinal);
         Assert.Contains("Content=\"Log Folder\"", page, StringComparison.Ordinal);
         Assert.Contains("Click=\"OpenLogFolderButton_Click\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void M1_M2_profile_and_raw_input_diagnostic_is_developer_only_bounded_and_cancellable()
+    {
+        var root = FindRepositoryRoot();
+        var developerXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
+        var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
+        var mainUi = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
+
+        Assert.Contains("Header=\"M1 / M2 Physical Input &amp; Firmware Profile (Read Only)\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Press and release M1 only, then M2 only; do not touch any other controls.", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Run 10s Diagnostic\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Cancel\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Unloaded += DeveloperPage_Unloaded", developerCode, StringComparison.Ordinal);
+        Assert.Contains("RunMsiBackButtonProfileAndRawInputDiagnosticAsync(cancellation.Token)", developerCode, StringComparison.Ordinal);
+        Assert.Contains("_msiBackButtonDiagnosticCancellation?.Cancel()", developerCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("M1 / M2 Physical Input &amp; Firmware Profile", mainUi, StringComparison.Ordinal);
     }
 
     [Fact]

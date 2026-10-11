@@ -146,6 +146,38 @@ public sealed class ControllerLedFrontendTests : IDisposable
         Assert.False(result.ReadResponseValid);
     }
 
+    [Fact]
+    public async Task M1_M2_diagnostic_uses_the_existing_exclusive_controller_operation_gate_and_cancels()
+    {
+        AppLog.DirectoryOverride = _directory;
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var control = new InProcessAddonFrontendControl(
+            coordinator,
+            new ThrowingStatusProvider(),
+            null,
+            runMsiBackButtonProfileAndRawInputDiagnostic: async token =>
+            {
+                started.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return FrontendMsiBackButtonDiagnosticResult.Unavailable("Unexpected completion.");
+            });
+
+        var operation = control.RunMsiBackButtonProfileAndRawInputDiagnosticAsync(cancellation.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var competingLedRead = await control.RunControllerLedProfileReadProbeAsync();
+        Assert.Equal(FrontendControllerLedProfileReadProbeOutcome.Unavailable, competingLedRead.Outcome);
+        Assert.Contains("Another controller diagnostic", competingLedRead.Status, StringComparison.Ordinal);
+
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
+
+        var afterCancellation = await control.RunControllerLedProfileReadProbeAsync();
+        Assert.Equal(FrontendControllerLedProfileReadProbeOutcome.Unavailable, afterCancellation.Outcome);
+        Assert.Contains("unavailable", afterCancellation.Status, StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose()
     {
         AppLog.DrainForTests();
