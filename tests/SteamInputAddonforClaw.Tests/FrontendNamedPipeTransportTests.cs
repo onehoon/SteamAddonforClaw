@@ -64,7 +64,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetSteamVirtualControllerAsync(SteamVirtualControllerPreference.DualSenseEdge);
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, fake.LastSteamVirtualControllerPreference);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, result.SteamVirtualController);
     }
@@ -83,7 +83,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
@@ -205,7 +205,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -269,7 +269,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -322,7 +322,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -342,7 +342,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -366,7 +366,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -379,7 +379,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.GameInputProbeSnapshot, await client.CaptureGameInputSystemButtonProbeAsync());
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.StartGameInputSystemButtonProbeAsync()).State);
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.CaptureGameInputSystemButtonProbeAsync()).State);
@@ -439,7 +439,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
         var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
@@ -462,10 +462,53 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.RunControllerLedProfileReadProbeAsync();
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
-        Assert.Equal("SetSteamVirtualController", Enum.GetNames<FrontendRpcMethod>().Last());
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal("RunMsiBackButtonProfileAndRawInputDiagnostic", Enum.GetNames<FrontendRpcMethod>().Last());
         Assert.Equal(fake.ControllerLedProfileReadProbeResult, result);
         Assert.Equal(1, fake.ControllerLedProfileReadProbeCount);
+    }
+
+    [Fact]
+    public async Task Developer_M1_M2_profile_and_raw_input_diagnostic_round_trips_without_payload()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var result = await client.RunMsiBackButtonProfileAndRawInputDiagnosticAsync();
+
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal("RunMsiBackButtonProfileAndRawInputDiagnostic", Enum.GetNames<FrontendRpcMethod>().Last());
+        Assert.Equal(fake.MsiBackButtonDiagnosticResult.ModelId, result.ModelId);
+        Assert.Equal(fake.MsiBackButtonDiagnosticResult.FirmwareVersion, result.FirmwareVersion);
+        Assert.Equal(fake.MsiBackButtonDiagnosticResult.Status, result.Status);
+        Assert.Equal(fake.MsiBackButtonDiagnosticResult.M1, result.M1);
+        Assert.Equal(fake.MsiBackButtonDiagnosticResult.M2, result.M2);
+        Assert.Equal(fake.MsiBackButtonDiagnosticResult.RawInput with
+        {
+            Transitions = result.RawInput.Transitions
+        }, result.RawInput);
+        Assert.Equal(fake.MsiBackButtonDiagnosticResult.RawInput.Transitions, result.RawInput.Transitions);
+        Assert.Equal(1, fake.MsiBackButtonDiagnosticCount);
+        Assert.False(result.FirmwareMutationIssued);
+    }
+
+    [Fact]
+    public async Task Developer_M1_M2_diagnostic_cancellation_is_forwarded_to_the_runtime()
+    {
+        var fake = new RecordingFrontendControl { BlockMsiBackButtonDiagnostic = true };
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        using var cancellation = new CancellationTokenSource();
+
+        var operation = client.RunMsiBackButtonProfileAndRawInputDiagnosticAsync(cancellation.Token);
+        await fake.MsiBackButtonDiagnosticStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
+        await fake.MsiBackButtonDiagnosticCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -478,11 +521,11 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.RunDeveloperRumbleRearmAsync();
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.DeveloperRumbleRearmResult, result);
         Assert.Equal(1, fake.DeveloperRumbleRearmCount);
         Assert.False(result.PhysicalMotorEffectVerified);
-        Assert.Equal("SetSteamVirtualController", Enum.GetNames<FrontendRpcMethod>().Last());
+        Assert.Equal("RunMsiBackButtonProfileAndRawInputDiagnostic", Enum.GetNames<FrontendRpcMethod>().Last());
     }
 
     [Theory]
@@ -494,6 +537,7 @@ public sealed class FrontendNamedPipeTransportTests
     [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":99}")]
     [InlineData("RunControllerLedProfileReadProbe", "{}")]
     [InlineData("RunDeveloperRumbleRearm", "{}")]
+    [InlineData("RunMsiBackButtonProfileAndRawInputDiagnostic", "{}")]
     public async Task Invalid_controller_vibration_payload_fails_closed_before_frontend_dispatch(string method, string payload)
     {
         var fake = new RecordingFrontendControl();
@@ -519,6 +563,7 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Empty(fake.ProfileWriteProbeModes);
         Assert.Equal(0, fake.ControllerLedProfileReadProbeCount);
         Assert.Equal(0, fake.DeveloperRumbleRearmCount);
+        Assert.Equal(0, fake.MsiBackButtonDiagnosticCount);
     }
 
     [Fact]
@@ -875,7 +920,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
-        Assert.Equal(72, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
         await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
     }
 
@@ -1808,9 +1853,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":72,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":72,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":72,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":73,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":73,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":73,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -2382,6 +2427,18 @@ public sealed class FrontendNamedPipeTransportTests
             FrontendControllerLedProfileReadProbeOutcome.CandidateReadbackParsed, 0x0230, 0x024A,
             "CandidateReadbackParsed. Firmware 0x0230; candidate 0x024A; valid read response: yes.");
         public int ControllerLedProfileReadProbeCount { get; private set; }
+        public FrontendMsiBackButtonDiagnosticResult MsiBackButtonDiagnosticResult { get; } = new(
+            "msi.claw.cg3em", 0x0414, "Profile and raw input results are independent. No firmware mutation was issued.",
+            new("M1", 0x00BA, 0x01, 0x08, FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed,
+                FrontendMsiBackButtonProfileClassification.HistoricalMarkerPresent, "ReadbackParsed/HistoricalMarkerPresent"),
+            new("M2", 0x0163, 0x01, 0x08, FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed,
+                FrontendMsiBackButtonProfileClassification.HistoricalMarkerPresent, "ReadbackParsed/HistoricalMarkerPresent"),
+            new(FrontendRawDirectInputButtonTransitionOutcome.Completed, "Completed", 10_000, 10_000, 17, 17, 2500,
+                [new(15, 1, 1), new(16, 1, 1)], true, true, true, true));
+        public int MsiBackButtonDiagnosticCount { get; private set; }
+        public bool BlockMsiBackButtonDiagnostic { get; init; }
+        public TaskCompletionSource MsiBackButtonDiagnosticStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource MsiBackButtonDiagnosticCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public FrontendDeveloperRumbleRearmResult DeveloperRumbleRearmResult { get; } = new(
             FrontendDeveloperRumbleRearmOutcome.Completed,
             "Mode cycle and controller restoration completed. Physical motor vibration is NOT verified: go to Controller > Vibration Strength and run Left Test / Right Test.",
@@ -2400,6 +2457,18 @@ public sealed class FrontendNamedPipeTransportTests
         { TotalCalls++; ProfileWriteProbeModes.Add(mode); return Task.FromResult(ProfileWriteProbeResult(mode)); }
         public Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(CancellationToken t = default)
         { TotalCalls++; ControllerLedProfileReadProbeCount++; return Task.FromResult(ControllerLedProfileReadProbeResult); }
+        public async Task<FrontendMsiBackButtonDiagnosticResult> RunMsiBackButtonProfileAndRawInputDiagnosticAsync(CancellationToken t = default)
+        {
+            TotalCalls++;
+            MsiBackButtonDiagnosticCount++;
+            if (BlockMsiBackButtonDiagnostic)
+            {
+                MsiBackButtonDiagnosticStarted.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, t); }
+                catch (OperationCanceledException) { MsiBackButtonDiagnosticCancelled.TrySetResult(); throw; }
+            }
+            return MsiBackButtonDiagnosticResult;
+        }
         public Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken t = default)
         { TotalCalls++; DeveloperRumbleRearmCount++; return Task.FromResult(DeveloperRumbleRearmResult); }
         public FrontendXbox360RumbleLoopSnapshot RumbleLoopSnapshot { get; private set; } =

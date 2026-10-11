@@ -47,6 +47,20 @@
                 </StackPanel>
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard Header="M1 / M2 Physical Input &amp; Firmware Profile (Read Only)" Description="Read the two known PID1902 profile slots and observe raw DirectInput button-index transitions for 10 seconds. No controller profile writes are issued.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Keyboard" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <StackPanel Spacing="6">
+                    <TextBlock Opacity="0.7" Text="Press and release M1 only, then M2 only; do not touch any other controls." TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="RunMsiBackButtonDiagnosticButton" Click="RunMsiBackButtonDiagnosticButton_Click" Content="Run 10s Diagnostic" />
+                        <Button x:Name="CancelMsiBackButtonDiagnosticButton" Click="CancelMsiBackButtonDiagnosticButton_Click" Content="Cancel" IsEnabled="False" />
+                    </StackPanel>
+                    <TextBlock x:Name="MsiBackButtonDiagnosticStatusText" Opacity="0.7" TextWrapping="Wrap" Visibility="Collapsed" />
+                </StackPanel>
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsCard Header="Vibration Test" Description="Run the Full1902 Xbox360 terminal STOP callback diagnostic. Close games and other XInput rumble tools first.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE1D9;" />

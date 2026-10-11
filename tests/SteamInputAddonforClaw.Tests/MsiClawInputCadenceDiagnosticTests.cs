@@ -68,6 +68,101 @@ public sealed class MsiClawInputCadenceDiagnosticTests
     }
 
     [Fact]
+    public async Task Raw_button_collector_records_independent_edges_and_other_candidate_indices()
+    {
+        var collector = new MsiClawRawButtonTransitionCollector(TimeSpan.FromMilliseconds(20), Timestamp(0));
+        var state = new bool[17];
+        collector.Observe(state, Timestamp(0));
+        state[15] = true;
+        collector.Observe(state, Timestamp(4));
+        state[15] = false;
+        collector.Observe(state, Timestamp(8));
+        state[4] = true;
+        collector.Observe(state, Timestamp(12));
+        state[4] = false;
+        state[16] = true;
+        collector.Observe(state, Timestamp(16));
+        state[16] = false;
+        collector.Observe(state, Timestamp(20));
+
+        var result = await collector.Completion;
+
+        Assert.Equal(FrontendRawDirectInputButtonTransitionOutcome.Completed, result.Outcome);
+        Assert.Equal(17, result.ButtonCount);
+        Assert.Equal(17, result.TrackedButtonCount);
+        Assert.Equal(6, result.SuccessfulReadCount);
+        Assert.Equal(new FrontendRawDirectInputButtonIndexTransition(15, 1, 1), result.Transitions.Single(item => item.ButtonIndex == 15));
+        Assert.Equal(new FrontendRawDirectInputButtonIndexTransition(16, 1, 1), result.Transitions.Single(item => item.ButtonIndex == 16));
+        Assert.Equal(new FrontendRawDirectInputButtonIndexTransition(4, 1, 1), result.Transitions.Single(item => item.ButtonIndex == 4));
+        Assert.True(result.Button15PressedAndReleasedObserved);
+        Assert.True(result.Button16PressedAndReleasedObserved);
+        Assert.True(result.Button15ChangedWhileButton16Released);
+        Assert.True(result.Button16ChangedWhileButton15Released);
+        Assert.True(result.Transitions.Count <= MsiClawRawButtonTransitionCollector.MaximumTrackedButtons);
+        Assert.Equal(32, MsiClawRawButtonTransitionCollector.MaximumEventLogLines);
+    }
+
+    [Fact]
+    public async Task Raw_button_collector_reports_no_change_and_rejects_short_or_changing_layouts()
+    {
+        var unchanged = new MsiClawRawButtonTransitionCollector(TimeSpan.FromMilliseconds(10), Timestamp(0));
+        unchanged.Observe(new bool[17], Timestamp(0));
+        unchanged.Observe(new bool[17], Timestamp(10));
+        var noChange = await unchanged.Completion;
+        Assert.Equal(FrontendRawDirectInputButtonTransitionOutcome.NoRawButtonTransitionsObserved, noChange.Outcome);
+        Assert.Equal("NoRawButtonTransitionsObserved", noChange.Status);
+
+        var shortLayout = new MsiClawRawButtonTransitionCollector(TimeSpan.FromSeconds(1), Timestamp(0));
+        shortLayout.Observe(new bool[16], Timestamp(1));
+        Assert.Equal(FrontendRawDirectInputButtonTransitionOutcome.InvalidButtonLayout, (await shortLayout.Completion).Outcome);
+
+        var changingLayout = new MsiClawRawButtonTransitionCollector(TimeSpan.FromSeconds(1), Timestamp(0));
+        changingLayout.Observe(new bool[17], Timestamp(1));
+        changingLayout.Observe(new bool[18], Timestamp(2));
+        Assert.Equal(FrontendRawDirectInputButtonTransitionOutcome.InvalidButtonLayout, (await changingLayout.Completion).Outcome);
+    }
+
+    [Fact]
+    public async Task Raw_button_collector_cancels_and_ends_without_retaining_a_source_session()
+    {
+        var cancelled = new MsiClawRawButtonTransitionCollector(TimeSpan.FromSeconds(10), Timestamp(0));
+        cancelled.Observe(new bool[17], Timestamp(1));
+        cancelled.Cancel(Timestamp(2));
+        Assert.Equal(FrontendRawDirectInputButtonTransitionOutcome.Cancelled, (await cancelled.Completion).Outcome);
+
+        var ended = new MsiClawRawButtonTransitionCollector(TimeSpan.FromSeconds(10), Timestamp(0));
+        ended.Observe(new bool[17], Timestamp(1));
+        ended.EndSession(Timestamp(2));
+        Assert.Equal(FrontendRawDirectInputButtonTransitionOutcome.SessionEnded, (await ended.Completion).Outcome);
+    }
+
+    [Fact]
+    public async Task Raw_button_diagnostic_uses_the_existing_directinput_session_and_shares_the_diagnostic_lane()
+    {
+        var enumerator = new TestEnumerator();
+        using var cadenceTimerApi = new FakeWaitableTimerNativeApi();
+        using var productionTimerApi = new FakeWaitableTimerNativeApi { AutoPulse = false };
+        await using var source = new MsiClawInputSource(
+            () => enumerator,
+            () => new WindowsHighResolutionOneShotTimer(cadenceTimerApi),
+            () => new WindowsHighResolutionOneShotTimer(productionTimerApi));
+        Assert.True(source.StartPrepared(Device()).Started);
+        await enumerator.Device.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var rawTask = source.RunRawDirectInputButtonTransitionDiagnosticAsync(TimeSpan.FromSeconds(5));
+        var overlappingCadence = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(10));
+        Assert.Equal(FrontendPid1902InputCadenceOutcome.AlreadyRunning, overlappingCadence.Outcome);
+
+        await source.StopAsync();
+        var rawResult = await rawTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(FrontendRawDirectInputButtonTransitionOutcome.SessionEnded, rawResult.Outcome);
+        Assert.Equal(1, enumerator.CreateCount);
+        Assert.Equal(1, enumerator.Device.AcquireCount);
+        Assert.Equal(1, enumerator.Device.ReadCount);
+    }
+
+    [Fact]
     public void Cadence_result_round_trips_as_json()
     {
         var value = new FrontendPid1902InputCadenceResult(

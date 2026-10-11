@@ -49,6 +49,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<bool>? _controllerVibrationTestAvailable;
     private readonly Func<MsiClawPhysicalIdentity?>? _controllerVibrationProbeIdentitySource;
     private readonly Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? _controllerLedProfileReadProbe;
+    private readonly Func<CancellationToken, Task<FrontendMsiBackButtonDiagnosticResult>>? _runMsiBackButtonProfileAndRawInputDiagnostic;
     private readonly Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? _testControllerVibrationMotor;
     private readonly Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? _runDeveloperRumbleRearm;
     private int _controllerExclusiveOperationInFlight;
@@ -168,6 +169,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<string, string?>? activeXboxDisplayNameSource = null,
         Func<MsiClawPhysicalIdentity?>? controllerVibrationProbeIdentitySource = null,
         Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? controllerLedProfileReadProbe = null,
+        Func<CancellationToken, Task<FrontendMsiBackButtonDiagnosticResult>>? runMsiBackButtonProfileAndRawInputDiagnostic = null,
         Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null,
         Action<string>? requestControllerPresentationReconcile = null)
     {
@@ -213,6 +215,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _controllerVibrationProbeIdentitySource = controllerVibrationProbeIdentitySource;
         _testControllerVibrationMotor = testControllerVibrationMotor;
         _controllerLedProfileReadProbe = controllerLedProfileReadProbe;
+        _runMsiBackButtonProfileAndRawInputDiagnostic = runMsiBackButtonProfileAndRawInputDiagnostic;
         _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
         _requestControllerPresentationReconcile = requestControllerPresentationReconcile;
         _settings = settings;
@@ -1219,6 +1222,19 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             () => _runPid1902InputCadenceDiagnostic?.Invoke(cancellationToken)
                 ?? Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable()),
             () => FrontendPid1902InputCadenceResult.Unavailable("Another controller diagnostic is already running."));
+    }
+
+    public Task<FrontendMsiBackButtonDiagnosticResult> RunMsiBackButtonProfileAndRawInputDiagnosticAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => _runMsiBackButtonProfileAndRawInputDiagnostic?.Invoke(cancellationToken)
+                ?? Task.FromResult(FrontendMsiBackButtonDiagnosticResult.Unavailable(
+                    "The M1/M2 profile and raw-input diagnostic is unavailable in this Runtime.")),
+            () => FrontendMsiBackButtonDiagnosticResult.Unavailable(
+                "Another controller diagnostic or re-arm is already running."));
     }
 
     public Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default)

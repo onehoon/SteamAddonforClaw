@@ -351,6 +351,90 @@ public sealed record FrontendPid1902InputCadenceResult(
         new(FrontendPid1902InputCadenceOutcome.Unavailable, status, 0, 0, 0, null, 0, 0, null, null, null, null, null, null, null);
 }
 
+public enum FrontendMsiBackButtonProfileReadOutcome
+{
+    ReadbackParsed,
+    NoReplyOrTimeout,
+    UnexpectedReport,
+    WrongAddressOrIndex,
+    TransportUnavailable,
+    OwnerUnavailable,
+    UnsupportedModel,
+    Cancelled,
+    Failed
+}
+
+public enum FrontendMsiBackButtonProfileClassification
+{
+    HistoricalMarkerPresent,
+    HistoricalMarkerAbsent,
+    OtherFormat,
+    NotApplicable
+}
+
+public sealed record FrontendMsiBackButtonProfileSlotResult(
+    string Slot,
+    ushort Address,
+    byte ReadIndex,
+    byte RequestedLength,
+    FrontendMsiBackButtonProfileReadOutcome Outcome,
+    FrontendMsiBackButtonProfileClassification Classification,
+    string Status);
+
+public enum FrontendRawDirectInputButtonTransitionOutcome
+{
+    Unavailable,
+    Completed,
+    NoRawButtonTransitionsObserved,
+    AlreadyRunning,
+    Cancelled,
+    InvalidButtonLayout,
+    SessionEnded,
+    Failed
+}
+
+public sealed record FrontendRawDirectInputButtonIndexTransition(
+    int ButtonIndex,
+    int RisingEdges,
+    int FallingEdges);
+
+public sealed record FrontendRawDirectInputButtonTransitionResult(
+    FrontendRawDirectInputButtonTransitionOutcome Outcome,
+    string Status,
+    long RequestedDurationMs,
+    long ActualDurationMs,
+    int? ButtonCount,
+    int TrackedButtonCount,
+    int SuccessfulReadCount,
+    IReadOnlyList<FrontendRawDirectInputButtonIndexTransition> Transitions,
+    bool Button15PressedAndReleasedObserved,
+    bool Button16PressedAndReleasedObserved,
+    bool Button15ChangedWhileButton16Released,
+    bool Button16ChangedWhileButton15Released)
+{
+    public static FrontendRawDirectInputButtonTransitionResult Unavailable(string status = "The owned PID1902 raw DirectInput source is unavailable.") =>
+        new(FrontendRawDirectInputButtonTransitionOutcome.Unavailable, status, 10_000, 0, null, 0, 0, [], false, false, false, false);
+}
+
+public sealed record FrontendMsiBackButtonDiagnosticResult(
+    string ModelId,
+    ushort? FirmwareVersion,
+    string Status,
+    FrontendMsiBackButtonProfileSlotResult M1,
+    FrontendMsiBackButtonProfileSlotResult M2,
+    FrontendRawDirectInputButtonTransitionResult RawInput)
+{
+    public bool FirmwareMutationIssued => false;
+
+    public static FrontendMsiBackButtonDiagnosticResult Unavailable(string status) => new(
+        "unknown", null, status,
+        new("M1", 0x00BA, 0x01, 0x08, FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable,
+            FrontendMsiBackButtonProfileClassification.NotApplicable, status),
+        new("M2", 0x0163, 0x01, 0x08, FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable,
+            FrontendMsiBackButtonProfileClassification.NotApplicable, status),
+        FrontendRawDirectInputButtonTransitionResult.Unavailable(status));
+}
+
 public enum SteamVirtualControllerPreference
 {
     SteamDeck = 0,
@@ -788,6 +872,8 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
     Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
+    Task<FrontendMsiBackButtonDiagnosticResult> RunMsiBackButtonProfileAndRawInputDiagnosticAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendMsiBackButtonDiagnosticResult.Unavailable("The M1/M2 profile and raw-input diagnostic is unavailable."));
     Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>

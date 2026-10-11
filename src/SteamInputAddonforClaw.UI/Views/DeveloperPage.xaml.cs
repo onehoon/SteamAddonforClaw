@@ -11,6 +11,7 @@ public sealed partial class DeveloperPage : UserControl
     private Func<bool>? _isPrerequisiteSetupInProgress;
     private int _isGeneratingEnvironmentDiscoveryReport;
     private int _isRunningPid1902InputCadenceDiagnostic;
+    private CancellationTokenSource? _msiBackButtonDiagnosticCancellation;
     private string _logDirectoryPath = string.Empty;
 
     public event EventHandler? BackRequested;
@@ -28,6 +29,7 @@ public sealed partial class DeveloperPage : UserControl
     public DeveloperPage()
     {
         InitializeComponent();
+        Unloaded += DeveloperPage_Unloaded;
     }
 
     internal void Initialize(
@@ -42,7 +44,18 @@ public sealed partial class DeveloperPage : UserControl
 
     private void BackButton_Click(object sender, RoutedEventArgs args)
     {
+        CancelMsiBackButtonDiagnostic();
         BackRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void DeveloperPage_Unloaded(object sender, RoutedEventArgs args) => CancelMsiBackButtonDiagnostic();
+
+    private void CancelMsiBackButtonDiagnosticButton_Click(object sender, RoutedEventArgs args) => CancelMsiBackButtonDiagnostic();
+
+    private void CancelMsiBackButtonDiagnostic()
+    {
+        try { _msiBackButtonDiagnosticCancellation?.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
 
     private void OpenLogFolderButton_Click(object sender, RoutedEventArgs args)
@@ -114,6 +127,64 @@ public sealed partial class DeveloperPage : UserControl
     {
         Pid1902InputCadenceStatusText.Text = text;
         Pid1902InputCadenceStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void RunMsiBackButtonDiagnosticButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_isPrerequisiteSetupInProgress?.Invoke() == true || _frontend is null) return;
+        var cancellation = new CancellationTokenSource();
+        if (Interlocked.CompareExchange(ref _msiBackButtonDiagnosticCancellation, cancellation, null) is not null)
+        {
+            cancellation.Dispose();
+            return;
+        }
+
+        RunMsiBackButtonDiagnosticButton.IsEnabled = false;
+        CancelMsiBackButtonDiagnosticButton.IsEnabled = true;
+        SetMsiBackButtonDiagnosticStatus("Running… Press and release M1 only, then M2 only; do not touch any other controls.");
+        try
+        {
+            var result = await _frontend.RunMsiBackButtonProfileAndRawInputDiagnosticAsync(cancellation.Token);
+            SetMsiBackButtonDiagnosticStatus(FormatMsiBackButtonDiagnosticResult(result));
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            SetMsiBackButtonDiagnosticStatus("Cancelled. No firmware mutation was issued.");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerBackButton", "M1/M2 profile and raw-input diagnostic failed in the Developer UI.", exception);
+            SetMsiBackButtonDiagnosticStatus("Diagnostic failed. See the application log for details.");
+        }
+        finally
+        {
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _msiBackButtonDiagnosticCancellation, null, cancellation), cancellation))
+                cancellation.Dispose();
+            RunMsiBackButtonDiagnosticButton.IsEnabled = true;
+            CancelMsiBackButtonDiagnosticButton.IsEnabled = false;
+        }
+    }
+
+    private void SetMsiBackButtonDiagnosticStatus(string text)
+    {
+        MsiBackButtonDiagnosticStatusText.Text = text;
+        MsiBackButtonDiagnosticStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private static string FormatMsiBackButtonDiagnosticResult(FrontendMsiBackButtonDiagnosticResult result)
+    {
+        var firmware = result.FirmwareVersion is ushort version ? $"0x{version:X4}" : "Unavailable";
+        var raw = result.RawInput;
+        var indices = raw.Transitions.Count == 0
+            ? "None"
+            : string.Join(", ", raw.Transitions.Select(item => $"{item.ButtonIndex}: {item.RisingEdges}+/{item.FallingEdges}-"));
+        return $"Model: {result.ModelId} · Firmware: {firmware}\r\n" +
+               $"M1 0x{result.M1.Address:X4}: {result.M1.Outcome} / {result.M1.Classification}\r\n" +
+               $"M2 0x{result.M2.Address:X4}: {result.M2.Outcome} / {result.M2.Classification}\r\n" +
+               $"Raw input: {raw.Outcome}; buttons={raw.ButtonCount?.ToString() ?? "n/a"}; indices={indices}\r\n" +
+               $"Index 15 press+release={raw.Button15PressedAndReleasedObserved}, index 16 press+release={raw.Button16PressedAndReleasedObserved}\r\n" +
+               $"Index 15 changed while 16 released={raw.Button15ChangedWhileButton16Released}, index 16 changed while 15 released={raw.Button16ChangedWhileButton15Released}\r\n" +
+               $"{result.Status}\r\nDetailed bounded bytes and counts are in the Addon log. Index changes do not identify a physical paddle without the instructed press sequence. No firmware mutation was issued.";
     }
 
     private static string FormatPid1902InputCadenceResult(FrontendPid1902InputCadenceResult result)
