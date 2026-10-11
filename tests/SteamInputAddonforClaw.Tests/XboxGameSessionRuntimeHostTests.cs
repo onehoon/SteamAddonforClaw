@@ -5,21 +5,58 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class XboxGameSessionRuntimeHostTests
 {
     [Fact]
-    public void Normal_runtime_owns_and_starts_the_xbox_session_after_the_headless_uninstall_guard()
+    public void Runtime_composes_xbox_observer_but_defers_start_and_keeps_pending_cadence_fast()
     {
         var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs").Replace("\r\n", "\n", StringComparison.Ordinal);
-        var runtimeCreation = host.IndexOf("_xboxGameSessionRuntime = new XboxGameSessionRuntime()", StringComparison.Ordinal);
-        var headlessGuard = host.IndexOf("if (_headlessUninstallPreparation)\n            return;", StringComparison.Ordinal);
-        var frontendCreation = host.IndexOf("_frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl", StringComparison.Ordinal);
+        var initialize = Method(host, "internal async Task InitializeRuntimeAsync()", "internal void StartRuntimeEventWatchers()");
+        var runtimeCreation = initialize.IndexOf("_xboxGameSessionRuntime = new XboxGameSessionRuntime()", StringComparison.Ordinal);
+        var headlessGuard = initialize.IndexOf("if (_headlessUninstallPreparation)\n            return;", StringComparison.Ordinal);
+        var frontendCreation = initialize.IndexOf("_frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl", StringComparison.Ordinal);
+        var activeGameSubscription = initialize.IndexOf("_xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;", StringComparison.Ordinal);
+        var readinessSubscription = initialize.IndexOf("_xboxGameSessionRuntime.ObservationReadinessChanged += OnXboxObservationReadinessChanged;", StringComparison.Ordinal);
+        var pendingCadence = initialize.IndexOf("UpdateControllerCadenceDecision(\"StartupObserverPending\", logInitialDecision: true);", StringComparison.Ordinal);
         Assert.True(runtimeCreation > headlessGuard);
         Assert.True(frontendCreation > runtimeCreation);
+        Assert.True(activeGameSubscription > runtimeCreation && readinessSubscription > activeGameSubscription);
+        Assert.True(pendingCadence > readinessSubscription && frontendCreation > pendingCadence);
 
-        var sessionStartup = host[runtimeCreation..frontendCreation];
-        Assert.Contains("await _xboxGameSessionRuntime.StartAsync(_startupCancellationTokenSource.Token)", sessionStartup, StringComparison.Ordinal);
-        Assert.Contains("Production XBOX game-session observer could not start; Runtime will continue", sessionStartup, StringComparison.Ordinal);
-        Assert.DoesNotContain("CenterMStartupState", sessionStartup, StringComparison.Ordinal);
-        Assert.DoesNotContain("MainWindow", sessionStartup, StringComparison.Ordinal);
-        Assert.DoesNotContain("Steam", sessionStartup, StringComparison.Ordinal);
+        Assert.DoesNotContain("_xboxGameSessionRuntime.StartAsync", initialize, StringComparison.Ordinal);
+        Assert.Contains("private int _controllerCadenceRequires250Hz = 1;", host, StringComparison.Ordinal);
+        Assert.Contains("|| !xboxCanReliablyReportNoActiveGame", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("CenterMStartupState", initialize[runtimeCreation..pendingCadence], StringComparison.Ordinal);
+        Assert.DoesNotContain("MainWindow", initialize[runtimeCreation..pendingCadence], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Deferred_start_runs_xbox_scan_after_controller_attempt_and_before_profile_reconcile()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs").Replace("\r\n", "\n", StringComparison.Ordinal);
+        var deferred = Method(host, "internal void StartDeferredRuntimeStartup()", "private void StartClawHudStartup()");
+        var controllerAttempt = deferred.IndexOf("await TryStartDisabledModeControllerAsync(", StringComparison.Ordinal);
+        var controllerFailure = deferred.IndexOf("Deferred Disabled-mode controller startup threw; Runtime remains available.", StringComparison.Ordinal);
+        var admissionCleared = deferred.IndexOf("Volatile.Write(ref _disabledControllerStartupPending, 0);", controllerAttempt, StringComparison.Ordinal);
+        var startupCancellationCheck = deferred.IndexOf("cancellationToken.IsCancellationRequested", admissionCleared, StringComparison.Ordinal);
+        var clawHud = deferred.IndexOf("StartClawHudStartup();", startupCancellationCheck, StringComparison.Ordinal);
+        var powerObservation = deferred.IndexOf("StartPowerObservation();", clawHud, StringComparison.Ordinal);
+        var observer = deferred.IndexOf("if (_xboxGameSessionRuntime is { } xboxObserver)", powerObservation, StringComparison.Ordinal);
+        var observerStart = deferred.IndexOf("await xboxObserver.StartAsync(cancellationToken).ConfigureAwait(false);", observer, StringComparison.Ordinal);
+        var profileReconcile = deferred.IndexOf("ReconcileDeviceProfileStartup();", observerStart, StringComparison.Ordinal);
+        var backgroundUpdate = deferred.IndexOf("StartBackgroundUpdate();", profileReconcile, StringComparison.Ordinal);
+
+        Assert.True(controllerAttempt >= 0 && controllerFailure > controllerAttempt && admissionCleared > controllerFailure
+            && startupCancellationCheck > admissionCleared && clawHud > startupCancellationCheck
+            && powerObservation > clawHud && observer > powerObservation
+            && observerStart > observer && profileReconcile > observerStart
+            && backgroundUpdate > profileReconcile);
+        Assert.Contains("var cancellationToken = _startupCancellationTokenSource.Token;", deferred, StringComparison.Ordinal);
+        Assert.DoesNotContain("startupResult.CenterMStartupState", deferred, StringComparison.Ordinal);
+        Assert.Contains("catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)", deferred[observer..profileReconcile], StringComparison.Ordinal);
+        Assert.Contains("Production XBOX game-session observer could not start; Runtime will continue without active XBOX detection.", deferred[observer..profileReconcile], StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(deferred, "await xboxObserver.StartAsync(cancellationToken).ConfigureAwait(false);"));
+        Assert.DoesNotContain("PublisherStarted", deferred[observer..profileReconcile], StringComparison.Ordinal);
+
+        var postObserverCheck = deferred.IndexOf("Volatile.Read(ref _processShutdownStarted) != 0", observerStart, StringComparison.Ordinal);
+        Assert.True(postObserverCheck > observerStart && profileReconcile > postObserverCheck);
     }
 
     [Fact]
@@ -138,5 +175,14 @@ public sealed class XboxGameSessionRuntimeHostTests
             offset += value.Length;
         }
         return count;
+    }
+
+    private static string Method(string source, string startToken, string endToken)
+    {
+        var start = source.IndexOf(startToken, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Could not find method start: {startToken}");
+        var end = source.IndexOf(endToken, start + startToken.Length, StringComparison.Ordinal);
+        Assert.True(end > start, $"Could not find method end: {endToken}");
+        return source[start..end];
     }
 }

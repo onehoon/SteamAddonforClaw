@@ -540,6 +540,14 @@ vibration settings. Those existing writes remain awaited in the owning initializ
 not delay the first game-facing publisher or change its success result. Physical recovery and
 power-resume reapplication keep their separate existing ordering.
 
+The production XBOX session observer is composed and subscribed during Runtime initialization,
+but its awaited startup hooks and bounded initial process scan run only after the deferred initial
+controller-presentation attempt and power-event registration. The scan still completes (or fails
+feature-locally) before Device/Profile startup reconciliation, so an already-running XBOX title
+can supply the initial profile. Until the observer establishes reliable idle, controller cadence
+remains conservatively at 250 Hz. XBOX discovery does not gate Win+G hook installation or the first
+publisher attach.
+
 ---
 
 ## 15. Presentation switching

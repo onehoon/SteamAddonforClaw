@@ -673,19 +673,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _xboxGameSessionRuntime = new XboxGameSessionRuntime();
         _xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;
         _xboxGameSessionRuntime.ObservationReadinessChanged += OnXboxObservationReadinessChanged;
-        try
-        {
-            await _xboxGameSessionRuntime.StartAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("XboxSession", "Production XBOX game-session observer could not start; Runtime will continue without active XBOX detection.", exception);
-        }
-        UpdateControllerCadenceDecision("StartupObservationReconciled", logInitialDecision: true);
+        // No XBOX session scan has established reliable idle yet. Keep the existing
+        // controller cadence conservative until the deferred observer reports readiness.
+        UpdateControllerCadenceDecision("StartupObserverPending", logInitialDecision: true);
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost,
             setupExecutor: setupExecutor,
@@ -2696,10 +2686,38 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 NotifyControllerBadgeIfChanged(previousBadge);
             }
 
+            if (cancellationToken.IsCancellationRequested
+                || Volatile.Read(ref _processShutdownStarted) != 0)
+                return;
+
             // CH-A2: optional ClawHUD work starts only after the Full1902 controller-critical
             // attempt has completed and its admission barrier has been cleared.
             StartClawHudStartup();
             StartPowerObservation();
+
+            // Keep the existing XBOX observer and its bounded startup scan out of the first
+            // controller-presentation path. It remains awaited here, before profile startup
+            // reconciliation consumes the detected active XBOX target.
+            if (_xboxGameSessionRuntime is { } xboxObserver)
+            {
+                try
+                {
+                    await xboxObserver.StartAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("XboxSession", "Production XBOX game-session observer could not start; Runtime will continue without active XBOX detection.", exception);
+                }
+            }
+
+            if (cancellationToken.IsCancellationRequested
+                || Volatile.Read(ref _processShutdownStarted) != 0)
+                return;
+
             ReconcileDeviceProfileStartup();
             StartBackgroundUpdate();
         }, cancellationToken);
