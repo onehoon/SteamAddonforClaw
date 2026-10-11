@@ -27,6 +27,7 @@ internal enum MsiClawInitialAcquisitionRetryReason
     None,
     BootRumbleTargetPidNotPresent,
     Pid1902TargetPidNotPresent,
+    Pid1902FirstValidInputNotReady,
     A2vmInitialControlHidNotPresent,
 }
 
@@ -1582,7 +1583,9 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         var elapsedBeforeInput = GetElapsedMilliseconds(finalWriteTimestamp, _getTimestamp());
         var remainingForInput = _a2vmInitialFinalReadinessWindow - TimeSpan.FromMilliseconds(elapsedBeforeInput);
         if (remainingForInput <= TimeSpan.Zero)
-            return FailFinal("FinalReadinessDeadlineExpired");
+            return CompleteA2vmInitialFastFailure("FirstValidStateDeadlineExpiredBeforeInputStart", true, writeCount,
+                true, cancellationToken, MsiClawInitialAcquisitionRetryReason.Pid1902FirstValidInputNotReady,
+                finalWriteTimestamp, finalPid1901Absent, firstValidState, hidHideCompliant);
         if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
             return FailFinal("AuthorityChangedBeforeDirectInputAcquire");
 
@@ -1603,8 +1606,37 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         }
         catch (TimeoutException)
         {
-            await SafeStopAsync().ConfigureAwait(false);
-            return FailFinal("FirstValidStateDeadlineExpired");
+            bool cleanupProven;
+            try
+            {
+                cleanupProven = await _inputSource.StopAndConfirmCleanupAsync().ConfigureAwait(false)
+                    && !_inputSource.IsRunning;
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("ControllerOwnership", "A2VM timed-out DirectInput source cleanup could not be confirmed.", exception,
+                    ("Event", "A2vmInitialFastInputCleanupUnproven"),
+                    ("SinceSecondWriteMs", GetElapsedMilliseconds(finalWriteTimestamp, _getTimestamp())));
+                return FailFinal("FirstValidStateTimeoutCleanupUnproven");
+            }
+
+            if (!cleanupProven)
+            {
+                AppLog.Warn("ControllerOwnership", "A2VM timed-out DirectInput source cleanup was not confirmed.", null,
+                    ("Event", "A2vmInitialFastInputCleanupUnproven"),
+                    ("CleanupProven", false), ("InputSourceStillRunning", _inputSource.IsRunning),
+                    ("SinceSecondWriteMs", GetElapsedMilliseconds(finalWriteTimestamp, _getTimestamp())));
+                return FailFinal("FirstValidStateTimeoutCleanupUnproven");
+            }
+
+            AppLog.Info("ControllerOwnership", "A2VM first valid DirectInput state is still pending; cleanly deferring initial ownership.",
+                ("Event", "A2vmInitialFastOwnershipCompleted"), ("Outcome", "Deferred"),
+                ("RetryReason", MsiClawInitialAcquisitionRetryReason.Pid1902FirstValidInputNotReady),
+                ("FinalPid1901Absent", finalPid1901Absent), ("InputCleanupConfirmed", true),
+                ("ElapsedMs", GetElapsedMilliseconds(finalWriteTimestamp, _getTimestamp())));
+            return CompleteA2vmInitialFastFailure("FirstValidStateDeadlineExpired", true, writeCount, true,
+                cancellationToken, MsiClawInitialAcquisitionRetryReason.Pid1902FirstValidInputNotReady,
+                finalWriteTimestamp, finalPid1901Absent, firstValidState, hidHideCompliant);
         }
         catch (Exception exception)
         {
@@ -1700,12 +1732,6 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             return FailFinal("HidHideTargetSetMissingPrimary");
         }
 
-        if (_getTimestamp() >= deadline)
-        {
-            await SafeStopAsync().ConfigureAwait(false);
-            return FailFinal("FinalReadinessDeadlineExpiredBeforeHidHide");
-        }
-
         _ownedPrimaryHiddenTarget ??= target;
         _ownedHiddenTargets = targetResolution.Targets;
         AddonHidHideBaselineResult baseline;
@@ -1726,12 +1752,6 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             await SafeStopAsync().ConfigureAwait(false);
             return FailFinal("HidHideReadbackNotCompliant:" + baseline.Outcome + ":" + baseline.Reason);
         }
-        if (_getTimestamp() >= deadline)
-        {
-            await SafeStopAsync().ConfigureAwait(false);
-            return FailFinal("FinalReadinessDeadlineExpiredAfterHidHide");
-        }
-
         _ownsInputSource = true;
         _ownedPrimaryHiddenTarget = target;
         _ownedPhysicalIdentity = identityAtFinalPid1902;
