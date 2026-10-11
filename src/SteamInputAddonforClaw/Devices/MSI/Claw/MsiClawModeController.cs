@@ -73,7 +73,7 @@ internal sealed class MsiClawModeController(
     private readonly Func<DateTimeOffset> _now = now ?? (() => DateTimeOffset.UtcNow);
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? ((duration, token) => Task.Delay(duration, token));
 
-    internal async Task<MsiClawModeCommandWriteResult> WriteXInputCommandAsync(
+    public async Task<MsiClawModeCommandWriteResult> WriteXInputCommandAsync(
         MsiClawPhysicalIdentity expectedIdentity,
         CancellationToken cancellationToken)
     {
