@@ -368,6 +368,8 @@ public enum FrontendMsiBackButtonProfileClassification
 {
     HistoricalMarkerPresent,
     HistoricalMarkerAbsent,
+    ObservedLinuxRightBraceCandidate,
+    ObservedLinuxLeftBraceCandidate,
     OtherFormat,
     NotApplicable
 }
@@ -433,6 +435,56 @@ public sealed record FrontendMsiBackButtonDiagnosticResult(
         new("M2", 0x0163, 0x01, 0x08, FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable,
             FrontendMsiBackButtonProfileClassification.NotApplicable, status),
         FrontendRawDirectInputButtonTransitionResult.Unavailable(status));
+}
+
+public enum FrontendMsiBackButtonManualRestoreOutcome
+{
+    Unavailable,
+    NotEligible,
+    AlreadyPrepared,
+    Cancelled,
+    WriteFailed,
+    PartialVolatileWritePossible,
+    Unverified,
+    Restored,
+    Failed
+}
+
+public sealed record FrontendMsiBackButtonManualRestoreSlotResult(
+    string Slot,
+    ushort Address,
+    FrontendMsiBackButtonProfileReadOutcome BeforeOutcome,
+    FrontendMsiBackButtonProfileClassification BeforeClassification,
+    string? BeforePayloadHex,
+    bool WriteIssued,
+    bool WriteTransportSucceeded,
+    FrontendMsiBackButtonProfileReadOutcome? AfterOutcome,
+    FrontendMsiBackButtonProfileClassification? AfterClassification,
+    string? AfterPayloadHex);
+
+public sealed record FrontendMsiBackButtonManualRestoreResult(
+    FrontendMsiBackButtonManualRestoreOutcome Outcome,
+    string ModelId,
+    ushort? FirmwareVersion,
+    string Status,
+    FrontendMsiBackButtonManualRestoreSlotResult M1,
+    FrontendMsiBackButtonManualRestoreSlotResult M2,
+    bool RomSyncIssued,
+    bool RomSyncTransportSucceeded,
+    bool ReadbackObserved,
+    FrontendRawDirectInputButtonTransitionResult RawInput)
+{
+    public bool WriteTransportSucceeded => M1.WriteTransportSucceeded && M2.WriteTransportSucceeded;
+    public bool RawInput15_16Observed => RawInput.Button15PressedAndReleasedObserved || RawInput.Button16PressedAndReleasedObserved;
+
+    public static FrontendMsiBackButtonManualRestoreResult Unavailable(string status) => new(
+        FrontendMsiBackButtonManualRestoreOutcome.Unavailable,
+        "unknown", null, status,
+        new("M1", 0x00BA, FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable,
+            FrontendMsiBackButtonProfileClassification.NotApplicable, null, false, false, null, null, null),
+        new("M2", 0x0163, FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable,
+            FrontendMsiBackButtonProfileClassification.NotApplicable, null, false, false, null, null, null),
+        false, false, false, FrontendRawDirectInputButtonTransitionResult.Unavailable(status));
 }
 
 public enum SteamVirtualControllerPreference
@@ -874,6 +926,8 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
     Task<FrontendMsiBackButtonDiagnosticResult> RunMsiBackButtonProfileAndRawInputDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendMsiBackButtonDiagnosticResult.Unavailable("The M1/M2 profile and raw-input diagnostic is unavailable."));
+    Task<FrontendMsiBackButtonManualRestoreResult> RunMsiBackButtonManualRestoreAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendMsiBackButtonManualRestoreResult.Unavailable("The manual M1/M2 DirectInput restore is unavailable."));
     Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>

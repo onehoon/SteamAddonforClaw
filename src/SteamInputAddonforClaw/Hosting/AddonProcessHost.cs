@@ -727,6 +727,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 startupResult.HardwareDeviceModel is { } ledModel ? ledModel.Value : "unknown", token),
             runMsiBackButtonProfileAndRawInputDiagnostic: token => RunMsiBackButtonProfileAndRawInputDiagnosticAsync(
                 startupResult.HardwareDeviceModel is { } backButtonModel ? backButtonModel.Value : "unknown", token),
+            runMsiBackButtonManualRestore: token => RunMsiBackButtonManualRestoreAsync(
+                startupResult.HardwareDeviceModel is { } restoreModel ? restoreModel.Value : "unknown", token),
             runDeveloperRumbleRearm: RunDeveloperRumbleRearmAsync,
             // This is a presentation capability derived from the existing supported-hardware and
             // startup authority facts. The apply callback re-checks live authority and ownership.
@@ -1886,6 +1888,94 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             ? "A2VM 7 profile bytes are diagnostic evidence only; factory values are not validated. No firmware mutation was issued."
             : "Profile and raw input results are independent. No firmware mutation was issued.";
         return new(modelId, profile.FirmwareVersion, status, profile.M1, profile.M2, rawInput);
+    }
+
+    private async Task<FrontendMsiBackButtonManualRestoreResult> RunMsiBackButtonManualRestoreAsync(
+        string modelId,
+        CancellationToken cancellationToken)
+    {
+        var physical = _physicalOwnership;
+        var ownedInput = physical?.LiveInputSource;
+        var initialIdentity = CaptureLiveOwnedPhysicalIdentityForDeveloperProbe();
+
+        bool RuntimeRestoreIsSafe() =>
+            Volatile.Read(ref _processShutdownStarted) == 0
+            && _ownedControllerRecovery.IsCompleted
+            && Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) == 0
+            && _presentationOwnership?.IsSuspendPaused != true
+            && ownedInput is { IsRunning: true }
+            && ReferenceEquals(_physicalOwnership?.LiveInputSource, ownedInput)
+            && initialIdentity is not null;
+
+        SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawPhysicalIdentity? CurrentOwnedIdentity() =>
+            RuntimeRestoreIsSafe()
+                && CaptureLiveOwnedPhysicalIdentityForDeveloperProbe() is { } current
+                && initialIdentity is { } expected
+                && current.StronglyMatches(expected)
+                    ? current
+                    : null;
+
+        if (ownedInput is not { IsRunning: true } || initialIdentity is null)
+            return FrontendMsiBackButtonManualRestoreResult.Unavailable(
+                "No healthy, strong Addon-owned PID1902 DirectInput session is available.");
+
+        var profileReader = new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawBackButtonProfileReader(
+            GetMsiControllerDevices(),
+            new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
+            new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawHidDeviceInformationLookup(),
+            new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawRawHidTransport());
+        var result = await profileReader.RestoreKnownDirectInputProfileAsync(
+            modelId,
+            CurrentOwnedIdentity,
+            () => _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled,
+            RuntimeRestoreIsSafe,
+            cancellationToken).ConfigureAwait(false);
+
+        var shouldConfirmRawInput = result.Outcome == FrontendMsiBackButtonManualRestoreOutcome.AlreadyPrepared
+            || result.M1.WriteIssued || result.M2.WriteIssued;
+        if (shouldConfirmRawInput && RuntimeRestoreIsSafe() && CurrentOwnedIdentity() is not null)
+        {
+            try
+            {
+                result = result with
+                {
+                    RawInput = await ownedInput.RunRawDirectInputButtonTransitionDiagnosticAsync(cancellationToken)
+                        .ConfigureAwait(false),
+                };
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                result = result with
+                {
+                    RawInput = FrontendRawDirectInputButtonTransitionResult.Unavailable(
+                        "Raw input confirmation was cancelled after the profile operation; no additional firmware command was issued."),
+                };
+            }
+        }
+
+        if (result.ReadbackObserved
+            && (result.RawInput.Outcome is FrontendRawDirectInputButtonTransitionOutcome.Completed
+                or FrontendRawDirectInputButtonTransitionOutcome.NoRawButtonTransitionsObserved)
+            && !result.RawInput15_16Observed)
+        {
+            result = result with
+            {
+                Status = result.Status + " MayRequireReenumeration: profile readback did not independently confirm raw button 15/16; use an ordinary controlled Windows restart before another read-only test. No live mode switch was issued.",
+            };
+        }
+
+        AppLog.Info("ControllerBackButton", "Manual M1/M2 restore and raw input evidence completed.",
+            ("Event", "ControllerBackButtonManualRestoreEvidence"),
+            ("Outcome", result.Outcome), ("Model", modelId),
+            ("Firmware", result.FirmwareVersion is ushort firmware ? $"0x{firmware:X4}" : "Unavailable"),
+            ("WriteTransportSucceeded", result.WriteTransportSucceeded),
+            ("RomSyncIssued", result.RomSyncIssued),
+            ("RomSyncTransportSucceeded", result.RomSyncTransportSucceeded),
+            ("ReadbackObserved", result.ReadbackObserved),
+            ("RawInputOutcome", result.RawInput.Outcome),
+            ("RawInput15_16Observed", result.RawInput15_16Observed),
+            ("Status", result.Status));
+        return result;
     }
 
     private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawPhysicalIdentity? CaptureLiveOwnedPhysicalIdentityForDeveloperProbe()
