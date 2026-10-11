@@ -1,0 +1,123 @@
+# Work Order — Full1902 M1/M2 PR3: Production Profile Preparation and Developer UI Cleanup
+
+**Date:** 2026-10-12  
+**Repository:** `onehoon/SteamAddonforClaw`  
+**Implementer:** local Codex (implementation and automated tests). **Physical validation is performed by the user after merge**, and must not be required for CI or PR merge.  
+**Baseline:** merged PR #764 (squash `429aec82a795b8b5bc1c9d6c8f580db8726411c8`), version `0.1.366.0`. Re-read current `main` before implementation.
+
+## 1. Goal / decision
+
+Move the proven PID1902 physical rear-button preparation from experimental Developer manual restore into the **existing Runtime's production owned-controller hardware-initialization phase**, specifically **after strong physical PID1902 ownership and initial virtual presentation are established, before the existing LED and vibration setting applications**. Nothing in this work order introduces CTW integration; Full1902 is standalone.
+
+**Product result:** in Center M Disabled mode, when the supported MSI Claw controller boots Windows after SteamOS (or another OS) has persistently mapped M1/M2 to keyboard codes, the Addon checks the current firmware slots once for that newly prepared owned physical session and restores independently recognizable DirectInput M1/M2 only when the mismatch is **positively recognized and safe to change**. Already-prepared slots are read-only. Unknown/custom profiles must be preserved. No UI toggle, background monitor, new manager, or database.
+
+**Developer cleanup:** retain Developer menu and the existing **read-only 10-second M1/M2 raw input + profile diagnostic**, useful for A2VM/EX field diagnostics. Remove **only** the experimental M1/M2 firmware mutation button and its confirmation/status UI. Remove now-dead frontend mutation RPC/wire/client/server/UI/test plumbing as practical, preserving the internal production writer/reader. Do not remove any other Developer cards or tests.
+
+## 2. Required architecture and source review
+
+Read these current docs first, in their authoritative order:
+
+- `docs/Full 1902 Implementation/README.md`
+- `docs/Full 1902 Implementation/HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md`
+- `docs/Full 1902 Implementation/REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md`
+- `docs/Full 1902 Implementation/FULL_1902_IMPLEMENTATION_ARCHITECTURE.md`
+- `docs/Full 1902 Implementation/FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md`
+- `docs/work-order/2026-10-11_FULL1902_M1_M2_PARSER_UI_AND_DEVELOPER_RESTORE_WORK_ORDER.md`
+- `docs/RE_MSI_PID1902_M1_M2_BackButton.md` (research only; historical markers are NOT current A2VM proof)
+
+Inspect these implementation seams: `AddonProcessHost.CompleteInitialControllerOwnershipAsync`, `RecoverOwnedControllerPhysicalInputAsync`, `ReapplyOwnedControllerHardwareSettingsAfterResumeAsync`, `CaptureLiveOwnedPhysicalIdentityForDeveloperProbe`, `MsiClawBackButtonProfileReader`, `MsiClawBackButtonProfileProtocol`, `MsiClawInputSource`, current LED/vibration writers, `DeveloperPage.xaml(.cs)`, `FrontendContracts`, and FrontendTransport method enums/codecs/tests.
+
+**Important lifecycle trap:** `CaptureLiveOwnedPhysicalIdentityForDeveloperProbe()` currently rejects while `_ownedControllerRecovery` is incomplete. The initial deferred acquisition is committed *inside* that tracked recovery task, and physical input recovery also executes *inside* it. **Do not simply call the current Developer manual-restore host entrypoint** from initial/recovery or it may be silently unavailable. Extract/use a narrowly scoped production operation with a live strong owner, matching current input source and exact control HID validation **appropriate to the current owning continuation**. Retain existing owner and safety invariants; no second authority, no extra DirectInput Acquire/ReadState, no new orchestration object.
+
+## 3. A2VM 0.1.366.0 real-device evidence (Google Drive `Addon/Log/AV2M/1012`)
+
+Only the `0.1.366.0` logs count for this acceptance; version `0.1.365.0` is excluded. At `2026-10-12 00:44:50–00:46:26 KST`, the A2VM 8 (`msi.claw.a2vm.8`), PID1902, firmware `0x0230`, Center M Disabled, strong owner, exact vendor control HID `UsagePage=0xFFF0, Usage=0x0040`, produced:
+
+```text
+Before M1 @ 0x00BA: 01 04 00 59 FF FF FF FF
+Before M2 @ 0x0163: 01 04 00 58 FF FF FF FF
+
+Command M1: 0F 00 00 3C 21 01 00 BA 02 01 00 ... (64 bytes), transport succeeded
+Command M2: 0F 00 00 3C 21 01 01 63 02 01 00 ... (64 bytes), transport succeeded
+Sync ROM:   0F 00 00 3C 22 ... (64 bytes), transport succeeded
+
+After  M1 @ 0x00BA: 01 00 00 59 FF FF FF FF
+After  M2 @ 0x0163: 01 00 00 58 FF FF FF FF
+```
+
+Both subsequent profile reads returned `ReadbackParsed`, and `ProfileReadbackVerified=True`. The first 10-second manual input capture at `00:44:56` observed zero transitions (cannot prove the operator pressed the paddles during this window). The second capture at `00:45:37–00:45:47` observed independent pressed/released input on **Button 15 and Button 16**, `Transitions=15:3+/3-,16:3+/3-`, `ReadFailures=0`, with **no second firmware write, ROM sync, Windows restart, or PID mode switch**. An additional read-only capture at `00:46:16–00:46:26` repeated both raw index observations.
+
+**Conclusion:** the HHC-format two-byte per-slot command followed by one ROM sync is validated on A2VM 8 `0x0230`. A Windows restart / `0x24` mode switch / extra forced DirectInput re-enumeration is **not** a required step. No automatic 10-second human press test is possible or appropriate at production startup. Distinguish readback verification from physical button verification in log names/outcomes.
+
+**EX/CG3EM:** existing code's explicit write-eligibility firmware versions are `0x0414` and `0x0419`, with the same PID1902 control HID addresses/protocol. The current supplied hardware log does **not** demonstrate an EX manual restore. Support EX through the exact same **positive profile recognition and explicit firmware gates**, but preserve any unrecognized EX/custom pattern without writing. Do not fabricate a factory profile, broaden eligible versions, or make EX physical testing a merge blocker. `msi.claw.a2vm.7` stays read-only until matching firmware/protocol is established.
+
+## 4. Production call sites, ordering, and eligibility
+
+After `CompleteInitialControllerOwnershipAsync` establishes initial presentation/publisher and front-button feature composition, **before** `ApplyOwnedControllerLedSettingsAsync` and `ApplyOwnedControllerVibrationSettingsAsync`, await the narrowly scoped feature-local M1/M2 profile preparation. The virtual publisher is already available; this optional read/write must **not delay first publisher attach**, change the acquired ownership result, or cause a rollback to PID1901. Then apply LED and vibration in their existing order regardless of M1/M2 feature-local outcome.
+
+In `RecoverOwnedControllerPhysicalInputAsync`, after a truly recovered and newly owned PID1902 session (`result.IsOwned && result.Reason != "RecoveryNotNeeded"`) and **before** LED/vibration reapplication, run the same operation once in that owning recovery sequence. The source may be different from startup; read current strong identity, input source and control endpoint. Ordinary power Resume with the **same** still-owned source only reapplies LED/vibration and does not require a fresh EEPROM scan; if Resume actually forces loss/re-acquisition, use the normal owned recovery path. Do not run on Steam/BPM switch, profile/game change, controller 250/125 Hz cadence changes, frontend UI restarts, or every DirectInput poll.
+
+Avoid adding a redundant global `alreadyChecked` flag/epoch; invocation under the **existing owning acquisition/recovery continuation** gives the correct once-per-new-owner-session boundary. On controlled Runtime restart, the new Runtime may check the existing PID1902 profile once, observe prepared, and perform **zero ROM writes**.
+
+Admission: Center M exactly Disabled, strong uniquely owned PID1902 physical session, live current DirectInput source, unique present `VID_0DB0/PID_1902` control HID `0xFFF0/0x0040` from the same strongly matched physical identity, stable relevant model/firmware/path across bounded reads and before mutation; existing shutdown/owner-release/suspend/power lifecycle and failed physical cleanup gates apply. Do not use merely `startupResult.HardwareSupported`, a cached stale device path, or the developer-only `_ownedControllerRecovery.IsCompleted` predicate to veto work *inside* the owning recovery task. No second HID reader process and no alternate gamepad input session.
+
+## 5. Match/restore behavior and firmware contract
+
+Reuse `MsiClawBackButtonProfileReader`, existing resolver, transport, profile parser and the successful 64-byte `BuildDirectInputRestoreWriteRequest` and `BuildSyncToRomRequest`. Prefer factoring the existing experimentally named `RestoreKnownDirectInputProfileAsync` into a product-focused method without duplicating protocol logic. Keep existing bounded I/O and live-owner checks, but do not retain frontend confirmation or 10-second raw-input capture in the production method.
+
+Read M1/M2 **once each** at the beginning. For supported firmware, define slot interpretations based on documented bytes:
+
+- **Prepared**: both mode-selector bytes `01 00` in an otherwise parseable slot; on the A2VM `0x0230` captured after-image, the full bytes are `01000059FFFFFFFF` / `01000058FFFFFFFF`. Since `01 00` changes mode semantics but remaining per-button codes may be preexisting, do not write a prepared slot even when its following bytes differ from this observation.
+- **Recognized keyboard remap candidate**: exact eight bytes `01040059FFFFFFFF` for M1 and `01040058FFFFFFFF` for M2. These are the observed A2VM SteamOS/Linux brace patterns, not universal manufacturer defaults.
+- **Unknown/custom/old-marker or malformed**: anything else. **Never auto-overwrite or `SyncToROM` an unknown profile.** Do not normalize unrelated firmware mappings.
+- For a first production pass, preserve the **current tested all-or-nothing pair policy** for mutation: when both are candidates, perform the two validated 2-byte writes, then exactly one `0x22` ROM sync, then re-read both. When both are already prepared, no write. For a mixed prepared/candidate or unknown/candidate pair, skip writes and log `MixedOrUnknownProfilePreserved` with both raw payloads. The one-slot mixed case can be revisited after explicit evidence; the current experimental writer deliberately rejects it.
+
+Firmware write eligibility must remain explicitly limited to A2VM 8 `0x0230` and EX/CG3EM `0x0414` / `0x0419`, using the existing `IsAllowedManualRestoreFirmware` policy (renamed to reflect production if suitable). Other versions/models: log `UnsupportedModelOrFirmware`, **zero writes**. Do not treat A2VM 7 read-only path as a failure that blocks normal routing.
+
+For a recognized candidate pair, command sequence:
+
+```text
+WriteProfile M1: 0F 00 00 3C 21 01 00 BA 02 01 00 ... 64 bytes
+WriteProfile M2: 0F 00 00 3C 21 01 01 63 02 01 00 ... 64 bytes
+SyncToROM:      0F 00 00 3C 22 ... 64 bytes
+ReadProfile M1/M2: verify both parse and begin 01 00 (record full 8-byte before/after)
+```
+
+If M1 fails, stop before M2; if M2 fails or the owner changes, no SyncToROM; report partial volatile write possibility, no forced rollback and no blind retry. If SyncToROM or post-read fails, log `Unverified` but leave the rest of the routing stack usable. Never call `0x24` mode switch, PID1901/PID1902 transition, or re-acquire physical input to apply this mapping. Cancel further firmware operations on ordinary shutdown/suspend/device loss; after first write, preserve the existing production-safe bounded operation and current ownership gates, without arbitrary frontend request cancellation.
+
+There is no physical-button test during startup. **Readback `01 00` is profile-prepared evidence, not a claim that raw 15/16 button presses occurred.** On-device pressed/released validation was already established for A2VM 8 manually; for EX the product logs should not imply EX physical verification.
+
+## 6. Production logging and lifecycle safety
+
+Use concise structured logs, e.g. `ControllerBackButtonProductionPrepareStarted`, `...Skipped`, `...Write`, `...Completed` with `Trigger=Startup|DeferredInitialAcquisition|PhysicalRecovery`, exact model/firmware, full pre/post payloads where available, status (`AlreadyPrepared`, `RestoredProfileReadback`, `UnknownProfilePreserved`, `UnsupportedFirmware`, `PartialVolatileWritePossible`, `Unverified`, `OwnerUnavailable`), and write / ROM-sync booleans. Do not report `PhysicalButtonsVerified` without actual owned input observation.
+
+The operation is **feature-local, best effort**. Failure must not demote a valid PID1902 physical owner, detach a valid VIIPER presentation, disturb HidHide, discard LED/vibration, force PID1901 mode, change WING/Center M suppression, or block shutdown. Maintain actual lifecycle safety on Sleep/Hibernate/Resume, crash/restart/shutdown, physical PnP loss, and owned cleanup-unproven states by using the existing gates; do not invent a new authority/lock/epoch/barrier/state machine for theoretical tiny interleavings.
+
+No new Steam/Overlay publication operations, CTW bridge, cache, user setting, scheduled service, or new retry loop. Existing pipeline remains single Windows user / single interactive session.
+
+## 7. Developer UI/API cleanup
+
+Keep the `M1 / M2 Physical Input & Firmware Profile` Developer card's read-only `Run 10s Diagnostic`, `Cancel`, wrapping and concise result formatting. Rewrite its description to state that production automatically checks/restores **recognized** profiles and the diagnostic never modifies firmware. Remove the `Restore M1/M2 DirectInput (Experimental)` button, popup, manual status text and related UI handler/fields/formatters.
+
+Remove the now-unused `RunMsiBackButtonManualRestore` frontend RPC method, frontend interface, transport dispatch/client method, and tests for that RPC. Keep read-only diagnostic RPC. Update Frontend transport version, enum compatibility and relevant unit/UI tests if the public wire shape changes, per existing conventions. The firmware restore implementation must remain in Runtime for production; do **not** delete the tested low-level restore protocol or current safety tests when removing experimental UI exposure. If the existing `FrontendMsiBackButtonManualRestoreResult` record is still useful as an internal production result, it can temporarily remain rather than add an elaborate replacement type solely for naming; prefer minimal clean ownership and avoid dangling dead public methods.
+
+The entire Developer menu and unrelated controls remain.
+
+## 8. Automated test expectations / merge policy
+
+Tests should cover:
+
+1. A2VM 8 `0x0230` exact captured before pair auto-restores via **two writes + one sync + two post-reads**, and logs the expected after payloads and profile outcome.
+2. A subsequent Runtime start/profile read showing both `01 00` performs **zero writes** and **zero ROM sync**; ignore non-mode trailing bytes for prepared status.
+3. A2VM 7, unknown firmware, unsupported models, unowned PID1902, PID1901, ambiguous/missing control HID, wrong firmware, Center M Enabled, shutdown/suspend/device loss, read timeout and unrecognized/mixed/custom profiles perform **no firmware mutation**.
+4. EX/CG3EM `0x0414` / `0x0419` with the **exact supported candidate pair** follows the same protocol; an unrecognized EX profile is preserved. This is a code-contract test, not a claim of EX hardware validation.
+5. On M1 failure, M2 failure, SyncToROM failure, post-read mismatch, or identity/device-path change, stop unsafe commands, never sync an incomplete pair, classify outcome correctly and still apply LED/vibration as existing optional hardware settings.
+6. Initial owned session, **deferred initial acquisition** and **actual physical session recovery** each reach this operation once and in the proper phase, while a Steam/BPM presentation switch, profile change, ordinary no-reacquisition Resume and frontend reopen do not.
+7. The operation neither schedules the raw 10-second input diagnostic nor blocks the first VIIPER presentation/publication; it reuses existing control HID transport and ownership. Validate no new DirectInput Acquire, `0x24` mode write, HidHide or VIIPER lifecycle change.
+8. UI still renders/read-only diagnostics legibly at varying DPI and long results; no developer mutation RPC or button is reachable. Other Developer functions remain available.
+
+Run normal build/test workflows. Hardware testing and confirming the startup restore on A2VM/EX are **the user's post-merge responsibility**, never a PR blocker. Review by realistically reachable product/lifecycle defects, not speculative race permutations.
+
+## 9. User post-merge checks (outside Codex PR/CI)
+
+The user can return to SteamOS, allow it to remap both M keys, then boot Windows 11. In the new Runtime log confirm one recognized read + narrow two writes + one ROM sync + two post-reads, and then check physical M1/M2 input in the surviving Developer **read-only** 10-second diagnostic. Restart Windows/Runtime and confirm the profile is already prepared and no ROM writes occur. EX/CG3EM can be validated analogously; if its profile is unfamiliar, automatic preservation is intentional and its raw evidence informs a separate narrow follow-up, not an excuse to overwrite unknown firmware bytes.
