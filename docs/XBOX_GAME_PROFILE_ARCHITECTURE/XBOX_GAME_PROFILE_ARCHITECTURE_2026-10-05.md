@@ -684,7 +684,13 @@ A WinEvent source only sees future events.
 
 A Runtime may start while an XBOX game is already running.
 
-Therefore, after hooks are installed:
+Therefore, the production observer starts after the initial Full1902 controller-presentation
+attempt and power-event registration, then completes one bounded startup reconciliation before
+Device/Profile startup reconciliation. This keeps XBOX process discovery off the first-publisher
+critical path without allowing an already-running title to receive the idle/default startup profile.
+The cadence remains conservatively at 250 Hz until the observer establishes reliable idle.
+
+When the observer starts, it installs its WinEvent hooks and performs:
 
 ~~~text
 one bounded reconciliation
