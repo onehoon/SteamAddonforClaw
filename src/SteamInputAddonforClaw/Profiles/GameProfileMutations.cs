@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices.Abstractions;
 
@@ -35,6 +36,34 @@ internal sealed class GameProfileMutations
             return loaded.Document.Games.TryGetValue(key, out var profile)
                 ? new(appId, Complete(profile, loaded.Document.Device), true, true)
                 : new(appId, Complete(new GameProfile(), loaded.Document.Device), false, true);
+        }
+    }
+
+    internal (bool Enabled, SteamVirtualControllerPreference? Preference) CaptureSteamVirtualController(uint appId)
+    {
+        var captured = CaptureProfile(appId);
+        return captured is null || !captured.PersistenceWritable
+            ? (false, null)
+            : (captured.Exists && captured.Profile.Enabled, captured.Profile.SteamVirtualController);
+    }
+
+    internal MutationOutcome SetSteamVirtualController(uint appId, SteamVirtualControllerPreference? preference)
+    {
+        if (preference is { } value && !Enum.IsDefined(value)) return MutationOutcome.InvalidTarget;
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile))
+            {
+                if (preference is null) return MutationOutcome.Succeeded;
+                profile = new GameProfile();
+            }
+            if (profile.SteamVirtualController == preference) return MutationOutcome.Succeeded;
+            loaded.Document.Games[key] = profile with { SteamVirtualController = preference };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; }
+            catch { return MutationOutcome.PersistenceFailed; }
         }
     }
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Profiles;
 
@@ -20,6 +21,8 @@ public sealed record GameProfile
 
     public GamePerformanceOverrides Performance { get; init; } = new();
     public GameDisplayOverrides Display { get; init; } = new();
+    /// <summary>Optional Steam-facing virtual controller selection; null inherits the global preference.</summary>
+    public SteamVirtualControllerPreference? SteamVirtualController { get; init; }
 
     /// <summary>Preserves unrecognized properties directly under this game entry (as opposed to
     /// inside <see cref="Performance"/>/<see cref="Display"/>) across a load/save round trip.</summary>

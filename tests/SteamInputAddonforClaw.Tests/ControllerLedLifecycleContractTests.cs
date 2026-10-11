@@ -16,13 +16,13 @@ public sealed class ControllerLedLifecycleContractTests
         var liveSourceCheck = continuation.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
         var suppression = continuation.IndexOf("EnsureAddonAuthorityWinGSuppression()", StringComparison.Ordinal);
         var watcher = continuation.IndexOf("StartControllerDeviceArrivalWatcher()", suppression, StringComparison.Ordinal);
-        var snapshot = continuation.IndexOf("CapturePresentationSnapshot()", watcher, StringComparison.Ordinal);
-        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync", snapshot, StringComparison.Ordinal);
+        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync(", watcher, StringComparison.Ordinal);
+        var snapshotProvider = continuation.IndexOf("() => _runtimeHost!.CapturePresentationSnapshot()", presentation, StringComparison.Ordinal);
         var apply = continuation.IndexOf("ApplyOwnedControllerLedSettingsAsync(", presentation, StringComparison.Ordinal);
 
         Assert.True(acquisition >= 0 && ownedGate > acquisition && continuationCall > ownedGate);
         Assert.True(liveSourceCheck >= 0 && suppression > liveSourceCheck && watcher > suppression
-            && snapshot > watcher && presentation > snapshot && apply > presentation);
+            && presentation > watcher && snapshotProvider > presentation && apply > presentation);
         Assert.Contains("controllerLedAvailable: startupResult.HardwareSupported", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled", host, StringComparison.Ordinal);
     }

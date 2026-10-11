@@ -83,6 +83,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly TdpRuntime? _tdpRuntime;
     private readonly GameProfileMutations? _gameProfileMutations;
     private readonly Func<uint> _actualRunningAppIdSource;
+    private readonly Func<SteamPresentationSnapshot>? _capturePresentationSnapshot;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>> _scanProfileGames;
     private readonly Func<CancellationToken, Task<XboxInstalledGameCatalogResult>> _scanXboxGames;
     private readonly XboxGameProfileMutations? _xboxGameProfileMutations;
@@ -171,7 +172,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? controllerLedProfileReadProbe = null,
         Func<CancellationToken, Task<FrontendMsiBackButtonDiagnosticResult>>? runMsiBackButtonProfileAndRawInputDiagnostic = null,
         Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null,
-        Action<string>? requestControllerPresentationReconcile = null)
+        Action<string>? requestControllerPresentationReconcile = null,
+        Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -186,6 +188,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _tdpRuntime = tdpRuntime;
         _gameProfileMutations = gameProfileMutations;
         _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
+        _capturePresentationSnapshot = capturePresentationSnapshot
+            ?? (_runtime is null ? null : () => _runtime.CapturePresentationSnapshot());
         _scanProfileGames = scanProfileGames ?? (token => new ProfileGameCatalogScanner().ScanAsync(token));
         _scanXboxGames = scanXboxGames ?? (token => new XboxInstalledGameCatalog().ScanAsync(token));
         _xboxGameProfileMutations = xboxGameProfileMutations;
@@ -642,6 +646,21 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             ProfileApplyKind.PowerMode, ProfileApplyKind.FpsLimit, ProfileApplyKind.GpuMinimumClock);
     }
 
+    public Task<FrontendGameProfileMutationResult> SetGameProfileSteamVirtualControllerAsync(
+        uint appId, SteamVirtualControllerPreference? preference, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (IsSteamGameOrBigPictureActive())
+            return Task.FromResult(new FrontendGameProfileMutationResult(
+                FrontendGameProfileMutationOutcome.Unavailable,
+                "Controller selection cannot be changed while a Steam game or Big Picture is active.",
+                CaptureGameProfile(appId)));
+        var outcome = _gameProfileMutations?.SetSteamVirtualController(appId, preference)
+            ?? GameProfileMutations.MutationOutcome.Unavailable;
+        return MutateGame(appId, outcome, ProfileApplyKind.None);
+    }
+
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -781,7 +800,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
             profile.Performance.PowerMode is { } power ? new(power.Enabled, power.Ac, power.Dc) : null,
             new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60, profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason),
-            CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock));
+            CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock))
+        {
+            SteamVirtualController = profile.SteamVirtualController
+        };
     }
 
     private FrontendGameGpuMinimumClockConfiguration CaptureGameGpuMinimumClock(GameGpuMinimumClockSettings? settings)
@@ -940,6 +962,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
+        if (IsSteamGameOrBigPictureActive())
+        {
+            AppLog.Info("ControllerPresentation", "Steam virtual controller preference mutation rejected while Steam or Big Picture is active.",
+                ("Event", "SteamVirtualControllerMutationRejectedActiveSession"));
+            return Task.FromResult(MapSettings());
+        }
         var previous = _settings.SteamVirtualController;
         if (!_settings.ChangeSteamVirtualController(preference))
             return Task.FromResult(MapSettings());
@@ -950,6 +978,22 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             StateInvalidated?.Invoke(this, EventArgs.Empty);
         }
         return Task.FromResult(MapSettings());
+    }
+
+    private bool IsSteamGameOrBigPictureActive()
+    {
+        try
+        {
+            var snapshot = _capturePresentationSnapshot?.Invoke()
+                ?? new SteamPresentationSnapshot(_actualRunningAppIdSource(), false);
+            return snapshot.RunningAppId != 0 || snapshot.BigPictureActive;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerPresentation", "Steam virtual controller preference mutation rejected because session state could not be captured.", exception,
+                ("Event", "SteamVirtualControllerMutationRejectedUnknownSession"));
+            return true;
+        }
     }
 
     public Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(Contracts.FrontButtons.FrontButtonMappingSettings mapping, CancellationToken cancellationToken = default)

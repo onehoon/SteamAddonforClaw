@@ -235,7 +235,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
 
         Assert.True(
-            host.IndexOf("AttachInitialAsync(source, snapshot", StringComparison.Ordinal)
+            host.IndexOf("context.Presentation.AttachInitialAsync(", StringComparison.Ordinal)
             < host.IndexOf("MsiClawFrontButtonRuntime.Create(", StringComparison.Ordinal));
         Assert.True(
             host.IndexOf("_frontButtonRuntime.DisposeAsync", StringComparison.Ordinal)

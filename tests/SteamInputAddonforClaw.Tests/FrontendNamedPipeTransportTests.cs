@@ -64,7 +64,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetSteamVirtualControllerAsync(SteamVirtualControllerPreference.DualSenseEdge);
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, fake.LastSteamVirtualControllerPreference);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, result.SteamVirtualController);
     }
@@ -83,7 +83,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
@@ -205,7 +205,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -269,7 +269,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -322,7 +322,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -342,7 +342,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -366,7 +366,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -379,7 +379,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.GameInputProbeSnapshot, await client.CaptureGameInputSystemButtonProbeAsync());
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.StartGameInputSystemButtonProbeAsync()).State);
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.CaptureGameInputSystemButtonProbeAsync()).State);
@@ -439,7 +439,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
         var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
@@ -462,8 +462,8 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.RunControllerLedProfileReadProbeAsync();
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
-        Assert.Equal("RunMsiBackButtonProfileAndRawInputDiagnostic", Enum.GetNames<FrontendRpcMethod>().Last());
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal("SetGameProfileSteamVirtualController", Enum.GetNames<FrontendRpcMethod>().Last());
         Assert.Equal(fake.ControllerLedProfileReadProbeResult, result);
         Assert.Equal(1, fake.ControllerLedProfileReadProbeCount);
     }
@@ -478,8 +478,8 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.RunMsiBackButtonProfileAndRawInputDiagnosticAsync();
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
-        Assert.Equal("RunMsiBackButtonProfileAndRawInputDiagnostic", Enum.GetNames<FrontendRpcMethod>().Last());
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal("SetGameProfileSteamVirtualController", Enum.GetNames<FrontendRpcMethod>().Last());
         Assert.Equal(fake.MsiBackButtonDiagnosticResult.ModelId, result.ModelId);
         Assert.Equal(fake.MsiBackButtonDiagnosticResult.FirmwareVersion, result.FirmwareVersion);
         Assert.Equal(fake.MsiBackButtonDiagnosticResult.Status, result.Status);
@@ -521,11 +521,11 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.RunDeveloperRumbleRearmAsync();
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.DeveloperRumbleRearmResult, result);
         Assert.Equal(1, fake.DeveloperRumbleRearmCount);
         Assert.False(result.PhysicalMotorEffectVerified);
-        Assert.Equal("RunMsiBackButtonProfileAndRawInputDiagnostic", Enum.GetNames<FrontendRpcMethod>().Last());
+        Assert.Equal("SetGameProfileSteamVirtualController", Enum.GetNames<FrontendRpcMethod>().Last());
     }
 
     [Theory]
@@ -913,14 +913,14 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task A_v69_frontend_peer_is_rejected_by_the_v70_server()
+    public async Task A_v73_frontend_peer_is_rejected_by_the_v74_server()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
         await using var serverLifetime = server;
         await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
-        Assert.Equal(73, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(74, FrontendTransportProtocol.CurrentVersion);
         await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
     }
 
@@ -937,6 +937,8 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal((uint)12345, games[0].AppId);
         Assert.Equivalent(fake.GameProfile, await client.CaptureGameProfileAsync(12345));
         Assert.Equivalent(fake.GameMutationResult, await client.SetGameProfileEnabledAsync(12345, true, "Test Game"));
+        Assert.Equivalent(fake.GameMutationResult, await client.SetGameProfileSteamVirtualControllerAsync(12345, SteamVirtualControllerPreference.DualSenseEdge));
+        Assert.Equal((12345u, SteamVirtualControllerPreference.DualSenseEdge), fake.LastGameVirtualController);
         Assert.Equivalent(fake.GameMutationResult, await client.SetGameProfileCpuBoostEnabledAsync(12345, false));
         Assert.Equivalent(fake.GameMutationResult, await client.SetGameProfileCpuBoostAcAsync(12345, CpuBoostMode.EfficientAggressive));
         Assert.Equivalent(fake.GameMutationResult, await client.SetGameProfileCpuBoostDcAsync(12345, CpuBoostMode.Disabled));
@@ -1849,13 +1851,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 72 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 74 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":73,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":73,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":73,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":74,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":74,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":74,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -2208,6 +2210,7 @@ public sealed class FrontendNamedPipeTransportTests
         public int TotalCalls { get; private set; }
         public FrontendLogLevel LastLogLevel { get; private set; }
         public SteamVirtualControllerPreference? LastSteamVirtualControllerPreference { get; private set; }
+        public (uint AppId, SteamVirtualControllerPreference? Preference)? LastGameVirtualController { get; private set; }
         public FrontButtonMappingSettings? LastFrontButtonMapping { get; private set; }
         public BackButtonMappingSettings? LastBackButtonMapping { get; private set; }
         public ControllerLedSettings? LastControllerLedSettings { get; private set; }
@@ -2307,6 +2310,7 @@ public sealed class FrontendNamedPipeTransportTests
         }
         public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; return Task.FromResult(GameProfile with { AppId = appId }); }
         public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; return Task.FromResult(GameMutationResult); }
+        public Task<FrontendGameProfileMutationResult> SetGameProfileSteamVirtualControllerAsync(uint appId, SteamVirtualControllerPreference? preference, CancellationToken t = default) { TotalCalls++; LastGameVirtualController = (appId, preference); return Task.FromResult(GameMutationResult); }
         public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostEnabledAsync(uint appId, bool enabled, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameCpuEnabled = enabled; return Task.FromResult(GameMutationResult); }
         public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAcAsync(uint appId, CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameCpu = (mode, LastGameCpu.GetValueOrDefault().Dc); return Task.FromResult(GameMutationResult); }
         public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostDcAsync(uint appId, CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameCpu = (LastGameCpu.GetValueOrDefault().Ac, mode); return Task.FromResult(GameMutationResult); }

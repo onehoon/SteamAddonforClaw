@@ -1491,7 +1491,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(1, h.SwitchCalls);
         Assert.Equal(new[] { PrimaryPnp }, h.HidHideApplied);
         // PR11 section 19: a live PR5 input source MUST exist after a cross-mode ownership success,
-        // so PR6/PR7 can attach an X360/SteamDeck presentation instead of "no live PR5 input source".
+        // so Full1902 can attach one Xbox360, Steam Deck, or DualSense Edge presentation instead of "no live input source".
         Assert.NotNull(owner.LiveInputSource);
         Assert.True(owner.LiveInputSource!.IsRunning);
     }

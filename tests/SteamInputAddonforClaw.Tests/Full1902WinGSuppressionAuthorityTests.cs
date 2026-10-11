@@ -93,7 +93,7 @@ public sealed class Full1902WinGSuppressionAuthorityTests
     {
         var body = Method(HostSource(), "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
         var ensure = body.IndexOf("EnsureAddonAuthorityWinGSuppression()", StringComparison.Ordinal);
-        var attach = body.IndexOf("context.Presentation.AttachInitialAsync(source, snapshot", StringComparison.Ordinal);
+        var attach = body.IndexOf("context.Presentation.AttachInitialAsync(", StringComparison.Ordinal);
         Assert.True(ensure > 0 && ensure < attach, "suppression must be armed/proven before the first live presentation attach");
 
         // The arm check gates the attach: a false result releases the presentation and returns.

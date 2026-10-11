@@ -71,8 +71,7 @@ internal interface ICanonicalViiperNativeApi
     bool RemoveXbox360Device(nuint deviceHandle);
     Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint deviceHandle);
 
-    // Optional experimental Edge surface. These exports are resolved lazily on
-    // the first Edge request and are deliberately absent from RequiredExports.
+    // Required canonical Edge surface. Runtime readiness requires all three typed devices.
     bool CreateDualSenseEdgeDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, nint metaState);
     bool SetDualSenseDeviceState(nuint deviceHandle, DSDeviceState state);
     bool SetDualSenseOutputCallback(nuint deviceHandle, DualSenseOutputCallback? callback);
@@ -81,14 +80,6 @@ internal interface ICanonicalViiperNativeApi
 
 internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 {
-    internal static readonly IReadOnlyList<string> OptionalDualSenseEdgeExports =
-    [
-        "CreateDualSenseEdgeDevice",
-        "SetDualSenseDeviceState",
-        "SetDualSenseOutputCallback",
-        "RemoveDualSenseDeviceEx"
-    ];
-
     internal static readonly IReadOnlyList<string> RequiredExports =
     [
         "SetDiagnosticLogDirectory",
@@ -111,7 +102,11 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         "SetXbox360DeviceState",
         "SetXbox360RumbleCallback",
         "RemoveXbox360Device",
-        "RemoveXbox360DeviceEx"
+        "RemoveXbox360DeviceEx",
+        "CreateDualSenseEdgeDevice",
+        "SetDualSenseDeviceState",
+        "SetDualSenseOutputCallback",
+        "RemoveDualSenseDeviceEx"
     ];
 
     private readonly SetDiagnosticLogDirectoryDelegate _setDiagnosticLogDirectory;
@@ -135,11 +130,10 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     private readonly SetXbox360RumbleCallbackDelegate _setXbox360RumbleCallback;
     private readonly RemoveXbox360DeviceDelegate _removeXbox360Device;
     private readonly RemoveXbox360DeviceExDelegate _removeXbox360DeviceEx;
-    private readonly nint _library;
-    private readonly Func<nint, string, nint> _exportResolver;
-    private readonly object _edgeBindingGate = new();
-    private DualSenseEdgeNativeBindings? _dualSenseEdgeBindings;
-    private bool _dualSenseEdgeBindingsResolved;
+    private readonly CreateDualSenseEdgeDeviceDelegate _createDualSenseEdgeDevice;
+    private readonly SetDualSenseDeviceStateDelegate _setDualSenseDeviceState;
+    private readonly SetDualSenseOutputCallbackDelegate _setDualSenseOutputCallback;
+    private readonly RemoveDualSenseDeviceExDelegate _removeDualSenseDeviceEx;
     private readonly object _callbackGate = new();
     private readonly Dictionary<nuint, SteamDeckOutputCallback> _steamDeckOutputCallbacks = [];
     private readonly Dictionary<nuint, Xbox360RumbleCallback> _xbox360RumbleCallbacks = [];
@@ -156,8 +150,6 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     internal CanonicalViiperNativeApi(nint library, Func<nint, string, nint>? exportResolver = null)
     {
         var resolve = exportResolver ?? NativeLibrary.GetExport;
-        _library = library;
-        _exportResolver = resolve;
         _setDiagnosticLogDirectory = Bind<SetDiagnosticLogDirectoryDelegate>(library, resolve, "SetDiagnosticLogDirectory");
         _newUsbServer = Bind<NewUsbServerDelegate>(library, resolve, "NewUSBServer");
         _closeUsbServer = Bind<CloseUsbServerDelegate>(library, resolve, "CloseUSBServer");
@@ -179,6 +171,10 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         _setXbox360RumbleCallback = Bind<SetXbox360RumbleCallbackDelegate>(library, resolve, "SetXbox360RumbleCallback");
         _removeXbox360Device = Bind<RemoveXbox360DeviceDelegate>(library, resolve, "RemoveXbox360Device");
         _removeXbox360DeviceEx = Bind<RemoveXbox360DeviceExDelegate>(library, resolve, "RemoveXbox360DeviceEx");
+        _createDualSenseEdgeDevice = Bind<CreateDualSenseEdgeDeviceDelegate>(library, resolve, "CreateDualSenseEdgeDevice");
+        _setDualSenseDeviceState = Bind<SetDualSenseDeviceStateDelegate>(library, resolve, "SetDualSenseDeviceState");
+        _setDualSenseOutputCallback = Bind<SetDualSenseOutputCallbackDelegate>(library, resolve, "SetDualSenseOutputCallback");
+        _removeDualSenseDeviceEx = Bind<RemoveDualSenseDeviceExDelegate>(library, resolve, "RemoveDualSenseDeviceEx");
     }
 
     internal static CanonicalViiperNativeApi Load(string absolutePath)
@@ -274,7 +270,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
             autoAttachLocalhost ? (byte)1 : (byte)0,
             idVendor,
             idProduct));
-        if (succeeded)
+        if (deviceHandle != 0)
         {
             lock (_callbackGate) _deviceOwnership[deviceHandle] = (serverHandle, busId);
         }
@@ -371,7 +367,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
             idVendor,
             idProduct,
             xinputSubType));
-        if (succeeded)
+        if (deviceHandle != 0)
         {
             lock (_callbackGate) _deviceOwnership[deviceHandle] = (serverHandle, busId);
         }
@@ -423,14 +419,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         ushort idProduct,
         nint metaState)
     {
-        var bindings = TryGetDualSenseEdgeBindings();
-        if (bindings is null)
-        {
-            deviceHandle = 0;
-            return false;
-        }
-
-        var succeeded = Succeeded(bindings.CreateDevice(
+        var succeeded = Succeeded(_createDualSenseEdgeDevice(
             serverHandle,
             out deviceHandle,
             busId,
@@ -448,19 +437,13 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     }
 
     public bool SetDualSenseDeviceState(nuint deviceHandle, DSDeviceState state)
-    {
-        var bindings = TryGetDualSenseEdgeBindings();
-        return bindings is not null && Succeeded(bindings.SetState(deviceHandle, state));
-    }
+        => Succeeded(_setDualSenseDeviceState(deviceHandle, state));
 
     public bool SetDualSenseOutputCallback(nuint deviceHandle, DualSenseOutputCallback? callback)
     {
         lock (_callbackGate)
         {
-            var bindings = TryGetDualSenseEdgeBindings();
-            if (bindings is null) return false;
-
-            var succeeded = Succeeded(bindings.SetOutputCallback(deviceHandle, callback));
+            var succeeded = Succeeded(_setDualSenseOutputCallback(deviceHandle, callback));
             if (succeeded)
             {
                 if (callback is null) _dualSenseOutputCallbacks.Remove(deviceHandle);
@@ -472,49 +455,10 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     public DSDeviceRemoveResult RemoveDualSenseDeviceEx(nuint deviceHandle)
     {
-        var bindings = TryGetDualSenseEdgeBindings();
-        if (bindings is null) return DSDeviceRemoveResult.Invalid;
-
-        var result = bindings.RemoveDeviceEx(deviceHandle);
+        var result = _removeDualSenseDeviceEx(deviceHandle);
         if (result == DSDeviceRemoveResult.Success)
             ReleaseDeviceOwnership(deviceHandle);
         return result;
-    }
-
-    private DualSenseEdgeNativeBindings? TryGetDualSenseEdgeBindings()
-    {
-        lock (_edgeBindingGate)
-        {
-            if (_dualSenseEdgeBindingsResolved) return _dualSenseEdgeBindings;
-
-            try
-            {
-                _dualSenseEdgeBindings = new DualSenseEdgeNativeBindings(
-                    BindOptional<CreateDualSenseEdgeDeviceDelegate>(_library, _exportResolver, "CreateDualSenseEdgeDevice"),
-                    BindOptional<SetDualSenseDeviceStateDelegate>(_library, _exportResolver, "SetDualSenseDeviceState"),
-                    BindOptional<SetDualSenseOutputCallbackDelegate>(_library, _exportResolver, "SetDualSenseOutputCallback"),
-                    BindOptional<RemoveDualSenseDeviceExDelegate>(_library, _exportResolver, "RemoveDualSenseDeviceEx"));
-            }
-            catch (EntryPointNotFoundException)
-            {
-                // Edge is experimental and optional. Missing symbols do not affect
-                // normal startup; the explicit Edge request reports unavailable.
-                _dualSenseEdgeBindings = null;
-            }
-            finally
-            {
-                _dualSenseEdgeBindingsResolved = true;
-            }
-
-            return _dualSenseEdgeBindings;
-        }
-    }
-
-    private static T BindOptional<T>(nint library, Func<nint, string, nint> resolver, string export) where T : Delegate
-    {
-        var address = resolver(library, export);
-        if (address == 0) throw new EntryPointNotFoundException($"Optional VIIPER export '{export}' is unavailable.");
-        return Marshal.GetDelegateForFunctionPointer<T>(address);
     }
 
     private static T Bind<T>(nint library, Func<nint, string, nint> resolver, string export) where T : Delegate
@@ -617,9 +561,4 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate DSDeviceRemoveResult RemoveDualSenseDeviceExDelegate(nuint handle);
 
-    private sealed record DualSenseEdgeNativeBindings(
-        CreateDualSenseEdgeDeviceDelegate CreateDevice,
-        SetDualSenseDeviceStateDelegate SetState,
-        SetDualSenseOutputCallbackDelegate SetOutputCallback,
-        RemoveDualSenseDeviceExDelegate RemoveDeviceEx);
 }

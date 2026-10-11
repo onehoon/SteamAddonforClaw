@@ -21,8 +21,8 @@ public sealed class ControllerVibrationLifecycleContractTests
         var liveSource = continuation.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
         var suppression = continuation.IndexOf("EnsureAddonAuthorityWinGSuppression()", StringComparison.Ordinal);
         var watcher = continuation.IndexOf("StartControllerDeviceArrivalWatcher()", suppression, StringComparison.Ordinal);
-        var snapshot = continuation.IndexOf("CapturePresentationSnapshot()", watcher, StringComparison.Ordinal);
-        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync", snapshot, StringComparison.Ordinal);
+        var presentation = continuation.IndexOf("context.Presentation.AttachInitialAsync(", watcher, StringComparison.Ordinal);
+        var snapshotProvider = continuation.IndexOf("() => _runtimeHost!.CapturePresentationSnapshot()", presentation, StringComparison.Ordinal);
         var presentationLog = continuation.IndexOf("First presentation attach completed.", presentation, StringComparison.Ordinal);
         var motion = continuation.IndexOf("ReconcileMotionReadersAsync(", presentationLog, StringComparison.Ordinal);
         var frontButtons = continuation.IndexOf("MsiClawFrontButtonRuntime.Create", motion, StringComparison.Ordinal);
@@ -33,7 +33,7 @@ public sealed class ControllerVibrationLifecycleContractTests
         Assert.True(admissionGate >= 0 && viiperReadyGate > admissionGate && acquisition > viiperReadyGate && continuationCall > acquisition);
         Assert.Contains("return;", startup[viiperReadyGate..acquisition], StringComparison.Ordinal);
         Assert.True(liveSource >= 0 && suppression > liveSource && watcher > suppression
-            && snapshot > watcher && presentation > snapshot && presentationLog > presentation
+            && presentation > watcher && snapshotProvider > presentation && presentationLog > presentation
             && motion > presentationLog && frontButtons > motion && cancellationCheck > frontButtons
             && led > cancellationCheck && vibration > led);
         Assert.Contains("context.StartupSettings.ControllerVibration", continuation[vibration..], StringComparison.Ordinal);

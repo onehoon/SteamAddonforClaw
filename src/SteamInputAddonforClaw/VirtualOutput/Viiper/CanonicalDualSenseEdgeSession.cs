@@ -21,7 +21,7 @@ internal sealed class CanonicalDualSenseEdgeSession : ICanonicalDualSenseEdgeSes
         if (State != CanonicalDualSenseEdgeSessionState.Clean || _runtime.State != CanonicalViiperRuntimeState.Ready)
             return false;
 
-        if (!_runtime.TryEnsureDualSenseEdgeDevice())
+        if (!_runtime.TryVerifyDualSenseEdgeDetached())
         {
             if (_runtime.State is CanonicalViiperRuntimeState.Unsafe or CanonicalViiperRuntimeState.CleanupPending)
                 State = CanonicalDualSenseEdgeSessionState.Unsafe;
