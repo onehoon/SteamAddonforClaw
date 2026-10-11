@@ -383,6 +383,8 @@ Critical rule:
 
 > **No virtual controller may be attached before physical PID1902 ownership and HidHide isolation are verified.**
 
+For A2VM 7/8 only, the startup model gate is resolved once. During Center M Disabled admission, an already usable supported control HID is accepted on its first unambiguous observation rather than waiting for three equal topology snapshots. Center M Enabled/stock onboarding and EX/CG3EM keep the existing topology-settle policy.
+
 ---
 
 ## 9. Boot-time PID policy: desired state, not forced round-trip
@@ -416,6 +418,8 @@ verify same supported MSI Claw
 → verify/reconcile HidHide
 ```
 
+For the eligible A2VM 7/8 Center M Disabled initial fast path only, use the unique current PID1901 `0xFFA0/0x0001` command endpoint for one DirectInput write and proceed directly to the single final PID1902/DirectInput/HidHide readiness window. Skip the separate full transition verification on that successful-write path. Other PID1901 transitions remain strict.
+
 ### Temporarily missing
 
 Use bounded startup/PnP stabilization.
@@ -435,11 +439,9 @@ is sufficient.
 
 ### A2VM 7/8 once-per-boot rumble initialization exception
 
-On the boot-prime second leg only, a verified PID1901 → PID1902 write followed by PID1901 disappearance and a partial PID1902 PnP arrival may qualify for the existing typed deferred first-acquisition recheck/Device Arrival path. The acquisition remains failed and unowned while the exact PID1902 control collection is pending; no DirectInput session, HidHide commit, or virtual presentation is published. The per-boot marker remains consumed, so a later `AcquireAsync` reconciles the current native mode without repeating the optional cycle. The ordinary transition-success predicate and final strong PID1902, DirectInput, HidHide, Win+G suppression, and presentation proofs remain unchanged. See the [second-leg partial PID1902 recovery work order](../work-order/2026-10-10_A2VM_BOOT_RUMBLE_SECOND_LEG_PARTIAL_PID1902_RECOVERY_WORK_ORDER.md).
+For A2VM 7/8 only, the Disabled-startup path uses the model identified once at startup and admits the first unambiguous supported control-HID observation instead of requiring three identical topology snapshots. After the once-per-Windows-boot marker is claimed, an initial PID1902 state issues one command through its unique current `0xFFF0/0x0040` endpoint, waits at most 10 seconds for one current PID1901 `0xFFA0/0x0001` endpoint, then issues one DirectInput command through that exact fresh instance. Intermediate proof does not compare Strong Identity, physical root, Container ID, or another full native-state snapshot. An initial PID1901 state uses one DirectInput write without separate full transition verification. After any successful new DirectInput write, one final readiness window (maximum 12 seconds) requires PID1901 absence, the exact PID1902 primary gamepad collection, matching live DirectInput first input, and compliant exact HidHide targets before ownership or attach. GamepadMode readback is skipped only after a successful new DirectInput write; an already-PID1902 boot with no new write retains normal readback/normalization. If normal PID1902 enumeration is pending at the final deadline, use the existing typed Device Arrival deferral without repeating either native write. The marker remains consumed. This does not change desired PID1902 authority, persistent HidHide state, stock release, shutdown, resume, or recovery behavior; EX/CG3EM stays strict. User-invoked **Restore Vibration** remains a temporary recovery, not a Center M authority release.
 
-For A2VM 7/8 only, after exact Center M Disabled startup admission and VIIPER Ready, the first eligible acquisition in an actual Windows boot consumes a narrow attempt marker. If the first strong native state is already PID1902 and the exact PID1902 control HID is resolved, the Addon issues one PID1902 → PID1901 command. A normal strict transition result is followed by a fresh target-scoped PID1901 endpoint lookup rather than another global snapshot. Only the A2VM boot-first-leg result “write succeeded, old PID disappeared, PID1901 command endpoint not ready” permits up to five additional seconds of target-scoped settling; the PID1901 parent devnode may already be present before the exact HID command child. Continuation requires one fresh Strong PID1901 logical target with the exact `0xFFA0/0x0001` command endpoint and PID1902 absence, and the first command is never repeated. That fresh PID1901 identity feeds the unchanged verified PID1901 → PID1902 transition. The final full PID1902 snapshot, strong identity, DirectInput first state, exact HidHide isolation, and presentation admission remain strict before virtual attach. If the bounded intermediate endpoint does not appear, initial ownership stays uncommitted and the existing typed Device Arrival recovery may be used. If the initial state is PID1901, the marker is consumed and only the normal single takeover occurs. CG3EM is unchanged. Marker I/O failure skips the optional cycle and cannot block ordinary ownership. This does not change the desired PID1902 authority, persistent HidHide state, stock release path, or shutdown behavior. User-invoked **Restore Vibration** is a temporary recovery, not a Center M authority release.
-
-The marker prevents a second optional cycle in the same Windows boot after Addon/update restart or process crash. It is not consulted by ordinary ownership, PnP recovery, suspend/resume, or Steam/BPM presentation changes. See the [2026-10-10 A2VM work order](../work-order/2026-10-10_A2VM_FAMILY_BOOT_RUMBLE_REARM_LED_VIBRATION_AND_RECOVERY_UI_WORK_ORDER.md) and [PID1901 settle follow-up](../work-order/2026-10-10_A2VM_BOOT_RUMBLE_INTERMEDIATE_PID1901_SETTLE_SIMPLIFICATION_WORK_ORDER.md).
+The marker prevents a second optional cycle in the same Windows boot after Addon/update restart or process crash. It is not consulted by ordinary ownership, PnP recovery, suspend/resume, or Steam/BPM presentation changes. See the [2026-10-11 A2VM initial fast-path work order](../work-order/2026-10-11_A2VM_INITIAL_CONTROLLER_FAST_PATH_HHC_CTW_SIMPLIFICATION_WORK_ORDER.md) and the [2026-10-10 A2VM work order](../work-order/2026-10-10_A2VM_FAMILY_BOOT_RUMBLE_REARM_LED_VIBRATION_AND_RECOVERY_UI_WORK_ORDER.md).
 
 ---
 

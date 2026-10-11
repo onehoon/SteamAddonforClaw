@@ -190,6 +190,42 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Initial_fast_writer_uses_the_unique_current_instance_without_container_identity()
+    {
+        var device = Device(null, null, @"HID\VID_0DB0&PID_1901&MI_02&COL01\CURRENT_SUFFIX",
+            0x1901, 0xFFA0, 0x0001);
+        var endpoint = new MsiClawInitialFastModeEndpoint(device, 0xFFA0, 0x0001);
+        var transport = new RecordingRawTransport();
+        var writer = new WindowsMsiClawModeWriter(
+            new FixedLookup(new("fresh-hid-path", device.InstanceId, Guid.NewGuid())), transport);
+
+        Assert.True(await writer.WriteInitialA2vmFastAsync(endpoint, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal("fresh-hid-path", transport.DevicePath);
+        Assert.Equal(MsiClawModeCommand.Build(MsiClawNativeMode.DirectInput), transport.Bytes);
+    }
+
+    [Fact]
+    public async Task Initial_fast_writer_rejects_missing_ambiguous_or_wrong_usage_instances()
+    {
+        var device = Device(null, null, @"HID\VID_0DB0&PID_1901&MI_02&COL01\CURRENT_SUFFIX",
+            0x1901, 0xFFA0, 0x0001);
+        var endpoint = new MsiClawInitialFastModeEndpoint(device, 0xFFA0, 0x0001);
+        var transport = new RecordingRawTransport();
+        var missing = new WindowsMsiClawModeWriter(new EmptyLookup(), transport);
+        Assert.False(await missing.WriteInitialA2vmFastAsync(endpoint, MsiClawNativeMode.DirectInput, CancellationToken.None));
+
+        var ambiguous = new WindowsMsiClawModeWriter(new MultiLookup(
+            new("path-a", device.InstanceId, null), new("path-b", device.InstanceId, Guid.NewGuid())), transport);
+        Assert.False(await ambiguous.WriteInitialA2vmFastAsync(endpoint, MsiClawNativeMode.DirectInput, CancellationToken.None));
+
+        var unsupported = new WindowsMsiClawModeWriter(new FixedLookup(
+            new("path", device.InstanceId, null)), transport);
+        var wrongUsage = endpoint with { Usage = 0x0002 };
+        Assert.False(await unsupported.WriteInitialA2vmFastAsync(wrongUsage, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal(0, transport.CallCount);
+    }
+
+    [Fact]
     public async Task Windows_writer_reads_gamepad_mode_with_the_0x26_command()
     {
         var container = Guid.NewGuid();
@@ -641,6 +677,8 @@ public sealed class MsiClawModeSwitchTests
     { public Task<IReadOnlyList<MsiClawHidDeviceInformation>> FindAsync(string selector, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MsiClawHidDeviceInformation>>([]); }
     private sealed class FixedLookup(MsiClawHidDeviceInformation item) : IMsiClawHidDeviceInformationLookup
     { public Task<IReadOnlyList<MsiClawHidDeviceInformation>> FindAsync(string selector, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MsiClawHidDeviceInformation>>([item]); }
+    private sealed class MultiLookup(params MsiClawHidDeviceInformation[] items) : IMsiClawHidDeviceInformationLookup
+    { public Task<IReadOnlyList<MsiClawHidDeviceInformation>> FindAsync(string selector, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MsiClawHidDeviceInformation>>(items); }
     private sealed class RecordingRawTransport : IMsiClawRawHidTransport
     {
         public string? DevicePath { get; private set; }

@@ -99,6 +99,58 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
         Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
     }
 
+    [Fact]
+    public async Task A2vmFirstControlHidReadiness_AcceptsTheFirstUniqueSupportedEndpoint()
+    {
+        var endpoint = DirectInputControlHid();
+        var enumerator = new CountingEnumerator([endpoint]);
+        var waiter = new ControllerTopologyWaiter(enumerator,
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
+            sampleInterval: TimeSpan.Zero, timeout: TimeSpan.FromSeconds(1));
+
+        var readiness = await waiter.WaitForFirstUnambiguousControlHidAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
+        Assert.Equal(1, enumerator.Calls);
+    }
+
+    [Fact]
+    public async Task A2vmFirstControlHidReadiness_WaitsForMissingEndpointButRejectsAmbiguity()
+    {
+        var first = DirectInputControlHid();
+        var second = DirectInputControlHid() with { InstanceId = "HID\\VID_0DB0&PID_1902&MI_02&COL02\\SECOND" };
+        var enumerator = new SequenceEnumerator([], [first], [first, second]);
+        var waiter = new ControllerTopologyWaiter(enumerator,
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
+            sampleInterval: TimeSpan.Zero, timeout: TimeSpan.FromMilliseconds(20));
+
+        var readiness = await waiter.WaitForFirstUnambiguousControlHidAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
+        Assert.Equal(2, enumerator.Calls);
+
+        var ambiguous = new ControllerTopologyWaiter(new FakeEnumerator([first, second]),
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
+            sampleInterval: TimeSpan.FromMilliseconds(1), timeout: TimeSpan.FromMilliseconds(10));
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate,
+            await ambiguous.WaitForFirstUnambiguousControlHidAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A2vmFirstControlHidReadiness_DoesNotAcceptTheUnverifiedRevision230Usage()
+    {
+        var candidate = DirectInputControlHid() with
+        {
+            HardwareIds = ["HID\\VID_0DB0&PID_1902&REV_0230&MI_02&COL01"],
+            UsagePage = 0x0001,
+            Usage = 0x0040,
+        };
+        var waiter = CreateWaiter([candidate], requiredStableSnapshots: 3, timeout: TimeSpan.FromMilliseconds(10));
+
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate,
+            await waiter.WaitForFirstUnambiguousControlHidAsync(CancellationToken.None));
+    }
+
     private static ControllerDeviceInfo GamepadInterface() => new(
         "HID\\VID_0DB0&PID_1902&MI_00&COL01",
         Guid.NewGuid(),
@@ -377,6 +429,23 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
     private sealed class FakeEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
     {
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices;
+    }
+
+    private sealed class CountingEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
+    {
+        public int Calls { get; private set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            Calls++;
+            return devices;
+        }
+    }
+
+    private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] states) : IControllerDeviceEnumerator
+    {
+        private int _index;
+        public int Calls => _index;
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Length - 1)];
     }
 
     private sealed class NeverMatchInternalControllerMatcher : IInternalControllerMatcher

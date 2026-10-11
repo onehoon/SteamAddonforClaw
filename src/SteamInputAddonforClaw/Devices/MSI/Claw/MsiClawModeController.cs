@@ -12,6 +12,9 @@ internal interface IMsiClawControlHidResolver
 internal interface IMsiClawModeWriter
 {
     Task<bool> WriteAsync(MsiClawControlHidDevice device, MsiClawNativeMode mode, CancellationToken cancellationToken);
+
+    Task<bool> WriteInitialA2vmFastAsync(MsiClawInitialFastModeEndpoint endpoint, MsiClawNativeMode mode, CancellationToken cancellationToken) =>
+        Task.FromResult(false);
 }
 
 internal sealed class MsiClawControlHidResolver : IMsiClawControlHidResolver
@@ -286,6 +289,9 @@ internal sealed class MsiClawModeController(
         AppLog.Debug("NativeMode", "NativeModeTransitionTimedOut", ("SourceMode", source.Mode), ("TargetMode", target), ("OldPidDisappeared", oldPidDisappeared));
         return Complete(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, source.Mode, "Native mode re-enumeration did not complete.", true);
     }
+
+    public Task<bool> WriteInitialA2vmFastModeAsync(MsiClawInitialFastModeEndpoint endpoint, MsiClawNativeMode target, CancellationToken cancellationToken) =>
+        writer.WriteInitialA2vmFastAsync(endpoint, target, cancellationToken);
 
     private SourceResolution ResolveSource(IReadOnlyList<ControllerDeviceInfo> devices, MsiClawPhysicalIdentity expectedIdentity)
     {

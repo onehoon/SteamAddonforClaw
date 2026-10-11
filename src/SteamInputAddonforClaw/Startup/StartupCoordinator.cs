@@ -159,7 +159,9 @@ internal sealed class StartupCoordinator
 
         var readinessStopwatch = Stopwatch.StartNew();
         AppLog.Info("ControllerTopology", "Disabled-boot controller topology stabilization started.");
-        var readiness = await _topologyWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
+        var readiness = IsA2vmModel(deviceModel)
+            ? await _topologyWaiter.WaitForFirstUnambiguousControlHidAsync(cancellationToken).ConfigureAwait(false)
+            : await _topologyWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("ControllerAdmission", "Disabled-boot controller topology stabilization completed.", ("Topology", readiness), ("ElapsedMs", readinessStopwatch.ElapsedMilliseconds));
 
         DisabledBootControllerAdmissionResult admission;
@@ -173,6 +175,9 @@ internal sealed class StartupCoordinator
             RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: deviceModel, HardwareStatus: hardware.Status,
             CenterMStartupState: FrontendCenterMStartupState.Disabled, DisabledBootAdmission: admission);
     }
+
+    private static bool IsA2vmModel(HandheldDeviceModelId? model) =>
+        model?.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8";
 
     private HardwareCompatibilityAssessment EvaluateHardwareCompatibility()
     {

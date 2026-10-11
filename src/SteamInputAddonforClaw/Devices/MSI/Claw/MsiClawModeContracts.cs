@@ -86,6 +86,7 @@ internal sealed record MsiClawModeTransitionResult(MsiClawModeTransitionStatus S
 }
 
 internal sealed record MsiClawModeCommandWriteResult(bool WriteAttempted, bool WriteSucceeded, string Reason);
+internal sealed record MsiClawInitialFastModeEndpoint(ControllerDeviceInfo Device, ushort UsagePage, ushort Usage);
 
 internal interface IMsiClawModeController
 {
@@ -93,4 +94,6 @@ internal interface IMsiClawModeController
 
     Task<MsiClawModeCommandWriteResult> WriteXInputCommandAsync(MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken) =>
         Task.FromResult(new MsiClawModeCommandWriteResult(false, false, "WriteOnlyModeCommandUnavailable"));
+    Task<bool> WriteInitialA2vmFastModeAsync(MsiClawInitialFastModeEndpoint endpoint, MsiClawNativeMode target, CancellationToken cancellationToken) =>
+        Task.FromResult(false);
 }
