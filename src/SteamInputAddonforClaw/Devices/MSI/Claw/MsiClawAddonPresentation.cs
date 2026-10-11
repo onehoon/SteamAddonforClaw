@@ -183,6 +183,9 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// routing status.</summary>
     AddonPresentationKind? ActivePresentation { get; }
 
+    /// <summary>True only while the currently attached presentation has its publisher running.</summary>
+    bool IsActivePresentationLive { get; }
+
     /// <summary>Whether the existing Full1902 presentation, physical rumble sink, and live owned
     /// physical-input session currently permit a bounded Controller-page motor test.</summary>
     bool IsVibrationTestAvailable { get; }
@@ -401,6 +404,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// <summary>Lock-free read (matches the existing internal accessor): a torn read during a switch
     /// at worst makes one queued gesture pick the other mapping domain, which the next press corrects.</summary>
     public AddonPresentationKind? ActivePresentation => _activeKind;
+
+    public bool IsActivePresentationLive => _activeKind is not null && _publisher is { IsRunning: true };
 
     public bool IsVibrationTestAvailable => CanTestVibration();
 

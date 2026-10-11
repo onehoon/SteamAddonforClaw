@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
@@ -34,6 +35,9 @@ internal static class AddonRuntimeCompositionFactory
         // Full1902 0903 cleanup (section 4.6): a read-only override for the final Addon operational
         // status, closing over AddonProcessHost's existing physical/presentation ownership facts.
         Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null,
+        // Device summary projection reads the same already-captured power recovery safety fact and
+        // the Runtime's existing controller owners; it performs no controller or device mutation.
+        Func<bool, FrontendControllerBadgeState>? captureControllerBadge = null,
         // Full1902 Suspend/Resume section 5.2 / addendum A.3: the one host-local Full1902 suspend
         // participant, created by AddonProcessHost and passed through unchanged. Its quiesce callback
         // reads AddonProcessHost's current presentation ownership with a null guard at execution time.
@@ -80,7 +84,8 @@ internal static class AddonRuntimeCompositionFactory
             // the legacy effective-routing-session state is no longer consulted.
             () => steamRuntime.CapturePresentationSnapshot(),
             () => recoverySafetyState.Current == RecoverySafety.Safe,
-            captureFull1902AddonStatus);
+            captureFull1902AddonStatus,
+            captureControllerBadge);
         // Full1902 A2 section 11: sleep/resume while Center M is Disabled must not call the legacy
         // stock XInput baseline; the Enabled (stock authority) state still needs stock PID1901
         // verification on resume. Gated independently of the (now removed) legacy routing selection.

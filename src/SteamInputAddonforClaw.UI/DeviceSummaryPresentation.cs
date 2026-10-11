@@ -22,10 +22,25 @@ internal static class DeviceSummaryPresentation
         };
     }
 
-    internal static string FormatDeviceCompatibility(FrontendHardwareStatus status) => status switch
+    internal static string FormatControllerBadge(FrontendHardwareStatus hardwareStatus, FrontendControllerBadgeState badge)
     {
-        FrontendHardwareStatus.Supported => "Supported",
-        FrontendHardwareStatus.Unsupported => "Unsupported",
-        _ => "Compatibility unknown"
-    };
+        if (hardwareStatus == FrontendHardwareStatus.Unsupported)
+            return "Unsupported";
+        if (hardwareStatus == FrontendHardwareStatus.Indeterminate)
+            return "Compatibility unknown";
+
+        return badge switch
+        {
+            FrontendControllerBadgeState.MsiNative => "MSI Native",
+            FrontendControllerBadgeState.Xbox360Active => "Xbox 360 · Active",
+            FrontendControllerBadgeState.SteamDeckActive => "Steam Deck · Active",
+            FrontendControllerBadgeState.Initializing => "Initializing…",
+            FrontendControllerBadgeState.Reconnecting => "Reconnecting…",
+            FrontendControllerBadgeState.NeedsAttention => "Needs attention",
+            _ => "Unavailable"
+        };
+    }
+
+    internal static FrontendStatusSnapshot WithUnavailableControllerBadge(FrontendStatusSnapshot snapshot) =>
+        snapshot with { ControllerBadge = FrontendControllerBadgeState.Unavailable };
 }

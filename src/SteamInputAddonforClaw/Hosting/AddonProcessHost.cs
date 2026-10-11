@@ -466,6 +466,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 // Full1902 0903 cleanup (section 4): read-only override for the final Addon operational
                 // status, closing over this host's existing physical/presentation ownership facts.
                 captureFull1902AddonStatus: TryCaptureFull1902AddonStatus,
+                captureControllerBadge: CaptureControllerBadge,
                 // Full1902 Suspend/Resume section 5 / addendum A: one host-local suspend participant.
                 // Its callback reads _presentationOwnership with a null guard at execution time, so it
                 // tolerates the legitimate state where this host exists but Full1902 controller
@@ -1260,7 +1261,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             AppLog.Info("ControllerOwnership", "Deferred initial controller acquisition requested.",
                 ("Event", "DeferredInitialControllerAcquisitionRequested"), ("Trigger", "DeferredDeviceArrival"));
-            _ownedControllerRecovery = Task.Run(() => RunInitialControllerAcquisitionAsync(context, "DeferredDeviceArrival"));
+            _ = TrackOwnedControllerRecovery(Task.Run(() => RunInitialControllerAcquisitionAsync(context, "DeferredDeviceArrival")));
         }
     }
 
@@ -1597,10 +1598,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             Interlocked.Exchange(ref _ownedControllerRecoveryBlockedByCleanup, 1);
             AppLog.Warn("ControllerOwnership", "Owned physical input recovery blocked; dead DirectInput session cleanup is unproven.", null,
                 ("Event", "OwnedPhysicalRecoveryBlocked"), ("Reason", "CleanupUnproven"));
+            NotifyControllerBadgeStateInvalidated();
             return;
         }
 
         RequestOwnedControllerRecovery(physical, "UnexpectedDirectInputCompletion");
+        NotifyControllerBadgeStateInvalidated();
     }
 
     private bool StartControllerDeviceArrivalWatcher()
@@ -1643,6 +1646,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         AppLog.Info("ControllerOwnership", "Controller device arrival observed.", ("Event", "ControllerDeviceArrivalObserved"));
         _ = RequestOwnedControllerRecovery(physical, "DeviceArrival");
+        NotifyControllerBadgeStateInvalidated();
     }
 
     /// <summary>The one owned-controller recovery scheduling seam, shared by the unexpected
@@ -1678,8 +1682,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
                 AppLog.Info("ControllerOwnership", "Deferred initial controller acquisition requested.",
                     ("Event", "DeferredInitialControllerAcquisitionRequested"), ("Trigger", trigger));
-                _ownedControllerRecovery = Task.Run(() => RunInitialControllerAcquisitionAsync(initial, trigger));
-                return _ownedControllerRecovery;
+                return TrackOwnedControllerRecovery(Task.Run(() => RunInitialControllerAcquisitionAsync(initial, trigger)));
             }
 
             // Coalesce concurrent triggers to one in-flight attempt. A real Device Arrival that lands
@@ -1695,9 +1698,20 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.",
                 ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", trigger));
-            _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, trigger, _startupCancellationTokenSource.Token);
-            return _ownedControllerRecovery;
+            return TrackOwnedControllerRecovery(RecoverOwnedControllerPhysicalInputAsync(physical, trigger, _startupCancellationTokenSource.Token));
         }
+    }
+
+    private Task TrackOwnedControllerRecovery(Task recovery)
+    {
+        _ownedControllerRecovery = recovery;
+        var pendingBadge = CaptureCurrentControllerBadge();
+        _ = NotifyControllerBadgeIfChangedAfterAsync(
+            recovery,
+            pendingBadge,
+            CaptureCurrentControllerBadge,
+            NotifyControllerBadgeStateInvalidated);
+        return recovery;
     }
 
     private async Task RecoverOwnedControllerPhysicalInputAsync(
@@ -1747,7 +1761,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             {
                 AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.",
                     ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", "DeferredDeviceArrival"));
-                _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, "DeferredDeviceArrival", _startupCancellationTokenSource.Token);
+                _ = TrackOwnedControllerRecovery(RecoverOwnedControllerPhysicalInputAsync(physical, "DeferredDeviceArrival", _startupCancellationTokenSource.Token));
             }
         }
     }
@@ -2667,7 +2681,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             }
             finally
             {
+                var previousBadge = CaptureCurrentControllerBadge();
                 Volatile.Write(ref _disabledControllerStartupPending, 0);
+                NotifyControllerBadgeIfChanged(previousBadge);
             }
 
             // CH-A2: optional ClawHUD work starts only after the Full1902 controller-critical
@@ -2900,6 +2916,55 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             Volatile.Read(ref _disabledControllerStartupPending) != 0,
             _physicalOwnership?.LiveInputSource is { IsRunning: true },
             _presentationOwnership?.ActivePresentation);
+
+    private FrontendControllerBadgeState CaptureControllerBadge(bool recoverySafe) =>
+        Full1902ControllerBadgeEvaluator.Evaluate(
+            _startupResult?.CenterMStartupState,
+            recoverySafe,
+            Volatile.Read(ref _disabledControllerStartupPending) != 0,
+            _initialControllerAcquisition is not null,
+            _physicalOwnership?.LiveInputSource is { IsRunning: true },
+            _presentationOwnership?.ActivePresentation,
+            _presentationOwnership?.IsActivePresentationLive == true,
+            _presentationOwnership?.IsSuspendPaused == true,
+            !_presentationReconcile.IsCompleted,
+            !_ownedControllerRecovery.IsCompleted,
+            Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0,
+            Volatile.Read(ref _controllerOwnershipReleaseStarted) != 0
+                || Volatile.Read(ref _processShutdownStarted) != 0);
+
+    private FrontendControllerBadgeState CaptureCurrentControllerBadge() =>
+        CaptureControllerBadge(_runtimeHost?.RecoverySafe ?? _startupResult?.RecoverySafe == true);
+
+    private void NotifyControllerBadgeIfChanged(FrontendControllerBadgeState previousBadge)
+    {
+        if (CaptureCurrentControllerBadge() != previousBadge)
+            NotifyControllerBadgeStateInvalidated();
+    }
+
+    private void NotifyControllerBadgeStateInvalidated()
+    {
+        if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
+            control.NotifyStateInvalidated();
+    }
+
+    internal static async Task NotifyControllerBadgeIfChangedAfterAsync(
+        Task operation,
+        FrontendControllerBadgeState previousBadge,
+        Func<FrontendControllerBadgeState> captureBadge,
+        Action invalidate)
+    {
+        try { await operation.ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            AppLog.Debug("ControllerPresentation", "Controller badge lifecycle operation completed with an exception.",
+                ("Reason", exception.GetType().Name));
+        }
+
+        if (captureBadge() != previousBadge)
+            invalidate();
+    }
 
     internal bool TryInitializeTray(Action restart)
     {
@@ -3406,7 +3471,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (presentation is null || physical is null) return;
 
         AppLog.Debug("ControllerPresentation", "Runtime presentation reconcile requested.", ("Event", "PresentationReconcileRequested"), ("Trigger", trigger));
-        _presentationReconcile = ReconcileControllerPresentationAsync(presentation, physical, trigger, _startupCancellationTokenSource.Token);
+        var previousBadge = CaptureCurrentControllerBadge();
+        var reconcile = ReconcileControllerPresentationAsync(presentation, physical, trigger, _startupCancellationTokenSource.Token);
+        _presentationReconcile = reconcile;
+        _ = NotifyControllerBadgeIfChangedAfterAsync(
+            reconcile,
+            previousBadge,
+            CaptureCurrentControllerBadge,
+            NotifyControllerBadgeStateInvalidated);
     }
 
     private async Task ReconcileControllerPresentationAsync(
@@ -3495,6 +3567,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _controllerPowerLifecycleGeneration++;
 
         _motionSource?.InvalidateAndCancel();
+        var shouldInvalidateBadge = false;
         try
         {
             if (Volatile.Read(ref _processShutdownStarted) != 0)
@@ -3504,6 +3577,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (presentation is null)
                 return true;
 
+            shouldInvalidateBadge = true;
+
             var pause = await presentation.PauseForSuspendAsync(cancellationToken).ConfigureAwait(false);
             AppLog.Info("ControllerPresentation", "Full1902 suspend participant quiesced.",
                 ("Event", "PresentationSuspendPauseParticipant"), ("Outcome", pause.Outcome), ("Reason", pause.Reason), ("Safe", pause.Safe));
@@ -3511,6 +3586,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         finally
         {
+            if (shouldInvalidateBadge)
+                NotifyControllerBadgeStateInvalidated();
             await StopMotionSourceAsync("Suspend").ConfigureAwait(false);
         }
     }
@@ -3545,6 +3622,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // immediately -- it carries the suspend-pause release pre-step and must not wait behind the
         // unrelated 2.5 s CPU Boost / Power Mode profile settle below.
         RequestControllerPresentationReconcile("PowerResume");
+        NotifyControllerBadgeStateInvalidated();
         // A healthy DirectInput source can survive the controller's hibernate power-cycle, so the
         // physical-recovery path may not run even though firmware has restored its LED state.
         // Reapply the latest desired state once after the control HID has had a bounded settle.

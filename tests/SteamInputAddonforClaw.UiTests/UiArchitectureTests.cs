@@ -564,6 +564,24 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Device_summary_uses_the_single_status_capture_and_expires_only_the_badge_on_disconnect()
+    {
+        var root = FindRepositoryRoot();
+        var window = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var refresh = ExtractMethod(window, "private async Task RefreshSystemStatusAsync()");
+
+        Assert.Equal(1, refresh.Split("CaptureStatusAsync()", StringSplitOptions.None).Length - 1);
+        Assert.Contains("exception is FrontendTransportException", refresh, StringComparison.Ordinal);
+        Assert.Contains("exception is not FrontendProtocolException", refresh, StringComparison.Ordinal);
+        Assert.Contains("exception is not FrontendRemoteException", refresh, StringComparison.Ordinal);
+        Assert.Contains("WithUnavailableControllerBadge(lastStatus)", refresh, StringComparison.Ordinal);
+        Assert.Contains("DeviceContent.RenderDeviceSummary(unavailableStatus)", refresh, StringComparison.Ordinal);
+        Assert.Contains("FormatControllerBadge(snapshot.Hardware.Status, snapshot.ControllerBadge)", devicePage, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureStatusAsync", devicePage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Main_app_shortcut_editor_is_separate_from_the_overlay_settings_page()
     {
         var root = FindRepositoryRoot();
