@@ -27,7 +27,10 @@ public sealed record FrontendGameFpsLimitConfiguration(bool Enabled, int AcFps, 
 public sealed record FrontendGameGpuMinimumClockConfiguration(bool Available, bool Initialized, bool Enabled,
     IReadOnlyList<double> SelectableClocksMhz, double? AcMhz, double? DcMhz, double? RecommendedDefaultMhz, string? UnavailableReason = null);
 public sealed record FrontendGameProfileSnapshot(uint AppId, string? DisplayName, bool Exists, bool Enabled,
-    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null);
+    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null)
+{
+    public SteamVirtualControllerPreference? SteamVirtualController { get; init; }
+}
 public sealed record FrontendXboxGameProfileSnapshot(string Key, string? DisplayName, bool Exists, bool Enabled,
     FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits,
     FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null)
@@ -924,6 +927,7 @@ public interface IAddonFrontendControl
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
     Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));
     Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileSteamVirtualControllerAsync(uint appId, SteamVirtualControllerPreference? preference, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile controller selection is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileTdpEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));

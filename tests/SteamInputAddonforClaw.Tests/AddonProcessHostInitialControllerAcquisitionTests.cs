@@ -69,8 +69,8 @@ public sealed class AddonProcessHostInitialControllerAcquisitionTests
         var source = continuation.IndexOf("if (source is null || !source.IsRunning)", StringComparison.Ordinal);
         var suppression = continuation.IndexOf("EnsureAddonAuthorityWinGSuppression()", source, StringComparison.Ordinal);
         var watcher = continuation.IndexOf("StartControllerDeviceArrivalWatcher()", suppression, StringComparison.Ordinal);
-        var snapshot = continuation.IndexOf("CapturePresentationSnapshot()", watcher, StringComparison.Ordinal);
-        var attach = continuation.IndexOf("context.Presentation.AttachInitialAsync(source, snapshot", snapshot, StringComparison.Ordinal);
+        var attach = continuation.IndexOf("context.Presentation.AttachInitialAsync(", watcher, StringComparison.Ordinal);
+        var snapshotProvider = continuation.IndexOf("() => _runtimeHost!.CapturePresentationSnapshot()", attach, StringComparison.Ordinal);
         var firstPresentationLog = continuation.IndexOf("First presentation attach completed.", attach, StringComparison.Ordinal);
         var motion = continuation.IndexOf("ReconcileMotionReadersAsync(trigger", firstPresentationLog, StringComparison.Ordinal);
         var frontButton = continuation.IndexOf("MsiClawFrontButtonRuntime.Create", motion, StringComparison.Ordinal);
@@ -83,8 +83,8 @@ public sealed class AddonProcessHostInitialControllerAcquisitionTests
             "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
         var deferredStartup = DeclarationContaining(host, "context.Owner.AcquireAsync");
 
-        Assert.True(source >= 0 && suppression > source && watcher > suppression && snapshot > watcher
-            && attach > snapshot && firstPresentationLog > attach && motion > firstPresentationLog
+        Assert.True(source >= 0 && suppression > source && watcher > suppression && attach > watcher
+            && snapshotProvider > attach && firstPresentationLog > attach && motion > firstPresentationLog
             && frontButton > motion && cancellationCheck > frontButton && led > cancellationCheck && vibration > led);
         Assert.Equal(1, Count(directStartup, "CompleteInitialControllerOwnershipAsync("));
         Assert.Equal(1, Count(deferredStartup, "CompleteInitialControllerOwnershipAsync("));

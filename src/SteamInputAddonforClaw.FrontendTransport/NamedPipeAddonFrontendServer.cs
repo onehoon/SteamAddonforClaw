@@ -262,6 +262,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.MutateQuickSettingAsync(FrontendWireCodec.Decode<QuickSettingsMutationIntent>(p), t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileFavorite
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileFavoriteAsync(FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).Favorite, FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).DisplayName, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileSteamVirtualController
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileSteamVirtualControllerAsync(FrontendWireCodec.Decode<SetGameProfileSteamVirtualControllerRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileSteamVirtualControllerRequest>(p).Preference, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileResolution
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileResolutionAsync(FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileCpuBoostEnabled

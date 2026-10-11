@@ -6,18 +6,18 @@ using Xunit;
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
-/// <see cref="CanonicalViiperRuntime"/> owns the persistent dual-device VIIPER substrate: one
-/// server, one bus, and BOTH typed logical devices (Steam Deck + Xbox360), created during normal
-/// production initialization and left detached (Persistent Dual VIIPER Devices work order). These
+    /// <see cref="CanonicalViiperRuntime"/> owns the persistent triple-device VIIPER substrate: one
+    /// server, one bus, and three typed logical devices, created during normal production initialization
+    /// and left detached. These
 /// tests cover the deterministic staged acquisition order, reverse-order staged-init unwind without
-/// lost native ownership, and final classified dual-device teardown ordering.
+/// lost native ownership, and final classified triple-device teardown ordering.
 /// </summary>
 public sealed class CanonicalViiperRuntimeTests
 {
     private const string LoopbackAddress = "127.0.0.1:3242";
 
     [Fact]
-    public void Initialize_happy_path_creates_both_typed_devices_detached()
+    public void Initialize_happy_path_creates_all_typed_devices_detached()
     {
         var native = new FakeNative();
 
@@ -33,8 +33,11 @@ public sealed class CanonicalViiperRuntimeTests
             "GetUSBDeviceAttachmentState",
             "CreateXbox360Device",
             "GetUSBDeviceIdentity",
+            "GetUSBDeviceAttachmentState",
+            "CreateDualSenseEdgeDevice",
+            "GetUSBDeviceIdentity",
             "GetUSBDeviceAttachmentState"
-        ], native.Calls);
+        ], native.AllCalls);
 
         Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime!.State);
         Assert.Equal((nuint)10, runtime.ServerHandle);
@@ -43,34 +46,43 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal((uint)9, runtime.DeckLogicalDeviceId);
         Assert.Equal((nuint)30, runtime.Xbox360DeviceHandle);
         Assert.Equal((uint)11, runtime.Xbox360LogicalDeviceId);
+        Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
+        Assert.Equal((uint)13, runtime.DualSenseEdgeLogicalDeviceId);
+        Assert.Equal((nuint)10, native.DeckCreateServerHandle);
+        Assert.Equal((nuint)10, native.Xbox360CreateServerHandle);
+        Assert.Equal((nuint)10, native.EdgeCreateServerHandle);
+        Assert.Equal((uint)42, native.DeckCreateBusId);
+        Assert.Equal((uint)42, native.Xbox360CreateBusId);
+        Assert.Equal((uint)42, native.EdgeCreateBusId);
 
-        // Both devices created detached (autoAttachLocalhost = false); no Attach call anywhere.
+        // All devices are created detached (autoAttachLocalhost = false); no Attach call anywhere.
         Assert.False(native.DeckAutoAttach);
         Assert.False(native.Xbox360AutoAttach);
-        Assert.DoesNotContain("AttachUSBDevice", native.Calls);
-        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+        Assert.False(native.EdgeAutoAttach);
+        Assert.DoesNotContain("AttachUSBDevice", native.AllCalls);
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.AllCalls);
         // No live typed-device state write and no rumble/output callback during initialization.
-        Assert.DoesNotContain("SetXbox360DeviceState", native.Calls);
-        Assert.DoesNotContain("SetSteamDeckOutputCallback", native.Calls);
+        Assert.DoesNotContain("SetXbox360DeviceState", native.AllCalls);
+        Assert.DoesNotContain("SetSteamDeckOutputCallback", native.AllCalls);
 
         // The Addon invents neither identity -- it forwards zero VID/PID/subtype so VIIPER supplies
         // its own canonical defaults for each typed device.
         Assert.Equal((ushort?)0, native.Xbox360CreateVendorId);
         Assert.Equal((ushort?)0, native.Xbox360CreateProductId);
         Assert.Equal((byte?)0, native.Xbox360CreateXInputSubType);
-        Assert.DoesNotContain("CreateDualSenseEdgeDevice", native.Calls);
+        Assert.Equal(1, native.AllCalls.Count(call => call == "CreateDualSenseEdgeDevice"));
     }
 
     [Fact]
-    public void DualSenseEdge_is_created_lazily_once_on_the_existing_bus_and_reused()
+    public void DualSenseEdge_is_created_at_startup_once_and_reused()
     {
         var native = new FakeNative();
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
 
-        Assert.True(runtime.TryEnsureDualSenseEdgeDevice());
-        Assert.True(runtime.TryEnsureDualSenseEdgeDevice());
+        Assert.True(runtime.TryVerifyDualSenseEdgeDetached());
+        Assert.True(runtime.TryVerifyDualSenseEdgeDetached());
 
-        Assert.Equal(1, native.Calls.Count(call => call == "CreateDualSenseEdgeDevice"));
+        Assert.Equal(1, native.AllCalls.Count(call => call == "CreateDualSenseEdgeDevice"));
         Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
         Assert.Equal((uint)42, runtime.BusId);
         Assert.Equal((uint)13, runtime.DualSenseEdgeLogicalDeviceId);
@@ -79,79 +91,83 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal((ushort)0, native.EdgeVendorId);
         Assert.Equal((ushort)0, native.EdgeProductId);
         Assert.Equal(nint.Zero, native.EdgeMetaState);
-        Assert.Equal(1, native.Calls.Count(call => call == "NewUSBServer"));
-        Assert.Equal(1, native.Calls.Count(call => call == "CreateUSBBus"));
-        Assert.DoesNotContain(native.Calls, call => call.StartsWith("AttachUSBDeviceEx", StringComparison.Ordinal));
+        Assert.Equal(1, native.AllCalls.Count(call => call == "NewUSBServer"));
+        Assert.Equal(1, native.AllCalls.Count(call => call == "CreateUSBBus"));
+        Assert.DoesNotContain(native.AllCalls, call => call.StartsWith("AttachUSBDeviceEx", StringComparison.Ordinal));
         Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime.State);
     }
 
     [Fact]
-    public void MissingEdgeExportDoesNotDamageTheReadyRuntime()
+    public void Edge_create_failure_without_handle_safely_unwinds_the_entire_owner()
     {
         var native = new FakeNative { CreateEdgeResult = false, EdgeCreateHandle = 0 };
-        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
-        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
-        Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime.State);
-        Assert.True(runtime.TryGetXbox360AttachmentState(out var xboxState));
-        Assert.Equal(USBDeviceAttachmentState.Detached, xboxState);
-        Assert.Contains("GetUSBDeviceAttachmentState", native.Calls);
-        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
-        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+        Assert.Null(runtime);
+        Assert.True(native.AllCalls.IndexOf("RemoveXbox360DeviceEx") < native.AllCalls.IndexOf("RemoveSteamDeckDeviceEx"));
+        Assert.True(native.AllCalls.IndexOf("RemoveSteamDeckDeviceEx") < native.AllCalls.IndexOf("RemoveUSBBus"));
+        Assert.True(native.AllCalls.IndexOf("RemoveUSBBus") < native.AllCalls.IndexOf("CloseUSBServer"));
     }
 
     [Fact]
-    public void Edge_create_failure_before_native_ownership_leaves_other_handles_ready()
-    {
-        var native = new FakeNative { CreateEdgeResult = false, EdgeCreateHandle = 0 };
-        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
-
-        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
-        Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime.State);
-        Assert.True(runtime.SetXbox360State(default));
-        Assert.Equal((nuint)0, runtime.DualSenseEdgeDeviceHandle);
-        Assert.DoesNotContain("RemoveDualSenseDeviceEx", native.Calls);
-    }
-
-    [Fact]
-    public void Edge_create_failure_with_a_nonzero_handle_fails_closed_and_retains_handle()
+    public void Edge_create_failure_with_nonzero_handle_removes_it_before_parent_resources()
     {
         var native = new FakeNative { CreateEdgeResult = false, EdgeCreateHandle = 40 };
-        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
-        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
-        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
-        Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
-        Assert.DoesNotContain("RemoveDualSenseDeviceEx", native.Calls);
-        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.Null(runtime);
+        var edgeRemove = native.AllCalls.IndexOf("RemoveDualSenseDeviceEx");
+        var xboxRemove = native.AllCalls.IndexOf("RemoveXbox360DeviceEx");
+        var deckRemove = native.AllCalls.IndexOf("RemoveSteamDeckDeviceEx");
+        Assert.True(edgeRemove >= 0 && edgeRemove < xboxRemove && xboxRemove < deckRemove);
     }
 
     [Fact]
-    public void Edge_surprising_attached_creation_is_neutralized_and_classified_detached_before_ready()
+    public void Edge_initially_attached_fails_ready_and_is_safely_retired()
     {
         var native = new FakeNative { EdgeInitialAttachmentState = USBDeviceAttachmentState.Attached };
-        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
-        Assert.True(runtime.TryEnsureDualSenseEdgeDevice());
-        Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime.State);
+        Assert.Null(runtime);
         Assert.Equal(USBDeviceAttachmentState.Detached, native.EdgeFinalAttachmentState);
-        Assert.True(native.Calls.IndexOf("SetDualSenseDeviceState") < native.Calls.IndexOf("DetachUSBDeviceEx:40"));
+        Assert.True(native.AllCalls.IndexOf("SetDualSenseDeviceState") < native.AllCalls.IndexOf("DetachUSBDeviceEx:40"));
+        Assert.True(native.AllCalls.IndexOf("DetachUSBDeviceEx:40") < native.AllCalls.IndexOf("RemoveDualSenseDeviceEx"));
     }
 
     [Fact]
     public void Edge_bad_bus_identity_is_removed_only_after_known_detached_state()
     {
         var native = new FakeNative { EdgeIdentityBusId = 999 };
-        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
-        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
-        Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime.State);
-        Assert.Equal((nuint)0, runtime.DualSenseEdgeDeviceHandle);
-        Assert.True(native.Calls.IndexOf("GetUSBDeviceAttachmentState") < native.Calls.IndexOf("RemoveDualSenseDeviceEx"));
+        Assert.Null(runtime);
+        Assert.True(native.AllCalls.IndexOf("GetUSBDeviceAttachmentState") < native.AllCalls.IndexOf("RemoveDualSenseDeviceEx"));
+    }
+
+    [Theory]
+    [InlineData(20)]
+    [InlineData(30)]
+    [InlineData(40)]
+    public void Initialize_rejects_zero_logical_device_identity_and_unwinds_in_reverse(int zeroIdentityHandle)
+    {
+        var native = new FakeNative { ZeroIdentityHandle = (nuint)zeroIdentityHandle };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.Null(runtime);
+        var removals = native.AllCalls.Where(call => call is
+            "RemoveDualSenseDeviceEx" or "RemoveXbox360DeviceEx" or "RemoveSteamDeckDeviceEx" or
+            "RemoveUSBBus" or "CloseUSBServer");
+        var expected = zeroIdentityHandle switch
+        {
+            20 => new[] { "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer" },
+            30 => new[] { "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer" },
+            _ => new[] { "RemoveDualSenseDeviceEx", "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer" }
+        };
+        Assert.Equal(expected, removals);
     }
 
     [Fact]
-    public async Task Edge_invalid_identity_with_retryable_remove_runs_full_owner_teardown_before_parent_removal()
+    public async Task Edge_invalid_identity_with_retryable_remove_retains_owner_until_reverse_cleanup_resumes()
     {
         var native = new FakeNative
         {
@@ -161,21 +177,20 @@ public sealed class CanonicalViiperRuntimeTests
         };
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
 
-        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
         Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime.State);
-        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.DeckDetach, runtime.TeardownPhase);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeRemove, runtime.TeardownPhase);
         Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
-        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.AllCalls);
 
         Assert.True(await runtime.TeardownAsync());
 
-        var deckRemove = native.Calls.LastIndexOf("RemoveSteamDeckDeviceEx");
-        var xboxRemove = native.Calls.LastIndexOf("RemoveXbox360DeviceEx");
-        var edgeRemove = native.Calls.LastIndexOf("RemoveDualSenseDeviceEx");
-        var busRemove = native.Calls.LastIndexOf("RemoveUSBBus");
-        var serverClose = native.Calls.LastIndexOf("CloseUSBServer");
-        Assert.True(deckRemove >= 0 && deckRemove < xboxRemove);
-        Assert.True(xboxRemove < edgeRemove && edgeRemove < busRemove && busRemove < serverClose);
+        var edgeRemove = native.AllCalls.LastIndexOf("RemoveDualSenseDeviceEx");
+        var xboxRemove = native.AllCalls.LastIndexOf("RemoveXbox360DeviceEx");
+        var deckRemove = native.AllCalls.LastIndexOf("RemoveSteamDeckDeviceEx");
+        var busRemove = native.AllCalls.LastIndexOf("RemoveUSBBus");
+        var serverClose = native.AllCalls.LastIndexOf("CloseUSBServer");
+        Assert.True(edgeRemove >= 0 && edgeRemove < xboxRemove);
+        Assert.True(xboxRemove < deckRemove && deckRemove < busRemove && busRemove < serverClose);
         Assert.Equal((nuint)0, runtime.DeckDeviceHandle);
         Assert.Equal((nuint)0, runtime.Xbox360DeviceHandle);
         Assert.Equal((nuint)0, runtime.DualSenseEdgeDeviceHandle);
@@ -188,12 +203,12 @@ public sealed class CanonicalViiperRuntimeTests
         var native = new FakeNative { EdgeAttachmentQuerySucceeds = false };
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
 
-        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
+        Assert.False(runtime.TryVerifyDualSenseEdgeDetached());
         Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
         Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
         Assert.False(await runtime.TeardownAsync());
-        Assert.DoesNotContain("RemoveDualSenseDeviceEx", native.Calls);
-        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("RemoveDualSenseDeviceEx", native.AllCalls);
+        Assert.DoesNotContain("RemoveUSBBus", native.AllCalls);
     }
 
     [Fact]
@@ -202,11 +217,11 @@ public sealed class CanonicalViiperRuntimeTests
         var native = new FakeNative { EdgeInitialAttachmentState = (USBDeviceAttachmentState)99 };
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
 
-        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
+        Assert.False(runtime.TryVerifyDualSenseEdgeDetached());
         Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
         Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
-        Assert.DoesNotContain("RemoveDualSenseDeviceEx", native.Calls);
-        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("RemoveDualSenseDeviceEx", native.AllCalls);
+        Assert.DoesNotContain("RemoveUSBBus", native.AllCalls);
     }
 
     [Theory]
@@ -217,12 +232,12 @@ public sealed class CanonicalViiperRuntimeTests
         var native = new FakeNative { EdgeInitialAttachmentState = (USBDeviceAttachmentState)stateValue };
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
 
-        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
+        Assert.False(runtime.TryVerifyDualSenseEdgeDetached());
         Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
         Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
-        Assert.DoesNotContain("SetDualSenseDeviceState", native.Calls);
-        Assert.DoesNotContain("DetachUSBDeviceEx:40", native.Calls);
-        Assert.DoesNotContain("RemoveDualSenseDeviceEx", native.Calls);
+        Assert.DoesNotContain("SetDualSenseDeviceState", native.AllCalls);
+        Assert.DoesNotContain("DetachUSBDeviceEx:40", native.AllCalls);
+        Assert.DoesNotContain("RemoveDualSenseDeviceEx", native.AllCalls);
     }
 
     [Fact]
@@ -240,10 +255,10 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.True(session.ClearOutputCallback());
         Assert.True(session.DetachDevice());
 
-        Assert.Contains("AttachUSBDeviceEx:40", native.Calls);
-        Assert.Contains("SetDualSenseOutputCallback", native.Calls);
-        Assert.Equal("DetachUSBDeviceEx:40", native.Calls.Last(call => call.StartsWith("DetachUSBDeviceEx", StringComparison.Ordinal)));
-        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls.Where(call => call != "AttachUSBDeviceEx:40"));
+        Assert.Contains("AttachUSBDeviceEx:40", native.AllCalls);
+        Assert.Contains("SetDualSenseOutputCallback", native.AllCalls);
+        Assert.Equal("DetachUSBDeviceEx:40", native.AllCalls.Last(call => call.StartsWith("DetachUSBDeviceEx", StringComparison.Ordinal)));
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.AllCalls.Where(call => call != "AttachUSBDeviceEx:40"));
         Assert.Equal(CanonicalDualSenseEdgeSessionState.Clean, session.State);
     }
 
@@ -260,14 +275,14 @@ public sealed class CanonicalViiperRuntimeTests
 
         Assert.False(session.Start());
         Assert.Equal(CanonicalDualSenseEdgeSessionState.Clean, session.State);
-        Assert.Equal(1, native.Calls.Count(call => call == "AttachUSBDeviceEx:40"));
+        Assert.Equal(1, native.AllCalls.Count(call => call == "AttachUSBDeviceEx:40"));
         Assert.True(session.Start());
         Assert.False(session.DetachDevice());
         Assert.Equal(CanonicalDualSenseEdgeSessionState.CleanupPending, session.State);
         Assert.True(session.RetryPendingCleanup());
         Assert.Equal(CanonicalDualSenseEdgeSessionState.Clean, session.State);
-        Assert.Equal(2, native.Calls.Count(call => call == "AttachUSBDeviceEx:40"));
-        Assert.Equal(2, native.Calls.Count(call => call == "DetachUSBDeviceEx:40"));
+        Assert.Equal(2, native.AllCalls.Count(call => call == "AttachUSBDeviceEx:40"));
+        Assert.Equal(2, native.AllCalls.Count(call => call == "DetachUSBDeviceEx:40"));
     }
 
     [Fact]
@@ -313,10 +328,10 @@ public sealed class CanonicalViiperRuntimeTests
         await input.StopAsync();
         Assert.True(session.DetachDevice());
 
-        var detachIndex = native.Calls.IndexOf("DetachUSBDeviceEx:40");
+        var detachIndex = native.AllCalls.IndexOf("DetachUSBDeviceEx:40");
         Assert.True(detachIndex > 0);
-        Assert.Equal("SetDualSenseDeviceState", native.Calls[detachIndex - 1]);
-        Assert.True(native.Calls.Take(detachIndex).Count(call => call == "SetDualSenseDeviceState") >= 3);
+        Assert.Equal("SetDualSenseDeviceState", native.AllCalls[detachIndex - 1]);
+        Assert.True(native.AllCalls.Take(detachIndex).Count(call => call == "SetDualSenseDeviceState") >= 3);
     }
 
     [Fact]
@@ -324,19 +339,19 @@ public sealed class CanonicalViiperRuntimeTests
     {
         var native = new FakeNative();
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
-        Assert.True(runtime.TryEnsureDualSenseEdgeDevice());
+        Assert.True(runtime.TryVerifyDualSenseEdgeDetached());
         Assert.Equal(USBDeviceAttachResult.Success, runtime.AttachDualSenseEdge());
 
         Assert.True(await runtime.TeardownAsync());
 
-        var detach = native.Calls.LastIndexOf("DetachUSBDeviceEx:40");
-        var remove = native.Calls.LastIndexOf("RemoveDualSenseDeviceEx");
-        var bus = native.Calls.LastIndexOf("RemoveUSBBus");
-        var close = native.Calls.LastIndexOf("CloseUSBServer");
+        var detach = native.AllCalls.LastIndexOf("DetachUSBDeviceEx:40");
+        var remove = native.AllCalls.LastIndexOf("RemoveDualSenseDeviceEx");
+        var bus = native.AllCalls.LastIndexOf("RemoveUSBBus");
+        var close = native.AllCalls.LastIndexOf("CloseUSBServer");
         Assert.True(detach >= 0 && detach < remove);
         Assert.True(remove < bus && bus < close);
-        Assert.DoesNotContain("SetXbox360DeviceState", native.Calls);
-        Assert.DoesNotContain("SetSteamDeckDeviceState", native.Calls);
+        Assert.DoesNotContain("SetXbox360DeviceState", native.AllCalls);
+        Assert.DoesNotContain("SetSteamDeckDeviceState", native.AllCalls);
     }
 
     [Fact]
@@ -347,16 +362,16 @@ public sealed class CanonicalViiperRuntimeTests
             RemoveEdgeResults = new Queue<DSDeviceRemoveResult>([DSDeviceRemoveResult.RetryableFailure, DSDeviceRemoveResult.Success])
         };
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
-        Assert.True(runtime.TryEnsureDualSenseEdgeDevice());
+        Assert.True(runtime.TryVerifyDualSenseEdgeDetached());
 
         Assert.False(await runtime.TeardownAsync());
         Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime.State);
         Assert.Equal(CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeRemove, runtime.TeardownPhase);
-        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.AllCalls);
         Assert.NotEqual((nuint)0, runtime.DualSenseEdgeDeviceHandle);
 
         Assert.True(await runtime.TeardownAsync());
-        Assert.True(native.Calls.LastIndexOf("RemoveDualSenseDeviceEx") < native.Calls.LastIndexOf("RemoveUSBBus"));
+        Assert.True(native.AllCalls.LastIndexOf("RemoveDualSenseDeviceEx") < native.AllCalls.LastIndexOf("RemoveUSBBus"));
     }
 
     [Theory]
@@ -366,13 +381,13 @@ public sealed class CanonicalViiperRuntimeTests
     {
         var native = new FakeNative { RemoveEdgeResults = new Queue<DSDeviceRemoveResult>([(DSDeviceRemoveResult)resultValue]) };
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
-        Assert.True(runtime.TryEnsureDualSenseEdgeDevice());
+        Assert.True(runtime.TryVerifyDualSenseEdgeDetached());
 
         Assert.False(await runtime.TeardownAsync());
         Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
         Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
-        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
-        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.AllCalls);
+        Assert.DoesNotContain("CloseUSBServer", native.AllCalls);
     }
 
     [Fact]
@@ -398,6 +413,68 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
+    public async Task Safe_startup_retry_waits_for_complete_unwind_then_initializes_all_three_devices()
+    {
+        var native = new FakeNative
+        {
+            DeckCreationResults = new Queue<(bool Succeeded, nuint Handle)>([(false, 20), (true, 20)])
+        };
+
+        var runtime = await CanonicalViiperRuntime.TryInitializeWithSafeRetryAsync(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime!.State);
+        Assert.Equal(2, native.AllCalls.Count(call => call == "NewUSBServer"));
+        Assert.Equal(2, native.AllCalls.Count(call => call == "CreateUSBBus"));
+        Assert.Equal(2, native.AllCalls.Count(call => call == "CreateSteamDeckDevice"));
+        Assert.Equal(1, native.AllCalls.Count(call => call == "CreateXbox360Device"));
+        Assert.Equal(1, native.AllCalls.Count(call => call == "CreateDualSenseEdgeDevice"));
+        var firstServerClose = native.AllCalls.IndexOf("CloseUSBServer");
+        var secondServerCreate = native.AllCalls.LastIndexOf("NewUSBServer");
+        Assert.True(firstServerClose >= 0 && firstServerClose < secondServerCreate);
+    }
+
+    [Fact]
+    public async Task Safe_startup_retry_resumes_retryable_cleanup_before_recreating_the_owner()
+    {
+        var native = new FakeNative
+        {
+            EdgeCreationResults = new Queue<(bool Succeeded, nuint Handle)>([(false, 40), (true, 40)]),
+            RemoveEdgeResults = new Queue<DSDeviceRemoveResult>(
+                [DSDeviceRemoveResult.RetryableFailure, DSDeviceRemoveResult.Success])
+        };
+
+        var runtime = await CanonicalViiperRuntime.TryInitializeWithSafeRetryAsync(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime!.State);
+        Assert.Equal(2, native.AllCalls.Count(call => call == "NewUSBServer"));
+        Assert.Equal(2, native.AllCalls.Count(call => call == "CreateDualSenseEdgeDevice"));
+        Assert.Equal(2, native.AllCalls.Count(call => call == "RemoveDualSenseDeviceEx"));
+        var retryServerCreate = native.AllCalls.LastIndexOf("NewUSBServer");
+        var priorServerClose = native.AllCalls.LastIndexOf("CloseUSBServer", retryServerCreate);
+        Assert.True(priorServerClose >= 0 && priorServerClose < retryServerCreate);
+    }
+
+    [Fact]
+    public async Task Unsafe_startup_owner_is_retained_without_retry_or_parent_teardown()
+    {
+        var native = new FakeNative { DeckInitialAttachmentState = USBDeviceAttachmentState.OutcomeUnknown };
+
+        var runtime = await CanonicalViiperRuntime.TryInitializeWithSafeRetryAsync(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime!.State);
+        Assert.Equal(1, native.AllCalls.Count(call => call == "NewUSBServer"));
+        Assert.Equal(1, native.AllCalls.Count(call => call == "CreateSteamDeckDevice"));
+        Assert.DoesNotContain("CreateXbox360Device", native.AllCalls);
+        Assert.DoesNotContain("CreateDualSenseEdgeDevice", native.AllCalls);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.AllCalls);
+        Assert.DoesNotContain("RemoveUSBBus", native.AllCalls);
+        Assert.DoesNotContain("CloseUSBServer", native.AllCalls);
+    }
+
+    [Fact]
     public void Deck_create_failure_tears_down_the_bus_and_server()
     {
         var native = new FakeNative { CreateDeckResult = false };
@@ -405,7 +482,7 @@ public sealed class CanonicalViiperRuntimeTests
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
         Assert.Null(runtime);
-        Assert.Equal(["NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "RemoveUSBBus", "CloseUSBServer"], native.Calls);
+        Assert.Equal(["NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceAttachmentState", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"], native.Calls);
     }
 
     [Fact]
@@ -418,7 +495,7 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Null(runtime);
         Assert.Equal(
         [
-            "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity",
+            "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
             "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
         ], native.Calls);
     }
@@ -434,7 +511,7 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(
         [
             "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
-            "SetSteamDeckDeviceState", "DetachUSBDeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
+            "SetSteamDeckDeviceState", "DetachUSBDeviceEx", "GetUSBDeviceAttachmentState", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
         ], native.Calls);
     }
 
@@ -475,7 +552,7 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
-    public void Xbox360_create_failure_removes_only_the_deck_then_bus_and_server()
+    public void Xbox360_create_failure_removes_xbox360_then_deck_then_bus_and_server()
     {
         var native = new FakeNative { CreateXbox360Result = false };
 
@@ -485,9 +562,8 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(
         [
             "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
-            "CreateXbox360Device", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
+            "CreateXbox360Device", "GetUSBDeviceAttachmentState", "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
         ], native.Calls);
-        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
     }
 
     [Fact]
@@ -501,7 +577,7 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(
         [
             "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
-            "CreateXbox360Device", "GetUSBDeviceIdentity", "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
+            "CreateXbox360Device", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState", "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
         ], native.Calls);
     }
 
@@ -568,7 +644,7 @@ public sealed class CanonicalViiperRuntimeTests
         [
             "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
             "CreateXbox360Device", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
-            "SetXbox360DeviceState", "DetachUSBDeviceEx",
+            "SetXbox360DeviceState", "DetachUSBDeviceEx", "GetUSBDeviceAttachmentState",
             "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
         ], native.Calls);
     }
@@ -618,7 +694,7 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(
         [
             "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
-            "CreateXbox360Device", "GetUSBDeviceIdentity", "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
+            "CreateXbox360Device", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState", "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
         ], native.Calls);
     }
 
@@ -676,7 +752,7 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime!.State);
         Assert.Equal(
         [
-            "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "RemoveSteamDeckDeviceEx"
+            "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState", "RemoveSteamDeckDeviceEx"
         ], native.Calls);
         // No destructive cleanup continues past an unsafe/unknown removal result.
         Assert.DoesNotContain("RemoveUSBBus", native.Calls);
@@ -781,17 +857,22 @@ public sealed class CanonicalViiperRuntimeTests
     // ---- Final teardown (work order sections 19-21, test section 32) ----
 
     [Fact]
-    public async Task TeardownAsync_happy_path_both_already_detached()
+    public async Task TeardownAsync_happy_path_all_three_devices_already_detached()
     {
         var native = new FakeNative();
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
         native.Calls.Clear();
+        native.AllCalls.Clear();
 
         var completed = await runtime.TeardownAsync();
 
         Assert.True(completed);
         Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
-        Assert.Equal(["GetUSBDeviceAttachmentState", "GetUSBDeviceAttachmentState", "RemoveSteamDeckDeviceEx", "RemoveXbox360DeviceEx", "RemoveUSBBus", "CloseUSBServer"], native.Calls);
+        Assert.Equal(
+        [
+            "GetUSBDeviceAttachmentState", "GetUSBDeviceAttachmentState", "GetUSBDeviceAttachmentState",
+            "RemoveDualSenseDeviceEx", "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
+        ], native.AllCalls);
 
         // A fully Closed runtime must expose no non-zero native capability -- retired handles
         // are never left looking like they are still authoritative.
@@ -801,6 +882,8 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(0u, runtime.DeckLogicalDeviceId);
         Assert.Equal((nuint)0, runtime.Xbox360DeviceHandle);
         Assert.Equal(0u, runtime.Xbox360LogicalDeviceId);
+        Assert.Equal((nuint)0, runtime.DualSenseEdgeDeviceHandle);
+        Assert.Equal(0u, runtime.DualSenseEdgeLogicalDeviceId);
     }
 
     [Fact]
@@ -940,7 +1023,7 @@ public sealed class CanonicalViiperRuntimeTests
 
         // No blind retry of an unsafe/unknown outcome.
         Assert.False(await runtime.TeardownAsync());
-        Assert.Equal(1, native.Calls.Count(c => c == "GetUSBDeviceAttachmentState"));
+        Assert.Equal(2, native.Calls.Count(c => c == "GetUSBDeviceAttachmentState"));
     }
 
     [Fact]
@@ -958,7 +1041,7 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.False(first);
         Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime.State);
         Assert.Equal(CanonicalViiperRuntimeTeardownPhase.DeckRemove, runtime.TeardownPhase);
-        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveXbox360DeviceEx"));
         Assert.DoesNotContain("RemoveUSBBus", native.Calls);
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
 
@@ -983,7 +1066,7 @@ public sealed class CanonicalViiperRuntimeTests
 
         Assert.False(completed);
         Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
-        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveXbox360DeviceEx"));
         Assert.DoesNotContain("RemoveUSBBus", native.Calls);
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
 
@@ -1121,7 +1204,7 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
-    public async Task TeardownAsync_deck_remove_unsafe_stops_before_xbox360_bus_or_server()
+    public async Task TeardownAsync_deck_remove_unsafe_stops_after_xbox360_but_before_bus_or_server()
     {
         var native = new FakeNative
         {
@@ -1134,7 +1217,7 @@ public sealed class CanonicalViiperRuntimeTests
 
         Assert.False(completed);
         Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
-        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.Equal(1, native.Calls.Count(call => call == "RemoveXbox360DeviceEx"));
         Assert.DoesNotContain("RemoveUSBBus", native.Calls);
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
 
@@ -1619,13 +1702,20 @@ public sealed class CanonicalViiperRuntimeTests
     private sealed class FakeNative : ICanonicalViiperNativeApi
     {
         public bool SetDiagnosticLogDirectory(string _) => true;
+        // Calls preserves the pre-Edge focused trace for legacy Deck/Xbox lifecycle cases.
+        // AllCalls is the complete native invocation trace and is used for triple-device ordering tests.
         internal readonly List<string> Calls = [];
+        internal readonly List<string> AllCalls = [];
         internal bool NewServerResult { get; init; } = true;
         internal bool CreateBusResult { get; init; } = true;
         internal bool CreateDeckResult { get; init; } = true;
         internal bool CreateXbox360Result { get; init; } = true;
         internal bool CreateEdgeResult { get; init; } = true;
+        internal Queue<(bool Succeeded, nuint Handle)> DeckCreationResults { get; init; } = [];
+        internal Queue<(bool Succeeded, nuint Handle)> Xbox360CreationResults { get; init; } = [];
+        internal Queue<(bool Succeeded, nuint Handle)> EdgeCreationResults { get; init; } = [];
         internal nuint EdgeCreateHandle { get; init; } = 40;
+        internal nuint ZeroIdentityHandle { get; init; }
         internal uint EdgeIdentityBusId { get; init; } = 42;
         internal bool EdgeIdentityQuerySucceeds { get; init; } = true;
         internal USBDeviceAttachmentState EdgeInitialAttachmentState { get; init; } = USBDeviceAttachmentState.Detached;
@@ -1640,7 +1730,7 @@ public sealed class CanonicalViiperRuntimeTests
         internal bool DeckAttachmentStateQuerySucceeds { get; init; } = true;
         internal bool Xbox360AttachmentStateQuerySucceeds { get; init; } = true;
         /// <summary>Separate from <see cref="Xbox360AttachmentStateQuerySucceeds"/> (which also
-        /// gates the two initialization-time queries) so a PR2c test can get a normal Ready runtime
+        /// gates the Deck and Xbox360 initialization-time queries) so a PR2c test can get a normal Ready runtime
         /// out of <see cref="CanonicalViiperRuntime.TryInitialize"/> and THEN make a direct
         /// post-init <c>TryGetXbox360AttachmentState()</c> call fail.</summary>
         internal bool Xbox360AttachmentStateQuerySucceedsPostInit { get; init; } = true;
@@ -1668,10 +1758,15 @@ public sealed class CanonicalViiperRuntimeTests
         private bool _removeUsbBusCalledOnceAlready;
         internal bool DeckAutoAttach { get; private set; }
         internal bool Xbox360AutoAttach { get; private set; }
+        internal nuint DeckCreateServerHandle { get; private set; }
+        internal uint DeckCreateBusId { get; private set; }
+        internal nuint Xbox360CreateServerHandle { get; private set; }
+        internal uint Xbox360CreateBusId { get; private set; }
         internal ushort? Xbox360CreateVendorId { get; private set; }
         internal ushort? Xbox360CreateProductId { get; private set; }
         internal byte? Xbox360CreateXInputSubType { get; private set; }
         internal uint? EdgeCreateBusId { get; private set; }
+        internal nuint? EdgeCreateServerHandle { get; private set; }
         internal bool EdgeAutoAttach { get; private set; }
         internal ushort EdgeVendorId { get; private set; }
         internal ushort EdgeProductId { get; private set; }
@@ -1682,43 +1777,49 @@ public sealed class CanonicalViiperRuntimeTests
 
         private int _attachmentStateQueries;
 
+        private void Record(string call, bool edge = false)
+        {
+            AllCalls.Add(call);
+            if (!edge) Calls.Add(call);
+        }
+
         public bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null)
         {
-            Calls.Add("NewUSBServer");
+            Record("NewUSBServer");
             serverHandle = 10;
             return NewServerResult;
         }
 
         public bool CloseUSBServer(nuint serverHandle)
         {
-            Calls.Add("CloseUSBServer");
+            Record("CloseUSBServer");
             return CloseServerResults.Count == 0 || CloseServerResults.Dequeue();
         }
 
-        public bool CreateUSBBus(nuint serverHandle, ref uint busId) { Calls.Add("CreateUSBBus"); busId = 42; return CreateBusResult; }
+        public bool CreateUSBBus(nuint serverHandle, ref uint busId) { Record("CreateUSBBus"); busId = 42; return CreateBusResult; }
         public bool RemoveUSBBus(nuint serverHandle, uint busId)
         {
             if (RejectRemoveUSBBusAfterFirstCall && _removeUsbBusCalledOnceAlready)
                 throw new InvalidOperationException("RemoveUSBBus must never be retried after an initial failure -- CloseUSBServer is the only valid recovery call.");
             _removeUsbBusCalledOnceAlready = true;
-            Calls.Add("RemoveUSBBus");
+            Record("RemoveUSBBus");
             return RemoveBusResults.Count == 0 || RemoveBusResults.Dequeue();
         }
 
         public bool GetUSBDeviceIdentity(nuint deviceHandle, out uint busId, out uint deviceId)
         {
-            Calls.Add("GetUSBDeviceIdentity");
-            if (deviceHandle == 20) { busId = DeckIdentityBusId; deviceId = 9; return true; }
-            if (deviceHandle == 40) { busId = EdgeIdentityBusId; deviceId = 13; return EdgeIdentityQuerySucceeds; }
-            busId = Xbox360IdentityBusId; deviceId = 11; return Xbox360IdentityQuerySucceeds;
+            Record("GetUSBDeviceIdentity", deviceHandle == 40);
+            if (deviceHandle == 20) { busId = DeckIdentityBusId; deviceId = ZeroIdentityHandle == deviceHandle ? 0u : 9u; return true; }
+            if (deviceHandle == 40) { busId = EdgeIdentityBusId; deviceId = ZeroIdentityHandle == deviceHandle ? 0u : 13u; return EdgeIdentityQuerySucceeds; }
+            busId = Xbox360IdentityBusId; deviceId = ZeroIdentityHandle == deviceHandle ? 0u : 11u; return Xbox360IdentityQuerySucceeds;
         }
 
-        public bool AttachUSBDevice(nuint deviceHandle) { Calls.Add("AttachUSBDevice"); return true; }
-        public bool DetachUSBDevice(nuint deviceHandle) { Calls.Add("DetachUSBDevice"); return true; }
+        public bool AttachUSBDevice(nuint deviceHandle) { Record("AttachUSBDevice", deviceHandle == 40); return true; }
+        public bool DetachUSBDevice(nuint deviceHandle) { Record("DetachUSBDevice", deviceHandle == 40); return true; }
 
         public USBDeviceAttachResult AttachUSBDeviceEx(nuint deviceHandle)
         {
-            Calls.Add(deviceHandle == 40 ? "AttachUSBDeviceEx:40" : "AttachUSBDeviceEx");
+            Record(deviceHandle == 40 ? "AttachUSBDeviceEx:40" : "AttachUSBDeviceEx", deviceHandle == 40);
             var queue = deviceHandle == 20 ? DeckAttachResults : deviceHandle == 40 ? EdgeAttachResults : Xbox360AttachResults;
             var result = queue.Count == 0 ? USBDeviceAttachResult.Success : queue.Dequeue();
             if (deviceHandle == 40 && result == USBDeviceAttachResult.Success) _edgeAttachmentState = USBDeviceAttachmentState.Attached;
@@ -1727,7 +1828,7 @@ public sealed class CanonicalViiperRuntimeTests
 
         public USBDeviceDetachResult DetachUSBDeviceEx(nuint deviceHandle)
         {
-            Calls.Add(deviceHandle == 40 ? "DetachUSBDeviceEx:40" : "DetachUSBDeviceEx");
+            Record(deviceHandle == 40 ? "DetachUSBDeviceEx:40" : "DetachUSBDeviceEx", deviceHandle == 40);
             var queue = deviceHandle == 20 ? DeckDetachResults : deviceHandle == 40 ? EdgeDetachResults : Xbox360DetachResults;
             var result = queue.Count == 0 ? USBDeviceDetachResult.Success : queue.Dequeue();
             if (deviceHandle == 40 && result == USBDeviceDetachResult.Success) _edgeAttachmentState = USBDeviceAttachmentState.Detached;
@@ -1736,18 +1837,17 @@ public sealed class CanonicalViiperRuntimeTests
 
         public bool GetUSBDeviceAttachmentState(nuint deviceHandle, out USBDeviceAttachmentState state)
         {
-            Calls.Add("GetUSBDeviceAttachmentState");
+            Record("GetUSBDeviceAttachmentState", deviceHandle == 40);
             if (deviceHandle == 40)
             {
                 state = _edgeAttachmentState;
                 return EdgeAttachmentQuerySucceeds;
             }
             _attachmentStateQueries++;
-            // Production initialization queries only the Deck (call 1); the test-only X360 seam
-            // additionally queries handle 30 (call 2). Distinguish those shapes so a first
+            // Production initialization queries Deck (call 1) and Xbox360 (call 2); Edge has its
+            // own state path. Distinguish those shapes so a first
             // post-init Deck teardown query is not mistaken for an initialization query.
-            var duringInit = _attachmentStateQueries <= 2;
-            duringInit = deviceHandle == 20
+            var duringInit = deviceHandle == 20
                 ? _attachmentStateQueries == 1
                 : _attachmentStateQueries == 2;
             if (duringInit)
@@ -1767,88 +1867,96 @@ public sealed class CanonicalViiperRuntimeTests
 
         public bool CreateSteamDeckDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct)
         {
-            Calls.Add("CreateSteamDeckDevice");
-            deviceHandle = 20;
+            Record("CreateSteamDeckDevice");
+            var result = DeckCreationResults.Count == 0 ? (CreateDeckResult, (nuint)20) : DeckCreationResults.Dequeue();
+            deviceHandle = result.Item2;
+            DeckCreateServerHandle = serverHandle;
+            DeckCreateBusId = busId;
             DeckAutoAttach = autoAttachLocalhost;
-            return CreateDeckResult;
+            return result.Item1;
         }
 
         public bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state)
         {
-            Calls.Add("SetSteamDeckDeviceState");
+            Record("SetSteamDeckDeviceState");
             return SetDeckStateResults.Count == 0 || SetDeckStateResults.Dequeue();
         }
-        public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); return true; }
-        public bool RemoveSteamDeckDevice(nuint deviceHandle) { Calls.Add("RemoveSteamDeckDevice"); return true; }
+        public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback) { Record("SetSteamDeckOutputCallback"); return true; }
+        public bool RemoveSteamDeckDevice(nuint deviceHandle) { Record("RemoveSteamDeckDevice"); return true; }
 
         public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle)
         {
-            Calls.Add("RemoveSteamDeckDeviceEx");
+            Record("RemoveSteamDeckDeviceEx");
             return RemoveDeckResults.Count == 0 ? SteamDeckDeviceRemoveResult.Success : RemoveDeckResults.Dequeue();
         }
 
         public bool CreateXbox360Device(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, byte xinputSubType)
         {
-            Calls.Add("CreateXbox360Device");
-            deviceHandle = 30;
+            Record("CreateXbox360Device");
+            var result = Xbox360CreationResults.Count == 0 ? (CreateXbox360Result, (nuint)30) : Xbox360CreationResults.Dequeue();
+            deviceHandle = result.Item2;
+            Xbox360CreateServerHandle = serverHandle;
+            Xbox360CreateBusId = busId;
             Xbox360AutoAttach = autoAttachLocalhost;
             Xbox360CreateVendorId = idVendor;
             Xbox360CreateProductId = idProduct;
             Xbox360CreateXInputSubType = xinputSubType;
-            return CreateXbox360Result;
+            return result.Item1;
         }
 
         public bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state)
         {
-            Calls.Add("SetXbox360DeviceState");
+            Record("SetXbox360DeviceState");
             return SetXbox360StateResults.Count == 0 || SetXbox360StateResults.Dequeue();
         }
         internal Queue<bool> SetXbox360RumbleCallbackResults { get; } = [];
         internal Xbox360RumbleCallback? ArmedXbox360RumbleCallback { get; private set; }
         public bool SetXbox360RumbleCallback(nuint deviceHandle, Xbox360RumbleCallback? callback)
         {
-            Calls.Add(callback is null ? "ClearXbox360RumbleCallback" : "SetXbox360RumbleCallback");
+            Record(callback is null ? "ClearXbox360RumbleCallback" : "SetXbox360RumbleCallback");
             var ok = SetXbox360RumbleCallbackResults.Count == 0 || SetXbox360RumbleCallbackResults.Dequeue();
             if (ok) ArmedXbox360RumbleCallback = callback;
             return ok;
         }
-        public bool RemoveXbox360Device(nuint deviceHandle) { Calls.Add("RemoveXbox360Device"); return true; }
+        public bool RemoveXbox360Device(nuint deviceHandle) { Record("RemoveXbox360Device"); return true; }
 
         public Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint deviceHandle)
         {
-            Calls.Add("RemoveXbox360DeviceEx");
+            Record("RemoveXbox360DeviceEx");
             return RemoveXbox360Results.Count == 0 ? Xbox360DeviceRemoveResult.Success : RemoveXbox360Results.Dequeue();
         }
 
         public bool CreateDualSenseEdgeDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, nint metaState)
         {
-            Calls.Add("CreateDualSenseEdgeDevice");
-            deviceHandle = EdgeCreateHandle;
+            Record("CreateDualSenseEdgeDevice", edge: true);
+            var result = EdgeCreationResults.Count == 0 ? (CreateEdgeResult, EdgeCreateHandle) : EdgeCreationResults.Dequeue();
+            deviceHandle = result.Item2;
+            EdgeCreateServerHandle = serverHandle;
             EdgeCreateBusId = busId;
             EdgeAutoAttach = autoAttachLocalhost;
             EdgeVendorId = idVendor;
             EdgeProductId = idProduct;
             EdgeMetaState = metaState;
             _edgeAttachmentState = EdgeInitialAttachmentState;
-            return CreateEdgeResult;
+            return result.Item1;
         }
 
         public bool SetDualSenseDeviceState(nuint deviceHandle, DSDeviceState state)
         {
-            Calls.Add("SetDualSenseDeviceState");
+            Record("SetDualSenseDeviceState", edge: true);
             OnSetEdgeState?.Invoke(state);
             return SetEdgeStateResults.Count == 0 || SetEdgeStateResults.Dequeue();
         }
 
         public bool SetDualSenseOutputCallback(nuint deviceHandle, DualSenseOutputCallback? callback)
         {
-            Calls.Add("SetDualSenseOutputCallback");
+            Record("SetDualSenseOutputCallback", edge: true);
             return true;
         }
 
         public DSDeviceRemoveResult RemoveDualSenseDeviceEx(nuint deviceHandle)
         {
-            Calls.Add("RemoveDualSenseDeviceEx");
+            Record("RemoveDualSenseDeviceEx", edge: true);
             return RemoveEdgeResults.Count == 0 ? DSDeviceRemoveResult.Success : RemoveEdgeResults.Dequeue();
         }
     }

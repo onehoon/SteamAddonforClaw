@@ -3,6 +3,8 @@ using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Profiles;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -69,6 +71,73 @@ public sealed class SteamVirtualControllerFrontendTests : IDisposable
 
         Assert.Equal(SteamVirtualControllerPreference.SteamDeck, coordinator.SteamVirtualController);
         Assert.Equal(0, reconcileCount);
+    }
+
+    [Theory]
+    [InlineData(12345u, false)]
+    [InlineData(0u, true)]
+    public async Task Controller_preference_mutations_are_rejected_while_a_game_or_big_picture_is_active(uint appId, bool bigPictureActive)
+    {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        Directory.CreateDirectory(_directory);
+        var settingsPath = Path.Combine(_directory, "guard-settings.json");
+        var profilePath = Path.Combine(_directory, "guard-profiles.json");
+        var settings = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(settingsPath), new NoOpStartupManager());
+        var profileStore = new ProfileStore(profilePath);
+        profileStore.Save(new ProfileDocument
+        {
+            Games = new Dictionary<string, GameProfile>(StringComparer.Ordinal)
+            {
+                ["12345"] = new() { Enabled = false, Favorite = false, DisplayName = "Test Game" }
+            }
+        });
+        var gameMutations = new GameProfileMutations(profileStore, new ProfileMutationGate());
+        var profileBefore = File.ReadAllBytes(profilePath);
+        var reconcileCount = 0;
+        var invalidationCount = 0;
+        var control = new InProcessAddonFrontendControl(settings, new ThrowingSystemStatusProvider(), null,
+            gameProfileMutations: gameMutations,
+            requestControllerPresentationReconcile: _ => reconcileCount++,
+            capturePresentationSnapshot: () => new SteamPresentationSnapshot(appId, bigPictureActive));
+        control.StateInvalidated += (_, _) => invalidationCount++;
+
+        var globalResult = await control.SetSteamVirtualControllerAsync(SteamVirtualControllerPreference.DualSenseEdge);
+        var gameResult = await control.SetGameProfileSteamVirtualControllerAsync(12345, SteamVirtualControllerPreference.DualSenseEdge);
+        Assert.Equal(profileBefore, File.ReadAllBytes(profilePath));
+        var unrelatedResult = await control.SetGameProfileFavoriteAsync(12345, true, "Test Game");
+
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, globalResult.SteamVirtualController);
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, settings.SteamVirtualController);
+        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable, gameResult.Outcome);
+        Assert.Null(gameResult.Snapshot.SteamVirtualController);
+        Assert.True(unrelatedResult.Succeeded, $"{unrelatedResult.Outcome}: {unrelatedResult.FailureMessage}");
+        Assert.Equal(0, reconcileCount);
+        Assert.Equal(1, invalidationCount);
+        Assert.True(profileStore.Load().Document.Games["12345"].Favorite);
+        Assert.False(File.Exists(settingsPath) && new SettingsStore(settingsPath).Load().SteamVirtualController == SteamVirtualControllerPreference.DualSenseEdge);
+    }
+
+    [Fact]
+    public async Task Per_game_controller_override_can_be_saved_while_steam_is_idle()
+    {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        var profilePath = Path.Combine(_directory, "idle-profiles.json");
+        var store = new ProfileStore(profilePath);
+        var gameProfileMutations = new GameProfileMutations(store, new ProfileMutationGate());
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
+            gameProfileMutations.SetEnabled(12345, true, "Idle Game"));
+        var control = new InProcessAddonFrontendControl(
+            new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_directory, "idle-settings.json")), new NoOpStartupManager()),
+            new ThrowingSystemStatusProvider(), null,
+            gameProfileMutations: gameProfileMutations,
+            capturePresentationSnapshot: () => new SteamPresentationSnapshot(0, false));
+
+        var result = await control.SetGameProfileSteamVirtualControllerAsync(12345, SteamVirtualControllerPreference.DualSenseEdge);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, result.Snapshot.SteamVirtualController);
+        Assert.True(result.Snapshot.Enabled);
+        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, store.Load().Document.Games["12345"].SteamVirtualController);
     }
 
     public void Dispose()

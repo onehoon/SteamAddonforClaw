@@ -27,7 +27,8 @@ public sealed class CanonicalViiperNativeAbiTests
             "AttachUSBDeviceEx", "DetachUSBDeviceEx", "GetUSBDeviceAttachmentState",
             "CreateSteamDeckDevice", "SetSteamDeckDeviceState", "SetSteamDeckOutputCallback",
             "RemoveSteamDeckDevice", "RemoveSteamDeckDeviceEx",
-            "CreateXbox360Device", "SetXbox360DeviceState", "SetXbox360RumbleCallback", "RemoveXbox360Device", "RemoveXbox360DeviceEx"
+            "CreateXbox360Device", "SetXbox360DeviceState", "SetXbox360RumbleCallback", "RemoveXbox360Device", "RemoveXbox360DeviceEx",
+            "CreateDualSenseEdgeDevice", "SetDualSenseDeviceState", "SetDualSenseOutputCallback", "RemoveDualSenseDeviceEx"
         };
 
         Assert.Equal(expected, CanonicalViiperNativeApi.RequiredExports);
@@ -193,19 +194,14 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.Equal(1, (int)DSDeviceRemoveResult.RetryableFailure);
         Assert.Equal(2, (int)DSDeviceRemoveResult.UnsafeOutcomeUnknown);
         Assert.Equal(3, (int)DSDeviceRemoveResult.Invalid);
-        Assert.Equal(new[] { "CreateDualSenseEdgeDevice", "SetDualSenseDeviceState", "SetDualSenseOutputCallback", "RemoveDualSenseDeviceEx" },
-            CanonicalViiperNativeApi.OptionalDualSenseEdgeExports);
-        Assert.Empty(CanonicalViiperNativeApi.OptionalDualSenseEdgeExports.Intersect(CanonicalViiperNativeApi.RequiredExports));
+        Assert.All(new[] { "CreateDualSenseEdgeDevice", "SetDualSenseDeviceState", "SetDualSenseOutputCallback", "RemoveDualSenseDeviceEx" },
+            name => Assert.Contains(name, CanonicalViiperNativeApi.RequiredExports));
     }
 
     [Fact]
-    public void MissingOptionalEdgeExports_DoNotBreakNormalApiInitialization()
+    public void MissingRequiredEdgeExportRejectsNativeApiInitialization()
     {
-        var api = new CanonicalViiperNativeApi(1, FakeExports.ResolveWithoutEdge);
-
-        Assert.True(api.SetDiagnosticLogDirectory("C:\\logs"));
-        Assert.False(api.CreateDualSenseEdgeDevice(1, out var handle, 1, false, 0, 0, nint.Zero));
-        Assert.Equal((nuint)0, handle);
+        Assert.Throws<EntryPointNotFoundException>(() => new CanonicalViiperNativeApi(1, FakeExports.ResolveWithoutEdge));
     }
 
     [Fact]
@@ -1231,7 +1227,7 @@ public sealed class CanonicalViiperNativeAbiTests
         internal static nint Resolve(nint _, string name) => Pointers[name];
         internal static nint ResolveWithoutEdge(nint library, string name)
         {
-            if (CanonicalViiperNativeApi.OptionalDualSenseEdgeExports.Contains(name))
+            if (name is "CreateDualSenseEdgeDevice" or "SetDualSenseDeviceState" or "SetDualSenseOutputCallback" or "RemoveDualSenseDeviceEx")
                 throw new EntryPointNotFoundException(name);
             return Resolve(library, name);
         }

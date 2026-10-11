@@ -735,7 +735,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             applyControllerLedSettings: ApplyOwnedControllerLedSettingsAsync,
             applyControllerVibrationSettings: (settings, token) =>
                 ApplyOwnedControllerVibrationSettingsAsync(settings, "UserMutation", token),
-            requestControllerPresentationReconcile: trigger => RequestControllerPresentationReconcile(trigger));
+            requestControllerPresentationReconcile: trigger => RequestControllerPresentationReconcile(trigger),
+            capturePresentationSnapshot: () => _runtimeHost?.CapturePresentationSnapshot()
+                ?? new SteamPresentationSnapshot(_runtimeHost?.ActualRunningAppId ?? 0, false));
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -917,7 +919,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// <summary>PR5/PR6: the whole Disabled-mode controller startup sequence. Runs only for an exact
     /// Center M Disabled boot. Order (work order PR6 section 5.1): construct PR5 physical owner ->
     /// init canonical VIIPER -> require VIIPER Ready -> PR5 AcquireAsync -> require Owned + live input
-    /// -> fresh Steam/BPM snapshot -> attach exactly one X360/SteamDeck presentation. Any failure
+    /// -> fresh Steam/BPM snapshot -> attach exactly one Xbox360, Steam Deck, or Edge presentation. Any failure
     /// keeps the mandatory Runtime/tray/frontend alive; PID1902 is never rolled back here.</summary>
     private async Task TryStartDisabledModeControllerAsync(AddonStartupComposition startupComposition, StartupResult startupResult, Settings.StartupSettingsCoordinator startupSettings)
     {
@@ -973,7 +975,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try
         {
             // PR6 section 5: canonical VIIPER must be positively Ready before any new PID takeover.
-            var viiper = LoadAndInitializeCanonicalViiper();
+            var viiper = await LoadAndInitializeCanonicalViiperAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
             // Full1902 production rumble: one physical MSI writer for the live owned-controller
             // runtime, keyed to the same verified PID1902 physical session the owner exposes. The
             // presentation owner arms/disarms the active virtual presentation's feedback callback
@@ -991,7 +993,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null,
                 motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable,
                 requires250Hz: RequiresController250Hz,
-                steamVirtualControllerPreferenceProvider: () => startupSettings.SteamVirtualController);
+                steamVirtualControllerPreferenceProvider: () => startupSettings.SteamVirtualController,
+                steamGameControllerPreferenceProvider: appId => _gameProfileMutations?.CaptureSteamVirtualController(appId) ?? (false, null));
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));
@@ -1112,11 +1115,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         // One watcher is shared by a deferred first acquisition and all later owned-session loss.
         _ = StartControllerDeviceArrivalWatcher();
-        var snapshot = _runtimeHost!.CapturePresentationSnapshot();
         if (IsDeferredInitialControllerAcquisition(context) && !IsInitialControllerAcquisitionCurrent(context))
             return new(false, null, false, "InitialAcquisitionAdmissionClosed");
 
-        var presentationResult = await context.Presentation.AttachInitialAsync(source, snapshot, _startupCancellationTokenSource.Token).ConfigureAwait(false);
+        var presentationResult = await context.Presentation.AttachInitialAsync(
+            source, () => _runtimeHost!.CapturePresentationSnapshot(), _startupCancellationTokenSource.Token).ConfigureAwait(false);
         AppLog.Info("ControllerPresentation", "First presentation attach completed.",
             ("Succeeded", presentationResult.Succeeded), ("Presentation", presentationResult.Presentation?.ToString() ?? "None"), ("Reason", presentationResult.Reason),
             ("Trigger", trigger));
@@ -1336,7 +1339,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
-    private VirtualOutput.Viiper.CanonicalViiperRuntime? LoadAndInitializeCanonicalViiper()
+    private async Task<VirtualOutput.Viiper.CanonicalViiperRuntime?> LoadAndInitializeCanonicalViiperAsync(CancellationToken cancellationToken)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
         VirtualOutput.Viiper.ICanonicalViiperNativeApi? native;
@@ -1373,7 +1376,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Warn("SteamOutput", "VIIPER diagnostic log directory could not be prepared; controller routing will continue with VIIPER's fallback logging path.", exception);
         }
 
-        return VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
+        return await VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitializeWithSafeRetryAsync(
+            native, "127.0.0.1:3242", cancellationToken).ConfigureAwait(false);
     }
 
     // Returns the concrete owner (not just IMsiClawAddonPhysicalOwnership): the Full1902 rumble sink
@@ -3778,7 +3782,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private bool RequiresController250Hz() => Volatile.Read(ref _controllerCadenceRequires250Hz) != 0;
 
     /// <summary>PR7: schedule one asynchronous Full-1902 presentation reconcile. Event-driven only --
-    /// no timer, no polling. The desired X360/SteamDeck kind is captured fresh AFTER the presentation
+    /// no timer, no polling. The desired Xbox360/Steam-facing kind is captured fresh AFTER the presentation
     /// owner's gate is acquired, so overlapping RunningAppID/BPM events never apply stale state.</summary>
     private void RequestControllerPresentationReconcile(string trigger)
     {

@@ -129,7 +129,7 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
 ///
 /// It deliberately does NOT use the old route-scoped native-mode session coordinator or physical
 /// isolation stage, does not journal anything in the routing recovery journal, and never attaches a
-/// virtual X360/SteamDeck presentation. Ordinary failure releases only process-owned handles:
+/// virtual Xbox360/Steam Deck/DualSense Edge presentation. Ordinary failure releases only process-owned handles:
 /// durable Addon authority is never silently released and PID1902 is not converted back to PID1901.
 /// The separately gated A2VM Windows session-end preparation is the only best-effort exception.
 /// </summary>

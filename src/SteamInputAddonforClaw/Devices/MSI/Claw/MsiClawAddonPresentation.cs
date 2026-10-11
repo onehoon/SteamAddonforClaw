@@ -166,9 +166,10 @@ internal sealed record SuspendResumeResult(SuspendResumeOutcome Outcome, string 
         or SuspendResumeOutcome.DeferredUnsafePresentation;
 }
 
-/// <summary>A narrow abstraction over the two canonical VIIPER input publishers so the presentation
+/// <summary>A narrow abstraction over the three canonical VIIPER input publishers so the presentation
 /// owner can be tested without the production worker thread. Production adapters forward verbatim to
-/// <see cref="CanonicalXbox360InputPublisher"/> / <see cref="CanonicalSteamDeckInputPublisher"/>.</summary>
+/// <see cref="CanonicalXbox360InputPublisher"/>, <see cref="CanonicalSteamDeckInputPublisher"/>, and
+/// <see cref="CanonicalDualSenseEdgeInputPublisher"/>.</summary>
 internal interface IAddonPresentationPublisher
 {
     bool IsRunning { get; }
@@ -210,6 +211,8 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// typed device, sends neutral, and starts exactly one matching publisher on the supplied PR5
     /// input source. No fallback to the other presentation on failure.</summary>
     Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, SteamPresentationSnapshot snapshot, CancellationToken cancellationToken);
+    Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, Func<SteamPresentationSnapshot> captureSnapshot, CancellationToken cancellationToken) =>
+        AttachInitialAsync(source, captureSnapshot(), cancellationToken);
 
     /// <summary>PR7: reconcile the attached typed device + publisher to the current raw Steam/BPM
     /// policy. The freshest snapshot is captured AFTER the owner gate is acquired (work order PR7
@@ -308,6 +311,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher> _deckPublisherFactory;
     private readonly Func<IControllerStateSnapshotSource, ICanonicalDualSenseEdgeStateSink, DualSenseEdgeSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher> _edgePublisherFactory;
     private readonly Func<SteamVirtualControllerPreference> _steamVirtualControllerPreferenceProvider;
+    private readonly Func<uint, (bool Enabled, SteamVirtualControllerPreference? Preference)>? _steamGameControllerPreferenceProvider;
     private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
     private readonly Func<IXbox360RumbleLoopXInput> _rumbleLoopXInputFactory;
     private readonly Func<IXbox360UsbTraceCapture>? _rumbleLoopUsbTraceCaptureFactory;
@@ -375,7 +379,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         Func<bool>? requires250Hz = null,
         Func<SteamVirtualControllerPreference>? steamVirtualControllerPreferenceProvider = null,
         Func<CanonicalViiperRuntime, ICanonicalDualSenseEdgeSession>? edgeSessionFactory = null,
-        Func<IControllerStateSnapshotSource, ICanonicalDualSenseEdgeStateSink, DualSenseEdgeSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? edgePublisherFactory = null)
+        Func<IControllerStateSnapshotSource, ICanonicalDualSenseEdgeStateSink, DualSenseEdgeSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? edgePublisherFactory = null,
+        Func<uint, (bool Enabled, SteamVirtualControllerPreference? Preference)>? steamGameControllerPreferenceProvider = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
@@ -392,6 +397,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
         _edgeSessionFactory = edgeSessionFactory ?? (runtime => new CanonicalDualSenseEdgeSession(runtime));
         _steamVirtualControllerPreferenceProvider = steamVirtualControllerPreferenceProvider ?? (static () => SteamVirtualControllerPreference.SteamDeck);
+        _steamGameControllerPreferenceProvider = steamGameControllerPreferenceProvider;
         _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
         _xbox360PublisherFactory = xbox360PublisherFactory
             ?? ((source, setState, fault) => new PublisherAdapter(new CanonicalXbox360InputPublisher(
@@ -746,7 +752,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private void ObserveXbox360RumbleCallback(byte left8, byte right8, long? callbackSequence) =>
         Volatile.Read(ref _rumbleLoopDiagnostic)?.ObserveCallback(left8, right8, callbackSequence);
 
-    public async Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, SteamPresentationSnapshot snapshot, CancellationToken cancellationToken)
+    public Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, SteamPresentationSnapshot snapshot, CancellationToken cancellationToken) =>
+        AttachInitialAsync(source, () => snapshot, cancellationToken);
+
+    public async Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, Func<SteamPresentationSnapshot> captureSnapshot, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -759,7 +768,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             if (source is null || !source.IsRunning)
                 return Fail(null, "LiveInputSource", "LiveInputSourceNotRunning");
 
-            var selected = ResolveDesiredPresentation(snapshot, _steamVirtualControllerPreferenceProvider());
+            var snapshot = captureSnapshot();
+            var selected = ResolveDesiredPresentationLocked(snapshot);
             AppLog.Info("ControllerPresentation", "Initial presentation selected.", ("Event", "InitialPresentationSelected"),
                 ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive), ("Selected", selected));
 
@@ -826,7 +836,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         var snapshot = captureSnapshot();
         if (_activeKind is null && _publisher is null && !TryProveNoResidualPresentationLocked(out var residualReason))
             return Blocked("ResidualPresentation:" + residualReason);
-        var desired = ResolveDesiredPresentation(snapshot, _steamVirtualControllerPreferenceProvider());
+        var desired = ResolveDesiredPresentationLocked(snapshot);
         if (_activeKind == desired && _publisher is { IsRunning: true })
         {
             AppLog.Debug("ControllerPresentation", "Runtime presentation reconcile: no change.", ("Event", "PresentationReconcileNoChange"),
@@ -1097,6 +1107,18 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             : preference == SteamVirtualControllerPreference.DualSenseEdge
                 ? AddonPresentationKind.DualSenseEdge
                 : AddonPresentationKind.SteamDeck;
+
+    private AddonPresentationKind ResolveDesiredPresentationLocked(SteamPresentationSnapshot snapshot)
+    {
+        var preference = _steamVirtualControllerPreferenceProvider();
+        if (snapshot.RunningAppId != 0 && _steamGameControllerPreferenceProvider is { } captureGamePreference)
+        {
+            var game = captureGamePreference(snapshot.RunningAppId);
+            if (game.Enabled && game.Preference is { } gamePreference)
+                preference = gamePreference;
+        }
+        return ResolveDesiredPresentation(snapshot, preference);
+    }
 
     // ---- publisher runtime fault: async fail-close only, no self-join, no re-attach, no PID touch ----
 
@@ -1546,7 +1568,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
             // Section 10.2: capture the fresh Steam/BPM desired kind at the actual resume boundary --
             // never the pre-sleep desired presentation.
-            var desired = ResolveDesiredPresentation(captureSnapshot(), _steamVirtualControllerPreferenceProvider());
+            var desired = ResolveDesiredPresentationLocked(captureSnapshot());
 
             // Section 7.2 pause case: the ACTUAL empty state -> nothing to resume. Review #490 (3rd
             // pass): apply the SAME structural residual-attachment proof PauseForSuspendAsync requires
@@ -1667,7 +1689,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// <summary>Review #490 (3rd pass): the shared structural proof that no residual typed-device
     /// attachment/ownership evidence survives when both <see cref="_activeKind"/> and
     /// <see cref="_publisher"/> are null. A rejected INITIAL neutral write followed by a failed
-    /// cleanup detach (in <c>AttachXbox360Async</c> / <c>AttachSteamDeckAsync</c>) never commits
+    /// cleanup detach (in <c>AttachXbox360Async</c>, <c>AttachSteamDeckAsync</c>, or
+    /// <c>AttachDualSenseEdgeAsync</c>) never commits
     /// either managed field, so their emptiness alone is not proof of "nothing attached". Shared by
     /// <see cref="PauseForSuspendAsync"/> and the empty-state branch of
     /// <see cref="ResumeAfterSuspendAsync"/> so Suspend and Resume apply the identical fail-close
@@ -1727,8 +1750,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     }
 
     /// <summary>Retire ONLY the current active presentation (stop/join publisher -&gt; canonical
-    /// detach primitive -&gt; clear managed fields). The canonical VIIPER runtime (server / bus / both
-    /// typed device objects) stays alive and Ready -- this is the PR7 X360 &lt;-&gt; Deck switch step.
+    /// detach primitive -&gt; clear managed fields). The canonical VIIPER runtime (server / bus / all
+    /// three typed device objects) stays alive and Ready -- this is the presentation switch step.
     /// Assumes <see cref="_gate"/> is already held; never reacquires it (work order PR7 section 14).</summary>
     private async Task<PresentationRetirementResult> RetireActivePresentationCoreAsync(string reason, CancellationToken cancellationToken = default)
     {
