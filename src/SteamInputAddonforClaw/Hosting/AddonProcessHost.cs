@@ -1420,7 +1420,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets),
             gamepadModeClient: gamepadModeClient,
             hardwareDeviceModel: hardwareDeviceModel,
-            writeXInputCommand: (identity, token) => nativeState.WriteXInputCommandAsync(identity, token));
+            writeXInputCommand: (identity, token) => nativeState.WriteXInputCommandAsync(identity, token),
+            writeA2vmInitialFastModeCommand: (endpoint, target, token) =>
+                nativeState.WriteInitialA2vmFastModeAsync(endpoint, target, token));
     }
 
     private async Task StartMotionSourceAsync(string trigger)

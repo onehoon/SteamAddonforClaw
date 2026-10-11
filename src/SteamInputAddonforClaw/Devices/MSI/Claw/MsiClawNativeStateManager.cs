@@ -23,6 +23,8 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         modeController is null
             ? Task.FromResult(new MsiClawModeCommandWriteResult(false, false, "ModeControllerUnavailable"))
             : modeController.WriteXInputCommandAsync(identity, cancellationToken);
+    internal Task<bool> WriteInitialA2vmFastModeAsync(MsiClawInitialFastModeEndpoint endpoint, MsiClawNativeMode target, CancellationToken cancellationToken) =>
+        modeController?.WriteInitialA2vmFastModeAsync(endpoint, target, cancellationToken) ?? Task.FromResult(false);
 
     public NativeStateCaptureResult CaptureSnapshot()
     {

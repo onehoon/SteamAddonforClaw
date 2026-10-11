@@ -21,6 +21,32 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter, IMsiClawGam
             _ => throw new ArgumentOutOfRangeException(nameof(mode)),
         }, cancellationToken).ConfigureAwait(false);
 
+    public async Task<bool> WriteInitialA2vmFastAsync(MsiClawInitialFastModeEndpoint endpoint, MsiClawNativeMode mode, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!IsExpectedInitialFastEndpoint(endpoint, mode)) return false;
+
+        var selector = HidDevice.GetDeviceSelector(endpoint.UsagePage, endpoint.Usage,
+            MsiClawHardware.VendorId, endpoint.Device.ProductId!.Value);
+        var infos = await _lookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
+        var matching = infos.Where(info => string.Equals(
+            info.InstanceId, endpoint.Device.InstanceId, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (matching.Length != 1 || string.IsNullOrWhiteSpace(matching[0].Id)) return false;
+
+        var targetMode = mode switch
+        {
+            MsiClawNativeMode.XInput => MsiClawGamepadMode.XInput,
+            MsiClawNativeMode.DirectInput => MsiClawGamepadMode.DirectInput,
+            _ => throw new ArgumentOutOfRangeException(nameof(mode)),
+        };
+        var bytes = MsiClawModeCommand.BuildSwitch(targetMode);
+        if (!await _transport.WriteAsync(matching[0].Id, bytes, cancellationToken).ConfigureAwait(false)) return false;
+        AppLog.Debug("NativeMode", "A2VM initial fast mode command written.",
+            ("PID", endpoint.Device.ProductId), ("UsagePage", endpoint.UsagePage),
+            ("Usage", endpoint.Usage), ("ReportLength", bytes.Length), ("Mode", targetMode));
+        return true;
+    }
+
     public async Task<bool> WriteGamepadModeAsync(MsiClawControlHidDevice device, MsiClawGamepadMode mode, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -70,6 +96,23 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter, IMsiClawGam
     {
         if (!string.Equals(info.InstanceId, expected.Device.InstanceId, StringComparison.OrdinalIgnoreCase)) return false;
         return !IsUsable(expected.VerifiedIdentity.ContainerId) || info.ContainerId == expected.VerifiedIdentity.ContainerId;
+    }
+
+    internal static bool IsExpectedInitialFastEndpoint(MsiClawInitialFastModeEndpoint endpoint, MsiClawNativeMode target)
+    {
+        if (!endpoint.Device.Present || endpoint.Device.VendorId != MsiClawHardware.VendorId
+            || string.IsNullOrWhiteSpace(endpoint.Device.InstanceId)) return false;
+
+        var expectedSource = target switch
+        {
+            MsiClawNativeMode.XInput => MsiClawNativeMode.DirectInput,
+            MsiClawNativeMode.DirectInput => MsiClawNativeMode.XInput,
+            _ => MsiClawNativeMode.Other,
+        };
+        return MsiClawModeTopology.TryGet(expectedSource, out var topology)
+            && endpoint.Device.ProductId == topology.ProductId
+            && endpoint.UsagePage == topology.UsagePage
+            && endpoint.Usage == topology.Usage;
     }
     private static bool IsUsable(Guid? value) => value is Guid guid && guid != Guid.Empty && guid != new Guid("00000000-0000-0000-ffff-ffffffffffff");
 }

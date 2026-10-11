@@ -230,11 +230,19 @@ public sealed class StartupCoordinatorTests
     private sealed class FakeTopologyWaiter(List<string> events) : IControllerTopologyWaiter
     {
         public int Calls { get; private set; }
+        public int FastCalls { get; private set; }
 
         public Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
         {
             events.Add("TopologyWaiter");
             Calls++;
+            return Task.FromResult(ControllerTopologyReadiness.Stable);
+        }
+
+        public Task<ControllerTopologyReadiness> WaitForFirstUnambiguousControlHidAsync(CancellationToken cancellationToken)
+        {
+            events.Add("FirstControlHidWaiter");
+            FastCalls++;
             return Task.FromResult(ControllerTopologyReadiness.Stable);
         }
     }
@@ -373,6 +381,26 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(["TopologyWaiter", "Admission"], events);
         Assert.DoesNotContain("Baseline", events);
         Assert.Equal(1, waiter.Calls);
+    }
+
+    [Fact]
+    public async Task DisabledA2vmStartup_UsesFirstUsableControlHidInsteadOfStableSnapshots()
+    {
+        var events = new List<string>();
+        var waiter = new FakeTopologyWaiter(events);
+        var evaluator = new FixedHardwareAssessmentEvaluator(
+            new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.a2vm.8"), "test"));
+        var coordinator = new StartupCoordinator(
+            waiter, new FakeProbeFactory(), evaluator,
+            disabledBootAdmission: new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready),
+            captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.DisabledBootAdmission!.IsReady);
+        Assert.Equal(1, waiter.FastCalls);
+        Assert.Equal(0, waiter.Calls);
+        Assert.Equal(["FirstControlHidWaiter", "Admission"], events);
     }
 
     [Fact]
@@ -573,6 +601,10 @@ public sealed class StartupCoordinatorTests
 
     private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
     private sealed class FakeHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"); }
+    private sealed class FixedHardwareAssessmentEvaluator(HardwareCompatibilityAssessment assessment) : IHardwareCompatibilityEvaluator
+    {
+        public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => assessment;
+    }
     private sealed class FixedHardwareEvaluator(HardwareCompatibilityStatus status) : IHardwareCompatibilityEvaluator
     {
         public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(status, null, null, "test");

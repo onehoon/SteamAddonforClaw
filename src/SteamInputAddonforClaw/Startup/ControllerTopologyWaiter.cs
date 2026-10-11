@@ -8,6 +8,9 @@ namespace SteamInputAddonforClaw.Startup;
 internal interface IControllerTopologyWaiter
 {
     Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken cancellationToken);
+
+    Task<ControllerTopologyReadiness> WaitForFirstUnambiguousControlHidAsync(CancellationToken cancellationToken) =>
+        WaitUntilStableAsync(cancellationToken);
 }
 
 internal enum ControllerTopologyReadiness { Stable, Indeterminate }
@@ -114,6 +117,67 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             ("RequiredStableSnapshots", _requiredStableSnapshots),
             ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Action", "Passive"));
         return ControllerTopologyReadiness.Indeterminate;
+    }
+
+    public async Task<ControllerTopologyReadiness> WaitForFirstUnambiguousControlHidAsync(CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var deadline = DateTimeOffset.UtcNow + _timeout;
+        var attempt = 0;
+        var lastCandidateCount = 0;
+        try
+        {
+            while (DateTimeOffset.UtcNow <= deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                attempt++;
+                var devices = _deviceEnumerator.EnumeratePresentDevices();
+                var candidates = devices.Where(IsSupportedModeCommandEndpoint).ToArray();
+                lastCandidateCount = candidates.Length;
+                if (candidates.Length == 1)
+                {
+                    AppLog.Info("ControllerTopology", "First unambiguous supported MSI control HID observed.",
+                        ("Event", "A2vmInitialControlHidReady"), ("Attempts", attempt),
+                        ("ProductId", candidates[0].ProductId), ("UsagePage", candidates[0].UsagePage),
+                        ("Usage", candidates[0].Usage), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+                    return ControllerTopologyReadiness.Stable;
+                }
+
+                await Task.Delay(_sampleInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerTopology", "A2VM first-control-HID observation failed.", exception,
+                ("Event", "A2vmInitialControlHidUnavailable"), ("Attempts", attempt),
+                ("CandidateCount", lastCandidateCount), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                ("Action", "Passive"));
+            return ControllerTopologyReadiness.Indeterminate;
+        }
+
+        AppLog.Warn("ControllerTopology", "No single supported MSI control HID became available within the bounded wait.", null,
+            ("Event", "A2vmInitialControlHidUnavailable"), ("Attempts", attempt),
+            ("CandidateCount", lastCandidateCount), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+            ("Action", "Passive"));
+        return ControllerTopologyReadiness.Indeterminate;
+    }
+
+    private static bool IsSupportedModeCommandEndpoint(ControllerDeviceInfo device)
+    {
+        if (!device.Present || device.VendorId != MsiClawHardware.VendorId)
+            return false;
+
+        return Matches(MsiClawNativeMode.XInput) || Matches(MsiClawNativeMode.DirectInput);
+
+        bool Matches(MsiClawNativeMode mode) =>
+            MsiClawModeTopology.TryGet(mode, out var topology)
+            && device.ProductId == topology.ProductId
+            && device.UsagePage == topology.UsagePage
+            && device.Usage == topology.Usage;
     }
 
     private TopologyObservation CreateRelevantTopologySnapshot()
