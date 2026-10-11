@@ -986,6 +986,28 @@ public sealed class MsiClawAddonPresentationTests
         await owner.DisposeAsync();
     }
 
+    [Theory]
+    [InlineData((int)USBDeviceDetachResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)USBDeviceDetachResult.Invalid)]
+    public async Task Windows_session_end_never_promotes_unknown_or_invalid_detach_to_safe(int detachResultValue)
+    {
+        var detachResult = (USBDeviceDetachResult)detachResultValue;
+        var native = new FakeNative();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), new FakeRumbleSink());
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        native.DetachResults.Enqueue(detachResult);
+        native.Calls.Clear();
+
+        var retired = await owner.PrepareForWindowsSessionEndAsync(CancellationToken.None);
+
+        Assert.False(retired);
+        Assert.Equal(1, native.Calls.Count(call => call == "DetachUSBDeviceEx"));
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+        Assert.NotEqual(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        await owner.DisposeAsync();
+        Assert.Equal(1, native.Calls.Count(call => call == "DetachUSBDeviceEx"));
+    }
+
     [Fact]
     public async Task Windows_session_end_does_not_report_safe_when_viiper_server_teardown_fails()
     {

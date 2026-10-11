@@ -137,7 +137,7 @@ public sealed class Full1902WinGSuppressionAuthorityTests
         Assert.Single(Regex.Matches(source, @"_winGSuppressionGuard\.Disarm\(\)|guard\.Disarm\(\)"));
 
         // The presentation reconcile path (Steam/BPM switch + recovery) must not disarm or reinstall.
-        var reconcile = Method(source, "private async Task ReconcileControllerPresentationAsync(");
+        var reconcile = Method(source, "private async Task<bool> ReconcileControllerPresentationAsync(");
         Assert.DoesNotContain("Disarm(", reconcile);
         Assert.DoesNotContain("_winGSuppressionGuard.Start()", reconcile);
         // ...but it IS fail-closed on a dropped hook (section 5.7).

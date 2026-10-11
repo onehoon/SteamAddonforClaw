@@ -23,7 +23,7 @@ public sealed class AddonProcessHostWindowsSessionEndTests
     {
         var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
         var begin = Method(host, "private async Task<SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(");
-        var admission = begin.IndexOf("GetWindowsSessionEndAdmissionFailure()", StringComparison.Ordinal);
+        var admission = begin.IndexOf("GetWindowsSessionEndAdmissionFailure(admissionReconcile)", StringComparison.Ordinal);
         var shutdownGate = begin.IndexOf("TryBeginProcessShutdownCore()", admission, StringComparison.Ordinal);
         var presentation = begin.IndexOf("presentation.PrepareForWindowsSessionEndAsync", shutdownGate, StringComparison.Ordinal);
         var physical = begin.IndexOf("physical.PrepareForWindowsSessionEndAsync", presentation, StringComparison.Ordinal);
@@ -35,6 +35,38 @@ public sealed class AddonProcessHostWindowsSessionEndTests
         Assert.Contains("CenterMAuthorityNotDisabled", host, StringComparison.Ordinal);
         Assert.Contains("OwnedStrongPid1902SessionUnavailable", host, StringComparison.Ordinal);
         Assert.Contains("ControllerLifecycleOperationInProgress", host, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Session_end_drains_only_the_captured_reconcile_and_revalidates_owners_before_retirement()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
+        var begin = Method(host, "private async Task<SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(");
+        var capture = begin.IndexOf("var admissionReconcile = _presentationReconcile", StringComparison.Ordinal);
+        var shutdownGate = begin.IndexOf("TryBeginProcessShutdownCore()", capture, StringComparison.Ordinal);
+        var shutdownReconcile = begin.IndexOf("var presentationReconcile = _presentationReconcile", shutdownGate, StringComparison.Ordinal);
+        var boundedWait = begin.IndexOf("presentationReconcile.WaitAsync(cancellationToken)", shutdownReconcile, StringComparison.Ordinal);
+        var revalidation = begin.IndexOf("GetWindowsSessionEndPostReconcileFailure", boundedWait, StringComparison.Ordinal);
+        var retirement = begin.IndexOf("presentation.PrepareForWindowsSessionEndAsync", revalidation, StringComparison.Ordinal);
+        var physical = begin.IndexOf("physical.PrepareForWindowsSessionEndAsync", retirement, StringComparison.Ordinal);
+
+        Assert.True(capture >= 0 && shutdownGate > capture && shutdownReconcile > shutdownGate && boundedWait > shutdownReconcile
+            && revalidation > boundedWait && retirement > revalidation && physical > retirement);
+        Assert.Contains("PresentationReconcileCancelled", begin, StringComparison.Ordinal);
+        Assert.Contains("PresentationReconcileFailed", begin, StringComparison.Ordinal);
+
+        var request = Method(host, "private void RequestControllerPresentationReconcile(");
+        Assert.Contains("lock (_controllerOwnershipOperationSync)", request, StringComparison.Ordinal);
+        Assert.Contains("Task.Run(() => ReconcileControllerPresentationAsync", request, StringComparison.Ordinal);
+        Assert.Contains("if (Volatile.Read(ref _processShutdownStarted) != 0) return", request, StringComparison.Ordinal);
+
+        var reconcile = Method(host, "private async Task<bool> ReconcileControllerPresentationAsync(");
+        Assert.Contains("catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)", reconcile, StringComparison.Ordinal);
+        Assert.Contains("throw;", reconcile, StringComparison.Ordinal);
+
+        var revalidateMethod = Method(host, "private string? GetWindowsSessionEndPostReconcileFailure(");
+        Assert.Contains("expectedIdentity.StronglyMatches(currentIdentity)", revalidateMethod, StringComparison.Ordinal);
+        Assert.Contains("presentation.IsActivePresentationLive", revalidateMethod, StringComparison.Ordinal);
     }
 
     [Fact]
