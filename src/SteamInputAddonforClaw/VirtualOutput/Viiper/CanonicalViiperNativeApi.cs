@@ -23,6 +23,16 @@ internal enum Xbox360DeviceRemoveResult : int
     Invalid = 3
 }
 
+// Mirrors the generated VIIPER DualSense/Edge removal enum. Both device
+// variants share this typed family and classified removal export.
+internal enum DSDeviceRemoveResult : int
+{
+    Success = 0,
+    RetryableFailure = 1,
+    UnsafeOutcomeUnknown = 2,
+    Invalid = 3
+}
+
 internal interface ICanonicalViiperNativeApi
 {
     bool SetDiagnosticLogDirectory(string directory);
@@ -60,10 +70,25 @@ internal interface ICanonicalViiperNativeApi
     bool SetXbox360RumbleCallback(nuint deviceHandle, Xbox360RumbleCallback? callback);
     bool RemoveXbox360Device(nuint deviceHandle);
     Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint deviceHandle);
+
+    // Optional experimental Edge surface. These exports are resolved lazily on
+    // the first Edge request and are deliberately absent from RequiredExports.
+    bool CreateDualSenseEdgeDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, nint metaState);
+    bool SetDualSenseDeviceState(nuint deviceHandle, DSDeviceState state);
+    bool SetDualSenseOutputCallback(nuint deviceHandle, DualSenseOutputCallback? callback);
+    DSDeviceRemoveResult RemoveDualSenseDeviceEx(nuint deviceHandle);
 }
 
 internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 {
+    internal static readonly IReadOnlyList<string> OptionalDualSenseEdgeExports =
+    [
+        "CreateDualSenseEdgeDevice",
+        "SetDualSenseDeviceState",
+        "SetDualSenseOutputCallback",
+        "RemoveDualSenseDeviceEx"
+    ];
+
     internal static readonly IReadOnlyList<string> RequiredExports =
     [
         "SetDiagnosticLogDirectory",
@@ -110,11 +135,17 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     private readonly SetXbox360RumbleCallbackDelegate _setXbox360RumbleCallback;
     private readonly RemoveXbox360DeviceDelegate _removeXbox360Device;
     private readonly RemoveXbox360DeviceExDelegate _removeXbox360DeviceEx;
+    private readonly nint _library;
+    private readonly Func<nint, string, nint> _exportResolver;
+    private readonly object _edgeBindingGate = new();
+    private DualSenseEdgeNativeBindings? _dualSenseEdgeBindings;
+    private bool _dualSenseEdgeBindingsResolved;
     private readonly object _callbackGate = new();
     private readonly Dictionary<nuint, SteamDeckOutputCallback> _steamDeckOutputCallbacks = [];
     private readonly Dictionary<nuint, Xbox360RumbleCallback> _xbox360RumbleCallbacks = [];
+    private readonly Dictionary<nuint, DualSenseOutputCallback> _dualSenseOutputCallbacks = [];
     private readonly Dictionary<nuint, ViiperLogCallback> _logCallbacks = [];
-    // Shared logical-device ownership map for both Steam Deck and Xbox360 handles. Safe to share:
+    // Shared logical-device ownership map for Steam Deck, Xbox360, and Edge handles. Safe to share:
     // VIIPER's canonical implementation allocates every typed device handle from the same
     // process-global cgo.Handle space and records all families in the same global
     // deviceHandleRecords table, so a Deck handle and an Xbox360 handle are never independently
@@ -125,6 +156,8 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     internal CanonicalViiperNativeApi(nint library, Func<nint, string, nint>? exportResolver = null)
     {
         var resolve = exportResolver ?? NativeLibrary.GetExport;
+        _library = library;
+        _exportResolver = resolve;
         _setDiagnosticLogDirectory = Bind<SetDiagnosticLogDirectoryDelegate>(library, resolve, "SetDiagnosticLogDirectory");
         _newUsbServer = Bind<NewUsbServerDelegate>(library, resolve, "NewUSBServer");
         _closeUsbServer = Bind<CloseUsbServerDelegate>(library, resolve, "CloseUSBServer");
@@ -294,6 +327,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         {
             _steamDeckOutputCallbacks.Remove(deviceHandle);
             _xbox360RumbleCallbacks.Remove(deviceHandle);
+            _dualSenseOutputCallbacks.Remove(deviceHandle);
             _deviceOwnership.Remove(deviceHandle);
         }
     }
@@ -306,6 +340,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
             _steamDeckOutputCallbacks.Remove(deviceHandle);
             _xbox360RumbleCallbacks.Remove(deviceHandle);
+            _dualSenseOutputCallbacks.Remove(deviceHandle);
             _deviceOwnership.Remove(deviceHandle);
         }
     }
@@ -377,6 +412,109 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         if (result == Xbox360DeviceRemoveResult.Success)
             ReleaseDeviceOwnership(deviceHandle);
         return result;
+    }
+
+    public bool CreateDualSenseEdgeDevice(
+        nuint serverHandle,
+        out nuint deviceHandle,
+        uint busId,
+        bool autoAttachLocalhost,
+        ushort idVendor,
+        ushort idProduct,
+        nint metaState)
+    {
+        var bindings = TryGetDualSenseEdgeBindings();
+        if (bindings is null)
+        {
+            deviceHandle = 0;
+            return false;
+        }
+
+        var succeeded = Succeeded(bindings.CreateDevice(
+            serverHandle,
+            out deviceHandle,
+            busId,
+            autoAttachLocalhost ? (byte)1 : (byte)0,
+            idVendor,
+            idProduct,
+            metaState));
+        // A non-zero out handle is ownership evidence even when the native
+        // success byte is false. Preserve it for the runtime's fail-closed path.
+        if (deviceHandle != 0)
+        {
+            lock (_callbackGate) _deviceOwnership[deviceHandle] = (serverHandle, busId);
+        }
+        return succeeded;
+    }
+
+    public bool SetDualSenseDeviceState(nuint deviceHandle, DSDeviceState state)
+    {
+        var bindings = TryGetDualSenseEdgeBindings();
+        return bindings is not null && Succeeded(bindings.SetState(deviceHandle, state));
+    }
+
+    public bool SetDualSenseOutputCallback(nuint deviceHandle, DualSenseOutputCallback? callback)
+    {
+        lock (_callbackGate)
+        {
+            var bindings = TryGetDualSenseEdgeBindings();
+            if (bindings is null) return false;
+
+            var succeeded = Succeeded(bindings.SetOutputCallback(deviceHandle, callback));
+            if (succeeded)
+            {
+                if (callback is null) _dualSenseOutputCallbacks.Remove(deviceHandle);
+                else _dualSenseOutputCallbacks[deviceHandle] = callback;
+            }
+            return succeeded;
+        }
+    }
+
+    public DSDeviceRemoveResult RemoveDualSenseDeviceEx(nuint deviceHandle)
+    {
+        var bindings = TryGetDualSenseEdgeBindings();
+        if (bindings is null) return DSDeviceRemoveResult.Invalid;
+
+        var result = bindings.RemoveDeviceEx(deviceHandle);
+        if (result == DSDeviceRemoveResult.Success)
+            ReleaseDeviceOwnership(deviceHandle);
+        return result;
+    }
+
+    private DualSenseEdgeNativeBindings? TryGetDualSenseEdgeBindings()
+    {
+        lock (_edgeBindingGate)
+        {
+            if (_dualSenseEdgeBindingsResolved) return _dualSenseEdgeBindings;
+
+            try
+            {
+                _dualSenseEdgeBindings = new DualSenseEdgeNativeBindings(
+                    BindOptional<CreateDualSenseEdgeDeviceDelegate>(_library, _exportResolver, "CreateDualSenseEdgeDevice"),
+                    BindOptional<SetDualSenseDeviceStateDelegate>(_library, _exportResolver, "SetDualSenseDeviceState"),
+                    BindOptional<SetDualSenseOutputCallbackDelegate>(_library, _exportResolver, "SetDualSenseOutputCallback"),
+                    BindOptional<RemoveDualSenseDeviceExDelegate>(_library, _exportResolver, "RemoveDualSenseDeviceEx"));
+            }
+            catch (EntryPointNotFoundException)
+            {
+                // Edge is experimental and optional. Missing symbols do not affect
+                // normal startup; the explicit Edge request reports unavailable.
+                _dualSenseEdgeBindings = null;
+            }
+            finally
+            {
+                _dualSenseEdgeBindingsResolved = true;
+            }
+
+            return _dualSenseEdgeBindings;
+        }
+    }
+
+    private static T BindOptional<T>(nint library, Func<nint, string, nint> resolver, string export) where T : Delegate
+    {
+        var address = resolver(library, export);
+        if (address == 0) throw new EntryPointNotFoundException($"Optional VIIPER export '{export}' is unavailable.");
+        return Marshal.GetDelegateForFunctionPointer<T>(address);
     }
 
     private static T Bind<T>(nint library, Func<nint, string, nint> resolver, string export) where T : Delegate
@@ -459,4 +597,29 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate Xbox360DeviceRemoveResult RemoveXbox360DeviceExDelegate(nuint handle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte CreateDualSenseEdgeDeviceDelegate(
+        nuint serverHandle,
+        out nuint outDeviceHandle,
+        uint busId,
+        byte autoAttachLocalhost,
+        ushort idVendor,
+        ushort idProduct,
+        nint metaState);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte SetDualSenseDeviceStateDelegate(nuint handle, DSDeviceState state);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte SetDualSenseOutputCallbackDelegate(nuint handle, DualSenseOutputCallback? callback);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate DSDeviceRemoveResult RemoveDualSenseDeviceExDelegate(nuint handle);
+
+    private sealed record DualSenseEdgeNativeBindings(
+        CreateDualSenseEdgeDeviceDelegate CreateDevice,
+        SetDualSenseDeviceStateDelegate SetState,
+        SetDualSenseOutputCallbackDelegate SetOutputCallback,
+        RemoveDualSenseDeviceExDelegate RemoveDeviceEx);
 }

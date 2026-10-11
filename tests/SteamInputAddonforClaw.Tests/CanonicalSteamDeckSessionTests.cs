@@ -160,5 +160,9 @@ public sealed class CanonicalSteamDeckSessionTests
         public bool SetXbox360RumbleCallback(nuint handle, Xbox360RumbleCallback? callback) { Calls.Add("SetXbox360RumbleCallback"); return true; }
         public bool RemoveXbox360Device(nuint handle) { Calls.Add("RemoveXbox360Device"); return true; }
         public Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint handle) { Calls.Add("RemoveXbox360DeviceEx"); return Xbox360DeviceRemoveResult.Success; }
+        public bool CreateDualSenseEdgeDevice(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid, nint meta) { Calls.Add("CreateDualSenseEdgeDevice"); handle = 40; return false; }
+        public bool SetDualSenseDeviceState(nuint handle, DSDeviceState state) { Calls.Add("SetDualSenseDeviceState"); return true; }
+        public bool SetDualSenseOutputCallback(nuint handle, DualSenseOutputCallback? callback) { Calls.Add("SetDualSenseOutputCallback"); return true; }
+        public DSDeviceRemoveResult RemoveDualSenseDeviceEx(nuint handle) { Calls.Add("RemoveDualSenseDeviceEx"); return DSDeviceRemoveResult.Success; }
     }
 }

@@ -149,6 +149,120 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.Equal(typeof(uint), parameters[2].ParameterType);
     }
 
+    [Fact]
+    public void DualSenseEdgeState_HasCanonicalX64SizeAndOffsets()
+    {
+        Assert.Equal(36, Marshal.SizeOf<DSDeviceState>());
+        var expected = new Dictionary<string, int>
+        {
+            [nameof(DSDeviceState.LX)] = 0, [nameof(DSDeviceState.LY)] = 1,
+            [nameof(DSDeviceState.RX)] = 2, [nameof(DSDeviceState.RY)] = 3,
+            [nameof(DSDeviceState.Buttons)] = 4, [nameof(DSDeviceState.DPad)] = 8,
+            [nameof(DSDeviceState.L2)] = 9, [nameof(DSDeviceState.R2)] = 10,
+            [nameof(DSDeviceState.Touch1X)] = 12, [nameof(DSDeviceState.Touch1Y)] = 14,
+            [nameof(DSDeviceState.Touch1Active)] = 16, [nameof(DSDeviceState.Touch2X)] = 18,
+            [nameof(DSDeviceState.Touch2Y)] = 20, [nameof(DSDeviceState.Touch2Active)] = 22,
+            [nameof(DSDeviceState.GyroX)] = 24, [nameof(DSDeviceState.GyroY)] = 26,
+            [nameof(DSDeviceState.GyroZ)] = 28, [nameof(DSDeviceState.AccelX)] = 30,
+            [nameof(DSDeviceState.AccelY)] = 32, [nameof(DSDeviceState.AccelZ)] = 34
+        };
+        foreach (var (name, offset) in expected)
+            Assert.Equal(offset, Marshal.OffsetOf<DSDeviceState>(name).ToInt32());
+    }
+
+    [Fact]
+    public void DualSenseEdgeCallbackAndDelegates_MatchTypedAbi()
+    {
+        Assert.Equal(CallingConvention.Cdecl, typeof(DualSenseOutputCallback).GetCustomAttribute<UnmanagedFunctionPointerAttribute>()!.CallingConvention);
+        var callbackParameters = typeof(DualSenseOutputCallback).GetMethod("Invoke")!.GetParameters();
+        Assert.Equal(typeof(void), typeof(DualSenseOutputCallback).GetMethod("Invoke")!.ReturnType);
+        Assert.Equal(new[] { typeof(nuint), typeof(byte), typeof(byte), typeof(byte), typeof(byte), typeof(byte), typeof(byte) },
+            callbackParameters.Select(parameter => parameter.ParameterType));
+
+        AssertCdecl("CreateDualSenseEdgeDeviceDelegate", typeof(byte));
+        AssertCdecl("SetDualSenseDeviceStateDelegate", typeof(byte));
+        AssertCdecl("SetDualSenseOutputCallbackDelegate", typeof(byte));
+        AssertCdecl("RemoveDualSenseDeviceExDelegate", typeof(DSDeviceRemoveResult));
+        AssertParameters("CreateDualSenseEdgeDeviceDelegate", typeof(nuint), typeof(nuint).MakeByRefType(), typeof(uint), typeof(byte), typeof(ushort), typeof(ushort), typeof(nint));
+        AssertParameters("SetDualSenseDeviceStateDelegate", typeof(nuint), typeof(DSDeviceState));
+        AssertParameters("SetDualSenseOutputCallbackDelegate", typeof(nuint), typeof(DualSenseOutputCallback));
+        AssertParameters("RemoveDualSenseDeviceExDelegate", typeof(nuint));
+
+        Assert.Equal(typeof(int), Enum.GetUnderlyingType(typeof(DSDeviceRemoveResult)));
+        Assert.Equal(0, (int)DSDeviceRemoveResult.Success);
+        Assert.Equal(1, (int)DSDeviceRemoveResult.RetryableFailure);
+        Assert.Equal(2, (int)DSDeviceRemoveResult.UnsafeOutcomeUnknown);
+        Assert.Equal(3, (int)DSDeviceRemoveResult.Invalid);
+        Assert.Equal(new[] { "CreateDualSenseEdgeDevice", "SetDualSenseDeviceState", "SetDualSenseOutputCallback", "RemoveDualSenseDeviceEx" },
+            CanonicalViiperNativeApi.OptionalDualSenseEdgeExports);
+        Assert.Empty(CanonicalViiperNativeApi.OptionalDualSenseEdgeExports.Intersect(CanonicalViiperNativeApi.RequiredExports));
+    }
+
+    [Fact]
+    public void MissingOptionalEdgeExports_DoNotBreakNormalApiInitialization()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.ResolveWithoutEdge);
+
+        Assert.True(api.SetDiagnosticLogDirectory("C:\\logs"));
+        Assert.False(api.CreateDualSenseEdgeDevice(1, out var handle, 1, false, 0, 0, nint.Zero));
+        Assert.Equal((nuint)0, handle);
+    }
+
+    [Fact]
+    public void DualSenseEdgeCallback_IsRootedUntilConfirmedClearOrRemoval()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateDualSenseEdgeDevice(1, out var handle, 1, false, 0, 0, nint.Zero));
+        var weak = RegisterDualSenseOutputCallback(api, handle);
+        CollectGarbage();
+        Assert.True(IsCallbackAlive(weak));
+
+        FakeExports.FailSetEdgeCallback = true;
+        try
+        {
+            Assert.False(api.SetDualSenseOutputCallback(handle, null));
+            CollectGarbage();
+            Assert.True(IsCallbackAlive(weak));
+        }
+        finally { FakeExports.FailSetEdgeCallback = false; }
+
+        Assert.Equal(DSDeviceRemoveResult.Success, api.RemoveDualSenseDeviceEx(handle));
+        CollectGarbage();
+        Assert.False(IsCallbackAlive(weak));
+    }
+
+    [Fact]
+    public void DualSenseEdgeCallback_ConfirmedClearReleasesTheRoot()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateDualSenseEdgeDevice(1, out var handle, 1, false, 0, 0, nint.Zero));
+        var weak = RegisterDualSenseOutputCallback(api, handle);
+
+        Assert.True(api.SetDualSenseOutputCallback(handle, null));
+        CollectGarbage();
+
+        Assert.False(weak.TryGetTarget(out _));
+    }
+
+    [Theory]
+    [InlineData((int)DSDeviceRemoveResult.RetryableFailure)]
+    [InlineData((int)DSDeviceRemoveResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)DSDeviceRemoveResult.Invalid)]
+    public void DualSenseEdgeCallback_NonSuccessRemovalRetainsTheRoot(int resultValue)
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateDualSenseEdgeDevice(1, out var handle, 1, false, 0, 0, nint.Zero));
+        var weak = RegisterDualSenseOutputCallback(api, handle);
+        FakeExports.RemoveEdgeExResult = (DSDeviceRemoveResult)resultValue;
+        try
+        {
+            Assert.Equal((DSDeviceRemoveResult)resultValue, api.RemoveDualSenseDeviceEx(handle));
+            CollectGarbage();
+            Assert.True(weak.TryGetTarget(out _));
+        }
+        finally { FakeExports.RemoveEdgeExResult = DSDeviceRemoveResult.Success; }
+    }
+
     private static void AssertCdecl(string delegateName, Type expectedReturnType)
     {
         var type = NestedDelegate(delegateName);
@@ -167,6 +281,7 @@ public sealed class CanonicalViiperNativeAbiTests
             ["AttachUsbDeviceExDelegate"] = typeof(USBDeviceAttachResult),
             ["DetachUsbDeviceExDelegate"] = typeof(USBDeviceDetachResult),
             ["RemoveXbox360DeviceExDelegate"] = typeof(Xbox360DeviceRemoveResult),
+            ["RemoveDualSenseDeviceExDelegate"] = typeof(DSDeviceRemoveResult),
         };
 
         var delegateTypes = typeof(CanonicalViiperNativeApi)
@@ -897,6 +1012,18 @@ public sealed class CanonicalViiperNativeAbiTests
         return weak;
     }
 
+    private static WeakReference<DualSenseOutputCallback> RegisterDualSenseOutputCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
+    {
+        var marker = new object();
+        var callback = new DualSenseOutputCallback((_, _, _, _, _, _, _) => GC.KeepAlive(marker));
+        var weak = new WeakReference<DualSenseOutputCallback>(callback);
+        Assert.True(api.SetDualSenseOutputCallback(deviceHandle, callback));
+        return weak;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static bool IsCallbackAlive(WeakReference<DualSenseOutputCallback> callback) => callback.TryGetTarget(out _);
+
     private static WeakReference<ViiperLogCallback> RegisterLogCallback(CanonicalViiperNativeApi api)
     {
         var marker = new object();
@@ -941,6 +1068,10 @@ public sealed class CanonicalViiperNativeAbiTests
         private static readonly CanonicalViiperNativeApi.SetXbox360RumbleCallbackDelegate SetXbox360RumbleCallback = SetXbox360RumbleCallbackImpl;
         private static readonly CanonicalViiperNativeApi.RemoveXbox360DeviceDelegate RemoveXbox360 = RemoveXbox360Impl;
         private static readonly CanonicalViiperNativeApi.RemoveXbox360DeviceExDelegate RemoveXbox360Ex = RemoveXbox360ExImpl;
+        private static readonly CanonicalViiperNativeApi.CreateDualSenseEdgeDeviceDelegate CreateEdge = CreateEdgeDeviceImpl;
+        private static readonly CanonicalViiperNativeApi.SetDualSenseDeviceStateDelegate SetEdgeState = SetEdgeStateImpl;
+        private static readonly CanonicalViiperNativeApi.SetDualSenseOutputCallbackDelegate SetEdgeCallback = SetEdgeCallbackImpl;
+        private static readonly CanonicalViiperNativeApi.RemoveDualSenseDeviceExDelegate RemoveEdgeEx = RemoveEdgeExImpl;
 
         [ThreadStatic]
         private static bool _failSetDiagnosticLogDirectory;
@@ -1040,6 +1171,12 @@ public sealed class CanonicalViiperNativeAbiTests
         private static bool _failRemoveXbox360;
 
         [ThreadStatic]
+        private static bool _failSetEdgeCallback;
+
+        [ThreadStatic]
+        private static DSDeviceRemoveResult _removeEdgeExResult;
+
+        [ThreadStatic]
         private static Xbox360DeviceRemoveResult _removeXbox360ExResult;
 
         internal static USBDeviceAttachResult AttachExResult { get => _attachExResult; set => _attachExResult = value; }
@@ -1048,6 +1185,8 @@ public sealed class CanonicalViiperNativeAbiTests
         internal static bool FailGetAttachmentState { get => _failGetAttachmentState; set => _failGetAttachmentState = value; }
         internal static bool FailCreateXbox360 { get => _failCreateXbox360; set => _failCreateXbox360 = value; }
         internal static bool FailRemoveXbox360 { get => _failRemoveXbox360; set => _failRemoveXbox360 = value; }
+        internal static bool FailSetEdgeCallback { get => _failSetEdgeCallback; set => _failSetEdgeCallback = value; }
+        internal static DSDeviceRemoveResult RemoveEdgeExResult { get => _removeEdgeExResult; set => _removeEdgeExResult = value; }
         internal static Xbox360DeviceRemoveResult RemoveXbox360ExResult
         {
             get => _removeXbox360ExResult;
@@ -1082,10 +1221,20 @@ public sealed class CanonicalViiperNativeAbiTests
             ["SetXbox360DeviceState"] = Marshal.GetFunctionPointerForDelegate(SetXbox360State),
             ["SetXbox360RumbleCallback"] = Marshal.GetFunctionPointerForDelegate(SetXbox360RumbleCallback),
             ["RemoveXbox360Device"] = Marshal.GetFunctionPointerForDelegate(RemoveXbox360),
-            ["RemoveXbox360DeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveXbox360Ex)
+            ["RemoveXbox360DeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveXbox360Ex),
+            ["CreateDualSenseEdgeDevice"] = Marshal.GetFunctionPointerForDelegate(CreateEdge),
+            ["SetDualSenseDeviceState"] = Marshal.GetFunctionPointerForDelegate(SetEdgeState),
+            ["SetDualSenseOutputCallback"] = Marshal.GetFunctionPointerForDelegate(SetEdgeCallback),
+            ["RemoveDualSenseDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveEdgeEx)
         };
 
         internal static nint Resolve(nint _, string name) => Pointers[name];
+        internal static nint ResolveWithoutEdge(nint library, string name)
+        {
+            if (CanonicalViiperNativeApi.OptionalDualSenseEdgeExports.Contains(name))
+                throw new EntryPointNotFoundException(name);
+            return Resolve(library, name);
+        }
 
         private static byte SetDiagnosticLogDirectoryImpl(nint directory)
         {
@@ -1183,5 +1332,15 @@ public sealed class CanonicalViiperNativeAbiTests
         private static byte RemoveXbox360Impl(nuint _) => FailRemoveXbox360 ? (byte)0 : (byte)1;
 
         private static Xbox360DeviceRemoveResult RemoveXbox360ExImpl(nuint _) => RemoveXbox360ExResult;
+
+        private static byte CreateEdgeDeviceImpl(nuint _, out nuint handle, uint __, byte ___, ushort ____, ushort _____, nint ______)
+        {
+            handle = 40;
+            return 1;
+        }
+
+        private static byte SetEdgeStateImpl(nuint _, DSDeviceState __) => 1;
+        private static byte SetEdgeCallbackImpl(nuint _, DualSenseOutputCallback? __) => FailSetEdgeCallback ? (byte)0 : (byte)1;
+        private static DSDeviceRemoveResult RemoveEdgeExImpl(nuint _) => RemoveEdgeExResult;
     }
 }

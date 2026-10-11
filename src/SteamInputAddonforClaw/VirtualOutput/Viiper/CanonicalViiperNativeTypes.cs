@@ -26,6 +26,19 @@ internal delegate void SteamDeckOutputCallback(nuint handle, nint data, uint len
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate void Xbox360RumbleCallback(nuint handle, byte leftMotor, byte rightMotor);
 
+// Mirrors the generated DualSense/Edge output callback typedef from the bundled
+// VIIPER 0689d184 build. The native signature retains LED parameters for ABI
+// compatibility; the Addon consumes only ordinary two-motor rumble.
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate void DualSenseOutputCallback(
+    nuint handle,
+    byte rumbleSmall,
+    byte rumbleLarge,
+    byte ledRed,
+    byte ledGreen,
+    byte ledBlue,
+    byte playerLeds);
+
 // Mirrors the generated dist/libVIIPER/libVIIPER.h classified USB attachment enums exactly
 // (VIIPER main@a6bb749199aa797da690c611d2f18edc5e770c1e -- see
 // src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md for the pinned commit). Distinct
@@ -124,4 +137,32 @@ internal struct SteamDeckDeviceState
     internal ushort RPadForce;
     internal ushort LStickForce;
     internal ushort RStickForce;
+}
+
+// Mirrors DSDeviceState in the generated dist/libVIIPER/libVIIPER.h bundled
+// with VIIPER 0689d18416cf6cde9ba4fed04eb373a1a3383ddc. Keep native default
+// alignment and pass this structure by value to SetDualSenseDeviceState.
+[StructLayout(LayoutKind.Sequential)]
+internal struct DSDeviceState
+{
+    internal sbyte LX;
+    internal sbyte LY;
+    internal sbyte RX;
+    internal sbyte RY;
+    internal uint Buttons;
+    internal byte DPad;
+    internal byte L2;
+    internal byte R2;
+    internal ushort Touch1X;
+    internal ushort Touch1Y;
+    internal byte Touch1Active;
+    internal ushort Touch2X;
+    internal ushort Touch2Y;
+    internal byte Touch2Active;
+    internal short GyroX;
+    internal short GyroY;
+    internal short GyroZ;
+    internal short AccelX;
+    internal short AccelY;
+    internal short AccelZ;
 }
