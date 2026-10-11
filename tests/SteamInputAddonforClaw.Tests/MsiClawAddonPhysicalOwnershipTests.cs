@@ -119,6 +119,92 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
+    public async Task A2vm_initial_valid_input_near_deadline_can_finish_fresh_hidhide_proof_after_deadline()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
+            PnpDevices = A2vmOwnedPnpDevices(),
+            A2vmInitialFinalReadinessWindow = TimeSpan.FromSeconds(12),
+            HidHideApplyElapsed = TimeSpan.FromMilliseconds(300),
+        };
+        h.InputSource.FirstValidStateWait = cancellationToken =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            h.AdvanceTime(TimeSpan.FromMilliseconds(11_800));
+            return Task.FromResult(true);
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned, result.Reason);
+        Assert.Equal(12_100, h.ElapsedSettleMilliseconds);
+        Assert.Equal([PrimaryPnp, ControlPnp], h.HidHideApplied);
+        Assert.True(h.InputSource.IsRunning);
+    }
+
+    [Fact]
+    public async Task A2vm_initial_pending_first_input_defers_after_confirmed_cleanup_and_retry_does_not_repeat_mode_writes()
+    {
+        var markerCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => ++markerCalls == 1
+                ? BootSessionAttemptResult.Claimed
+                : BootSessionAttemptResult.AlreadyClaimed,
+            PnpDevices = A2vmOwnedPnpDevices(),
+            A2vmInitialFinalReadinessWindow = TimeSpan.FromMilliseconds(20),
+        };
+        var pendingFirstInput = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.InputSource.FirstValidStateWait = _ => pendingFirstInput.Task;
+        var owner = h.Build();
+
+        var deferred = await owner.AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, deferred.Outcome);
+        Assert.Equal(MsiClawInitialAcquisitionRetryReason.Pid1902FirstValidInputNotReady, deferred.InitialAcquisitionRetryReason);
+        Assert.Equal(1, h.InputSource.StopAndConfirmCleanupCalls);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Empty(h.HidHideApplied);
+
+        h.InputSource.FirstValidStateWait = _ => Task.FromResult(true);
+        var retry = await owner.AcquireAsync(default);
+
+        Assert.True(retry.IsOwned, retry.Reason);
+        Assert.Equal(2, markerCalls);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.FastWriteTargets);
+        Assert.Equal(2, h.InputSource.StartCallCount);
+        Assert.True(h.InputSource.IsRunning);
+    }
+
+    [Fact]
+    public async Task A2vm_initial_pending_first_input_does_not_defer_when_source_cleanup_is_unproven()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.Claimed,
+            PnpDevices = A2vmOwnedPnpDevices(),
+            A2vmInitialFinalReadinessWindow = TimeSpan.FromMilliseconds(20),
+        };
+        h.InputSource.FirstValidStateWait = _ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+        h.InputSource.CleanupProven = false;
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Equal(MsiClawInitialAcquisitionRetryReason.None, result.InitialAcquisitionRetryReason);
+        Assert.Equal(1, h.InputSource.StopAndConfirmCleanupCalls);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Empty(h.HidHideApplied);
+    }
+
+    [Fact]
     public async Task A2vm_initial_fast_path_fails_closed_if_primary_disappears_before_hidhide()
     {
         var h = new Harness
@@ -1101,6 +1187,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         Assert.Equal(A2vmWindowsSessionEndOutcome.CommandWritten, result.Outcome);
         Assert.Equal(1, h.XInputCommandWriteCalls);
+        Assert.Equal(1, h.XInputCommandResolutionCalls);
         Assert.Empty(h.SwitchTargets); // no verified transition and no PID1901 wait
         Assert.True(h.Events.IndexOf("InputStop") >= 0);
         Assert.True(h.Events.IndexOf("InputStop") < h.Events.IndexOf("XInputCommand"));
@@ -1181,7 +1268,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(A2vmWindowsSessionEndOutcome.Skipped, result.Outcome);
         Assert.Equal("UniquePid1902CommandHidUnavailable", result.Reason);
         Assert.Equal(0, h.XInputCommandWriteCalls);
-        Assert.True(h.InputSource.IsRunning);
+        Assert.Equal(1, h.XInputCommandResolutionCalls);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Contains("InputStop", h.Events);
         await owner.DisposeAsync();
     }
 
@@ -1202,6 +1291,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         Assert.Equal(A2vmWindowsSessionEndOutcome.Skipped, result.Outcome);
         Assert.Equal(0, h.XInputCommandWriteCalls);
+        Assert.Equal(0, h.XInputCommandResolutionCalls);
         Assert.Contains("DirectInputCleanupUnproven", result.Reason);
         await owner.DisposeAsync();
     }
@@ -2800,6 +2890,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public int FastWriteFailOnCall { get; set; }
         public TimeSpan A2vmInitialPid1901Window { get; set; } = TimeSpan.FromMilliseconds(20);
         public TimeSpan A2vmInitialFinalReadinessWindow { get; set; } = TimeSpan.FromMilliseconds(200);
+        public TimeSpan HidHideApplyElapsed { get; set; }
         public List<MsiClawNativeMode> FastWriteTargets { get; } = [];
         public List<MsiClawInitialFastModeEndpoint> FastWriteEndpoints { get; } = [];
 
@@ -2821,6 +2912,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public bool XInputCommandWriteSucceeds { get; set; } = true;
         public Func<MsiClawPhysicalIdentity, CancellationToken, Task<MsiClawModeCommandWriteResult>>? XInputCommandWriteOverride { get; set; }
         public int XInputCommandWriteCalls { get; private set; }
+        public int XInputCommandResolutionCalls { get; private set; }
         public List<string> Events { get; } = [];
 
         private MsiClawNativeMode RecoveryCurrentMode => RecoverySwitchCalls > 0
@@ -2964,6 +3056,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             InputSource,
             targets =>
             {
+                AdvanceTime(HidHideApplyElapsed);
                 HidHideApplied.AddRange(targets);
                 if (Recovering) Events.Add("HidHideApply");
                 var outcome = Recovering && RecoveryHidHideOutcome is { } recoveryOutcome ? recoveryOutcome : HidHideOutcome;
@@ -2985,6 +3078,10 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             writeXInputCommand: (identity, cancellationToken) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                XInputCommandResolutionCalls++;
+                var currentDevices = PnpDeviceSnapshot?.Invoke() ?? PnpDevices ?? A2vmOwnedPnpDevices();
+                if (new MsiClawControlHidResolver().Resolve(currentDevices, MsiClawNativeMode.DirectInput, identity) is null)
+                    return Task.FromResult(new MsiClawModeCommandWriteResult(false, false, "UniquePid1902CommandHidUnavailable"));
                 XInputCommandWriteCalls++;
                 Events.Add("XInputCommand");
                 if (XInputCommandWriteOverride is { } writeOverride)
@@ -3007,6 +3104,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             a2vmInitialPid1901Window: A2vmInitialPid1901Window,
             a2vmInitialFinalReadinessWindow: A2vmInitialFinalReadinessWindow);
         }
+
+        public void AdvanceTime(TimeSpan duration) =>
+            _timestamp += (long)(duration.TotalSeconds * Stopwatch.Frequency);
 
         private NativeStateCaptureResult Capture(MsiClawNativeMode mode, MsiClawIdentityConfidence confidence, string physKey)
         {
@@ -3090,6 +3190,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public bool StartCalled { get; private set; }
         public int StartCallCount { get; private set; }
         public bool StopCalled { get; private set; }
+        public int StopAndConfirmCleanupCalls { get; private set; }
         public bool DisposeCalled { get; private set; }
         public bool IsRunning { get; private set; }
         public List<string>? Events { get; set; }
@@ -3129,6 +3230,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         public async Task<bool> StopAndConfirmCleanupAsync()
         {
+            StopAndConfirmCleanupCalls++;
             await StopAsync();
             if (StopCleanupGate is { } gate)
                 await gate.Task;

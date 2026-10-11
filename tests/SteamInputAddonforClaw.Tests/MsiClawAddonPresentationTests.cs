@@ -942,7 +942,9 @@ public sealed class MsiClawAddonPresentationTests
         Assert.Equal(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
         Assert.True(events.IndexOf("PublisherStop") >= 0);
         Assert.True(events.IndexOf("PublisherStop") < events.IndexOf("PhysicalStop"));
-        Assert.True(events.IndexOf("PhysicalStop") < events.IndexOf("ViiperDetach"));
+        Assert.True(events.IndexOf("FeedbackCallbackCleared") < events.IndexOf("ViiperDetach"));
+        Assert.True(events.IndexOf("ViiperDetach") < events.IndexOf("ViiperClosed"));
+        Assert.True(events.IndexOf("ViiperClosed") < events.IndexOf("PhysicalStop"));
         Assert.Contains("CloseUSBServer", native.Calls);
         await owner.DisposeAsync();
     }
@@ -985,11 +987,19 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
-    public async Task Windows_session_end_does_not_detach_when_physical_rumble_stop_is_unconfirmed()
+    public async Task Windows_session_end_detaches_and_closes_before_unconfirmed_physical_stop_fails_closed()
     {
-        var native = new FakeNative();
-        var sink = new FakeRumbleSink();
-        var publisher = new FakePublisher();
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            },
+        };
+        var publisher = new FakePublisher { LifecycleEvents = events };
         var owner = BuildWithSink(native, publisher, new FakePublisher(), sink);
         Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
         sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "StopFailed"));
@@ -999,18 +1009,28 @@ public sealed class MsiClawAddonPresentationTests
 
         Assert.False(retired);
         Assert.True(publisher.StopCalled);
-        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
-        Assert.DoesNotContain("CloseUSBServer", native.Calls);
-        Assert.Equal(CanonicalViiperRuntimeState.Ready, owner.ViiperState);
+        Assert.Contains("DetachUSBDeviceEx", native.Calls);
+        Assert.Contains("CloseUSBServer", native.Calls);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        Assert.True(events.IndexOf("ViiperClosed") < events.IndexOf("PhysicalStop"));
         await owner.DisposeAsync();
     }
 
     [Fact]
     public async Task Windows_session_end_does_not_teardown_viiper_when_typed_detach_fails()
     {
-        var native = new FakeNative();
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
         var publisher = new FakePublisher();
-        var owner = BuildWithSink(native, publisher, new FakePublisher(), new FakeRumbleSink());
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, publisher, new FakePublisher(), sink);
         Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
         native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure);
         native.Calls.Clear();
@@ -1020,6 +1040,7 @@ public sealed class MsiClawAddonPresentationTests
         Assert.False(retired);
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
         Assert.Equal(CanonicalViiperRuntimeState.Ready, owner.ViiperState);
+        Assert.True(events.IndexOf("ViiperDetach") < events.IndexOf("PhysicalStop"));
         await owner.DisposeAsync();
     }
 
@@ -1048,8 +1069,17 @@ public sealed class MsiClawAddonPresentationTests
     [Fact]
     public async Task Windows_session_end_does_not_report_safe_when_viiper_server_teardown_fails()
     {
-        var native = new FakeNative();
-        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), new FakeRumbleSink());
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
         Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
         native.CloseServerResults.Enqueue(false);
 
@@ -1057,6 +1087,100 @@ public sealed class MsiClawAddonPresentationTests
 
         Assert.False(retired);
         Assert.Contains("CloseUSBServer", native.Calls);
+        Assert.NotEqual(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        Assert.True(events.IndexOf("CloseUSBServer") < events.IndexOf("PhysicalStop"));
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Windows_session_end_attempts_physical_stop_when_canceled_as_native_close_returns()
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        events.Clear();
+        using var cancellation = new CancellationTokenSource();
+        native.CloseServerReturning = () =>
+        {
+            native.CloseServerReturning = null;
+            cancellation.Cancel();
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => owner.PrepareForWindowsSessionEndAsync(cancellation.Token));
+
+        Assert.Equal(1, events.Count(item => item == "PhysicalStop"));
+        Assert.True(events.IndexOf("ViiperClosed") >= 0);
+        Assert.True(events.IndexOf("ViiperClosed") < events.IndexOf("PhysicalStop"));
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Windows_session_end_attempts_physical_stop_when_native_close_throws()
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        events.Clear();
+        native.CloseServerException = new InvalidOperationException("simulated native close exception");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => owner.PrepareForWindowsSessionEndAsync(CancellationToken.None));
+
+        Assert.Equal(1, events.Count(item => item == "PhysicalStop"));
+        Assert.True(events.IndexOf("CloseUSBServer") >= 0);
+        Assert.True(events.IndexOf("CloseUSBServer") < events.IndexOf("PhysicalStop"));
+        Assert.DoesNotContain("ViiperClosed", events);
+        Assert.NotEqual(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        await owner.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData((int)USBDeviceDetachResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)USBDeviceDetachResult.Invalid)]
+    public async Task Windows_session_end_steam_deck_detach_failure_stops_physical_rumble_but_never_closes_viiper(int detachResultValue)
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default)).Succeeded);
+        native.DetachResults.Enqueue((USBDeviceDetachResult)detachResultValue);
+        native.Calls.Clear();
+        events.Clear();
+
+        var retired = await owner.PrepareForWindowsSessionEndAsync(CancellationToken.None);
+
+        Assert.False(retired);
+        Assert.Equal(1, native.Calls.Count(call => call == "DetachUSBDeviceEx"));
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+        Assert.True(events.IndexOf("FeedbackCallbackCleared") < events.IndexOf("ViiperDetach"));
+        Assert.True(events.IndexOf("ViiperDetach") < events.IndexOf("PhysicalStop"));
         Assert.NotEqual(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
         await owner.DisposeAsync();
     }
@@ -2298,9 +2422,24 @@ public sealed class MsiClawAddonPresentationTests
         internal Queue<USBDeviceAttachmentState> AttachmentStates { get; } = [];
         internal Queue<bool> StateResults { get; } = [];
         internal Queue<bool> CloseServerResults { get; } = [];
+        internal Action? CloseServerReturning { get; set; }
+        internal Exception? CloseServerException { get; set; }
         private readonly Dictionary<nuint, USBDeviceAttachmentState> _attachmentByHandle = [];
         public bool NewUSBServer(ref USBServerConfig config, out nuint handle, ViiperLogCallback? callback = null) { Calls.Add("NewUSBServer"); handle = 10; return true; }
-        public bool CloseUSBServer(nuint handle) { Calls.Add("CloseUSBServer"); return CloseServerResults.Count == 0 || CloseServerResults.Dequeue(); }
+        public bool CloseUSBServer(nuint handle)
+        {
+            Calls.Add("CloseUSBServer");
+            LifecycleEvents?.Add("CloseUSBServer");
+            if (CloseServerException is { } exception)
+            {
+                CloseServerException = null;
+                throw exception;
+            }
+            var closed = CloseServerResults.Count == 0 || CloseServerResults.Dequeue();
+            if (closed) LifecycleEvents?.Add("ViiperClosed");
+            CloseServerReturning?.Invoke();
+            return closed;
+        }
         public bool CreateUSBBus(nuint handle, ref uint bus) { Calls.Add("CreateUSBBus"); bus = 42; return true; }
         public bool RemoveUSBBus(nuint handle, uint bus) { Calls.Add("RemoveUSBBus"); return true; }
         public bool GetUSBDeviceIdentity(nuint handle, out uint bus, out uint id) { Calls.Add("GetUSBDeviceIdentity"); bus = 42; id = handle == 20 ? 9u : 10u; return true; }
@@ -2311,7 +2450,14 @@ public sealed class MsiClawAddonPresentationTests
         public bool GetUSBDeviceAttachmentState(nuint handle, out USBDeviceAttachmentState state) { Calls.Add("GetUSBDeviceAttachmentState"); state = AttachmentStates.Count > 0 ? AttachmentStates.Dequeue() : (_attachmentByHandle.TryGetValue(handle, out var s) ? s : USBDeviceAttachmentState.Detached); return true; }
         public bool CreateSteamDeckDevice(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid) { Calls.Add("CreateSteamDeckDevice"); handle = 20; return true; }
         public bool SetSteamDeckDeviceState(nuint handle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); return StateResults.Count == 0 || StateResults.Dequeue(); }
-        public bool SetSteamDeckOutputCallback(nuint handle, SteamDeckOutputCallback? callback) { Calls.Add(callback is null ? "ClearSteamDeckOutputCallback" : "SetSteamDeckOutputCallback"); var ok = RumbleCallbackResults.Count == 0 || RumbleCallbackResults.Dequeue(); if (ok) ArmedSteamDeckOutputCallback = callback; return ok; }
+        public bool SetSteamDeckOutputCallback(nuint handle, SteamDeckOutputCallback? callback)
+        {
+            Calls.Add(callback is null ? "ClearSteamDeckOutputCallback" : "SetSteamDeckOutputCallback");
+            if (callback is null) LifecycleEvents?.Add("FeedbackCallbackCleared");
+            var ok = RumbleCallbackResults.Count == 0 || RumbleCallbackResults.Dequeue();
+            if (ok) ArmedSteamDeckOutputCallback = callback;
+            return ok;
+        }
         public bool RemoveSteamDeckDevice(nuint handle) => throw new NotSupportedException();
         public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint handle) { Calls.Add("RemoveSteamDeckDeviceEx"); return SteamDeckDeviceRemoveResult.Success; }
         internal Queue<bool> RumbleCallbackResults { get; } = [];
@@ -2322,6 +2468,7 @@ public sealed class MsiClawAddonPresentationTests
         public bool SetXbox360RumbleCallback(nuint handle, Xbox360RumbleCallback? callback)
         {
             Calls.Add(callback is null ? "ClearXbox360RumbleCallback" : "SetXbox360RumbleCallback");
+            if (callback is null) LifecycleEvents?.Add("FeedbackCallbackCleared");
             var ok = RumbleCallbackResults.Count == 0 || RumbleCallbackResults.Dequeue();
             if (ok) ArmedXbox360RumbleCallback = callback;
             return ok;

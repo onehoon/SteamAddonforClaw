@@ -439,7 +439,7 @@ is sufficient.
 
 ### A2VM 7/8 once-per-boot rumble initialization exception
 
-For A2VM 7/8 only, the Disabled-startup path uses the model identified once at startup and admits the first unambiguous supported control-HID observation instead of requiring three identical topology snapshots. After the once-per-Windows-boot marker is claimed, an initial PID1902 state issues one command through its unique current `0xFFF0/0x0040` endpoint, waits at most 10 seconds for one current PID1901 `0xFFA0/0x0001` endpoint, then issues one DirectInput command through that exact fresh instance. Intermediate proof does not compare Strong Identity, physical root, Container ID, or another full native-state snapshot. An initial PID1901 state uses one DirectInput write without separate full transition verification. After any successful new DirectInput write, one final readiness window (maximum 12 seconds) requires PID1901 absence, the exact PID1902 primary gamepad collection, matching live DirectInput first input, and compliant exact HidHide targets before ownership or attach. GamepadMode readback is skipped only after a successful new DirectInput write; an already-PID1902 boot with no new write retains normal readback/normalization. If normal PID1902 enumeration is pending at the final deadline, use the existing typed Device Arrival deferral without repeating either native write. The marker remains consumed. This does not change desired PID1902 authority, persistent HidHide state, stock release, shutdown, resume, or recovery behavior; EX/CG3EM stays strict. User-invoked **Restore Vibration** remains a temporary recovery, not a Center M authority release.
+For A2VM 7/8 only, the Disabled-startup path uses the model identified once at startup and admits the first unambiguous supported control-HID observation instead of requiring three identical topology snapshots. After the once-per-Windows-boot marker is claimed, an initial PID1902 state issues one command through its unique current `0xFFF0/0x0040` endpoint, waits at most 10 seconds for one current PID1901 `0xFFA0/0x0001` endpoint, then issues one DirectInput command through that exact fresh instance. Intermediate proof does not compare Strong Identity, physical root, Container ID, or another full native-state snapshot. An initial PID1901 state uses one DirectInput write without separate full transition verification. After any successful new DirectInput write, the final readiness window (maximum 12 seconds) bounds normal PID1902 descriptor and first-valid-input arrival. Once a valid first state has been obtained, the immediately following fresh PID1901-absence, exact primary identity, and compliant current HidHide application/readback proofs may finish beyond that arrival deadline. If the descriptor or first valid input is still pending at the deadline, defer only through the existing typed Device Arrival path and only after confirmed cleanup of any started DirectInput source. The marker remains consumed; neither native mode write repeats. Ownership or attach still requires every final proof. GamepadMode readback is skipped only after a successful new DirectInput write; an already-PID1902 boot with no new write retains normal readback/normalization. This does not change desired PID1902 authority, persistent HidHide state, stock release, shutdown, resume, or recovery behavior; EX/CG3EM stays strict. User-invoked **Restore Vibration** remains a temporary recovery, not a Center M authority release.
 
 The marker prevents a second optional cycle in the same Windows boot after Addon/update restart or process crash. It is not consulted by ordinary ownership, PnP recovery, suspend/resume, or Steam/BPM presentation changes. See the [2026-10-11 A2VM initial fast-path work order](../work-order/2026-10-11_A2VM_INITIAL_CONTROLLER_FAST_PATH_HHC_CTW_SIMPLIFICATION_WORK_ORDER.md) and the [2026-10-10 A2VM work order](../work-order/2026-10-10_A2VM_FAMILY_BOOT_RUMBLE_REARM_LED_VIBRATION_AND_RECOVERY_UI_WORK_ORDER.md).
 
@@ -486,12 +486,16 @@ Recommended shutdown/restart behavior:
 ```text
 actual `WM_ENDSESSION(TRUE)` for shutdown/restart, excluding logoff and app replacement
 → A2VM 7/8 + Center M Disabled + healthy, strongly owned PID1902 only
-→ neutral and retire publisher/typed virtual output; prove VIIPER teardown
+→ stop/join publisher and clear/drain feedback callbacks
+→ promptly attempt the canonical typed VIIPER detach; prove runtime Closed
+→ confirm physical PID1902 rumble STOP while the owned physical identity is still available
 → prove process-owned DirectInput cleanup
-→ if safe completion fits the short deadline, issue at most one PID1902 → PID1901 command
+→ freshly resolve the unique PID1902 command HID and, if the short deadline still permits, attempt at most one XInput write
 → do not wait for or claim PID1901 PnP verification; keep HidHide and Center M settings unchanged
 → on any failure/deadline, skip the mode command and allow Windows to exit
 ```
+
+If typed detach fails, a best-effort physical STOP may still be attempted only while the original PID1902 identity remains owned; the mode command remains blocked. A failure to prove VIIPER `Closed`, physical STOP, or DirectInput cleanup also blocks the command. This order applies only to actual Windows session end; ordinary presentation release, app restart/update, logoff, and sleep/resume keep their independent lifecycle policies.
 
 The physical device may remain PID1902, or firmware/Windows may later enumerate it as PID1901.
 
