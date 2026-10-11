@@ -1106,12 +1106,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _motionSource = new MsiClawMotionSource(motionModel);
         }
 
-        // The LED and vibration settings are physical PID1902 state. Apply them only after the
-        // shared owner has completed its live DirectInput and exact HidHide proofs.
-        await ApplyOwnedControllerLedSettingsAsync(context.StartupSettings.ControllerLed, _startupCancellationTokenSource.Token).ConfigureAwait(false);
-        await ApplyOwnedControllerVibrationSettingsAsync(
-            context.StartupSettings.ControllerVibration, trigger, _startupCancellationTokenSource.Token).ConfigureAwait(false);
-
         if (IsDeferredInitialControllerAcquisition(context) && !IsInitialControllerAcquisitionCurrent(context))
             return new(false, null, false, "InitialAcquisitionAdmissionClosed");
 
@@ -1153,6 +1147,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Warn("CenterM.Oem1", "Front-button action path composition failed; controller ownership is unaffected.", exception);
         }
+
+        // The first presentation and its supporting runtimes are established before optional writes.
+        // Keep these awaited in the existing initialization continuation and preserve their order.
+        _startupCancellationTokenSource.Token.ThrowIfCancellationRequested();
+        await ApplyOwnedControllerLedSettingsAsync(
+            context.StartupSettings.ControllerLed,
+            _startupCancellationTokenSource.Token).ConfigureAwait(false);
+        await ApplyOwnedControllerVibrationSettingsAsync(
+            context.StartupSettings.ControllerVibration,
+            trigger,
+            _startupCancellationTokenSource.Token).ConfigureAwait(false);
 
         return new(true, presentationResult.Presentation?.ToString(), presentationResult.Succeeded, presentationResult.Reason);
     }
