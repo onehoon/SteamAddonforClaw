@@ -24,6 +24,22 @@ public sealed class Full1902ControllerBadgeEvaluatorTests
             presentationLive: true));
 
     [Fact]
+    public void Disabled_authority_shows_Edge_only_for_the_live_Edge_presentation() =>
+        Assert.Equal(FrontendControllerBadgeState.DualSenseEdgeActive, Evaluate(
+            centerM: FrontendCenterMStartupState.Disabled,
+            physicalInputRunning: true,
+            presentation: AddonPresentationKind.DualSenseEdge,
+            presentationLive: true));
+
+    [Fact]
+    public void Saved_Edge_preference_without_live_Edge_output_never_shows_Edge_badge() =>
+        Assert.Equal(FrontendControllerBadgeState.NeedsAttention, Evaluate(
+            centerM: FrontendCenterMStartupState.Disabled,
+            physicalInputRunning: true,
+            presentation: AddonPresentationKind.DualSenseEdge,
+            presentationLive: false));
+
+    [Fact]
     public void Disabled_startup_pending_is_initializing_not_native_or_active() =>
         Assert.Equal(FrontendControllerBadgeState.Initializing, Evaluate(
             centerM: FrontendCenterMStartupState.Disabled,

@@ -351,6 +351,12 @@ public sealed record FrontendPid1902InputCadenceResult(
         new(FrontendPid1902InputCadenceOutcome.Unavailable, status, 0, 0, 0, null, 0, 0, null, null, null, null, null, null, null);
 }
 
+public enum SteamVirtualControllerPreference
+{
+    SteamDeck = 0,
+    DualSenseEdge = 1
+}
+
 /// <remarks><see cref="FrontButtonMapping"/> is the settings-layer projection of the one persisted
 /// front-button mapping. The frontend deliberately carries the SAME
 /// <see cref="FrontButtonMappingSettings"/> the runtime persists and the dispatcher validates
@@ -358,6 +364,7 @@ public sealed record FrontendPid1902InputCadenceResult(
 /// validation must never be able to disagree.</remarks>
 public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool SuppressDeveloperMenuWarning, FrontButtonMappingSettings FrontButtonMapping)
 {
+    public SteamVirtualControllerPreference SteamVirtualController { get; init; } = SteamVirtualControllerPreference.SteamDeck;
     public bool DeveloperMenuEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
     public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
@@ -548,6 +555,7 @@ public enum FrontendControllerBadgeState
     SteamDeckActive,
     Initializing,
     Reconnecting,
+    DualSenseEdgeActive,
     NeedsAttention
 }
 
@@ -603,6 +611,9 @@ public interface IAddonFrontendControl
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);
+    Task<FrontendSettingsSnapshot> SetSteamVirtualControllerAsync(
+        SteamVirtualControllerPreference preference, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Steam virtual controller selection is not supported by this frontend.");
     async Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken cancellationToken = default) =>
         (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
     Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default) =>

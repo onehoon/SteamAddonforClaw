@@ -109,6 +109,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _captureGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _startGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _stopGameInputSystemButtonProbe;
+    private readonly Action<string>? _requestControllerPresentationReconcile;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -167,7 +168,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<string, string?>? activeXboxDisplayNameSource = null,
         Func<MsiClawPhysicalIdentity?>? controllerVibrationProbeIdentitySource = null,
         Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? controllerLedProfileReadProbe = null,
-        Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null)
+        Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null,
+        Action<string>? requestControllerPresentationReconcile = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -212,6 +214,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _testControllerVibrationMotor = testControllerVibrationMotor;
         _controllerLedProfileReadProbe = controllerLedProfileReadProbe;
         _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
+        _requestControllerPresentationReconcile = requestControllerPresentationReconcile;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -929,6 +932,23 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
+    public Task<FrontendSettingsSnapshot> SetSteamVirtualControllerAsync(
+        SteamVirtualControllerPreference preference, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var previous = _settings.SteamVirtualController;
+        if (!_settings.ChangeSteamVirtualController(preference))
+            return Task.FromResult(MapSettings());
+
+        if (previous != _settings.SteamVirtualController)
+        {
+            _requestControllerPresentationReconcile?.Invoke("SteamVirtualControllerPreferenceChanged");
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+        return Task.FromResult(MapSettings());
+    }
+
     public Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(Contracts.FrontButtons.FrontButtonMappingSettings mapping, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(mapping);
@@ -1629,7 +1649,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1

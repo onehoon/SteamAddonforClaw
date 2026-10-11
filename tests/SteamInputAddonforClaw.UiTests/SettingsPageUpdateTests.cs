@@ -98,6 +98,42 @@ public sealed class SettingsPageUpdateTests
         Assert.DoesNotContain("RequestEnterBios", code, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Steam_virtual_controller_setting_binds_saved_state_and_restores_after_rpc_failure()
+    {
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
+        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml.cs");
+        var cardIndex = xaml.IndexOf("x:Name=\"SteamVirtualControllerCard\"", StringComparison.Ordinal);
+        var developerCardIndex = xaml.IndexOf("x:Name=\"DeveloperMenuCard\"", StringComparison.Ordinal);
+        var initializeStart = code.IndexOf("internal void Initialize(FrontendBootstrapSnapshot bootstrap", StringComparison.Ordinal);
+        var initializeEnd = code.IndexOf("internal void RequestAppUpdateRefresh", initializeStart, StringComparison.Ordinal);
+        var handlerStart = code.IndexOf("private async void SteamVirtualControllerComboBox_SelectionChanged", StringComparison.Ordinal);
+        var handlerEnd = code.IndexOf("/// <summary>Renders the read-only Required Components", handlerStart, StringComparison.Ordinal);
+
+        Assert.True(cardIndex >= 0 && developerCardIndex > cardIndex);
+        Assert.Contains("Header=\"Steam / Big Picture Controller\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Steam Deck (Default)\" Tag=\"SteamDeck\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"DualSense Edge (Experimental)\" Tag=\"DualSenseEdge\"", xaml, StringComparison.Ordinal);
+        Assert.True(initializeStart >= 0 && initializeEnd > initializeStart);
+        var initialize = code[initializeStart..initializeEnd];
+        Assert.Contains("bootstrap.Settings.SteamVirtualController", initialize, StringComparison.Ordinal);
+        Assert.Contains("RenderSteamVirtualController(_lastKnownSteamVirtualController)", initialize, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetSteamVirtualControllerAsync", initialize, StringComparison.Ordinal);
+
+        Assert.True(handlerStart >= 0 && handlerEnd > handlerStart);
+        var handler = code[handlerStart..handlerEnd];
+        Assert.Contains("_applyingSteamVirtualControllerState", handler, StringComparison.Ordinal);
+        Assert.Contains("Interlocked.Exchange(ref _steamVirtualControllerMutationInProgress, 1)", handler, StringComparison.Ordinal);
+        Assert.Contains("SetSteamVirtualControllerAsync(requested)", handler, StringComparison.Ordinal);
+        Assert.Contains("settings.SteamVirtualController", handler, StringComparison.Ordinal);
+        Assert.Contains("GetBootstrapAsync()", handler, StringComparison.Ordinal);
+        Assert.Contains("bootstrap.Settings.SteamVirtualController", handler, StringComparison.Ordinal);
+        Assert.Contains("RenderSteamVirtualController(_lastKnownSteamVirtualController)", handler, StringComparison.Ordinal);
+        Assert.Contains("The saved Runtime choice is selected.", handler, StringComparison.Ordinal);
+        Assert.Contains("Showing the last confirmed choice.", handler, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeveloperMenuEnabled", handler, StringComparison.Ordinal);
+    }
+
     private static string ReadSource(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

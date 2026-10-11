@@ -12,6 +12,9 @@ public sealed record AppSettings(
     AppLogPreference LogLevel = AppLogPreference.Info,
     bool SuppressDeveloperMenuWarning = false)
 {
+    /// <summary>Saved Steam/Big Picture virtual output choice. Normal Windows remains Xbox360.</summary>
+    public SteamVirtualControllerPreference SteamVirtualController { get; init; } = SteamVirtualControllerPreference.SteamDeck;
+
     /// <summary>Top-level desired state for the optional ClawHUD Managed Runtime.</summary>
     public bool ClawHudEnabled { get; init; }
 

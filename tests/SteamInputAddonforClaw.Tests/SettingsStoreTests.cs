@@ -55,6 +55,65 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.True(store.Load().SuppressDeveloperMenuWarning);
     }
 
+    [Theory]
+    [InlineData("{}", SteamVirtualControllerPreference.SteamDeck)]
+    [InlineData("{\"SteamVirtualController\":\"SteamDeck\"}", SteamVirtualControllerPreference.SteamDeck)]
+    [InlineData("{\"SteamVirtualController\":\"DualSenseEdge\"}", SteamVirtualControllerPreference.DualSenseEdge)]
+    public void Steam_virtual_controller_preference_defaults_and_loads_exact_enum_names(
+        string json, SteamVirtualControllerPreference expected)
+    {
+        var path = Path.Combine(_testDirectory, "steam-controller-settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, json);
+
+        Assert.Equal(expected, new SettingsStore(path).Load().SteamVirtualController);
+    }
+
+    [Theory]
+    [InlineData("\"Unknown\"")]
+    [InlineData("99")]
+    [InlineData("null")]
+    [InlineData("\"1\"")]
+    public void Malformed_Steam_virtual_controller_preference_falls_back_locally(string value)
+    {
+        var path = Path.Combine(_testDirectory, "malformed-steam-controller-settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, $"{{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true,\"QuickSettingsCurrentPowerSourceOnly\":true,\"SteamVirtualController\":{value}}}");
+
+        var loaded = new SettingsStore(path).Load();
+
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, loaded.SteamVirtualController);
+        Assert.Equal(AppLogPreference.Debug, loaded.LogLevel);
+        Assert.True(loaded.DeveloperMenuEnabled);
+        Assert.True(loaded.QuickSettingsCurrentPowerSourceOnly);
+    }
+
+    [Fact]
+    public void Steam_virtual_controller_preference_persists_and_reloads()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "steam-controller-persist.json"));
+        store.Save(new AppSettings { SteamVirtualController = SteamVirtualControllerPreference.DualSenseEdge });
+
+        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, store.Load().SteamVirtualController);
+    }
+
+    [Fact]
+    public void Invalid_or_failed_Steam_virtual_controller_mutation_does_not_publish_the_choice()
+    {
+        var path = Path.Combine(_testDirectory, "steam-controller-invalid.json");
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(path), new FakeStartupManager());
+        Assert.False(coordinator.ChangeSteamVirtualController((SteamVirtualControllerPreference)99));
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, coordinator.SteamVirtualController);
+
+        Directory.CreateDirectory(_testDirectory);
+        var blockingFile = Path.Combine(_testDirectory, "steam-controller-blocking-file");
+        File.WriteAllText(blockingFile, "blocked");
+        var failing = new StartupSettingsCoordinator(new AppSettings(),
+            new SettingsStore(Path.Combine(blockingFile, "settings.json")), new FakeStartupManager());
+        Assert.ThrowsAny<IOException>(() => failing.ChangeSteamVirtualController(SteamVirtualControllerPreference.DualSenseEdge));
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, failing.SteamVirtualController);
+    }
+
     [Fact]
     public void ControllerVibration_defaults_to_fifty_fifty_and_missing_legacy_property_uses_that_default()
     {

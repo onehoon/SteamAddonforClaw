@@ -11,7 +11,7 @@ internal sealed class CanonicalDualSenseEdgeSession : ICanonicalDualSenseEdgeSes
 
     internal CanonicalDualSenseEdgeSession(CanonicalViiperRuntime runtime) => _runtime = runtime;
 
-    internal CanonicalDualSenseEdgeSessionState State { get; private set; } = CanonicalDualSenseEdgeSessionState.Clean;
+    public CanonicalDualSenseEdgeSessionState State { get; private set; } = CanonicalDualSenseEdgeSessionState.Clean;
     internal uint? BusId => State == CanonicalDualSenseEdgeSessionState.Clean ? null : _runtime.BusId;
     internal uint? LogicalDeviceId => State == CanonicalDualSenseEdgeSessionState.Clean ? null : _runtime.DualSenseEdgeLogicalDeviceId;
 
@@ -96,6 +96,7 @@ internal interface ICanonicalDualSenseEdgeStateSink
 
 internal interface ICanonicalDualSenseEdgeSession : ICanonicalDualSenseEdgeStateSink, IDisposable
 {
+    CanonicalDualSenseEdgeSessionState State { get; }
     bool Start();
     bool SetNeutral();
     bool SetOutputCallback(DualSenseOutputCallback callback);

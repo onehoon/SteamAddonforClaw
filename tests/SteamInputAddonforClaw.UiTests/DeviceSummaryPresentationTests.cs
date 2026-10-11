@@ -24,6 +24,7 @@ public sealed class DeviceSummaryPresentationTests
     [InlineData(FrontendControllerBadgeState.MsiNative, "MSI Native")]
     [InlineData(FrontendControllerBadgeState.Xbox360Active, "Xbox 360 · Active")]
     [InlineData(FrontendControllerBadgeState.SteamDeckActive, "Steam Deck · Active")]
+    [InlineData(FrontendControllerBadgeState.DualSenseEdgeActive, "DualSense Edge · Active")]
     [InlineData(FrontendControllerBadgeState.Initializing, "Initializing…")]
     [InlineData(FrontendControllerBadgeState.Reconnecting, "Reconnecting…")]
     [InlineData(FrontendControllerBadgeState.NeedsAttention, "Needs attention")]

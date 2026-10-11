@@ -15,8 +15,9 @@ public enum FrontButtonKind
 
 /// <summary>
 /// The runtime presentation domain a front-button press resolves against. Decided per press from the
-/// actual Full1902 presentation (SteamDeck presentation active =&gt; <see cref="Steam"/>, anything
-/// else =&gt; <see cref="Normal"/>) -- never a persisted flag or a raw Steam/Big Picture probe.
+/// active Steam-facing Full1902 presentation identity (SteamDeck or DualSenseEdge =&gt; <see cref="Steam"/>,
+/// anything else =&gt; <see cref="Normal"/>), including while Overlay capture has paused publication --
+/// never publisher pulse eligibility, a persisted flag, or a raw Steam/Big Picture probe.
 /// User-facing labels are "Normal" and "Steam Game / Big Picture".
 /// </summary>
 public enum FrontButtonDomain

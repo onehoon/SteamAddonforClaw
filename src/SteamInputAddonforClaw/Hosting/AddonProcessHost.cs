@@ -732,7 +732,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 && startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled,
             applyControllerLedSettings: ApplyOwnedControllerLedSettingsAsync,
             applyControllerVibrationSettings: (settings, token) =>
-                ApplyOwnedControllerVibrationSettingsAsync(settings, "UserMutation", token));
+                ApplyOwnedControllerVibrationSettingsAsync(settings, "UserMutation", token),
+            requestControllerPresentationReconcile: trigger => RequestControllerPresentationReconcile(trigger));
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -987,7 +988,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 physicalRumbleTestAvailabilityProvider: () =>
                     owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null,
                 motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable,
-                requires250Hz: RequiresController250Hz);
+                requires250Hz: RequiresController250Hz,
+                steamVirtualControllerPreferenceProvider: () => startupSettings.SteamVirtualController);
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));
@@ -1124,7 +1126,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _frontButtonRuntime ??= Devices.MSI.Claw.MsiClawFrontButtonRuntime.Create(
                 hardwareSupported: context.StartupResult.HardwareSupported,
                 frontButtonMappingPreference: context.StartupSettings,
-                isSteamDeckPresentationActive: () => _presentationOwnership?.ActivePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck,
+                // Mapping follows the retained Steam-facing presentation identity while Overlay has
+                // stopped publication. The pulse delegates below keep their own live-output gates.
+                isSteamFacingPresentationActive: () => _presentationOwnership?.ActivePresentation
+                    is Devices.MSI.Claw.AddonPresentationKind.SteamDeck or Devices.MSI.Claw.AddonPresentationKind.DualSenseEdge,
                 requestOverlayToggle: RequestOverlayToggle,
                 tryRequestQuickAccessPulse: RequestSteamQuickAccess,
                 tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false,
@@ -1439,7 +1444,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return;
             }
 
-            AppLog.Info("ControllerMotion", "Motion reader start was accepted for the active Steam Deck presentation.",
+            AppLog.Info("ControllerMotion", "Motion reader start was accepted for the active Steam-facing presentation.",
                 ("Event", "MotionSourceStartAccepted"), ("Model", model.Value), ("Trigger", trigger));
             if (!ShouldRunMotionReaders())
                 await StopMotionSourceAsync("MotionReaderGateClosed").ConfigureAwait(false);
@@ -1515,16 +1520,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         return ShouldRunMotionReaders(
             IsHealthyOwnedMotionSession(),
             presentation?.ActivePresentation,
-            presentation?.IsSuspendPaused ?? false);
+            presentation?.IsSuspendPaused ?? false,
+            presentation?.IsActivePresentationLive ?? false);
     }
 
     internal static bool ShouldRunMotionReaders(
         bool hasHealthyOwnedMotionSession,
         Devices.MSI.Claw.AddonPresentationKind? activePresentation,
-        bool isSuspendPaused) =>
+        bool isSuspendPaused,
+        bool activePresentationLive) =>
         hasHealthyOwnedMotionSession
         && !isSuspendPaused
-        && activePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck;
+        && activePresentationLive
+        && activePresentation is Devices.MSI.Claw.AddonPresentationKind.SteamDeck or Devices.MSI.Claw.AddonPresentationKind.DualSenseEdge;
 
     private Task ReconcileMotionReadersAsync(string trigger) =>
         ShouldRunMotionReaders()
