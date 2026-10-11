@@ -47,24 +47,6 @@
                 </StackPanel>
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard Header="M1 / M2 Physical Input &amp; Firmware Profile" Description="The diagnostic is read-only. The separate experimental restore button writes only an exact recognized profile after explicit confirmation.">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Keyboard" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <Grid HorizontalAlignment="Stretch" ColumnDefinitions="*">
-                    <StackPanel Grid.Column="0" HorizontalAlignment="Stretch" Spacing="6">
-                        <TextBlock Opacity="0.7" Text="Press and release M1 only, then M2 only; do not touch any other controls." TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button x:Name="RunMsiBackButtonDiagnosticButton" Click="RunMsiBackButtonDiagnosticButton_Click" Content="Run 10s Diagnostic" />
-                            <Button x:Name="RestoreMsiBackButtonDirectInputButton" Click="RestoreMsiBackButtonDirectInputButton_Click" Content="Restore M1/M2 DirectInput (Experimental)" />
-                            <Button x:Name="CancelMsiBackButtonDiagnosticButton" Click="CancelMsiBackButtonDiagnosticButton_Click" Content="Cancel" IsEnabled="False" />
-                        </StackPanel>
-                        <TextBlock x:Name="MsiBackButtonDiagnosticStatusText" HorizontalAlignment="Stretch" Opacity="0.7" TextWrapping="Wrap" Visibility="Collapsed" />
-                        <TextBlock x:Name="MsiBackButtonManualRestoreStatusText" HorizontalAlignment="Stretch" Opacity="0.7" TextWrapping="Wrap" Visibility="Collapsed" />
-                    </StackPanel>
-                </Grid>
-            </ctcontrols:SettingsCard>
-
             <ctcontrols:SettingsCard Header="Vibration Test" Description="Run the Full1902 Xbox360 terminal STOP callback diagnostic. Close games and other XInput rumble tools first.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE1D9;" />

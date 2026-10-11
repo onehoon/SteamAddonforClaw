@@ -16,7 +16,6 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     private static readonly TimeSpan IdlePollInterval = TimeSpan.FromMilliseconds(8);
     private static readonly TimeSpan CadenceDiagnosticPollInterval = TimeSpan.FromMilliseconds(1);
     private static readonly TimeSpan CadenceDiagnosticDuration = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan RawButtonTransitionDiagnosticDuration = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ProductionCadenceSummaryWindow = TimeSpan.FromSeconds(10);
     private const int MaximumKnownInvalidInitialStates = 16;
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
@@ -26,8 +25,8 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     private readonly Func<bool> _requires250Hz;
     private readonly Lock _sync = new();
     private InputSession? _currentSession;
-    private MsiClawInputTestSummary? _lastCompletionSummary;
-    private int _testSession;
+    private MsiClawInputSessionCompletion? _lastSessionCompletion;
+    private int _inputSessionId;
     private bool _disposed;
 
     public MsiClawInputSource(Func<IDirectInputDeviceEnumerator> enumeratorFactory)
@@ -55,10 +54,8 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     }
 
     public event EventHandler<ControllerState>? StateChanged;
-    // Full1902 Cleanup G: originally a diagnostic name, this is the one live Full1902 owned-input
-    // completion signal -- AddonProcessHost subscribes to it to classify actual owned DirectInput
-    // session loss and schedule physical recovery. StopReason on the summary carries the cause.
-    public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
+    // The Full1902 owner uses this lifecycle signal to classify unexpected owned DirectInput loss.
+    internal event EventHandler<MsiClawInputSessionCompletion>? SessionCompleted;
 
     private sealed class StateBox(ControllerState value) { internal ControllerState Value { get; } = value; }
     private static ControllerState NeutralState() => new(new AuxiliaryButtonState(Enumerable.Repeat(false, MsiClawControls.Catalog.Count).ToArray()));
@@ -94,7 +91,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         lock (_sync)
         {
             if (_disposed) return new(MsiClawInputStartStatus.InitializationFailed, "DirectInput is unavailable because the input source is disposed.");
-            if (_currentSession is not null) return new(MsiClawInputStartStatus.AlreadyRunning, "M1/M2 DirectInput test is already running.");
+            if (_currentSession is not null) return new(MsiClawInputStartStatus.AlreadyRunning, "The physical DirectInput input source is already running.");
             if (!MsiClawDirectInputDeviceSelector.Select([descriptor]).IsSelected)
                 return new(MsiClawInputStartStatus.Indeterminate, "The prepared DirectInput descriptor could not be verified. No changes were made.");
 
@@ -109,13 +106,13 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                 return new(MsiClawInputStartStatus.InitializationFailed, "DirectInput initialization failed. No controller settings were changed.");
             }
 
-            return StartCoreLocked(enumerator, descriptor, _testSession + 1, "Routing");
+            return StartCoreLocked(enumerator, descriptor, _inputSessionId + 1, "Routing");
         }
     }
 
     private MsiClawInputStartResult StartCoreLocked(IDirectInputDeviceEnumerator enumerator, DirectInputDeviceDescriptor descriptor, int sessionId, string logCategory)
     {
-        _lastCompletionSummary = null;
+        _lastSessionCompletion = null;
         IDirectInputDevice? device = null;
         try
         {
@@ -128,19 +125,19 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             return new(MsiClawInputStartStatus.CreateDeviceFailed, "DirectInput device creation failed. No controller settings were changed.");
         }
 
-        var session = new InputSession(++_testSession, enumerator, device, new CancellationTokenSource());
+        var session = new InputSession(++_inputSessionId, enumerator, device, new CancellationTokenSource());
         try
         {
-            AppLog.Info("DirectInput", "Device acquire started.", ("TestSession", session.Id), ("InstanceGuid", descriptor.InstanceGuid));
+            AppLog.Info("DirectInput", "Device acquire started.", ("InputSessionId", session.Id), ("InstanceGuid", descriptor.InstanceGuid));
             var stopwatch = Stopwatch.StartNew();
             device.Acquire();
             session.AcquiredAt = Stopwatch.GetTimestamp();
             session.AcquireDurationMs = stopwatch.ElapsedMilliseconds;
-            AppLog.Info("DirectInput", "Device acquire succeeded.", ("TestSession", session.Id), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+            AppLog.Info("DirectInput", "Device acquire succeeded.", ("InputSessionId", session.Id), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         }
         catch (Exception exception)
         {
-            AppLog.Warn("DirectInput", "Device acquire failed.", exception, ("TestSession", session.Id), ("Reason", "AcquireFailed"), ("Action", "AbortInput"), ("NoChangesMade", true));
+            AppLog.Warn("DirectInput", "Device acquire failed.", exception, ("InputSessionId", session.Id), ("Reason", "AcquireFailed"), ("Action", "AbortInput"), ("NoChangesMade", true));
             CleanupBeforePolling(session);
             return new(MsiClawInputStartStatus.AcquireFailed, "DirectInput device acquisition failed. No controller settings were changed.");
         }
@@ -174,13 +171,13 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                 _currentSession = null;
             LogCadenceApplyFailed("DirectInput", "Physical", 0, initialPeriodMilliseconds, exception);
             AppLog.Warn("DirectInput", "Physical input worker initialization failed.", exception,
-                ("TestSession", session.Id), ("Reason", "InputWorkerInitializationFailed"), ("Action", "AbortInput"));
+                ("InputSessionId", session.Id), ("Reason", "InputWorkerInitializationFailed"), ("Action", "AbortInput"));
             CleanupBeforePolling(session);
             return new(MsiClawInputStartStatus.InitializationFailed, "The physical input polling worker could not be initialized.");
         }
 
-        AppLog.Info(logCategory, "M1/M2 input source started.", ("TestSession", session.Id), ("VID", MsiClawHardware.FormatVendorId()), ("PID", MsiClawHardware.FormatDirectInputProductId()), ("InstanceGuid", descriptor.InstanceGuid));
-        return new(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.");
+        AppLog.Info(logCategory, "M1/M2 physical input source started.", ("InputSessionId", session.Id), ("VID", MsiClawHardware.FormatVendorId()), ("PID", MsiClawHardware.FormatDirectInputProductId()), ("InstanceGuid", descriptor.InstanceGuid));
+        return new(MsiClawInputStartStatus.Started, "The physical DirectInput input source is running.");
     }
 
     internal Action<WindowsHighResolutionOneShotTimer, long, long>? ArmForDeadlineOverrideForTests { get; set; }
@@ -214,7 +211,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         await StopAsync().ConfigureAwait(false);
         lock (_sync)
             return _currentSession is null
-                && _lastCompletionSummary is { CleanupSucceeded: true, StopReason: MsiClawInputStopReason.Stopped };
+                && _lastSessionCompletion is { CleanupSucceeded: true, StopReason: MsiClawInputStopReason.Stopped };
     }
 
     public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken)
@@ -244,7 +241,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                 return new(FrontendPid1902InputCadenceOutcome.Unavailable, "The live PID1902 DirectInput source is unavailable.", requestedDurationMs, 0, 0, null, 0, 0, null, null, null, null, null, null, null);
 
             session = _currentSession;
-            if (session.CadenceDiagnostic is not null || session.RawButtonTransitionDiagnostic is not null)
+            if (session.CadenceDiagnostic is not null)
                 return new(FrontendPid1902InputCadenceOutcome.AlreadyRunning, "Another PID1902 input diagnostic is already running.", requestedDurationMs, 0, 0, null, 0, 0, null, null, null, null, null, null, null);
 
             try
@@ -301,78 +298,6 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         return result;
     }
 
-    public Task<FrontendRawDirectInputButtonTransitionResult> RunRawDirectInputButtonTransitionDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        RunRawDirectInputButtonTransitionDiagnosticAsync(RawButtonTransitionDiagnosticDuration, cancellationToken);
-
-    internal async Task<FrontendRawDirectInputButtonTransitionResult> RunRawDirectInputButtonTransitionDiagnosticAsync(
-        TimeSpan duration,
-        CancellationToken cancellationToken = default)
-    {
-        if (duration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(duration));
-        var requestedMs = (long)duration.TotalMilliseconds;
-        if (cancellationToken.IsCancellationRequested)
-            return EmptyRawButtonResult(FrontendRawDirectInputButtonTransitionOutcome.Cancelled, "Cancelled", requestedMs);
-
-        InputSession session;
-        MsiClawRawButtonTransitionCollector? collector = null;
-        lock (_sync)
-        {
-            if (_disposed || _currentSession is null || _currentSession.Cancellation.IsCancellationRequested)
-                return EmptyRawButtonResult(FrontendRawDirectInputButtonTransitionOutcome.Unavailable,
-                    "The live PID1902 DirectInput source is unavailable.", requestedMs);
-
-            session = _currentSession;
-            if (session.CadenceDiagnostic is not null || session.RawButtonTransitionDiagnostic is not null)
-                return EmptyRawButtonResult(FrontendRawDirectInputButtonTransitionOutcome.AlreadyRunning,
-                    "Another PID1902 input diagnostic is already running.", requestedMs);
-
-            collector = new MsiClawRawButtonTransitionCollector(duration, Stopwatch.GetTimestamp());
-            session.RawButtonTransitionDiagnostic = collector;
-        }
-
-        AppLog.Info("Diagnostics", "M1/M2 raw DirectInput button transition diagnostic started.",
-            ("TestSession", session.Id),
-            ("RequestedDurationMs", requestedMs),
-            ("ProductionPollIntervalMs", session.ProductionPeriodMilliseconds),
-            ("Reader", "ExistingOwnedPollWorker"),
-            ("AdditionalReadStateCalls", 0));
-
-        using var cancellationRegistration = cancellationToken.Register(static state =>
-        {
-            var value = ((MsiClawRawButtonTransitionCollector Collector, Func<long> Timestamp))state!;
-            value.Collector.Cancel(value.Timestamp());
-        }, (collector, (Func<long>)Stopwatch.GetTimestamp));
-
-        FrontendRawDirectInputButtonTransitionResult result;
-        try
-        {
-            result = await collector.Completion.ConfigureAwait(false);
-        }
-        finally
-        {
-            ClearRawButtonTransitionDiagnostic(session, collector);
-        }
-
-        var transitions = string.Join(",", result.Transitions.Select(item =>
-            $"{item.ButtonIndex}:{item.RisingEdges}+/{item.FallingEdges}-"));
-        AppLog.Info("Diagnostics", "M1/M2 raw DirectInput button transition diagnostic completed.",
-            ("TestSession", session.Id),
-            ("Outcome", result.Outcome),
-            ("Status", result.Status),
-            ("RequestedDurationMs", result.RequestedDurationMs),
-            ("ActualDurationMs", result.ActualDurationMs),
-            ("ButtonCount", result.ButtonCount),
-            ("TrackedButtonCount", result.TrackedButtonCount),
-            ("SuccessfulReadCount", result.SuccessfulReadCount),
-            ("Transitions", transitions),
-            ("Button15PressedAndReleasedObserved", result.Button15PressedAndReleasedObserved),
-            ("Button16PressedAndReleasedObserved", result.Button16PressedAndReleasedObserved),
-            ("Button15ChangedWhileButton16Released", result.Button15ChangedWhileButton16Released),
-            ("Button16ChangedWhileButton15Released", result.Button16ChangedWhileButton15Released),
-            ("FirmwareMutationIssued", false));
-        return result;
-    }
-
     public async ValueTask DisposeAsync()
     {
         lock (_sync)
@@ -385,14 +310,8 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
 
     private void PollWorker(InputSession session)
     {
-        var stopwatch = Stopwatch.StartNew();
         var previous = NeutralState();
         var hasPrevious = false;
-        var m1Observed = false;
-        var m2Observed = false;
-        var m1OnlyObserved = false;
-        var m2OnlyObserved = false;
-        var independent = false;
         var readFailures = 0;
         var cleanupSucceeded = true;
         var stopReason = MsiClawInputStopReason.Stopped;
@@ -427,7 +346,6 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
 
                 if (input.Buttons.Count < MsiClawHardware.RequiredDirectInputButtonCount)
                 {
-                    GetRawButtonTransitionDiagnostic(session)?.FailInvalidLayout(Stopwatch.GetTimestamp());
                     stopReason = MsiClawInputStopReason.InvalidButtonLayout;
                     AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "InsufficientButtonCount"));
                     break;
@@ -459,13 +377,10 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
 
                 if (!TryMapState(input, out var current))
                 {
-                    GetRawButtonTransitionDiagnostic(session)?.FailInvalidLayout(Stopwatch.GetTimestamp());
                     stopReason = MsiClawInputStopReason.InvalidButtonLayout;
                     AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "KnownInvalidState"));
                     break;
                 }
-
-                GetRawButtonTransitionDiagnostic(session)?.Observe(input.Buttons, Stopwatch.GetTimestamp());
 
                 // Gated per-poll: LogPovIfChanged itself takes a lock and compares state even when the
                 // eventual AppLog.Debug call would be filtered, so check the level here rather than
@@ -528,26 +443,6 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                     previous = current;
                 }
 
-                if (IsM1Pressed(current) && !m1Observed)
-                {
-                    m1Observed = true;
-                    AppLog.Info("Diagnostics", "M1 input verified.", ("TestSession", session.Id), ("ButtonIndex", MsiClawHardware.M1DirectInputButtonIndex));
-                }
-
-                if (IsM2Pressed(current) && !m2Observed)
-                {
-                    m2Observed = true;
-                    AppLog.Info("Diagnostics", "M2 input verified.", ("TestSession", session.Id), ("ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex));
-                }
-
-                if (IsM1Pressed(current) && !IsM2Pressed(current)) m1OnlyObserved = true;
-                if (!IsM1Pressed(current) && IsM2Pressed(current)) m2OnlyObserved = true;
-                if (!independent && m1OnlyObserved && m2OnlyObserved)
-                {
-                    independent = true;
-                    AppLog.Info("Diagnostics", "Independent M1/M2 input verified.", ("TestSession", session.Id), ("M1OnlyObserved", true), ("M2OnlyObserved", true), ("M1ButtonIndex", MsiClawHardware.M1DirectInputButtonIndex), ("M2ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex));
-                }
-
                 if (!WaitForNextPoll(session, GetCadenceDiagnostic(session), ref nextProductionDeadlineTicks, ref firstProductionWait, ref diagnosticModeActive, out schedulerFailed))
                 {
                     if (schedulerFailed) stopReason = MsiClawInputStopReason.PollSchedulerFailed;
@@ -567,7 +462,6 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         finally
         {
             var cadenceDiagnostic = GetCadenceDiagnostic(session);
-            var rawButtonDiagnostic = GetRawButtonTransitionDiagnostic(session);
             if (cadenceDiagnostic is not null)
             {
                 if (session.Cancellation.IsCancellationRequested)
@@ -575,14 +469,13 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                 else
                     cadenceDiagnostic.Fail($"The PID1902 DirectInput session stopped: {stopReason}.");
             }
-            rawButtonDiagnostic?.EndSession(Stopwatch.GetTimestamp());
             session.FirstValidState.TrySetResult(false);
             Volatile.Write(ref _latestState, new StateBox(NeutralState()));
             cleanupSucceeded = CleanupSession(session);
-            var summary = new MsiClawInputTestSummary(session.Id, stopwatch.ElapsedMilliseconds, m1Observed, m2Observed, independent, readFailures, cleanupSucceeded, stopReason);
+            var completion = new MsiClawInputSessionCompletion(cleanupSucceeded, stopReason);
             lock (_sync)
             {
-                _lastCompletionSummary = summary;
+                _lastSessionCompletion = completion;
                 if (ReferenceEquals(_currentSession, session))
                 {
                     _currentSession = null;
@@ -591,13 +484,15 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             session.Cancellation.Dispose();
             try
             {
-                AppLog.Info("Diagnostics", "M1/M2 input diagnostic completed.", ("TestSession", summary.TestSession), ("DurationMs", summary.DurationMs), ("M1Observed", summary.M1Observed), ("M2Observed", summary.M2Observed), ("Independent", summary.Independent), ("ReadFailures", summary.ReadFailures), ("CleanupSucceeded", summary.CleanupSucceeded), ("StopReason", summary.StopReason));
-                TestCompleted?.Invoke(this, summary);
+                AppLog.Info("DirectInput", "Physical input session completed.",
+                    ("TestSession", session.Id), ("CleanupSucceeded", completion.CleanupSucceeded),
+                    ("StopReason", completion.StopReason));
+                SessionCompleted?.Invoke(this, completion);
             }
             catch (Exception exception)
             {
                 AppLog.Error("DirectInput", "Physical input completion callback failed.", exception,
-                    ("TestSession", session.Id), ("StopReason", summary.StopReason));
+                    ("TestSession", session.Id), ("StopReason", completion.StopReason));
             }
             finally
             {
@@ -856,12 +751,6 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             return ReferenceEquals(_currentSession, session) ? session.CadenceDiagnostic : null;
     }
 
-    private MsiClawRawButtonTransitionCollector? GetRawButtonTransitionDiagnostic(InputSession session)
-    {
-        lock (_sync)
-            return ReferenceEquals(_currentSession, session) ? session.RawButtonTransitionDiagnostic : null;
-    }
-
     private void ClearCadenceDiagnostic(InputSession session, MsiClawInputCadenceCollector collector)
     {
         lock (_sync)
@@ -870,21 +759,6 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                 session.CadenceDiagnostic = null;
         }
     }
-
-    private void ClearRawButtonTransitionDiagnostic(InputSession session, MsiClawRawButtonTransitionCollector collector)
-    {
-        lock (_sync)
-        {
-            if (ReferenceEquals(_currentSession, session) && ReferenceEquals(session.RawButtonTransitionDiagnostic, collector))
-                session.RawButtonTransitionDiagnostic = null;
-        }
-    }
-
-    private static FrontendRawDirectInputButtonTransitionResult EmptyRawButtonResult(
-        FrontendRawDirectInputButtonTransitionOutcome outcome,
-        string status,
-        long requestedDurationMs) => new(
-            outcome, status, requestedDurationMs, 0, null, 0, 0, [], false, false, false, false);
 
     private sealed class InputSession(int id, IDirectInputDeviceEnumerator enumerator, IDirectInputDevice device, CancellationTokenSource cancellation)
     {
@@ -904,7 +778,6 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         public long? LastSuccessfulReadAt { get; set; }
         public int SuccessfulReadCount { get; set; }
         public MsiClawInputCadenceCollector? CadenceDiagnostic { get; set; }
-        public MsiClawRawButtonTransitionCollector? RawButtonTransitionDiagnostic { get; set; }
         public TaskCompletionSource<bool> FirstValidState { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 

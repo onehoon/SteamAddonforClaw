@@ -11,7 +11,6 @@ public sealed partial class DeveloperPage : UserControl
     private Func<bool>? _isPrerequisiteSetupInProgress;
     private int _isGeneratingEnvironmentDiscoveryReport;
     private int _isRunningPid1902InputCadenceDiagnostic;
-    private CancellationTokenSource? _msiBackButtonDiagnosticCancellation;
     private string _logDirectoryPath = string.Empty;
 
     public event EventHandler? BackRequested;
@@ -26,11 +25,7 @@ public sealed partial class DeveloperPage : UserControl
     private void OpenBatteryChargeLimitTestButton_Click(object sender, RoutedEventArgs args) => BatteryChargeLimitTestRequested?.Invoke(this, EventArgs.Empty);
     private void OpenGameInputSystemButtonProbeButton_Click(object sender, RoutedEventArgs args) => GameInputSystemButtonProbeRequested?.Invoke(this, EventArgs.Empty);
 
-    public DeveloperPage()
-    {
-        InitializeComponent();
-        Unloaded += DeveloperPage_Unloaded;
-    }
+    public DeveloperPage() => InitializeComponent();
 
     internal void Initialize(
         IAddonFrontendControl frontend,
@@ -44,77 +39,7 @@ public sealed partial class DeveloperPage : UserControl
 
     private void BackButton_Click(object sender, RoutedEventArgs args)
     {
-        CancelMsiBackButtonDiagnostic();
         BackRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void DeveloperPage_Unloaded(object sender, RoutedEventArgs args) => CancelMsiBackButtonDiagnostic();
-
-    private void CancelMsiBackButtonDiagnosticButton_Click(object sender, RoutedEventArgs args) => CancelMsiBackButtonDiagnostic();
-
-    private void CancelMsiBackButtonDiagnostic()
-    {
-        try { _msiBackButtonDiagnosticCancellation?.Cancel(); }
-        catch (ObjectDisposedException) { }
-    }
-
-    private async void RestoreMsiBackButtonDirectInputButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (_isPrerequisiteSetupInProgress?.Invoke() == true || _frontend is null || XamlRoot is null
-            || Volatile.Read(ref _msiBackButtonDiagnosticCancellation) is not null)
-            return;
-
-        var confirmation = new ContentDialog
-        {
-            Title = "Restore M1/M2 DirectInput (Experimental)",
-            Content = new TextBlock
-            {
-                TextWrapping = TextWrapping.Wrap,
-                Text = "This writes the M1 and M2 controller profile and may persist across reboot and between SteamOS and Windows. This is not a read-only test. Only the exact recognized profile is eligible; unknown or custom mappings are left untouched. Keep the device connected and do not change controller mode during the operation.",
-            },
-            PrimaryButtonText = "Write M1/M2 Profile",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-            XamlRoot = XamlRoot,
-        };
-        if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
-            return;
-
-        var cancellation = new CancellationTokenSource();
-        if (Interlocked.CompareExchange(ref _msiBackButtonDiagnosticCancellation, cancellation, null) is not null)
-        {
-            cancellation.Dispose();
-            return;
-        }
-
-        RunMsiBackButtonDiagnosticButton.IsEnabled = false;
-        RestoreMsiBackButtonDirectInputButton.IsEnabled = false;
-        CancelMsiBackButtonDiagnosticButton.IsEnabled = true;
-        SetMsiBackButtonDiagnosticStatus(string.Empty);
-        SetMsiBackButtonManualRestoreStatus(
-            "Checking both profile slots and current Runtime ownership. Cancel is honored before the first write; a write already sent cannot be undone.");
-        try
-        {
-            var result = await _frontend.RunMsiBackButtonManualRestoreAsync(cancellation.Token);
-            SetMsiBackButtonManualRestoreStatus(FormatMsiBackButtonManualRestoreResult(result));
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        {
-            SetMsiBackButtonManualRestoreStatus("Cancelled before the first firmware write. No profile write was issued.");
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("ControllerBackButton", "Manual M1/M2 DirectInput restore failed in the Developer UI.", exception);
-            SetMsiBackButtonManualRestoreStatus("Manual restore failed. Check the ControllerBackButton log for exact command and readback evidence.");
-        }
-        finally
-        {
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _msiBackButtonDiagnosticCancellation, null, cancellation), cancellation))
-                cancellation.Dispose();
-            RunMsiBackButtonDiagnosticButton.IsEnabled = true;
-            RestoreMsiBackButtonDirectInputButton.IsEnabled = true;
-            CancelMsiBackButtonDiagnosticButton.IsEnabled = false;
-        }
     }
 
     private void OpenLogFolderButton_Click(object sender, RoutedEventArgs args)
@@ -187,88 +112,6 @@ public sealed partial class DeveloperPage : UserControl
         Pid1902InputCadenceStatusText.Text = text;
         Pid1902InputCadenceStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
     }
-
-    private async void RunMsiBackButtonDiagnosticButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (_isPrerequisiteSetupInProgress?.Invoke() == true || _frontend is null) return;
-        var cancellation = new CancellationTokenSource();
-        if (Interlocked.CompareExchange(ref _msiBackButtonDiagnosticCancellation, cancellation, null) is not null)
-        {
-            cancellation.Dispose();
-            return;
-        }
-
-        RunMsiBackButtonDiagnosticButton.IsEnabled = false;
-        RestoreMsiBackButtonDirectInputButton.IsEnabled = false;
-        CancelMsiBackButtonDiagnosticButton.IsEnabled = true;
-        SetMsiBackButtonManualRestoreStatus(string.Empty);
-        SetMsiBackButtonDiagnosticStatus("Running… Press and release M1 only, then M2 only; do not touch any other controls.");
-        try
-        {
-            var result = await _frontend.RunMsiBackButtonProfileAndRawInputDiagnosticAsync(cancellation.Token);
-            SetMsiBackButtonDiagnosticStatus(FormatMsiBackButtonDiagnosticResult(result));
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        {
-            SetMsiBackButtonDiagnosticStatus("Cancelled. No firmware mutation was issued.");
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("ControllerBackButton", "M1/M2 profile and raw-input diagnostic failed in the Developer UI.", exception);
-            SetMsiBackButtonDiagnosticStatus("Diagnostic failed. See the application log for details.");
-        }
-        finally
-        {
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _msiBackButtonDiagnosticCancellation, null, cancellation), cancellation))
-                cancellation.Dispose();
-            RunMsiBackButtonDiagnosticButton.IsEnabled = true;
-            RestoreMsiBackButtonDirectInputButton.IsEnabled = true;
-            CancelMsiBackButtonDiagnosticButton.IsEnabled = false;
-        }
-    }
-
-    private void SetMsiBackButtonDiagnosticStatus(string text)
-    {
-        MsiBackButtonDiagnosticStatusText.Text = text;
-        MsiBackButtonDiagnosticStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    internal static string FormatMsiBackButtonDiagnosticResult(FrontendMsiBackButtonDiagnosticResult result)
-    {
-        var firmware = result.FirmwareVersion is ushort version ? $"0x{version:X4}" : "Unavailable";
-        var raw = result.RawInput;
-        var sample = string.Join(", ", raw.Transitions.Take(6)
-            .Select(item => $"{item.ButtonIndex}({item.RisingEdges}+/{item.FallingEdges}-)"));
-        var indices = raw.Transitions.Count == 0
-            ? "no changed indices"
-            : $"{raw.Transitions.Count} changed index(es): {sample}{(raw.Transitions.Count > 6 ? ", …" : string.Empty)}";
-        return $"Model: {result.ModelId} · Firmware: {firmware}\r\n" +
-               $"M1 0x{result.M1.Address:X4}: {result.M1.Outcome} / {result.M1.Classification} · M2 0x{result.M2.Address:X4}: {result.M2.Outcome} / {result.M2.Classification}\r\n" +
-               $"Raw: {raw.Outcome}, {raw.SuccessfulReadCount:N0} reads, {indices}\r\n" +
-               $"Index 15={raw.Button15PressedAndReleasedObserved}, 16={raw.Button16PressedAndReleasedObserved}; detailed bytes/counts are in the log. Read-only; no firmware mutation." +
-               (string.IsNullOrWhiteSpace(result.Status) ? string.Empty : $"\r\n{CompactStatus(result.Status)}");
-    }
-
-    internal static string FormatMsiBackButtonManualRestoreResult(FrontendMsiBackButtonManualRestoreResult result)
-    {
-        var firmware = result.FirmwareVersion is ushort version ? $"0x{version:X4}" : "Unavailable";
-        var raw = result.RawInput;
-        var m1Candidate = result.M1.BeforeClassification == FrontendMsiBackButtonProfileClassification.ObservedLinuxRightBraceCandidate;
-        var m2Candidate = result.M2.BeforeClassification == FrontendMsiBackButtonProfileClassification.ObservedLinuxLeftBraceCandidate;
-        return $"{result.Outcome} · {result.ModelId} · FW {firmware}\r\n" +
-               $"M1 candidate={m1Candidate}; {result.M1.BeforePayloadHex ?? "n/a"} → {result.M1.AfterPayloadHex ?? "n/a"}; write={result.M1.WriteIssued}/{result.M1.WriteTransportSucceeded}\r\n" +
-               $"M2 candidate={m2Candidate}; {result.M2.BeforePayloadHex ?? "n/a"} → {result.M2.AfterPayloadHex ?? "n/a"}; write={result.M2.WriteIssued}/{result.M2.WriteTransportSucceeded}\r\n" +
-               $"ROM sync issued/succeeded={result.RomSyncIssued}/{result.RomSyncTransportSucceeded}; readbacks={result.ReadbackObserved}, DirectInput headers verified={result.ProfileReadbackVerified}; raw index15={raw.Button15PressedAndReleasedObserved}, index16={raw.Button16PressedAndReleasedObserved}, both={result.RawInput15_16Observed} ({raw.Outcome})\r\n" +
-               CompactStatus(result.Status);
-    }
-
-    private void SetMsiBackButtonManualRestoreStatus(string text)
-    {
-        MsiBackButtonManualRestoreStatusText.Text = text;
-        MsiBackButtonManualRestoreStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private static string CompactStatus(string text) => text.Length <= 240 ? text : text[..237] + "…";
 
     private static string FormatPid1902InputCadenceResult(FrontendPid1902InputCadenceResult result)
     {

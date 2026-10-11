@@ -1386,8 +1386,6 @@ public sealed class UiArchitectureTests
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
-        Assert.True(page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal) < page.IndexOf("M1 / M2 Physical Input &amp; Firmware Profile", StringComparison.Ordinal));
-        Assert.True(page.IndexOf("M1 / M2 Physical Input &amp; Firmware Profile", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
         Assert.Contains("Content=\"Run 10s Test\"", page, StringComparison.Ordinal);
         Assert.True(page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
         Assert.DoesNotContain("Header=\"Logging\"", page, StringComparison.Ordinal);
@@ -1397,25 +1395,22 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void M1_M2_profile_and_raw_input_diagnostic_is_developer_only_bounded_and_cancellable()
+    public void Developer_menu_removes_M1_M2_tools_and_preserves_unrelated_diagnostics()
     {
         var root = FindRepositoryRoot();
         var developerXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
         var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
         var mainUi = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
 
-        Assert.Contains("Header=\"M1 / M2 Physical Input &amp; Firmware Profile\"", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Press and release M1 only, then M2 only; do not touch any other controls.", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Run 10s Diagnostic\"", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Restore M1/M2 DirectInput (Experimental)\"", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("ColumnDefinitions=\"*\"", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment=\"Stretch\" Opacity=\"0.7\" TextWrapping=\"Wrap\"", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("DefaultButton = ContentDialogButton.Close", developerCode, StringComparison.Ordinal);
-        Assert.Contains("RunMsiBackButtonManualRestoreAsync(cancellation.Token)", developerCode, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Cancel\"", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Unloaded += DeveloperPage_Unloaded", developerCode, StringComparison.Ordinal);
-        Assert.Contains("RunMsiBackButtonProfileAndRawInputDiagnosticAsync(cancellation.Token)", developerCode, StringComparison.Ordinal);
-        Assert.Contains("_msiBackButtonDiagnosticCancellation?.Cancel()", developerCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("M1 / M2 Physical Input &amp; Firmware Profile", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run 10s Diagnostic", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Restore M1/M2 DirectInput", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("MsiBackButton", developerCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("RawDirectInputButton", developerCode, StringComparison.Ordinal);
+        Assert.Contains("Header=\"PID1902 Input Cadence\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Vibration Test\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Gyro / Sensor Test\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OpenLogFolderButton_Click\"", developerXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("M1 / M2 Physical Input &amp; Firmware Profile", mainUi, StringComparison.Ordinal);
     }
 

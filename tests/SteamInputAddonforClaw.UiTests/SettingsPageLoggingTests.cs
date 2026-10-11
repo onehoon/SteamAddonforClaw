@@ -93,7 +93,6 @@ public sealed class SettingsPageLoggingTests
         {
             "Text=\"Environment Discovery\"",
             "Header=\"PID1902 Input Cadence\"",
-            "Header=\"M1 / M2 Physical Input &amp; Firmware Profile\"",
             "Header=\"Vibration Test\"",
             "Header=\"Gyro / Sensor Test\"",
             "Header=\"Fan Hardware Probe\"",
