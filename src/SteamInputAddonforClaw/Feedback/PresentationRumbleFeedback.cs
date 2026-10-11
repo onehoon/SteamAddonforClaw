@@ -379,6 +379,120 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
     }
 }
 
+/// <summary>Maps VIIPER's rumble-only DualSense Edge output callback to the shared physical sink.</summary>
+internal sealed class DualSenseEdgeRumbleFeedbackAdapter : IDisposable
+{
+    internal static readonly TimeSpan DefaultSafetyStop = TimeSpan.FromSeconds(5);
+
+    private readonly IPhysicalRumbleSink _sink;
+    private readonly Func<bool> _clearNativeCallback;
+    private readonly TimeSpan _safetyStopDelay;
+    private readonly object _callbackWriteGate = new();
+    private readonly object _safetyGate = new();
+    private readonly DualSenseOutputCallback _callback;
+    private CancellationTokenSource? _safetyStop;
+    private long _feedbackSequence;
+    private int _disposed;
+
+    private DualSenseEdgeRumbleFeedbackAdapter(IPhysicalRumbleSink sink, Func<bool> clearNativeCallback, TimeSpan safetyStopDelay)
+    {
+        _sink = sink;
+        _clearNativeCallback = clearNativeCallback;
+        _safetyStopDelay = safetyStopDelay;
+        _callback = OnOutput;
+    }
+
+    internal static ushort Expand(byte value) => (ushort)(value * 257);
+    internal bool IsArmed => Volatile.Read(ref _disposed) == 0;
+
+    internal static DualSenseEdgeRumbleFeedbackAdapter? TryArm(
+        IPhysicalRumbleSink sink,
+        Func<DualSenseOutputCallback, bool> setNativeCallback,
+        Func<bool> clearNativeCallback,
+        TimeSpan? safetyStop = null)
+    {
+        var adapter = new DualSenseEdgeRumbleFeedbackAdapter(sink, clearNativeCallback, safetyStop ?? DefaultSafetyStop);
+        if (setNativeCallback(adapter._callback)) return adapter;
+        AppLog.Warn("Rumble", "DualSense Edge rumble callback registration failed.", null,
+            ("Event", "ProductionRumbleCallbackArmFailed"), ("Presentation", "DualSenseEdge"));
+        return null;
+    }
+
+    private void OnOutput(nuint handle, byte rumbleSmall, byte rumbleLarge, byte ledRed, byte ledGreen, byte ledBlue, byte playerLeds)
+    {
+        try
+        {
+            if (Volatile.Read(ref _disposed) != 0) return;
+            // The experimental VIIPER callback is rumble-only. LED fields are intentionally ignored.
+            var rumble = new TwoMotorRumble(Expand(rumbleLarge), Expand(rumbleSmall));
+            lock (_callbackWriteGate)
+            {
+                if (Volatile.Read(ref _disposed) != 0) return;
+                try { _sink.SetRumble(rumble); }
+                finally { ScheduleSafetyStop(rumble); }
+            }
+        }
+        catch
+        {
+            // Never throw across the native C ABI callback boundary.
+        }
+    }
+
+    private void ScheduleSafetyStop(TwoMotorRumble rumble)
+    {
+        CancellationToken token = default;
+        long sequence;
+        lock (_safetyGate)
+        {
+            _safetyStop?.Cancel();
+            _safetyStop?.Dispose();
+            _safetyStop = null;
+            sequence = ++_feedbackSequence;
+            if (Volatile.Read(ref _disposed) != 0 || rumble.Equals(TwoMotorRumble.Stopped) || _safetyStopDelay <= TimeSpan.Zero)
+                return;
+            _safetyStop = new CancellationTokenSource();
+            token = _safetyStop.Token;
+        }
+        _ = StopAfterDelayAsync(sequence, token);
+    }
+
+    private async Task StopAfterDelayAsync(long sequence, CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(_safetyStopDelay, token).ConfigureAwait(false);
+            lock (_callbackWriteGate)
+            {
+                // Recheck while holding the same gate used by native callback writes. A newer
+                // callback may arrive after the timer's first check but before it gets this gate.
+                lock (_safetyGate)
+                    if (token.IsCancellationRequested || sequence != _feedbackSequence || Volatile.Read(ref _disposed) != 0) return;
+                _sink.SetRumble(TwoMotorRumble.Stopped);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            AppLog.Debug("Rumble", "DualSense Edge rumble safety stop was contained.",
+                ("Event", "ProductionRumbleStopFailed"), ("Presentation", "DualSenseEdge"), ("Reason", exception.GetType().Name));
+        }
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        lock (_safetyGate)
+        {
+            _safetyStop?.Cancel();
+            _safetyStop?.Dispose();
+            _safetyStop = null;
+            _feedbackSequence++;
+        }
+        RumbleCallbackCleanup.ClearNativeCallback(_clearNativeCallback, "DualSenseEdge");
+        lock (_callbackWriteGate) { }
+    }
+}
+
 internal static class RumbleCallbackCleanup
 {
     /// <summary>Clears the native callback registration (a failed clear is still safe because future
@@ -402,5 +516,8 @@ internal static class RumbleCallbackCleanup
     }
 
     internal static void ClearNativeCallback(Func<Xbox360RumbleCallback?, bool> clear, string presentation)
+        => ClearNativeCallback(() => clear(null), presentation);
+
+    internal static void ClearNativeCallback(Func<DualSenseOutputCallback?, bool> clear, string presentation)
         => ClearNativeCallback(() => clear(null), presentation);
 }

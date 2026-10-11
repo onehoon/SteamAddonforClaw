@@ -1,7 +1,7 @@
 # Full1902 DualSense Edge Virtual Presentation — Architecture and Integration Plan
 
 **Date:** 2026-10-11  
-**Status:** Design approved in principle; implementation not yet started  
+**Status:** PR-A typed backend is implemented locally for review; it remains dormant and is not user-selectable until PR-B
 **Repository:** onehoon/SteamAddonforClaw  
 **Product:** Standalone Steam Addon for Claw / Full PID1902  
 **Scope:** Settings-selectable Steam/BPM virtual-controller presentation: existing Steam Deck or new Sony DualSense Edge. Xbox360 stays the normal Windows output.
@@ -316,6 +316,8 @@ Native Edge fields are raw signed 16-bit values. The upstream fork specifies:
 - Treat the Edge axis/sign transform as its **own controller coordinate mapping**. Do not assume that the Steam Deck Pitch/Yaw/Roll/Accel permutation is automatically correct for Sony axes.
 
 From the current MotionState, propose a target-specific mapping with explicit yaw/roll/pitch and stationary-gravity reference cases; keep the transform confined to EdgeDeviceStateMapper. The initial sign/permutation needs user hardware confirmation. Do not change common Motion Core normalization to fix an Edge-only output orientation.
+
+PR-A's initial software transform maps normalized source `+X/+Y/+Z` directly to Edge `+X/+Y/+Z` for gyro and accelerometer. That is a documented candidate transform, not a claimed physical match; the user must confirm stationary-gravity and rotation reference poses on hardware after merge.
 
 Keep the PR1/PR2 existing freshness checks (gyro 250 ms; accel 500 ms) and require a complete usable snapshot before encoding motion. An unavailable/stale/invalid source publishes **neutral motion** and continues ordinary gamepad input. No stale nonzero gyroscope and no invented gravity vector when measurements are unavailable. Motion failures must never release PID1902 ownership.
 

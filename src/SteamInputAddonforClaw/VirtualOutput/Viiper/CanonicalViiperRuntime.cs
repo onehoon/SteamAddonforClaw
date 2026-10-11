@@ -25,8 +25,10 @@ internal enum CanonicalViiperRuntimeTeardownPhase
     None,
     DeckDetach,
     Xbox360Detach,
+    DualSenseEdgeDetach,
     DeckRemove,
     Xbox360Remove,
+    DualSenseEdgeRemove,
     BusRemoval,
     ServerClose
 }
@@ -60,6 +62,7 @@ internal sealed class CanonicalViiperRuntime
     private bool _busCreated;
     private bool _deckCreated;
     private bool _xbox360Created;
+    private bool _dualSenseEdgeCreated;
 
     private CanonicalViiperRuntime(ICanonicalViiperNativeApi native, nuint serverHandle)
     {
@@ -80,6 +83,8 @@ internal sealed class CanonicalViiperRuntime
     internal uint DeckLogicalDeviceId { get; private set; }
     internal nuint Xbox360DeviceHandle { get; private set; }
     internal uint Xbox360LogicalDeviceId { get; private set; }
+    internal nuint DualSenseEdgeDeviceHandle { get; private set; }
+    internal uint DualSenseEdgeLogicalDeviceId { get; private set; }
 
     internal bool TryGetDeckAttachmentState(out USBDeviceAttachmentState state)
     {
@@ -195,6 +200,243 @@ internal sealed class CanonicalViiperRuntime
     /// (MsiClawAddonPresentation), exactly as with <see cref="SetDeckOutputCallback"/>.</summary>
     internal bool SetXbox360RumbleCallback(Xbox360RumbleCallback? callback) =>
         State == CanonicalViiperRuntimeState.Ready && _xbox360Created && _native.SetXbox360RumbleCallback(Xbox360DeviceHandle, callback);
+
+    // ---- Optional DualSense Edge backend over the same server and caller-owned bus. It is
+    // created only by an explicit Edge session request; normal initialization and presentation
+    // selection do not probe Edge exports or create an Edge device. ----
+
+    internal bool TryEnsureDualSenseEdgeDevice()
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready) return false;
+
+            if (_dualSenseEdgeCreated)
+            {
+                if (!TryGetAttachmentState(DualSenseEdgeDeviceHandle, out var existingState))
+                {
+                    MarkUnsafe("DualSenseEdgeAttachmentStateQueryFailed");
+                    return false;
+                }
+                if (existingState == USBDeviceAttachmentState.OutcomeUnknown || !Enum.IsDefined(existingState))
+                {
+                    MarkUnsafe($"DualSenseEdgeAttachmentState{(int)existingState}");
+                    return false;
+                }
+                return existingState == USBDeviceAttachmentState.Detached;
+            }
+
+            if (!_native.CreateDualSenseEdgeDevice(
+                    ServerHandle,
+                    out var edgeHandle,
+                    BusId,
+                    autoAttachLocalhost: false,
+                    idVendor: 0,
+                    idProduct: 0,
+                    metaState: nint.Zero))
+            {
+                if (edgeHandle == 0)
+                {
+                    AppLog.Warn("SteamOutput", "Optional DualSense Edge backend is unavailable.", null,
+                        ("Event", "DualSenseEdgeUnavailable"));
+                    return false;
+                }
+
+                DualSenseEdgeDeviceHandle = edgeHandle;
+                _dualSenseEdgeCreated = true;
+                MarkUnsafe("DualSenseEdgeCreateFailedWithOwnedHandle");
+                return false;
+            }
+
+            if (edgeHandle == 0)
+            {
+                // Native reported success but supplied no capability token. There is no safe
+                // handle to query or remove, so preserve the existing server/bus owner fail-closed.
+                MarkUnsafe("DualSenseEdgeCreateSucceededWithoutHandle");
+                return false;
+            }
+
+            DualSenseEdgeDeviceHandle = edgeHandle;
+            _dualSenseEdgeCreated = true;
+
+            if (!_native.GetUSBDeviceIdentity(edgeHandle, out var edgeBusId, out var edgeDeviceId) || edgeBusId != BusId)
+            {
+                AppLog.Warn("SteamOutput", "DualSense Edge creation did not prove the expected bus identity.", null,
+                    ("Event", "DualSenseEdgeIdentityInvalid"), ("ExpectedBusId", BusId), ("ObservedBusId", edgeBusId));
+                return TryRetireInvalidEdgeCreation();
+            }
+            DualSenseEdgeLogicalDeviceId = edgeDeviceId;
+
+            if (!TryGetAttachmentState(edgeHandle, out var attachmentState))
+            {
+                MarkUnsafe("DualSenseEdgeAttachmentStateQueryFailed");
+                return false;
+            }
+
+            if (attachmentState == USBDeviceAttachmentState.Detached)
+                return true;
+
+            if (attachmentState == USBDeviceAttachmentState.Attached)
+            {
+                if (!TryDetachDualSenseEdgeIfAttached(attachmentState)) return false;
+                if (!TryGetAttachmentState(edgeHandle, out var detachedState))
+                {
+                    MarkUnsafe("DualSenseEdgePostDetachStateQueryFailed");
+                    return false;
+                }
+                if (detachedState == USBDeviceAttachmentState.Detached) return true;
+                MarkUnsafe($"DualSenseEdgePostDetachState{(int)detachedState}");
+                return false;
+            }
+
+            MarkUnsafe($"DualSenseEdgeAttachmentState{(int)attachmentState}");
+            return false;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal bool TryGetDualSenseEdgeAttachmentState(out USBDeviceAttachmentState state)
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready || !_dualSenseEdgeCreated)
+            { state = default; return false; }
+            if (!TryGetAttachmentState(DualSenseEdgeDeviceHandle, out state))
+            {
+                MarkUnsafe("DualSenseEdgeAttachmentStateQueryFailed");
+                return false;
+            }
+            if (state == USBDeviceAttachmentState.OutcomeUnknown || !Enum.IsDefined(state))
+                MarkUnsafe($"DualSenseEdgeAttachmentState{(int)state}");
+            return true;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal USBDeviceAttachResult AttachDualSenseEdge()
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready || !_dualSenseEdgeCreated) return USBDeviceAttachResult.Invalid;
+            var result = _native.AttachUSBDeviceEx(DualSenseEdgeDeviceHandle);
+            if (result is not (USBDeviceAttachResult.Success or USBDeviceAttachResult.RetryableFailure))
+                MarkUnsafe($"DualSenseEdgeAttach{result}");
+            return result;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal USBDeviceDetachResult DetachDualSenseEdge()
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready || !_dualSenseEdgeCreated) return USBDeviceDetachResult.Invalid;
+            if (!_native.SetDualSenseDeviceState(DualSenseEdgeDeviceHandle, default)) return USBDeviceDetachResult.RetryableFailure;
+            var result = _native.DetachUSBDeviceEx(DualSenseEdgeDeviceHandle);
+            if (result is not (USBDeviceDetachResult.Success or USBDeviceDetachResult.RetryableFailure))
+                MarkUnsafe($"DualSenseEdgeDetach{result}");
+            return result;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal bool SetDualSenseEdgeState(DSDeviceState state) =>
+        State == CanonicalViiperRuntimeState.Ready && _dualSenseEdgeCreated && _native.SetDualSenseDeviceState(DualSenseEdgeDeviceHandle, state);
+
+    internal bool SetDualSenseEdgeOutputCallback(DualSenseOutputCallback? callback) =>
+        State == CanonicalViiperRuntimeState.Ready && _dualSenseEdgeCreated && _native.SetDualSenseOutputCallback(DualSenseEdgeDeviceHandle, callback);
+
+    private bool TryRetireInvalidEdgeCreation()
+    {
+        if (!TryGetAttachmentState(DualSenseEdgeDeviceHandle, out var state))
+        {
+            MarkUnsafe("DualSenseEdgeInvalidIdentityAttachmentQueryFailed");
+            return false;
+        }
+
+        if (state == USBDeviceAttachmentState.Attached)
+        {
+            if (!TryDetachDualSenseEdgeIfAttached(state))
+            {
+                RestartFullTeardownAfterRetryableEdgeCreationCleanup();
+                return false;
+            }
+            if (!TryGetAttachmentState(DualSenseEdgeDeviceHandle, out state) || state != USBDeviceAttachmentState.Detached)
+            {
+                MarkUnsafe("DualSenseEdgeInvalidIdentityPostDetachNotDetached");
+                return false;
+            }
+        }
+        else if (state != USBDeviceAttachmentState.Detached)
+        {
+            MarkUnsafe($"DualSenseEdgeInvalidIdentityAttachmentState{(int)state}");
+            return false;
+        }
+
+        if (!TryRemoveDualSenseEdge())
+        {
+            RestartFullTeardownAfterRetryableEdgeCreationCleanup();
+            return false;
+        }
+        State = CanonicalViiperRuntimeState.Ready;
+        TeardownPhase = CanonicalViiperRuntimeTeardownPhase.None;
+        return false;
+    }
+
+    private void RestartFullTeardownAfterRetryableEdgeCreationCleanup()
+    {
+        // A retryable Edge cleanup happened before final runtime teardown began. Resume at the
+        // canonical owner sequence so the persistent Deck and Xbox handles are also retired.
+        if (State == CanonicalViiperRuntimeState.CleanupPending)
+            TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DeckDetach;
+    }
+
+    private bool TryDetachDualSenseEdgeIfAttached(USBDeviceAttachmentState observedState)
+    {
+        if (observedState != USBDeviceAttachmentState.Attached) return true;
+
+        if (!_native.SetDualSenseDeviceState(DualSenseEdgeDeviceHandle, default))
+        {
+            State = CanonicalViiperRuntimeState.CleanupPending;
+            TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeDetach;
+            return false;
+        }
+
+        var result = _native.DetachUSBDeviceEx(DualSenseEdgeDeviceHandle);
+        if (result == USBDeviceDetachResult.Success) return true;
+        if (result == USBDeviceDetachResult.RetryableFailure)
+        {
+            State = CanonicalViiperRuntimeState.CleanupPending;
+            TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeDetach;
+            return false;
+        }
+        MarkUnsafe($"DualSenseEdgeDetach{result}");
+        return false;
+    }
+
+    private bool TryRemoveDualSenseEdge()
+    {
+        var result = _native.RemoveDualSenseDeviceEx(DualSenseEdgeDeviceHandle);
+        if (result == DSDeviceRemoveResult.Success)
+        {
+            _dualSenseEdgeCreated = false;
+            DualSenseEdgeDeviceHandle = 0;
+            DualSenseEdgeLogicalDeviceId = 0;
+            return true;
+        }
+        if (result == DSDeviceRemoveResult.RetryableFailure)
+        {
+            State = CanonicalViiperRuntimeState.CleanupPending;
+            TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeRemove;
+            return false;
+        }
+        MarkUnsafe($"DualSenseEdgeRemove{result}");
+        return false;
+    }
 
     /// <summary>
     /// Production staged initialization, one deterministic ownership chain:
@@ -451,6 +693,27 @@ internal sealed class CanonicalViiperRuntime
                             return false;
                     }
                 }
+                TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeDetach;
+            }
+
+            if (TeardownPhase == CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeDetach)
+            {
+                if (_dualSenseEdgeCreated)
+                {
+                    if (!TryGetAttachmentState(DualSenseEdgeDeviceHandle, out var edgeState)) return false;
+                    switch (edgeState)
+                    {
+                        case USBDeviceAttachmentState.Detached:
+                            break;
+                        case USBDeviceAttachmentState.Attached:
+                            if (!TryDetachDualSenseEdgeIfAttached(edgeState)) return false;
+                            break;
+                        case USBDeviceAttachmentState.OutcomeUnknown:
+                        default:
+                            MarkUnsafe($"TeardownDualSenseEdgeAttachmentState{(int)edgeState}");
+                            return false;
+                    }
+                }
                 TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DeckRemove;
             }
 
@@ -474,6 +737,12 @@ internal sealed class CanonicalViiperRuntime
                     if (!TryRemoveDeck()) return false;
                 }
 
+                TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeRemove;
+            }
+
+            if (TeardownPhase == CanonicalViiperRuntimeTeardownPhase.DualSenseEdgeRemove)
+            {
+                if (_dualSenseEdgeCreated && !TryRemoveDualSenseEdge()) return false;
                 TeardownPhase = CanonicalViiperRuntimeTeardownPhase.BusRemoval;
             }
 
