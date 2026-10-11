@@ -50,6 +50,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<MsiClawPhysicalIdentity?>? _controllerVibrationProbeIdentitySource;
     private readonly Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? _controllerLedProfileReadProbe;
     private readonly Func<CancellationToken, Task<FrontendMsiBackButtonDiagnosticResult>>? _runMsiBackButtonProfileAndRawInputDiagnostic;
+    private readonly Func<CancellationToken, Task<FrontendMsiBackButtonManualRestoreResult>>? _runMsiBackButtonManualRestore;
     private readonly Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? _testControllerVibrationMotor;
     private readonly Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? _runDeveloperRumbleRearm;
     private int _controllerExclusiveOperationInFlight;
@@ -173,7 +174,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<FrontendMsiBackButtonDiagnosticResult>>? runMsiBackButtonProfileAndRawInputDiagnostic = null,
         Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null,
         Action<string>? requestControllerPresentationReconcile = null,
-        Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null)
+        Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null,
+        Func<CancellationToken, Task<FrontendMsiBackButtonManualRestoreResult>>? runMsiBackButtonManualRestore = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -220,6 +222,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _testControllerVibrationMotor = testControllerVibrationMotor;
         _controllerLedProfileReadProbe = controllerLedProfileReadProbe;
         _runMsiBackButtonProfileAndRawInputDiagnostic = runMsiBackButtonProfileAndRawInputDiagnostic;
+        _runMsiBackButtonManualRestore = runMsiBackButtonManualRestore;
         _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
         _requestControllerPresentationReconcile = requestControllerPresentationReconcile;
         _settings = settings;
@@ -1278,6 +1281,19 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 ?? Task.FromResult(FrontendMsiBackButtonDiagnosticResult.Unavailable(
                     "The M1/M2 profile and raw-input diagnostic is unavailable in this Runtime.")),
             () => FrontendMsiBackButtonDiagnosticResult.Unavailable(
+                "Another controller diagnostic or re-arm is already running."));
+    }
+
+    public Task<FrontendMsiBackButtonManualRestoreResult> RunMsiBackButtonManualRestoreAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return RunExclusiveControllerOperationAsync(
+            () => _runMsiBackButtonManualRestore?.Invoke(cancellationToken)
+                ?? Task.FromResult(FrontendMsiBackButtonManualRestoreResult.Unavailable(
+                    "The manual M1/M2 DirectInput restore is unavailable in this Runtime.")),
+            () => FrontendMsiBackButtonManualRestoreResult.Unavailable(
                 "Another controller diagnostic or re-arm is already running."));
     }
 
