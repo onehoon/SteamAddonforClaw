@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -151,6 +152,73 @@ public sealed class MsiClawMotionSourceTests
         Assert.True(MsiClawMotionSource.IsDuplicateSensorTimestamp(timestamp, timestamp));
         Assert.False(MsiClawMotionSource.IsDuplicateSensorTimestamp(timestamp, timestamp.AddTicks(1)));
         Assert.False(MsiClawMotionSource.IsDuplicateSensorTimestamp(null, null));
+    }
+
+    [Theory]
+    [InlineData("msi.claw.a2vm.7", 0, 0)]
+    [InlineData("msi.claw.a2vm.7", 1, 1)]
+    [InlineData("msi.claw.a2vm.7", 2, 1)]
+    [InlineData("msi.claw.a2vm.8", 0, 0)]
+    [InlineData("msi.claw.a2vm.8", 1, 1)]
+    [InlineData("msi.claw.a2vm.8", 2, 1)]
+    [InlineData("msi.claw.cg3em", 0, 0)]
+    [InlineData("msi.claw.cg3em", 1, 1)]
+    [InlineData("msi.claw.cg3em", 2, 1)]
+    public async Task Production_readers_use_the_probe_backoff_for_both_roles_and_all_models(
+        string modelId,
+        int outcomeValue,
+        int expectedBackoffMs)
+    {
+        var outcome = (FakeReadOutcome)outcomeValue;
+        var (gyro, accel) = SensorsForModel(modelId);
+        using var releaseBlockedRead = new ManualResetEventSlim();
+        var backoffs = new ConcurrentQueue<(int Milliseconds, bool CancellationAware)>();
+        var blockOnReadNumber = outcome == FakeReadOutcome.Fresh ? 2 : 3;
+        var handles = new Dictionary<string, FakeSourceHandle>(StringComparer.OrdinalIgnoreCase)
+        {
+            [gyro.SensorId] = new(gyro, (1, 2, 3), releaseBlockedRead,
+                blockOnReadNumber: blockOnReadNumber, outcomeAfterFirstFresh: outcome),
+            [accel.SensorId] = new(accel, (0.1, 0.2, 0.9), releaseBlockedRead,
+                blockOnReadNumber: blockOnReadNumber, outcomeAfterFirstFresh: outcome)
+        };
+        var clock = new FakeMonotonicClock();
+        await using var source = new MsiClawMotionSource(
+            new HandheldDeviceModelId(modelId),
+            () => new ClawSensorDiscovery([gyro, accel], null, null, []),
+            candidate => handles[candidate.SensorId],
+            clock.Read,
+            clock.Frequency,
+            waitForNextRead: (token, milliseconds) => backoffs.Enqueue((milliseconds, token.CanBeCanceled)));
+
+        Assert.True(await source.StartAsync("ReadPolicyTest"));
+        await Task.WhenAll(handles.Values.Select(handle => Task.Run(() =>
+            Assert.True(handle.BlockedReadStarted.Wait(TimeSpan.FromSeconds(3))))))
+            .WaitAsync(TimeSpan.FromSeconds(4));
+
+        var latest = source.LatestState;
+        Assert.True(latest.HasGyro);
+        Assert.True(latest.HasAccelerometer);
+        Assert.Equal((1d, 3d, -2d), (latest.GyroXDegPerSecond, latest.GyroYDegPerSecond, latest.GyroZDegPerSecond));
+        Assert.Equal((0.1d, 0.9d, -0.2d), (latest.AccelXG, latest.AccelYG, latest.AccelZG));
+
+        var observedBackoffs = backoffs.ToArray();
+        if (expectedBackoffMs == 0)
+        {
+            Assert.Empty(observedBackoffs);
+        }
+        else
+        {
+            Assert.Equal(2, observedBackoffs.Length);
+            Assert.All(observedBackoffs, wait =>
+            {
+                Assert.Equal(expectedBackoffMs, wait.Milliseconds);
+                Assert.True(wait.CancellationAware);
+            });
+        }
+
+        var stopTask = source.StopAsync("ReadPolicyTest");
+        releaseBlockedRead.Set();
+        Assert.True(await stopTask);
     }
 
     [Fact]
@@ -398,6 +466,16 @@ public sealed class MsiClawMotionSourceTests
         SupportsY: true,
         SupportsZ: true);
 
+    private static (ClawSensorProbeCandidate Gyro, ClawSensorProbeCandidate Accel) SensorsForModel(string modelId)
+    {
+        var accel = Legacy("Physical Accelerometer", "{73000001-0012-0002-0000-000000000001}",
+            state: modelId.StartsWith("msi.claw.a2vm.", StringComparison.Ordinal) ? "Min" : "Ready");
+        if (modelId.StartsWith("msi.claw.a2vm.", StringComparison.Ordinal))
+            return (WinRtGyro(), accel);
+
+        return (Legacy("Physical Gyrometer", "{76000001-0012-0002-0000-000000000001}"), accel);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var timer = Stopwatch.StartNew();
@@ -416,11 +494,20 @@ public sealed class MsiClawMotionSourceTests
         internal long Read() => Interlocked.Increment(ref _ticks);
     }
 
+    private enum FakeReadOutcome
+    {
+        Fresh,
+        NoData,
+        Duplicate
+    }
+
     private sealed class FakeSourceHandle(
         ClawSensorProbeCandidate candidate,
         (double X, double Y, double Z) values,
         ManualResetEventSlim? blockAfterFirstRead,
-        bool nonFiniteFirstSample = false) : IClawSensorProbeSourceHandle
+        bool nonFiniteFirstSample = false,
+        int blockOnReadNumber = 2,
+        FakeReadOutcome outcomeAfterFirstFresh = FakeReadOutcome.Duplicate) : IClawSensorProbeSourceHandle
     {
         private int _readCount;
         private int _firstReadThreadId;
@@ -438,20 +525,22 @@ public sealed class MsiClawMotionSourceTests
         {
             var count = Interlocked.Increment(ref _readCount);
             Interlocked.CompareExchange(ref _firstReadThreadId, Environment.CurrentManagedThreadId, 0);
-            if (count == 1)
-            {
-                if (nonFiniteFirstSample)
-                    return ClawSensorReportReadResult.Data(double.NaN, values.Y, values.Z, DateTimeOffset.UnixEpoch.AddTicks(count));
-                return ClawSensorReportReadResult.Data(values.X, values.Y, values.Z, DateTimeOffset.UnixEpoch.AddTicks(count));
-            }
-
-            if (blockAfterFirstRead is not null)
+            if (count == blockOnReadNumber && blockAfterFirstRead is not null)
             {
                 BlockedReadStarted.Set();
                 blockAfterFirstRead.Wait();
             }
 
-            return ClawSensorReportReadResult.Data(values.X, values.Y, values.Z, DateTimeOffset.UnixEpoch.AddTicks(count));
+            if (count == 2 && outcomeAfterFirstFresh == FakeReadOutcome.NoData)
+                return ClawSensorReportReadResult.NoData();
+
+            var timestampOrdinal = count > 1 && outcomeAfterFirstFresh == FakeReadOutcome.Duplicate ? 1 : count;
+            var sampleValues = count == 2 && outcomeAfterFirstFresh == FakeReadOutcome.Duplicate
+                ? (X: values.X + 10, Y: values.Y + 10, Z: values.Z + 10)
+                : values;
+            if (count == 1 && nonFiniteFirstSample)
+                return ClawSensorReportReadResult.Data(double.NaN, sampleValues.Y, sampleValues.Z, DateTimeOffset.UnixEpoch.AddTicks(timestampOrdinal));
+            return ClawSensorReportReadResult.Data(sampleValues.X, sampleValues.Y, sampleValues.Z, DateTimeOffset.UnixEpoch.AddTicks(timestampOrdinal));
         }
 
         public void Dispose()
