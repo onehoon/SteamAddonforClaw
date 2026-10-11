@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Contracts.BackButtons;
@@ -40,6 +41,7 @@ internal enum AddonProcessStartupOutcome
 
 internal sealed class AddonProcessHost : IAsyncDisposable
 {
+    private static readonly TimeSpan WindowsSessionEndPreparationBudget = TimeSpan.FromMilliseconds(1500);
     private readonly Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? _runtimeCompositionFactory;
     private readonly Func<string>? _frontendPipeNameFactory;
     private readonly bool _headlessUninstallPreparation;
@@ -1417,7 +1419,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             () => hidHideBaseline.TryGetExistingOwnedTargets(
                 Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets),
             gamepadModeClient: gamepadModeClient,
-            hardwareDeviceModel: hardwareDeviceModel);
+            hardwareDeviceModel: hardwareDeviceModel,
+            writeXInputCommand: (identity, token) => nativeState.WriteXInputCommandAsync(identity, token));
     }
 
     private async Task StartMotionSourceAsync(string trigger)
@@ -2970,7 +2973,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         try
         {
-            _trayHostWindow = new NativeTrayHostWindow();
+            _trayHostWindow = new NativeTrayHostWindow(HandleWindowsSessionEnd);
             _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, EvaluateUserRestart);
             return true;
         }
@@ -2983,6 +2986,124 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("Tray", "Tray initialization failed in headless Runtime mode.", exception);
             return false;
         }
+    }
+
+    private void HandleWindowsSessionEnd()
+    {
+        var startedAt = Stopwatch.GetTimestamp();
+        var model = _startupResult?.HardwareDeviceModel?.Value ?? "unknown";
+        var result = SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("NotStarted");
+        using var deadline = new CancellationTokenSource();
+        deadline.CancelAfter(WindowsSessionEndPreparationBudget);
+
+        Task<SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult>? operation = null;
+        try
+        {
+            // Run the observed async sequence away from the native WndProc's thread. The handler
+            // still waits for this one result, but only for the shared short deadline.
+            operation = Task.Run(() => PrepareForWindowsSessionEndAsync(deadline.Token));
+            if (!operation.Wait(WindowsSessionEndPreparationBudget))
+            {
+                deadline.Cancel();
+                result = SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped(
+                    "DeadlineExceeded;CommandWriteResultUnconfirmed");
+                ObserveLateSessionEndTask(operation);
+            }
+            else
+            {
+                result = operation.GetAwaiter().GetResult();
+            }
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            result = SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("DeadlineExceededBeforeCommandWrite");
+        }
+        catch (Exception exception)
+        {
+            result = SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PreparationThrew:" + exception.GetType().Name);
+            AppLog.Warn("Lifecycle", "A2VM Windows session-end preparation failed closed; Windows shutdown will continue.", exception,
+                ("Event", "A2vmWindowsSessionEndPreparationFailed"));
+        }
+
+        AppLog.Info("Lifecycle", "A2VM Windows session-end PID1901 preparation completed.",
+            ("Event", "A2vmWindowsSessionEndPid1901Prepare"),
+            ("Trigger", "WindowsEndSession"),
+            ("Model", model),
+            ("Outcome", result.Outcome),
+            ("Reason", result.Reason),
+            ("ElapsedMs", (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds),
+            ("PnP1901Verified", false));
+    }
+
+    private async Task<SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var admissionFailure = GetWindowsSessionEndAdmissionFailure();
+        if (admissionFailure is not null)
+            return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped(admissionFailure);
+
+        if (!TryBeginProcessShutdownCore())
+            return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("RuntimeShutdownAlreadyStarted");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var presentation = _presentationOwnership!;
+        var physical = _physicalOwnership!;
+        if (!await presentation.PrepareForWindowsSessionEndAsync(cancellationToken).ConfigureAwait(false))
+            return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationRetirementUnproven");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return await physical.PrepareForWindowsSessionEndAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private string? GetWindowsSessionEndAdmissionFailure()
+    {
+        if (_startupResult?.HardwareDeviceModel is not { } model
+            || !SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawAddonPhysicalOwnership.IsA2vmBootRumblePrimeModel(model))
+            return "UnsupportedModel";
+        if (_startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled
+            || Volatile.Read(ref _processShutdownStarted) != 0
+            || _startupCancellationTokenSource.IsCancellationRequested)
+            return "CenterMOrRuntimeAuthorityUnavailable";
+        if (_centerMStartupControl is null
+            || _centerMStartupControl.Capture().State != FrontendCenterMStartupState.Disabled)
+            return "CenterMAuthorityNotDisabled";
+        if (Volatile.Read(ref _disabledControllerStartupPending) != 0
+            || _initialControllerAcquisition is not null
+            || Volatile.Read(ref _controllerOwnershipReleaseStarted) != 0
+            || Volatile.Read(ref _developerRumbleRearmInProgress) != 0
+            || Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0
+            || !_ownedControllerRecovery.IsCompletedSuccessfully
+            || !_presentationReconcile.IsCompletedSuccessfully)
+            return "ControllerLifecycleOperationInProgress";
+
+        var physical = _physicalOwnership;
+        var presentation = _presentationOwnership;
+        if (physical?.LiveInputSource is not { IsRunning: true }
+            || physical.OwnedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong, ProductId: MsiClawHardware.DirectInputProductId }
+            || physical.OwnedPrimaryHiddenTarget is not { } target
+            || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(target))
+            return "OwnedStrongPid1902SessionUnavailable";
+        if (presentation is null
+            || !presentation.IsActivePresentationLive
+            || presentation.IsSuspendPaused
+            || presentation.IsOverlayPaused)
+            return "LivePresentationUnavailable";
+        return null;
+    }
+
+    private static void ObserveLateSessionEndTask(Task task)
+    {
+        _ = task.ContinueWith(
+            completed =>
+            {
+                if (completed.Exception is { } exception)
+                    AppLog.Warn("Lifecycle", "Timed-out Windows session-end preparation completed with an exception after cancellation.", exception,
+                        ("Event", "A2vmWindowsSessionEndLateTaskFaulted"));
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>PR12 section 17: the one narrow Runtime-owned operation a future safe-uninstall entry
@@ -3021,11 +3142,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         return result;
     }
 
-    internal void BeginProcessShutdown()
+    internal void BeginProcessShutdown() => _ = TryBeginProcessShutdownCore();
+
+    private bool TryBeginProcessShutdownCore()
     {
         lock (_controllerOwnershipOperationSync)
         {
-            if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
+            if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return false;
             _initialControllerAcquisition = null;
             Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0);
         }
@@ -3070,6 +3193,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _deviceArrivalWatcherStarted = false;
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
+        return true;
     }
 
     public async ValueTask DisposeAsync()

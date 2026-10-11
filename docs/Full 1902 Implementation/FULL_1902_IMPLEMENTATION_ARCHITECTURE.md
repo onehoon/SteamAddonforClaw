@@ -102,7 +102,7 @@ Center M Disabled
 → Windows shutdown/restart does not release authority
 → controlled Addon Runtime restart does not release authority
 → sleep/hibernate does not release authority
-→ only an explicit authority-release action returns to PID1901
+→ only an explicit authority-release action changes durable controller authority; the narrowly gated A2VM Windows session-end preparation may issue one unverified best-effort PID1901 command without releasing that authority
 ```
 
 The primary supported authority-release action is:
@@ -268,7 +268,7 @@ DesiredPhysicalPID = PID1902
 
 Startup/recovery logic evaluates current reality and converges toward that state.
 
-**Narrow boot-only exception (2026-10-10):** On A2VM 7/8 only, the first eligible controller acquisition in an actual Windows boot may first cycle PID1902 → PID1901 → PID1902 when the initial strong state is already PID1902. A2VM 7/8 that initially enumerate PID1901 use only the normal verified PID1901 → PID1902 takeover. This optional cycle is gated by exact Center M Disabled startup admission, VIIPER Ready, the boot-scoped attempt marker, and an exact current PID1902 control-HID preflight. For the first boot-only leg only, a strict write-success/old-PID-gone/command-endpoint-not-ready result permits at most five additional seconds of focused PID1901 settling; the PID1901 parent devnode may already be present while its HID command child is still enumerating. Continuation requires a unique strong fresh PID1901 logical target, exact `0xFFA0/0x0001` command endpoint, and PID1902 absence, with no first-write retry. A timely strict transition is followed by a fresh focused endpoint lookup, not a second all-device snapshot. The existing normal PID1901 → PID1902 transition and full final PID1902/DirectInput/HidHide/presentation proofs are unchanged and still gate every virtual attach. The cycle completes before persisted LED/strength application and virtual presentation. If the marker cannot be read/written, skip only this optional cycle and continue ordinary ownership; the marker is not authority. EX/CG3EM is unchanged, and Runtime restart, update restart, PnP recovery, sleep/resume, Steam/BPM changes, or shutdown do not trigger this cycle. The persistent desired PID remains 1902 and shutdown still does not restore PID1901. See the [A2VM boot-rumble work order](../work-order/2026-10-10_A2VM_FAMILY_BOOT_RUMBLE_REARM_LED_VIBRATION_AND_RECOVERY_UI_WORK_ORDER.md) and [PID1901 settle follow-up](../work-order/2026-10-10_A2VM_BOOT_RUMBLE_INTERMEDIATE_PID1901_SETTLE_SIMPLIFICATION_WORK_ORDER.md).
+**Narrow boot-only exception (2026-10-10):** On A2VM 7/8 only, the first eligible controller acquisition in an actual Windows boot may first cycle PID1902 → PID1901 → PID1902 when the initial strong state is already PID1902. A2VM 7/8 that initially enumerate PID1901 use only the normal verified PID1901 → PID1902 takeover. This optional cycle is gated by exact Center M Disabled startup admission, VIIPER Ready, the boot-scoped attempt marker, and an exact current PID1902 control-HID preflight. For the first boot-only leg only, a strict write-success/old-PID-gone/command-endpoint-not-ready result permits at most five additional seconds of focused PID1901 settling; the PID1901 parent devnode may already be present while its HID command child is still enumerating. Continuation requires a unique strong fresh PID1901 logical target, exact `0xFFA0/0x0001` command endpoint, and PID1902 absence, with no first-write retry. A timely strict transition is followed by a fresh focused endpoint lookup, not a second all-device snapshot. The existing normal PID1901 → PID1902 transition and full final PID1902/DirectInput/HidHide/presentation proofs are unchanged and still gate every virtual attach. The cycle completes before persisted LED/strength application and virtual presentation. If the marker cannot be read/written, skip only this optional cycle and continue ordinary ownership; the marker is not authority. EX/CG3EM is unchanged, and Runtime restart, update restart, PnP recovery, sleep/resume, Steam/BPM changes, or shutdown do not trigger this boot cycle. The persistent desired PID remains 1902. The separate A2VM-only Windows session-end preparation may issue one unverified best-effort PID1901 command after safe retirement; it does not release authority or change HidHide. See the [A2VM boot-rumble work order](../work-order/2026-10-10_A2VM_FAMILY_BOOT_RUMBLE_REARM_LED_VIBRATION_AND_RECOVERY_UI_WORK_ORDER.md) and [PID1901 settle follow-up](../work-order/2026-10-10_A2VM_BOOT_RUMBLE_INTERMEDIATE_PID1901_SETTLE_SIMPLIFICATION_WORK_ORDER.md).
 
 If an initial native-mode command is verified written and the old PID disappears but the target command endpoint is not ready after the bounded post-write verification window, initial ownership remains uncommitted and no virtual device is attached. For the A2VM boot-prime PID1902 → PID1901 first leg only, the PID1901 parent may already be present before its exact HID command child; the owner performs the bounded target-scoped settle described above. If that deadline also expires without positive endpoint proof, the original typed command-endpoint-not-ready result may use the same existing event-driven Device Arrival path. Other eligible typed target-not-present results may keep the same Ready VIIPER presentation available, register the existing watcher, perform one fresh `AcquireAsync` recheck, and await a later real arrival. The boot-attempt marker remains consumed: a later acquisition never repeats the optional PID1902 → PID1901 → PID1902 prime; it follows the current strong PID state and performs only the normal PID1901 → PID1902 takeover when needed. Strong identity, exact PID1902 topology, DirectInput, HidHide, Win+G suppression, and presentation readiness must all be proven before the first attach. Ambiguous, unsafe, cancelled, or non-PnP failures remain terminal for that startup attempt.
 
@@ -309,21 +309,22 @@ Do not mutate a different or ambiguously identified device.
 
 ## 8. Windows shutdown/restart is not authority release
 
-The old fail-safe policy of deliberately restoring PID1901 for every clean process/Windows shutdown is no longer the desired architecture.
+Windows shutdown/restart is not an authority-release boundary. The old fail-safe policy of restoring PID1901 for every clean process exit is not the desired architecture; a narrowly gated A2VM 7/8 preparation is allowed only for an actual Windows shutdown/restart notification.
 
 While Center M remains Disabled:
 
 ```text
-Windows shutdown/restart begins
-→ neutral/retire process-owned virtual output
-→ stop publishers
-→ release process-owned DirectInput/native handles as required
-→ keep persistent HidHide Disabled-mode baseline
-→ DO NOT issue PID1902 → PID1901 solely because Windows is shutting down/restarting
-→ Windows exits
+Actual Windows shutdown/restart (`WM_ENDSESSION(TRUE)`, not logoff or app replacement)
+→ A2VM 7/8 + Center M Disabled + healthy, strongly owned PID1902 only
+→ safely retire virtual output/VIIPER and prove DirectInput cleanup
+→ if every step completes within the short deadline, issue at most one PID1902 → PID1901 command
+→ do not wait for or claim PID1901 PnP verification; keep Center M Disabled and persistent HidHide unchanged
+→ otherwise skip the command and let Windows exit
+
+Ordinary process exit, Addon restart/update, logoff, sleep, hibernate, and resume do not issue this command.
 ```
 
-The A2VM boot-only initialization is not a shutdown action. User-invoked **Restore Vibration** is also a temporary recovery under Addon authority, not a stock release.
+The A2VM boot-only initialization is not a shutdown action. The separate Windows session-end command is best-effort physical preparation, not a stock authority release. User-invoked **Restore Vibration** is also a temporary recovery under Addon authority, not a stock release.
 
 After next logon:
 
@@ -1093,9 +1094,9 @@ MSI authority restored
 3. **Center M Disabled means the background Addon Runtime is mandatory until explicit authority release.**
 4. **The frontend may close independently from the controller Runtime.**
 5. **PID1902 is the desired physical state for the entire Disabled-mode lifetime.**
-6. **Windows shutdown/restart is not an authority-release boundary.**
-7. **Do not deliberately restore PID1901 merely to reboot and then immediately return to PID1902.**
-8. **Ordinary startup/recovery keeps PID1902 if already present; the A2VM 7/8 once-per-Windows-boot rumble initialization above is the only scoped exception.**
+6. **Windows shutdown/restart is not an authority-release boundary; the one A2VM 7/8 safe-retirement command is best-effort and does not change durable authority.**
+7. **Do not perform a verified PID1901 round trip merely to reboot and immediately return to PID1902; at most, issue the narrowly gated single command without PnP verification.**
+8. **Ordinary startup/recovery keeps PID1902 if already present; the A2VM 7/8 boot-rumble cycle is its only scoped startup exception. Windows session-end preparation is separate and does not change authority.**
 9. **DirectInput and HidHide are persistent physical-ownership infrastructure, not Steam-session resources.**
 10. **HidHide configuration persists across restart while Disabled.**
 11. **Xbox360 is normal/default presentation; SteamDeck is Steam/BPM presentation.**

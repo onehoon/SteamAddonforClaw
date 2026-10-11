@@ -235,6 +235,11 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// Must reach a proven-safe state before physical ownership is released to MSI.</summary>
     Task<bool> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken);
 
+    /// <summary>Windows shutdown/restart only: use the same presentation owner to stop publication,
+    /// drain feedback, STOP rumble, detach the active typed device, and prove VIIPER teardown before
+    /// the physical owner may issue its single best-effort PID1901 command.</summary>
+    Task<bool> PrepareForWindowsSessionEndAsync(CancellationToken cancellationToken);
+
     /// <summary>OQ4: stop the current publisher, prove it joined, and write the SAME attached typed
     /// device neutral -- WITHOUT detaching it or recreating VIIPER. On a proven-stopped publisher
     /// with a rejected neutral write the current presentation is retired through the existing owner
@@ -1101,6 +1106,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     public Task<bool> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken) => RetireAsync("CenterMEnable");
 
+    public Task<bool> PrepareForWindowsSessionEndAsync(CancellationToken cancellationToken) => RetireAsync("WindowsSessionEnd", cancellationToken);
+
     public async Task<OverlayPauseResult> PauseForOverlayAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1568,9 +1575,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// detach primitive -&gt; clear managed fields). The canonical VIIPER runtime (server / bus / both
     /// typed device objects) stays alive and Ready -- this is the PR7 X360 &lt;-&gt; Deck switch step.
     /// Assumes <see cref="_gate"/> is already held; never reacquires it (work order PR7 section 14).</summary>
-    private async Task<PresentationRetirementResult> RetireActivePresentationCoreAsync(string reason)
+    private async Task<PresentationRetirementResult> RetireActivePresentationCoreAsync(string reason, CancellationToken cancellationToken = default)
     {
         await CancelRumbleLoopForLifecycleLockedAsync(reason).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         var physicalRumbleStopConfirmed = _rumbleSink is null;
 
         // 1. Stop + JOIN the publisher. A join failure is a hard barrier: never detach a device
@@ -1580,6 +1588,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             try
             {
                 await publisher.StopAsync().ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
             }
             catch (Exception exception)
             {
@@ -1604,11 +1613,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         // 2-3. Stop accepting old-presentation feedback (clear the native callback) and request a
         //      best-effort physical STOP before the typed device is detached, so a switch/release/
         //      shutdown/fail-close can never leave a motor latched.
-        var strictRearmRetirement = string.Equals(reason, "DeveloperRumbleRearm", StringComparison.Ordinal);
+        cancellationToken.ThrowIfCancellationRequested();
+        var strictFeedbackRetirement = string.Equals(reason, "DeveloperRumbleRearm", StringComparison.Ordinal)
+            || string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal);
         var feedbackDrainConfirmed = true;
         try
         {
-            if (strictRearmRetirement)
+            if (strictFeedbackRetirement)
             {
                 feedbackDrainConfirmed = TryDisarmFeedbackLocked(reason);
                 if (feedbackDrainConfirmed)
@@ -1623,12 +1634,25 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
         if (!feedbackDrainConfirmed)
         {
-            AppLog.Error("ControllerPresentation", "Developer rumble re-arm callback drain was not proven; retaining the typed device and aborting before mode mutation.", null,
-                ("Event", "DeveloperRumbleRearmFeedbackDrainFailed"), ("Presentation", _activeKind));
+            var message = string.Equals(reason, "DeveloperRumbleRearm", StringComparison.Ordinal)
+                ? "Developer rumble re-arm callback drain was not proven; retaining the typed device and aborting before mode mutation."
+                : "Presentation feedback callback drain was not proven; retaining the typed device and aborting before mode mutation.";
+            var eventName = string.Equals(reason, "DeveloperRumbleRearm", StringComparison.Ordinal)
+                ? "DeveloperRumbleRearmFeedbackDrainFailed"
+                : "PresentationFeedbackDrainFailed";
+            AppLog.Error("ControllerPresentation", message, null,
+                ("Event", eventName), ("Presentation", _activeKind), ("Reason", reason));
             return new(false, false, false);
+        }
+        if (string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal) && !physicalRumbleStopConfirmed)
+        {
+            AppLog.Error("ControllerPresentation", "Physical rumble STOP was not confirmed; retaining the typed device and aborting Windows session-end mode preparation.", null,
+                ("Event", "A2vmWindowsSessionEndRumbleStopFailed"));
+            return new(false, false, true);
         }
 
         // 4. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
+        cancellationToken.ThrowIfCancellationRequested();
         if (_activeKind == AddonPresentationKind.Xbox360)
         {
             var detach = _viiper!.DetachXbox360();
@@ -1695,18 +1719,20 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         return index >= 0 && index < state.Auxiliary.Count && state.Auxiliary[index];
     }
 
-    private async Task<bool> RetireAsync(string reason)
+    private async Task<bool> RetireAsync(string reason, CancellationToken cancellationToken = default)
     {
-        await _gate.WaitAsync().ConfigureAwait(false);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!(await RetireActivePresentationCoreAsync(reason).ConfigureAwait(false)).Succeeded)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!(await RetireActivePresentationCoreAsync(reason, cancellationToken).ConfigureAwait(false)).Succeeded)
                 return false;
 
             // 3. Tear the canonical VIIPER runtime down to its proven-safe closed state.
             if (_viiper is { State: not (CanonicalViiperRuntimeState.Closed or CanonicalViiperRuntimeState.Unsafe) } runtime)
             {
                 var teardown = await runtime.TeardownAsync().ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!teardown || runtime.State != CanonicalViiperRuntimeState.Closed)
                 {
                     AppLog.Error("ControllerPresentation", "Canonical VIIPER teardown could not be proven; ownership retained.", null,
@@ -1719,6 +1745,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 AppLog.Error("ControllerPresentation", "Canonical VIIPER is Unsafe; cannot prove teardown.", null, ("Reason", reason));
                 return false;
             }
+            cancellationToken.ThrowIfCancellationRequested();
 
             AppLog.Info("ControllerPresentation", "Presentation released.", ("Event", "PresentationReleased"),
                 ("Presentation", "None"), ("ViiperTeardownSucceeded", true), ("Reason", reason));

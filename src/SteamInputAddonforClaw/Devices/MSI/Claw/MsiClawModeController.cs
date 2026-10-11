@@ -70,6 +70,52 @@ internal sealed class MsiClawModeController(
     private readonly Func<DateTimeOffset> _now = now ?? (() => DateTimeOffset.UtcNow);
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? ((duration, token) => Task.Delay(duration, token));
 
+    internal async Task<MsiClawModeCommandWriteResult> WriteXInputCommandAsync(
+        MsiClawPhysicalIdentity expectedIdentity,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (expectedIdentity.Confidence != MsiClawIdentityConfidence.Strong
+            || expectedIdentity.VendorId != MsiClawHardware.VendorId
+            || expectedIdentity.ProductId != MsiClawHardware.DirectInputProductId)
+            return new(false, false, "StrongPid1902IdentityRequired");
+
+        IReadOnlyList<ControllerDeviceInfo> devices;
+        try
+        {
+            devices = deviceEnumerator.EnumeratePresentDevices();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("NativeMode", "Windows session-end mode command source enumeration failed.", exception,
+                ("Event", "A2vmWindowsSessionEndCommandSourceUnavailable"));
+            return new(false, false, "CommandSourceEnumerationFailed");
+        }
+
+        var source = ResolveSource(devices, expectedIdentity);
+        if (source.Status != MsiClawModeTransitionStatus.Succeeded
+            || source.Mode != MsiClawNativeMode.DirectInput
+            || source.Control is null)
+            return new(false, false, "CommandSourceNotProven:" + source.Reason);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var succeeded = await writer.WriteAsync(source.Control, MsiClawNativeMode.XInput, cancellationToken).ConfigureAwait(false);
+            return new(true, succeeded, succeeded ? "CommandWritten" : "ModeCommandWriteNotConfirmed");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("NativeMode", "Windows session-end XInput mode command write failed.", exception,
+                ("Event", "A2vmWindowsSessionEndModeCommandWriteFailed"));
+            return new(true, false, "ModeCommandWriteThrew:" + exception.GetType().Name);
+        }
+    }
+
     public async Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
     {
         var started = _now();

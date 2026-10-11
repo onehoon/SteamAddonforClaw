@@ -58,8 +58,18 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
 
         cancellationToken.ThrowIfCancellationRequested();
         var buffer = bytes.ToArray();
-        if (!_api.Write(handle, buffer, out var written))
+        using var cancellationRegistration = cancellationToken.Register(
+            static state =>
+            {
+                var (api, activeHandle) = ((IMsiClawNativeHidApi Api, SafeFileHandle Handle))state!;
+                api.CancelWrite(activeHandle);
+            },
+            (_api, handle));
+        cancellationToken.ThrowIfCancellationRequested();
+        var writeSucceeded = _api.Write(handle, buffer, out var written);
+        if (!writeSucceeded)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var error = _api.LastError;
             AppLog.Debug("NativeMode", "Raw MSI HID write failed.", ("Operation", "Write"), ("BytesWritten", written), ("Win32Error", error), ("RequestedLength", buffer.Length));
             return Task.FromResult(false);
