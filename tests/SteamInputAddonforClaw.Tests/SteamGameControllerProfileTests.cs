@@ -55,6 +55,57 @@ public sealed class SteamGameControllerProfileTests : IDisposable
             mutations.CaptureSteamVirtualController(12345));
     }
 
+    [Fact]
+    public void Controller_override_mutation_requires_an_existing_enabled_profile()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new ProfileStore(StorePath);
+        store.Save(new ProfileDocument
+        {
+            Games = new Dictionary<string, GameProfile>(StringComparer.Ordinal)
+            {
+                ["12345"] = new() { Enabled = false, SteamVirtualController = SteamVirtualControllerPreference.SteamDeck }
+            }
+        });
+        var mutations = new GameProfileMutations(store, new ProfileMutationGate());
+        var disabledBytes = File.ReadAllBytes(StorePath);
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Unavailable,
+            mutations.SetSteamVirtualController(12345, SteamVirtualControllerPreference.DualSenseEdge));
+        Assert.Equal(disabledBytes, File.ReadAllBytes(StorePath));
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck,
+            store.Load().Document.Games["12345"].SteamVirtualController);
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Unavailable,
+            mutations.SetSteamVirtualController(67890, SteamVirtualControllerPreference.DualSenseEdge));
+        Assert.Equal(disabledBytes, File.ReadAllBytes(StorePath));
+        Assert.DoesNotContain("67890", store.Load().Document.Games.Keys);
+    }
+
+    [Fact]
+    public void Disabling_and_reenabling_profile_preserves_controller_override()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new ProfileStore(StorePath);
+        store.Save(new ProfileDocument());
+        var mutations = new GameProfileMutations(store, new ProfileMutationGate());
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(12345, true, "Test Game"));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetSteamVirtualController(12345, SteamVirtualControllerPreference.DualSenseEdge));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(12345, false, null));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Unavailable,
+            mutations.SetSteamVirtualController(12345, SteamVirtualControllerPreference.SteamDeck));
+        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge,
+            store.Load().Document.Games["12345"].SteamVirtualController);
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(12345, true, null));
+        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge,
+            store.Load().Document.Games["12345"].SteamVirtualController);
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetSteamVirtualController(12345, SteamVirtualControllerPreference.SteamDeck));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);

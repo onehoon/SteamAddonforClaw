@@ -55,11 +55,8 @@ internal sealed class GameProfileMutations
             var loaded = _store.Load();
             if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
             var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            if (!loaded.Document.Games.TryGetValue(key, out var profile))
-            {
-                if (preference is null) return MutationOutcome.Succeeded;
-                profile = new GameProfile();
-            }
+            if (!loaded.Document.Games.TryGetValue(key, out var profile) || !profile.Enabled)
+                return MutationOutcome.Unavailable;
             if (profile.SteamVirtualController == preference) return MutationOutcome.Succeeded;
             loaded.Document.Games[key] = profile with { SteamVirtualController = preference };
             try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; }

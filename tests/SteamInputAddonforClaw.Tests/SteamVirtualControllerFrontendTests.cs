@@ -123,17 +123,20 @@ public sealed class SteamVirtualControllerFrontendTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
         var profilePath = Path.Combine(_directory, "idle-profiles.json");
         var store = new ProfileStore(profilePath);
+        var gameProfileMutations = new GameProfileMutations(store, new ProfileMutationGate());
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
+            gameProfileMutations.SetEnabled(12345, true, "Idle Game"));
         var control = new InProcessAddonFrontendControl(
             new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_directory, "idle-settings.json")), new NoOpStartupManager()),
             new ThrowingSystemStatusProvider(), null,
-            gameProfileMutations: new GameProfileMutations(store, new ProfileMutationGate()),
+            gameProfileMutations: gameProfileMutations,
             capturePresentationSnapshot: () => new SteamPresentationSnapshot(0, false));
 
         var result = await control.SetGameProfileSteamVirtualControllerAsync(12345, SteamVirtualControllerPreference.DualSenseEdge);
 
         Assert.True(result.Succeeded);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, result.Snapshot.SteamVirtualController);
-        Assert.False(result.Snapshot.Enabled);
+        Assert.True(result.Snapshot.Enabled);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, store.Load().Document.Games["12345"].SteamVirtualController);
     }
 
