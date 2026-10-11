@@ -948,6 +948,43 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
+    public async Task Windows_session_end_serializes_after_a_successful_inflight_presentation_reconcile()
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var stopStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var xboxPublisher = new FakePublisher
+        {
+            LifecycleEvents = events,
+            StopStarted = stopStarted,
+            StopGate = releaseStop,
+        };
+        var deckPublisher = new FakePublisher { LifecycleEvents = events, StartEventName = "DeckPublisherStart" };
+        var owner = BuildWithSink(native, xboxPublisher, deckPublisher, new FakeRumbleSink());
+        var source = new FakeSource();
+        Assert.True((await owner.AttachInitialAsync(source, WantsXbox(), default)).Succeeded);
+
+        var reconcile = owner.ReconcileDesiredPresentationAsync(source, WantsDeck, CancellationToken.None);
+        await stopStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var sessionEnd = owner.PrepareForWindowsSessionEndAsync(CancellationToken.None);
+
+        Assert.False(sessionEnd.IsCompleted);
+        releaseStop.SetResult();
+        var reconciled = await reconcile.WaitAsync(TimeSpan.FromSeconds(5));
+        var retired = await sessionEnd.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(reconciled.Succeeded);
+        Assert.True(retired);
+        Assert.Null(owner.ActivePresentation);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        Assert.Equal(2, native.Calls.Count(call => call == "DetachUSBDeviceEx"));
+        Assert.True(events.IndexOf("DeckPublisherStart") >= 0);
+        Assert.True(events.IndexOf("DeckPublisherStart") < events.LastIndexOf("PublisherStop"));
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Windows_session_end_does_not_detach_when_physical_rumble_stop_is_unconfirmed()
     {
         var native = new FakeNative();
@@ -2213,6 +2250,8 @@ public sealed class MsiClawAddonPresentationTests
         public bool StartThrows { get; set; }
         public bool StopThrows { get; set; }
         public TaskCompletionSource? StopGate { get; set; }
+        public TaskCompletionSource? StopStarted { get; set; }
+        public string? StartEventName { get; set; }
         public Action<Exception>? Fault { get; set; }
         private bool _running;
         public bool IsRunning => _running;
@@ -2221,11 +2260,13 @@ public sealed class MsiClawAddonPresentationTests
             if (StartThrows) throw new InvalidOperationException("start failed");
             Started = true;
             _running = true;
+            if (StartEventName is { } eventName) LifecycleEvents?.Add(eventName);
         }
         public async Task StopAsync()
         {
             StopCalled = true;
             LifecycleEvents?.Add("PublisherStop");
+            StopStarted?.TrySetResult();
             if (StopGate is not null) await StopGate.Task.ConfigureAwait(false);
             if (StopThrows) throw new InvalidOperationException("join failed");
             _running = false;

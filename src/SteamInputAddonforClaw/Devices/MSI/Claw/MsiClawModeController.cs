@@ -83,6 +83,7 @@ internal sealed class MsiClawModeController(
             || expectedIdentity.ProductId != MsiClawHardware.DirectInputProductId)
             return new(false, false, "StrongPid1902IdentityRequired");
 
+        var sourceResolutionStartedAt = Stopwatch.GetTimestamp();
         IReadOnlyList<ControllerDeviceInfo> devices;
         try
         {
@@ -91,7 +92,8 @@ internal sealed class MsiClawModeController(
         catch (Exception exception)
         {
             AppLog.Warn("NativeMode", "Windows session-end mode command source enumeration failed.", exception,
-                ("Event", "A2vmWindowsSessionEndCommandSourceUnavailable"));
+                ("Event", "A2vmWindowsSessionEndCommandSourceUnavailable"),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(sourceResolutionStartedAt).TotalMilliseconds));
             return new(false, false, "CommandSourceEnumerationFailed");
         }
 
@@ -99,22 +101,59 @@ internal sealed class MsiClawModeController(
         if (source.Status != MsiClawModeTransitionStatus.Succeeded
             || source.Mode != MsiClawNativeMode.DirectInput
             || source.Control is null)
+        {
+            AppLog.Warn("NativeMode", "Windows session-end mode command source was not proven.", null,
+                ("Event", "A2vmWindowsSessionEndCommandSourceUnavailable"),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(sourceResolutionStartedAt).TotalMilliseconds),
+                ("ResolutionReason", source.Reason));
             return new(false, false, "CommandSourceNotProven:" + source.Reason);
+        }
+
+        AppLog.Info("NativeMode", "Windows session-end mode command source was resolved.",
+            ("Event", "A2vmWindowsSessionEndCommandSourceResolved"),
+            ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(sourceResolutionStartedAt).TotalMilliseconds),
+            ("UsagePage", source.Control.UsagePage),
+            ("Usage", source.Control.Usage));
 
         cancellationToken.ThrowIfCancellationRequested();
+        var writeStartedAt = Stopwatch.GetTimestamp();
         try
         {
             var succeeded = await writer.WriteAsync(source.Control, MsiClawNativeMode.XInput, cancellationToken).ConfigureAwait(false);
+            if (succeeded)
+                AppLog.Info("NativeMode", "Windows session-end XInput mode command write completed.",
+                    ("Event", "A2vmWindowsSessionEndModeCommandWrite"),
+                    ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(writeStartedAt).TotalMilliseconds),
+                    ("WriteAttempted", true),
+                    ("WriteSucceeded", true),
+                    ("ResultUnconfirmed", false));
+            else
+                AppLog.Warn("NativeMode", "Windows session-end XInput mode command write was not confirmed.", null,
+                    ("Event", "A2vmWindowsSessionEndModeCommandWrite"),
+                    ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(writeStartedAt).TotalMilliseconds),
+                    ("WriteAttempted", true),
+                    ("WriteSucceeded", false),
+                    ("ResultUnconfirmed", false));
             return new(true, succeeded, succeeded ? "CommandWritten" : "ModeCommandWriteNotConfirmed");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            AppLog.Warn("NativeMode", "Windows session-end XInput command write was canceled before its result was confirmed.", null,
+                ("Event", "A2vmWindowsSessionEndModeCommandWrite"),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(writeStartedAt).TotalMilliseconds),
+                ("WriteAttempted", true),
+                ("WriteSucceeded", false),
+                ("ResultUnconfirmed", true));
             throw;
         }
         catch (Exception exception)
         {
             AppLog.Warn("NativeMode", "Windows session-end XInput mode command write failed.", exception,
-                ("Event", "A2vmWindowsSessionEndModeCommandWriteFailed"));
+                ("Event", "A2vmWindowsSessionEndModeCommandWriteFailed"),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(writeStartedAt).TotalMilliseconds),
+                ("WriteAttempted", true),
+                ("WriteSucceeded", false),
+                ("ResultUnconfirmed", false));
             return new(true, false, "ModeCommandWriteThrew:" + exception.GetType().Name);
         }
     }

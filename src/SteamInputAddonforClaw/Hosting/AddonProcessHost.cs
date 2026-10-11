@@ -41,7 +41,7 @@ internal enum AddonProcessStartupOutcome
 
 internal sealed class AddonProcessHost : IAsyncDisposable
 {
-    private static readonly TimeSpan WindowsSessionEndPreparationBudget = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan WindowsSessionEndPreparationBudget = TimeSpan.FromMilliseconds(2000);
     private readonly Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? _runtimeCompositionFactory;
     private readonly Func<string>? _frontendPipeNameFactory;
     private readonly bool _headlessUninstallPreparation;
@@ -3003,7 +3003,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             // Run the observed async sequence away from the native WndProc's thread. The handler
             // still waits for this one result, but only for the shared short deadline.
-            operation = Task.Run(() => PrepareForWindowsSessionEndAsync(deadline.Token));
+            operation = Task.Run(() => PrepareForWindowsSessionEndAsync(deadline.Token, startedAt));
             if (!operation.Wait(WindowsSessionEndPreparationBudget))
             {
                 deadline.Cancel();
@@ -3038,9 +3038,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     private async Task<SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long sessionEndStartedAt)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var admissionStartedAt = Stopwatch.GetTimestamp();
         var admissionReconcile = _presentationReconcile;
         var admissionFailure = GetWindowsSessionEndAdmissionFailure(admissionReconcile);
         if (admissionFailure is not null)
@@ -3055,6 +3057,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (!TryBeginProcessShutdownCore())
             return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("RuntimeShutdownAlreadyStarted");
 
+        AppLog.Info("Lifecycle", "Windows session-end shutdown admission completed.",
+            ("Event", "A2vmWindowsSessionEndAdmissionCompleted"),
+            ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(admissionStartedAt).TotalMilliseconds),
+            ("ReconcilePending", !admissionReconcile.IsCompleted));
+
         cancellationToken.ThrowIfCancellationRequested();
         var presentationReconcile = _presentationReconcile;
         if (presentationReconcile.IsFaulted || presentationReconcile.IsCanceled)
@@ -3063,7 +3070,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             try
             {
-                if (!await presentationReconcile.WaitAsync(cancellationToken).ConfigureAwait(false))
+                if (!await DrainWindowsSessionEndPresentationReconcileAsync(presentationReconcile, cancellationToken).ConfigureAwait(false))
                     return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationReconcileFailed");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -3095,11 +3102,36 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (postReconcileFailure is not null)
             return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped(postReconcileFailure);
 
-        if (!await presentation.PrepareForWindowsSessionEndAsync(cancellationToken).ConfigureAwait(false))
+        var presentationRetirementStartedAt = Stopwatch.GetTimestamp();
+        var presentationRetired = await presentation.PrepareForWindowsSessionEndAsync(cancellationToken).ConfigureAwait(false);
+        if (presentationRetired)
+            AppLog.Info("Lifecycle", "Windows session-end presentation retirement completed.",
+                ("Event", "A2vmWindowsSessionEndPresentationRetirement"),
+                ("Succeeded", true),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(presentationRetirementStartedAt).TotalMilliseconds));
+        else
+            AppLog.Warn("Lifecycle", "Windows session-end presentation retirement was not proven.", null,
+                ("Event", "A2vmWindowsSessionEndPresentationRetirement"),
+                ("Succeeded", false),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(presentationRetirementStartedAt).TotalMilliseconds));
+        if (!presentationRetired)
             return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationRetirementUnproven");
 
         cancellationToken.ThrowIfCancellationRequested();
-        return await physical.PrepareForWindowsSessionEndAsync(cancellationToken).ConfigureAwait(false);
+        return await physical.PrepareForWindowsSessionEndAsync(
+            cancellationToken,
+            () => GetWindowsSessionEndRemainingBudget(sessionEndStartedAt)).ConfigureAwait(false);
+    }
+
+    internal static Task<bool> DrainWindowsSessionEndPresentationReconcileAsync(
+        Task<bool> presentationReconcile,
+        CancellationToken cancellationToken) =>
+        presentationReconcile.WaitAsync(cancellationToken);
+
+    private static TimeSpan GetWindowsSessionEndRemainingBudget(long sessionEndStartedAt)
+    {
+        var remaining = WindowsSessionEndPreparationBudget - Stopwatch.GetElapsedTime(sessionEndStartedAt);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
 
     private string? GetWindowsSessionEndAdmissionFailure(Task<bool> presentationReconcile)

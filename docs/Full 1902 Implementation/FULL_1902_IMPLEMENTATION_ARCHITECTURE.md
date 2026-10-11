@@ -326,7 +326,7 @@ Actual Windows shutdown/restart (`WM_ENDSESSION(TRUE)`, not logoff or app replac
 Ordinary process exit, Addon restart/update, logoff, sleep, hibernate, and resume do not issue this command.
 ```
 
-If a Steam/BPM presentation reconcile is already in flight at this boundary, the Runtime closes further reconcile admission through the existing shutdown gate and may drain only that tracked task inside the same global deadline. It then rechecks the live presentation and exact strong PID1902 ownership before retirement. A failed, canceled, timed-out, or uncertain reconcile skips the mode command; unknown/invalid VIIPER detach outcomes remain fail-closed.
+If a Steam/BPM presentation reconcile is already in flight at this boundary, the Runtime closes further reconcile admission through the existing shutdown gate and may drain only that tracked task inside the same bounded 2-second global deadline. It then rechecks the live presentation and exact strong PID1902 ownership before retirement. A failed, canceled, timed-out, or uncertain reconcile skips the mode command; unknown/invalid VIIPER detach outcomes remain fail-closed.
 
 The A2VM boot-only initialization is not a shutdown action. The separate Windows session-end command is best-effort physical preparation, not a stock authority release. User-invoked **Restore Vibration** is also a temporary recovery under Addon authority, not a stock release.
 
