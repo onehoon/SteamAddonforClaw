@@ -2691,7 +2691,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
 
         // The one completion signal is subscribed at the existing construction seam.
-        Assert.Contains("directInputInputSource.TestCompleted += OnOwnedControllerPhysicalInputCompleted;", host, StringComparison.Ordinal);
+        Assert.Contains("directInputInputSource.SessionCompleted += OnOwnedControllerPhysicalInputCompleted;", host, StringComparison.Ordinal);
         // Expected stop and pre-commit startup completions do not schedule recovery.
         Assert.Contains("summary.StopReason == Devices.MSI.Claw.MsiClawInputStopReason.Stopped", host, StringComparison.Ordinal);
         Assert.Contains("!summary.CleanupSucceeded", host, StringComparison.Ordinal);

@@ -20,13 +20,7 @@ public sealed record MsiClawInputStartResult(MsiClawInputStartStatus Status, str
     public bool Started => Status == MsiClawInputStartStatus.Started;
 }
 
-public sealed record MsiClawInputTestSummary(
-    int TestSession,
-    long DurationMs,
-    bool M1Observed,
-    bool M2Observed,
-    bool Independent,
-    int ReadFailures,
+internal sealed record MsiClawInputSessionCompletion(
     bool CleanupSucceeded,
     MsiClawInputStopReason StopReason);
 
@@ -42,7 +36,7 @@ internal interface IMsiClawPreparedInputSource : IAsyncDisposable, IControllerSt
     /// <summary>Full1902 Suspend/Resume section 9: explicitly overwrite the published snapshot with a
     /// neutral <see cref="Input.ControllerState"/> immediately before suspend-paused publication is
     /// released, so the first resumed publish cannot replay a stale pre-suspend snapshot. This does
-    /// NOT stop the DirectInput session, reset <c>TestSession</c>, change the physical session
+    /// NOT stop the DirectInput session, reset its input-session identifier, change the physical session
     /// generation, reacquire the device, or raise <see cref="StateChanged"/>. The existing poll loop
     /// writes the current mapped state back on the next successful read.</summary>
     void ResetLatestStateToNeutral();
@@ -56,8 +50,6 @@ internal interface IMsiClawPreparedInputSource : IAsyncDisposable, IControllerSt
     }
     Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
-    Task<FrontendRawDirectInputButtonTransitionResult> RunRawDirectInputButtonTransitionDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendRawDirectInputButtonTransitionResult.Unavailable());
     Task StopAsync();
 }
 

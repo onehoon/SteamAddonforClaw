@@ -297,7 +297,7 @@ public sealed class MsiClawInputSourceTests
 
         Assert.False(source.IsRunning);
         Assert.Equal(MsiClawInputStopReason.ReadStateFailed, summary.StopReason);
-        Assert.Equal(1, summary.ReadFailures);
+        Assert.Equal(1, device.ReadCount);
         Assert.Equal(1, device.UnacquireCount);
         Assert.Equal(1, device.DisposeCount);
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
@@ -320,7 +320,7 @@ public sealed class MsiClawInputSourceTests
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
 
         Assert.Equal(MsiClawInputStopReason.ReadStateFailed, summary.StopReason);
-        Assert.Equal(1, summary.ReadFailures);
+        Assert.Equal(3, device.ReadCount);
         Assert.Equal(1, device.UnacquireCount);
         Assert.Equal(1, device.DisposeCount);
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
@@ -333,7 +333,7 @@ public sealed class MsiClawInputSourceTests
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var observed = new TaskCompletionSource<(ControllerState State, bool IsRunning, MsiClawInputStopReason StopReason)>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        source.TestCompleted += (_, summary) => observed.TrySetResult((source.LatestState, source.IsRunning, summary.StopReason));
+        source.SessionCompleted += (_, summary) => observed.TrySetResult((source.LatestState, source.IsRunning, summary.StopReason));
 
         Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         var snapshot = await observed.Task.WaitAsync(AwaitTimeout);
@@ -344,7 +344,7 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
-    public async Task ShortButtonArray_StopsDiagnosticInsteadOfPollingNeutralState()
+    public async Task ShortButtonArray_StopsInsteadOfPollingNeutralState()
     {
         var device = new FakeDevice(new DirectInputState(new bool[16]));
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
@@ -441,7 +441,6 @@ public sealed class MsiClawInputSourceTests
         await source.StopAsync();
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
         Assert.Equal(MsiClawInputStopReason.Stopped, summary.StopReason);
-        Assert.Equal(1, summary.TestSession); // same session throughout
     }
 
     [Fact]
@@ -497,60 +496,37 @@ public sealed class MsiClawInputSourceTests
     [Fact]
     public async Task StateChanged_RaisesForInitialSnapshotAndActualChangesOnly()
     {
-        var device = new FakeDevice(State(), State(), State(), State(15), State(15));
+        var device = new FakeDevice(State(), State(), State(), State(15), State(15), State(16), State(16));
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var states = new List<ControllerState>();
-        var changedStateObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var m1Observed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var m2Observed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         source.StateChanged += (_, state) =>
         {
             states.Add(state);
-            if (state == new ControllerState(new AuxiliaryButtonState([false, true]))) changedStateObserved.TrySetResult();
+            if (state == new ControllerState(new AuxiliaryButtonState([false, true]))) m1Observed.TrySetResult();
+            if (state == new ControllerState(new AuxiliaryButtonState([true, false]))) m2Observed.TrySetResult();
         };
 
         Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
-        await changedStateObserved.Task.WaitAsync(AwaitTimeout);
-        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, true])), source.LatestState);
+        await Task.WhenAll(m1Observed.Task, m2Observed.Task).WaitAsync(AwaitTimeout);
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([true, false])), source.LatestState);
         await source.StopAsync();
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
 
         Assert.Equal(
-            [new ControllerState(new AuxiliaryButtonState([false, false])), new ControllerState(new AuxiliaryButtonState([false, true]))],
+            [
+                new ControllerState(new AuxiliaryButtonState([false, false])),
+                new ControllerState(new AuxiliaryButtonState([false, true])),
+                new ControllerState(new AuxiliaryButtonState([true, false]))
+            ],
             states);
         var controls = new MsiClawDeviceAdapter().AuxiliaryControls;
         Assert.All(states, state => Assert.Equal(controls.Count, state.Auxiliary.Count));
         Assert.True(states[1].Auxiliary[controls.GetIndex(new SteamInputAddonforClaw.Devices.Abstractions.AuxiliaryControlId("msi.claw.m1"))]);
         Assert.False(states[1].Auxiliary[controls.GetIndex(new SteamInputAddonforClaw.Devices.Abstractions.AuxiliaryControlId("msi.claw.m2"))]);
-    }
-
-    [Theory]
-    [MemberData(nameof(IndependentCases))]
-    public async Task IndependentVerification_RequiresBothExclusiveButtonStates(object[] reads, bool expectedM1, bool expectedM2, bool expectedIndependent)
-    {
-        var device = new FakeDevice(reads);
-        var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
-        var summaryTask = ObserveSummary(source);
-        var expectedReadsObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        device.ReadPerformed += readCount =>
-        {
-            if (readCount >= reads.Length) expectedReadsObserved.TrySetResult();
-        };
-
-        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
-        await expectedReadsObserved.Task.WaitAsync(AwaitTimeout);
-        await source.StopAsync();
-        var summary = await summaryTask.WaitAsync(AwaitTimeout);
-
-        Assert.Equal(expectedM1, summary.M1Observed);
-        Assert.Equal(expectedM2, summary.M2Observed);
-        Assert.Equal(expectedIndependent, summary.Independent);
-    }
-
-    public static IEnumerable<object[]> IndependentCases()
-    {
-        yield return [new object[] { State(15) }, true, false, false];
-        yield return [new object[] { State(16) }, false, true, false];
-        yield return [new object[] { State(15), State(), State(16) }, true, true, true];
-        yield return [new object[] { State(15, 16) }, true, true, false];
+        Assert.False(states[2].Auxiliary[controls.GetIndex(new SteamInputAddonforClaw.Devices.Abstractions.AuxiliaryControlId("msi.claw.m1"))]);
+        Assert.True(states[2].Auxiliary[controls.GetIndex(new SteamInputAddonforClaw.Devices.Abstractions.AuxiliaryControlId("msi.claw.m2"))]);
     }
 
     [Fact]
@@ -618,10 +594,10 @@ public sealed class MsiClawInputSourceTests
         Assert.Equal(1, second.Device!.UnacquireCount);
     }
 
-    private static Task<MsiClawInputTestSummary> ObserveSummary(MsiClawInputSource source)
+    private static Task<MsiClawInputSessionCompletion> ObserveSummary(MsiClawInputSource source)
     {
-        var completion = new TaskCompletionSource<MsiClawInputTestSummary>(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.TestCompleted += (_, summary) => completion.TrySetResult(summary);
+        var completion = new TaskCompletionSource<MsiClawInputSessionCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.SessionCompleted += (_, summary) => completion.TrySetResult(summary);
         return completion.Task;
     }
 

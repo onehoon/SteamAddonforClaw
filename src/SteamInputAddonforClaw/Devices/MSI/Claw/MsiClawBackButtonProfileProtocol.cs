@@ -1,5 +1,3 @@
-using SteamInputAddonforClaw.Contracts.Frontend;
-
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal static class MsiClawBackButtonProfileProtocol
@@ -17,7 +15,7 @@ internal static class MsiClawBackButtonProfileProtocol
 
     internal readonly record struct ParsedReadback(
         byte[] Payload,
-        FrontendMsiBackButtonProfileClassification Classification);
+        MsiClawBackButtonProfileClassification Classification);
 
     internal static IReadOnlyList<byte[]> BuildSlotReadRequests()
     {
@@ -65,24 +63,24 @@ internal static class MsiClawBackButtonProfileProtocol
         return ParseOutcome.ReadbackParsed;
     }
 
-    internal static FrontendMsiBackButtonProfileClassification ClassifyPayload(ReadOnlySpan<byte> payload, ushort address)
+    internal static MsiClawBackButtonProfileClassification ClassifyPayload(ReadOnlySpan<byte> payload, ushort address)
     {
         if (payload.Length != PayloadLength)
-            return FrontendMsiBackButtonProfileClassification.OtherFormat;
+            return MsiClawBackButtonProfileClassification.OtherFormat;
 
         if (address == M1Address
             && payload[0] == 0x01 && payload[1] == 0x04 && payload[2] == 0x00 && payload[3] == 0x59
             && payload[4] == 0xFF && payload[5] == 0xFF && payload[6] == 0xFF && payload[7] == 0xFF)
-            return FrontendMsiBackButtonProfileClassification.ObservedLinuxRightBraceCandidate;
+            return MsiClawBackButtonProfileClassification.ObservedLinuxRightBraceCandidate;
         if (address == M2Address
             && payload[0] == 0x01 && payload[1] == 0x04 && payload[2] == 0x00 && payload[3] == 0x58
             && payload[4] == 0xFF && payload[5] == 0xFF && payload[6] == 0xFF && payload[7] == 0xFF)
-            return FrontendMsiBackButtonProfileClassification.ObservedLinuxLeftBraceCandidate;
+            return MsiClawBackButtonProfileClassification.ObservedLinuxLeftBraceCandidate;
         if (payload[0] == 0x01 && payload[1] == 0x04 && payload[2] == 0x0C)
-            return FrontendMsiBackButtonProfileClassification.HistoricalMarkerPresent;
+            return MsiClawBackButtonProfileClassification.HistoricalMarkerPresent;
         if (payload[0] == 0x01 && payload[1] == 0x04)
-            return FrontendMsiBackButtonProfileClassification.HistoricalMarkerAbsent;
-        return FrontendMsiBackButtonProfileClassification.OtherFormat;
+            return MsiClawBackButtonProfileClassification.HistoricalMarkerAbsent;
+        return MsiClawBackButtonProfileClassification.OtherFormat;
     }
 
     internal static byte[] BuildDirectInputRestoreWriteRequest(ushort address)

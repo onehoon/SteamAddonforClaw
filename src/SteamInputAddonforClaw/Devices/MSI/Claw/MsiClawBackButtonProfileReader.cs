@@ -1,18 +1,10 @@
-using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
+using FrontendMsiBackButtonProfileClassification = SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawBackButtonProfileClassification;
+using FrontendMsiBackButtonProfileReadOutcome = SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawBackButtonProfileReadOutcome;
+using FrontendMsiBackButtonProfileSlotResult = SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawBackButtonProfileSlotResult;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
-
-internal sealed record MsiClawBackButtonProfileReadSet(
-    ushort? FirmwareVersion,
-    FrontendMsiBackButtonProfileSlotResult M1,
-    FrontendMsiBackButtonProfileSlotResult M2)
-{
-    internal byte[]? M1Payload { get; init; }
-    internal byte[]? M2Payload { get; init; }
-    internal string? ControlDevicePath { get; init; }
-}
 
 internal sealed class MsiClawBackButtonProfileReader(
     IControllerDeviceEnumerator deviceEnumerator,
@@ -29,13 +21,15 @@ internal sealed class MsiClawBackButtonProfileReader(
         Func<MsiClawPhysicalIdentity?> ownedIdentitySource,
         Func<bool> centerMIsExactlyDisabled,
         CancellationToken cancellationToken,
-        bool firmwareMutationIssued = false)
+        bool firmwareMutationIssued = false,
+        string trigger = "ProfileRead")
     {
         ushort? firmwareVersion = null;
         var modelSupported = IsSupportedModel(modelId);
         var a2vm7ResearchOnly = string.Equals(modelId, "msi.claw.a2vm.7", StringComparison.Ordinal);
         AppLog.Info("ControllerBackButton", "ControllerBackButtonProfileReadStarted",
             ("Model", modelId),
+            ("Trigger", trigger),
             ("ReadIndex", MsiClawBackButtonProfileProtocol.ReadIndex),
             ("SlotCount", 2),
             ("RequestedLength", MsiClawBackButtonProfileProtocol.PayloadLength),
@@ -49,6 +43,7 @@ internal sealed class MsiClawBackButtonProfileReader(
         var m2 = await ReadSlotAsync("M2", MsiClawBackButtonProfileProtocol.M2Address, payload => m2Payload = payload).ConfigureAwait(false);
         AppLog.Info("ControllerBackButton", "ControllerBackButtonProfileReadSummary",
             ("Model", modelId),
+            ("Trigger", trigger),
             ("Firmware", firmwareVersion is ushort version ? $"0x{version:X4}" : "Unavailable"),
             ("M1Outcome", m1.Outcome),
             ("M1Classification", m1.Classification),
@@ -91,7 +86,9 @@ internal sealed class MsiClawBackButtonProfileReader(
                     return Complete(FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable, "ExactPid1902ControlHidUnavailableOrAmbiguous");
                 var selector = Windows.Devices.HumanInterfaceDevice.HidDevice.GetDeviceSelector(
                     control.UsagePage, control.Usage, MsiClawHardware.VendorId, MsiClawHardware.DirectInputProductId);
-                var candidates = await informationLookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
+                using var informationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                informationTimeout.CancelAfter(QueryTimeout);
+                var candidates = await informationLookup.FindAsync(selector, informationTimeout.Token).ConfigureAwait(false);
                 var info = WindowsMsiClawModeWriter.SelectDeviceInformation(control, candidates);
                 if (info is null)
                     return Complete(FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable, "ExactControlHidPathUnavailableOrAmbiguous");
@@ -114,7 +111,9 @@ internal sealed class MsiClawBackButtonProfileReader(
                     || currentControl.UsagePage != control.UsagePage
                     || currentControl.Usage != control.Usage)
                     return Complete(FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable, "ControlHidChangedBeforeQuery");
-                var currentInfoCandidates = await informationLookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
+                using var currentInformationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                currentInformationTimeout.CancelAfter(QueryTimeout);
+                var currentInfoCandidates = await informationLookup.FindAsync(selector, currentInformationTimeout.Token).ConfigureAwait(false);
                 var currentInfo = WindowsMsiClawModeWriter.SelectDeviceInformation(currentControl, currentInfoCandidates);
                 if (currentInfo is null || !string.Equals(currentInfo.Id, info.Id, StringComparison.OrdinalIgnoreCase))
                     return Complete(FrontendMsiBackButtonProfileReadOutcome.OwnerUnavailable, "ControlHidPathChangedBeforeQuery");
@@ -125,7 +124,7 @@ internal sealed class MsiClawBackButtonProfileReader(
                 cancellationToken.ThrowIfCancellationRequested();
                 var request = MsiClawBackButtonProfileProtocol.BuildReadRequest(address);
                 if (request[4] != 0x04)
-                    throw new InvalidOperationException("The M1/M2 profile diagnostic only permits ReadProfile requests.");
+                    throw new InvalidOperationException("The M1/M2 profile read only permits ReadProfile requests.");
                 var exchange = await transport.WriteAndReadAsync(
                     info.Id,
                     request,
@@ -175,6 +174,10 @@ internal sealed class MsiClawBackButtonProfileReader(
             {
                 return Complete(FrontendMsiBackButtonProfileReadOutcome.Cancelled, "Cancelled");
             }
+            catch (OperationCanceledException)
+            {
+                return Complete(FrontendMsiBackButtonProfileReadOutcome.NoReplyOrTimeout, "DeviceInformationLookupTimedOut");
+            }
             catch (Exception exception)
             {
                 return Complete(FrontendMsiBackButtonProfileReadOutcome.Failed, exception.GetType().Name);
@@ -191,6 +194,7 @@ internal sealed class MsiClawBackButtonProfileReader(
                     MsiClawBackButtonProfileProtocol.PayloadLength, outcome, classification, reason);
                 AppLog.Info("ControllerBackButton", "ControllerBackButtonProfileSlotReadCompleted",
                     ("Model", modelId),
+                    ("Trigger", trigger),
                     ("Firmware", firmwareVersion is ushort version ? $"0x{version:X4}" : "Unavailable"),
                     ("PID", "0x1902"),
                     ("UsagePage", "0xFFF0"),
@@ -210,84 +214,87 @@ internal sealed class MsiClawBackButtonProfileReader(
         }
     }
 
-    internal async Task<FrontendMsiBackButtonManualRestoreResult> RestoreKnownDirectInputProfileAsync(
+    internal async Task<MsiClawBackButtonProductionPrepareResult> PrepareDirectInputProfileAsync(
         string modelId,
+        string trigger,
         Func<MsiClawPhysicalIdentity?> ownedIdentitySource,
         Func<bool> centerMIsExactlyDisabled,
         Func<bool> runtimeOperationIsSafe,
         CancellationToken cancellationToken)
     {
         var identity = CaptureStrongOwnedIdentity(ownedIdentitySource);
-        AppLog.Info("ControllerBackButton", "Explicit M1/M2 DirectInput restore requested.",
-            ("Event", "ControllerBackButtonManualRestoreStarted"),
+        AppLog.Info("ControllerBackButton", "Production M1/M2 profile preparation started.",
+            ("Event", "ControllerBackButtonProductionPrepareStarted"),
+            ("Trigger", trigger),
             ("Model", modelId),
             ("PID", "0x1902"),
             ("UsagePage", "0xFFF0"),
             ("Usage", "0x0040"),
             ("CenterMDisabled", IsCenterMDisabled(centerMIsExactlyDisabled)));
 
-        if (!IsManualRestoreModel(modelId))
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.NotEligible, null,
-                "This model is read-only for manual M1/M2 restore; A2VM 7 is not write-enabled.");
+        if (!IsSupportedModel(modelId))
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.UnsupportedModelOrFirmware, null,
+                "This MSI Claw model is not eligible for M1/M2 profile reads or writes.");
         if (identity is null || !IsRuntimeSafe(runtimeOperationIsSafe)
             || !IsCenterMDisabled(centerMIsExactlyDisabled))
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.Unavailable, null,
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.OwnerUnavailable, null,
                 "A healthy Addon-owned strong PID1902 session with Center M exactly Disabled is required.");
         if (cancellationToken.IsCancellationRequested)
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.Cancelled, null,
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.OwnerUnavailable, null,
                 "Cancelled before profile reads or mutation.");
 
-        var before = await ReadAsync(modelId, ownedIdentitySource, centerMIsExactlyDisabled, cancellationToken)
+        var before = await ReadAsync(modelId, ownedIdentitySource, centerMIsExactlyDisabled, cancellationToken, trigger: trigger)
             .ConfigureAwait(false);
         var m1BeforeHex = ToHex(before.M1Payload);
         var m2BeforeHex = ToHex(before.M2Payload);
-        AppLog.Info("ControllerBackButton", "Manual M1/M2 restore pre-read completed.",
-            ("Event", "ControllerBackButtonManualRestorePreRead"),
+        AppLog.Info("ControllerBackButton", "Production M1/M2 profile pre-read completed.",
+            ("Event", "ControllerBackButtonProductionPreparePreRead"),
+            ("Trigger", trigger),
             ("Model", modelId),
             ("Firmware", before.FirmwareVersion is ushort beforeVersion ? $"0x{beforeVersion:X4}" : "Unavailable"),
             ("M1Outcome", before.M1.Outcome), ("M1Classification", before.M1.Classification), ("M1OriginalBytes", m1BeforeHex ?? "Unavailable"),
             ("M2Outcome", before.M2.Outcome), ("M2Classification", before.M2.Classification), ("M2OriginalBytes", m2BeforeHex ?? "Unavailable"));
 
         if (cancellationToken.IsCancellationRequested)
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.Cancelled, before,
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.OwnerUnavailable, before,
                 "Cancelled before the first profile write.");
-        if (before.M1.Outcome != FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed
-            || before.M2.Outcome != FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed
+        if (before.M1.Outcome != MsiClawBackButtonProfileReadOutcome.ReadbackParsed
+            || before.M2.Outcome != MsiClawBackButtonProfileReadOutcome.ReadbackParsed
             || before.M1Payload is not { Length: MsiClawBackButtonProfileProtocol.PayloadLength }
             || before.M2Payload is not { Length: MsiClawBackButtonProfileProtocol.PayloadLength }
             || string.IsNullOrWhiteSpace(before.ControlDevicePath))
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.NotEligible, before,
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.Unverified, before,
                 "Both exact PID1902 profile slots must be read successfully before any write.");
 
-        if (!IsAllowedManualRestoreFirmware(modelId, before.FirmwareVersion))
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.NotEligible, before,
+        if (!IsAllowedProductionPrepareFirmware(modelId, before.FirmwareVersion))
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.UnsupportedModelOrFirmware, before,
                 "This exact model and firmware pair is not write-enabled.");
 
         var m1Prepared = IsKnownDirectInputProfile(before.M1Payload);
         var m2Prepared = IsKnownDirectInputProfile(before.M2Payload);
         if (m1Prepared && m2Prepared)
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.AlreadyPrepared, before,
-                "Both profile slots already have the known DirectInput header; no write was issued.");
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.AlreadyPrepared, before,
+                "Both profile slots already use the DirectInput mode selector; no write was issued.");
 
         if (!IsObservedCandidate(before.M1Payload, MsiClawBackButtonProfileProtocol.M1Address, isM1: true)
             || !IsObservedCandidate(before.M2Payload, MsiClawBackButtonProfileProtocol.M2Address, isM1: false))
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.NotEligible, before,
-                "UnknownProfile: unknown, custom, historical, or mixed M1/M2 profile bytes were preserved; no write was issued.");
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.MixedOrUnknownProfilePreserved, before,
+                "Unknown, custom, historical, or mixed M1/M2 profile bytes were preserved; no write was issued.");
 
         if (!IsSameStrongOwnedIdentity(ownedIdentitySource, identity)
             || !IsRuntimeSafe(runtimeOperationIsSafe)
             || !IsCenterMDisabled(centerMIsExactlyDisabled))
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.Unavailable, before,
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.OwnerUnavailable, before,
                 "Runtime ownership or Center M authority changed before the first profile write.");
 
-        var endpoint = await ResolveManualRestoreEndpointAsync(
+        var endpoint = await ResolveProductionPrepareEndpointAsync(
             identity, before.ControlDevicePath, before.FirmwareVersion!.Value,
             ownedIdentitySource, centerMIsExactlyDisabled, runtimeOperationIsSafe).ConfigureAwait(false);
         if (endpoint is null)
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.Unavailable, before,
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.OwnerUnavailable, before,
                 "The exact owned PID1902 control HID or firmware changed before mutation.");
         if (cancellationToken.IsCancellationRequested)
-            return Complete(FrontendMsiBackButtonManualRestoreOutcome.Cancelled, before,
+            return Complete(MsiClawBackButtonProductionPrepareOutcome.OwnerUnavailable, before,
                 "Cancelled before the first profile write.");
 
         var m1Write = MsiClawBackButtonProfileProtocol.BuildDirectInputRestoreWriteRequest(MsiClawBackButtonProfileProtocol.M1Address);
@@ -309,54 +316,54 @@ internal sealed class MsiClawBackButtonProfileReader(
             m1Succeeded = await WriteBoundedAsync(endpoint.DevicePath, m1Write).ConfigureAwait(false);
             LogCommand("M1Write", MsiClawBackButtonProfileProtocol.M1Address, m1Write, m1Succeeded);
             if (!m1Succeeded)
-                return await FinishAsync(FrontendMsiBackButtonManualRestoreOutcome.WriteFailed,
+                return await FinishAsync(MsiClawBackButtonProductionPrepareOutcome.PartialVolatileWritePossible,
                     "The M1 write transport failed; M2 and ROM sync were not issued.").ConfigureAwait(false);
 
-            endpoint = await ResolveManualRestoreEndpointAsync(
+            endpoint = await ResolveProductionPrepareEndpointAsync(
                 identity, before.ControlDevicePath, before.FirmwareVersion.Value,
                 ownedIdentitySource, centerMIsExactlyDisabled, runtimeOperationIsSafe).ConfigureAwait(false);
             if (endpoint is null)
-                return await FinishAsync(FrontendMsiBackButtonManualRestoreOutcome.PartialVolatileWritePossible,
+                return await FinishAsync(MsiClawBackButtonProductionPrepareOutcome.PartialVolatileWritePossible,
                     "The owned session changed after M1; M2 and ROM sync were not issued.").ConfigureAwait(false);
 
             m2Issued = true;
             m2Succeeded = await WriteBoundedAsync(endpoint.DevicePath, m2Write).ConfigureAwait(false);
             LogCommand("M2Write", MsiClawBackButtonProfileProtocol.M2Address, m2Write, m2Succeeded);
             if (!m2Succeeded)
-                return await FinishAsync(FrontendMsiBackButtonManualRestoreOutcome.PartialVolatileWritePossible,
+                return await FinishAsync(MsiClawBackButtonProductionPrepareOutcome.PartialVolatileWritePossible,
                     "M2 transport failed after the M1 write; ROM sync was not issued.").ConfigureAwait(false);
 
-            endpoint = await ResolveManualRestoreEndpointAsync(
+            endpoint = await ResolveProductionPrepareEndpointAsync(
                 identity, before.ControlDevicePath, before.FirmwareVersion.Value,
                 ownedIdentitySource, centerMIsExactlyDisabled, runtimeOperationIsSafe).ConfigureAwait(false);
             if (endpoint is null)
-                return await FinishAsync(FrontendMsiBackButtonManualRestoreOutcome.PartialVolatileWritePossible,
+                return await FinishAsync(MsiClawBackButtonProductionPrepareOutcome.PartialVolatileWritePossible,
                     "The owned session changed after both profile writes; ROM sync was not issued.").ConfigureAwait(false);
 
             syncIssued = true;
             syncSucceeded = await WriteBoundedAsync(endpoint.DevicePath, sync).ConfigureAwait(false);
             LogCommand("SyncToROM", null, sync, syncSucceeded);
-            return await FinishAsync(FrontendMsiBackButtonManualRestoreOutcome.Unverified,
+            return await FinishAsync(MsiClawBackButtonProductionPrepareOutcome.Unverified,
                 syncSucceeded
                     ? "Both profile writes and ROM sync were accepted; verifying readback and physical input separately."
                     : "Both profile writes were accepted, but ROM sync transport failed; result is unverified.").ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            AppLog.Warn("ControllerBackButton", "Manual M1/M2 restore stopped after an exception.", exception,
-                ("Event", "ControllerBackButtonManualRestoreFailed"),
+            AppLog.Warn("ControllerBackButton", "Production M1/M2 preparation stopped after an exception.", exception,
+                ("Event", "ControllerBackButtonProductionPrepareFailed"), ("Trigger", trigger),
                 ("Model", modelId), ("Firmware", $"0x{before.FirmwareVersion:X4}"),
                 ("M1WriteIssued", m1Issued), ("M1WriteSucceeded", m1Succeeded),
                 ("M2WriteIssued", m2Issued), ("M2WriteSucceeded", m2Succeeded),
                 ("RomSyncIssued", syncIssued), ("RomSyncSucceeded", syncSucceeded));
-            var outcome = m1Succeeded && !m2Succeeded || m1Succeeded && m2Succeeded && !syncIssued
-                ? FrontendMsiBackButtonManualRestoreOutcome.PartialVolatileWritePossible
-                : FrontendMsiBackButtonManualRestoreOutcome.Failed;
-            return await FinishAsync(outcome, $"Manual restore stopped: {exception.GetType().Name}.").ConfigureAwait(false);
+            var outcome = m1Issued || m1Succeeded || m2Issued || m2Succeeded
+                ? MsiClawBackButtonProductionPrepareOutcome.PartialVolatileWritePossible
+                : MsiClawBackButtonProductionPrepareOutcome.Failed;
+            return await FinishAsync(outcome, $"Production preparation stopped: {exception.GetType().Name}.").ConfigureAwait(false);
         }
 
-        async Task<FrontendMsiBackButtonManualRestoreResult> FinishAsync(
-            FrontendMsiBackButtonManualRestoreOutcome requestedOutcome,
+        async Task<MsiClawBackButtonProductionPrepareResult> FinishAsync(
+            MsiClawBackButtonProductionPrepareOutcome requestedOutcome,
             string status)
         {
             if ((m1Issued || m2Issued || syncIssued)
@@ -365,37 +372,40 @@ internal sealed class MsiClawBackButtonProfileReader(
                     && IsCenterMDisabled(centerMIsExactlyDisabled))
             {
                 after = await ReadAsync(modelId, ownedIdentitySource, centerMIsExactlyDisabled, CancellationToken.None,
-                    firmwareMutationIssued: true)
+                    firmwareMutationIssued: true, trigger: trigger)
                     .ConfigureAwait(false);
             }
 
             var readbackObserved = after?.M1.Outcome == FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed
                 && after.M2.Outcome == FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed;
             var matchesPrepared = readbackObserved
+                && after?.FirmwareVersion == before.FirmwareVersion
+                && string.Equals(after?.ControlDevicePath, before.ControlDevicePath, StringComparison.OrdinalIgnoreCase)
                 && IsKnownDirectInputProfile(after!.M1Payload)
                 && IsKnownDirectInputProfile(after.M2Payload);
             var profileReadbackVerified = m1Succeeded && m2Succeeded && syncIssued && syncSucceeded && matchesPrepared;
-            var finalOutcome = requestedOutcome;
-            var finalStatus = requestedOutcome == FrontendMsiBackButtonManualRestoreOutcome.Unverified && profileReadbackVerified
-                ? "Both DirectInput profile headers read back; physical M1/M2 input is not yet verified."
+            var finalOutcome = requestedOutcome == MsiClawBackButtonProductionPrepareOutcome.Unverified && profileReadbackVerified
+                ? MsiClawBackButtonProductionPrepareOutcome.RestoredProfileReadback
+                : requestedOutcome;
+            var finalStatus = finalOutcome == MsiClawBackButtonProductionPrepareOutcome.RestoredProfileReadback
+                ? "Both DirectInput profile selectors read back; this is not a physical button test."
                 : status;
 
-            var result = new FrontendMsiBackButtonManualRestoreResult(
+            var result = new MsiClawBackButtonProductionPrepareResult(
                 finalOutcome, modelId, before.FirmwareVersion, finalStatus,
-                ManualSlot("M1", MsiClawBackButtonProfileProtocol.M1Address, before.M1, before.M1Payload,
+                ProductionSlot("M1", MsiClawBackButtonProfileProtocol.M1Address, before.M1, before.M1Payload,
                     m1Issued, m1Succeeded, after?.M1, after?.M1Payload),
-                ManualSlot("M2", MsiClawBackButtonProfileProtocol.M2Address, before.M2, before.M2Payload,
+                ProductionSlot("M2", MsiClawBackButtonProfileProtocol.M2Address, before.M2, before.M2Payload,
                     m2Issued, m2Succeeded, after?.M2, after?.M2Payload),
-                syncIssued, syncSucceeded, readbackObserved,
-                FrontendRawDirectInputButtonTransitionResult.Unavailable("Raw input confirmation has not run."));
-            AppLog.Info("ControllerBackButton", "Manual M1/M2 DirectInput restore completed.",
-                ("Event", "ControllerBackButtonManualRestoreCompleted"),
+                syncIssued, syncSucceeded, readbackObserved);
+            AppLog.Info("ControllerBackButton", "Production M1/M2 profile preparation completed.",
+                ("Event", "ControllerBackButtonProductionPrepareCompleted"), ("Trigger", trigger),
                 ("Outcome", result.Outcome), ("Model", modelId),
                 ("Firmware", result.FirmwareVersion is ushort resultVersion ? $"0x{resultVersion:X4}" : "Unavailable"),
                 ("M1Before", result.M1.BeforePayloadHex ?? "Unavailable"),
                 ("M2Before", result.M2.BeforePayloadHex ?? "Unavailable"),
-                ("M1WriteIssued", result.M1.WriteIssued), ("M1WriteTransportSucceeded", result.M1.WriteTransportSucceeded),
-                ("M2WriteIssued", result.M2.WriteIssued), ("M2WriteTransportSucceeded", result.M2.WriteTransportSucceeded),
+                ("M1WriteIssued", result.M1.WriteIssued), ("M1WriteTransportSucceeded", result.M1.WriteSucceeded),
+                ("M2WriteIssued", result.M2.WriteIssued), ("M2WriteTransportSucceeded", result.M2.WriteSucceeded),
                 ("RomSyncIssued", result.RomSyncIssued), ("RomSyncTransportSucceeded", result.RomSyncTransportSucceeded),
                 ("M1After", result.M1.AfterPayloadHex ?? "Unavailable"),
                 ("M2After", result.M2.AfterPayloadHex ?? "Unavailable"),
@@ -406,27 +416,40 @@ internal sealed class MsiClawBackButtonProfileReader(
         }
 
         void LogCommand(string command, ushort? address, byte[] packet, bool succeeded) =>
-            AppLog.Info("ControllerBackButton", "Manual M1/M2 firmware command completed.",
-                ("Event", "ControllerBackButtonManualRestoreCommand"),
+            AppLog.Info("ControllerBackButton", "Production M1/M2 firmware command completed.",
+                ("Event", "ControllerBackButtonProductionPrepareCommand"), ("Trigger", trigger),
                 ("Command", command), ("Address", address is ushort value ? $"0x{value:X4}" : "N/A"),
                 ("PacketHex", Convert.ToHexString(packet)), ("TransportSucceeded", succeeded));
 
-        FrontendMsiBackButtonManualRestoreResult Complete(
-            FrontendMsiBackButtonManualRestoreOutcome outcome,
+        MsiClawBackButtonProductionPrepareResult Complete(
+            MsiClawBackButtonProductionPrepareOutcome outcome,
             MsiClawBackButtonProfileReadSet? read,
             string status)
         {
             var m1 = read?.M1 ?? EmptySlot("M1", MsiClawBackButtonProfileProtocol.M1Address, status);
             var m2 = read?.M2 ?? EmptySlot("M2", MsiClawBackButtonProfileProtocol.M2Address, status);
-            return new(outcome, modelId, read?.FirmwareVersion, status,
-                ManualSlot("M1", MsiClawBackButtonProfileProtocol.M1Address, m1, read?.M1Payload, false, false, null, null),
-                ManualSlot("M2", MsiClawBackButtonProfileProtocol.M2Address, m2, read?.M2Payload, false, false, null, null),
-                false, false, false,
-                FrontendRawDirectInputButtonTransitionResult.Unavailable(status));
+            var result = new MsiClawBackButtonProductionPrepareResult(outcome, modelId, read?.FirmwareVersion, status,
+                ProductionSlot("M1", MsiClawBackButtonProfileProtocol.M1Address, m1, read?.M1Payload, false, false, null, null),
+                ProductionSlot("M2", MsiClawBackButtonProfileProtocol.M2Address, m2, read?.M2Payload, false, false, null, null),
+                false, false, false);
+            AppLog.Info("ControllerBackButton", "Production M1/M2 profile preparation completed.",
+                ("Event", "ControllerBackButtonProductionPrepareCompleted"), ("Trigger", trigger),
+                ("Outcome", result.Outcome), ("Model", modelId),
+                ("Firmware", result.FirmwareVersion is ushort version ? $"0x{version:X4}" : "Unavailable"),
+                ("M1Before", result.M1.BeforePayloadHex ?? "Unavailable"),
+                ("M2Before", result.M2.BeforePayloadHex ?? "Unavailable"),
+                ("M1After", result.M1.AfterPayloadHex ?? "Unavailable"),
+                ("M2After", result.M2.AfterPayloadHex ?? "Unavailable"),
+                ("M1WriteIssued", result.M1.WriteIssued), ("M1WriteTransportSucceeded", result.M1.WriteSucceeded),
+                ("M2WriteIssued", result.M2.WriteIssued), ("M2WriteTransportSucceeded", result.M2.WriteSucceeded),
+                ("RomSyncIssued", result.RomSyncIssued), ("RomSyncTransportSucceeded", result.RomSyncSucceeded),
+                ("ReadbackObserved", result.ReadbackObserved), ("ProfileReadbackVerified", result.ProfileReadbackVerified),
+                ("Status", result.Status));
+            return result;
         }
     }
 
-    private async Task<MsiClawManualRestoreEndpoint?> ResolveManualRestoreEndpointAsync(
+    private async Task<MsiClawProductionPrepareEndpoint?> ResolveProductionPrepareEndpointAsync(
         MsiClawPhysicalIdentity expectedIdentity,
         string expectedDevicePath,
         ushort expectedFirmware,
@@ -444,7 +467,16 @@ internal sealed class MsiClawBackButtonProfileReader(
             return null;
         var selector = Windows.Devices.HumanInterfaceDevice.HidDevice.GetDeviceSelector(
             control.UsagePage, control.Usage, MsiClawHardware.VendorId, MsiClawHardware.DirectInputProductId);
-        var candidates = await informationLookup.FindAsync(selector, CancellationToken.None).ConfigureAwait(false);
+        using var lookupTimeout = new CancellationTokenSource(QueryTimeout);
+        IReadOnlyList<MsiClawHidDeviceInformation> candidates;
+        try
+        {
+            candidates = await informationLookup.FindAsync(selector, lookupTimeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (lookupTimeout.IsCancellationRequested)
+        {
+            return null;
+        }
         var info = WindowsMsiClawModeWriter.SelectDeviceInformation(control, candidates);
         if (info is null
             || !string.Equals(info.Id, expectedDevicePath, StringComparison.OrdinalIgnoreCase)
@@ -479,7 +511,7 @@ internal sealed class MsiClawBackButtonProfileReader(
         }
     }
 
-    private static FrontendMsiBackButtonManualRestoreSlotResult ManualSlot(
+    private static MsiClawBackButtonProductionPrepareSlotResult ProductionSlot(
         string slot,
         ushort address,
         FrontendMsiBackButtonProfileSlotResult before,
@@ -510,9 +542,7 @@ internal sealed class MsiClawBackButtonProfileReader(
         payload is { Length: MsiClawBackButtonProfileProtocol.PayloadLength }
         && payload[0] == 0x01 && payload[1] == 0x00;
 
-    private static bool IsManualRestoreModel(string modelId) => modelId is "msi.claw.a2vm.8" or "msi.claw.cg3em";
-
-    private static bool IsAllowedManualRestoreFirmware(string modelId, ushort? firmware) =>
+    private static bool IsAllowedProductionPrepareFirmware(string modelId, ushort? firmware) =>
         modelId == "msi.claw.a2vm.8" && firmware == 0x0230
         || modelId == "msi.claw.cg3em" && firmware is 0x0414 or 0x0419;
 
@@ -522,7 +552,7 @@ internal sealed class MsiClawBackButtonProfileReader(
         catch { return false; }
     }
 
-    private sealed record MsiClawManualRestoreEndpoint(string DevicePath, ushort FirmwareVersion);
+    private sealed record MsiClawProductionPrepareEndpoint(string DevicePath, ushort FirmwareVersion);
 
     private MsiClawControlHidDevice? ResolveCurrentControl(MsiClawPhysicalIdentity identity)
     {
