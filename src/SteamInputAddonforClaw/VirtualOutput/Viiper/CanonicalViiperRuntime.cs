@@ -360,7 +360,11 @@ internal sealed class CanonicalViiperRuntime
 
         if (state == USBDeviceAttachmentState.Attached)
         {
-            if (!TryDetachDualSenseEdgeIfAttached(state)) return false;
+            if (!TryDetachDualSenseEdgeIfAttached(state))
+            {
+                RestartFullTeardownAfterRetryableEdgeCreationCleanup();
+                return false;
+            }
             if (!TryGetAttachmentState(DualSenseEdgeDeviceHandle, out state) || state != USBDeviceAttachmentState.Detached)
             {
                 MarkUnsafe("DualSenseEdgeInvalidIdentityPostDetachNotDetached");
@@ -373,10 +377,22 @@ internal sealed class CanonicalViiperRuntime
             return false;
         }
 
-        if (!TryRemoveDualSenseEdge()) return false;
+        if (!TryRemoveDualSenseEdge())
+        {
+            RestartFullTeardownAfterRetryableEdgeCreationCleanup();
+            return false;
+        }
         State = CanonicalViiperRuntimeState.Ready;
         TeardownPhase = CanonicalViiperRuntimeTeardownPhase.None;
         return false;
+    }
+
+    private void RestartFullTeardownAfterRetryableEdgeCreationCleanup()
+    {
+        // A retryable Edge cleanup happened before final runtime teardown began. Resume at the
+        // canonical owner sequence so the persistent Deck and Xbox handles are also retired.
+        if (State == CanonicalViiperRuntimeState.CleanupPending)
+            TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DeckDetach;
     }
 
     private bool TryDetachDualSenseEdgeIfAttached(USBDeviceAttachmentState observedState)

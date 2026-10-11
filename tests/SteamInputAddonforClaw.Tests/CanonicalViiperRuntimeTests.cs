@@ -151,6 +151,38 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
+    public async Task Edge_invalid_identity_with_retryable_remove_runs_full_owner_teardown_before_parent_removal()
+    {
+        var native = new FakeNative
+        {
+            EdgeIdentityBusId = 999,
+            RemoveEdgeResults = new Queue<DSDeviceRemoveResult>(
+                [DSDeviceRemoveResult.RetryableFailure, DSDeviceRemoveResult.Success])
+        };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+
+        Assert.False(runtime.TryEnsureDualSenseEdgeDevice());
+        Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime.State);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.DeckDetach, runtime.TeardownPhase);
+        Assert.Equal((nuint)40, runtime.DualSenseEdgeDeviceHandle);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+
+        Assert.True(await runtime.TeardownAsync());
+
+        var deckRemove = native.Calls.LastIndexOf("RemoveSteamDeckDeviceEx");
+        var xboxRemove = native.Calls.LastIndexOf("RemoveXbox360DeviceEx");
+        var edgeRemove = native.Calls.LastIndexOf("RemoveDualSenseDeviceEx");
+        var busRemove = native.Calls.LastIndexOf("RemoveUSBBus");
+        var serverClose = native.Calls.LastIndexOf("CloseUSBServer");
+        Assert.True(deckRemove >= 0 && deckRemove < xboxRemove);
+        Assert.True(xboxRemove < edgeRemove && edgeRemove < busRemove && busRemove < serverClose);
+        Assert.Equal((nuint)0, runtime.DeckDeviceHandle);
+        Assert.Equal((nuint)0, runtime.Xbox360DeviceHandle);
+        Assert.Equal((nuint)0, runtime.DualSenseEdgeDeviceHandle);
+        Assert.Equal((nuint)0, runtime.ServerHandle);
+    }
+
+    [Fact]
     public async Task Edge_attachment_query_failure_retains_handle_and_blocks_parent_teardown()
     {
         var native = new FakeNative { EdgeAttachmentQuerySucceeds = false };
