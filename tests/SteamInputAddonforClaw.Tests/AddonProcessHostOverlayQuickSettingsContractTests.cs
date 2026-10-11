@@ -262,6 +262,36 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.True(committedIndex < refreshIndex);
     }
 
+    [Fact]
+    public void Overlay_capture_stops_motion_promptly_and_release_restarts_through_live_presentation_reconcile()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var opening = ExtractMethod(source, "private async Task CoordinateOverlayToggleAsync()");
+        var pauseIndex = opening.IndexOf("PauseForOverlayAsync", StringComparison.Ordinal);
+        var committedIndex = opening.IndexOf("AppLog.Info(\"OverlayCapture\", \"Capture committed.\"", StringComparison.Ordinal);
+        var stopIndex = opening.IndexOf("_ = ReconcileMotionReadersAsync(\"OverlayCaptureCommitted\");", StringComparison.Ordinal);
+        var refreshIndex = opening.IndexOf("_overlayController.RefreshQuickSettingsAsync(preferActiveProfile)", StringComparison.Ordinal);
+
+        Assert.True(pauseIndex >= 0 && pauseIndex < committedIndex);
+        Assert.True(committedIndex < stopIndex && stopIndex < refreshIndex);
+        Assert.DoesNotContain("await ReconcileMotionReadersAsync(\"OverlayCaptureCommitted\")", opening);
+        Assert.DoesNotContain("await StopMotionSourceAsync", opening);
+        Assert.DoesNotContain("StopAsync(", opening);
+
+        var release = ExtractMethod(source, "private async Task<bool> RetireOverlayCaptureUnderTransitionAsync");
+        var resumeIndex = release.IndexOf("await presentation.ResumeAfterOverlayAsync", StringComparison.Ordinal);
+        var unavailableIndex = release.IndexOf("source is not { IsRunning: true }", StringComparison.Ordinal);
+        var releaseReconcileIndex = release.IndexOf("RequestControllerPresentationReconcile(\"OverlayCaptureReleased\")", StringComparison.Ordinal);
+        Assert.True(resumeIndex >= 0 && resumeIndex < unavailableIndex);
+        Assert.True(unavailableIndex < releaseReconcileIndex);
+        Assert.Contains("return true; // existing PR8/PR10 physical recovery + PR7 reconcile own repair", release);
+
+        var presentationReconcile = ExtractMethod(source, "private async Task<bool> ReconcileControllerPresentationAsync(");
+        var finallyIndex = presentationReconcile.LastIndexOf("finally", StringComparison.Ordinal);
+        var motionReconcileIndex = presentationReconcile.IndexOf("await ReconcileMotionReadersAsync(\"PresentationReconcile:\" + trigger)", StringComparison.Ordinal);
+        Assert.True(finallyIndex >= 0 && finallyIndex < motionReconcileIndex);
+    }
+
     // Section 27/28: the shared product/dispatch authority SF-V2-08 already built stays untouched --
     // SF-V2-09 only consumes it from the Overlay side.
     [Fact]
