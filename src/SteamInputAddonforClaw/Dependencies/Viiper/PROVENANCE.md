@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     0689d18416cf6cde9ba4fed04eb373a1a3383ddc
+Commit:     17b9334645b4ede72de81a8d09d967189fb3fdc4
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -35,7 +35,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: 2e70012583747384c18f7229e270f5dfc092a79d0625e6f0bc999efe6e5dbde0
-DLL SHA-256:              e7eb94adb4df0347928507f28bcd7491029663ff47d06cd3d85c00899c718015
+DLL SHA-256:              3e23c68d80a595d3d45de1c11bcaff28785e75640c10738b4dc46af7c3f84968
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -43,36 +43,12 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-This source-alignment review compares the checked-in generated
-`Dependencies/Viiper/libVIIPER.h` with `CanonicalViiperNativeApi.cs`,
-`CanonicalViiperNativeTypes.cs`, and `CanonicalViiperNativeAbiTests.cs` for the
-pinned artifact above.
-
-- `DSDeviceHandle` is native `uintptr_t` and managed `nuint`. The generated
-  header also retains classified `AttachUSBDeviceEx` / `DetachUSBDeviceEx` and
-  `GetUSBDeviceAttachmentState`, alongside typed Steam Deck and Xbox360 state,
-  callback, and removal exports.
-- The Edge exports `CreateDualSenseEdgeDevice`, `SetDualSenseDeviceState`,
-  `SetDualSenseOutputCallback`, and `RemoveDualSenseDeviceEx` are present in the
-  pinned generated header. The Addon resolves them lazily and keeps them out of
-  `RequiredExports`; a DLL without those optional symbols can still support
-  ordinary startup, while an explicit Edge request reports the missing
-  capability.
-- `DSDeviceState` is passed by value with native default alignment and managed
-  sequential layout. On x64 the struct is 36 bytes; the checked-in ABI tests
-  assert `Buttons` at offset 4, `DPad` at 8, `GyroX` at 24, and `AccelX` at 30.
-- `DSDeviceRemoveResult` is a four-byte C enum mirrored with values Success=0,
-  RetryableFailure=1, UnsafeOutcomeUnknown=2, and Invalid=3.
-- `DSOutputCallback` is a C `cdecl` callback with a pointer-width handle and
-  six byte parameters: small/large rumble, RGB LED values, and player LEDs. The
-  managed delegate and ABI tests assert that signature. The Addon uses only
-  ordinary two-motor rumble and ignores LED values; it does not translate
-  LED-only commands, adaptive triggers, audio, or specialized haptics.
-
-These checked-in source and ABI tests establish the managed/native contract;
-they do not establish Sony recognition, Steam Input compatibility, or physical
-controller behavior. This review records the current contract and does not
-claim a complete list of changes relative to an earlier header revision.
+ABI compatibility is not inferred by the dependency automation. Review the
+generated `libVIIPER.h` diff and the managed interop
+(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
+`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
+Replace this paragraph with the reviewed ABI delta -- including any changed
+struct layout, offsets, or exports -- once confirmed.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
