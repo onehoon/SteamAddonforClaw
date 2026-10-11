@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
@@ -97,6 +98,40 @@ public sealed class SystemStatusTests
 
         Assert.False(snapshot.RecoverySafe);
         Assert.Equal(AddonOperationalStatus.Indeterminate, snapshot.Addon.Status);
+    }
+
+    [Fact]
+    public async Task SystemStatusProvider_PassesCapturedRecoverySafetyToBadgeProjection()
+    {
+        bool? badgeRecoverySafe = null;
+        var provider = new SystemStatusProvider(
+            new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
+            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
+            () => new SteamPresentationSnapshot(0, false), () => false,
+            captureControllerBadge: recoverySafe =>
+            {
+                badgeRecoverySafe = recoverySafe;
+                return FrontendControllerBadgeState.Reconnecting;
+            });
+
+        var snapshot = await provider.CaptureAsync();
+
+        Assert.False(badgeRecoverySafe);
+        Assert.Equal(FrontendControllerBadgeState.Reconnecting, snapshot.ControllerBadge);
+    }
+
+    [Fact]
+    public async Task SystemStatusProvider_BadgeProjectionFailureDefaultsToUnavailable()
+    {
+        var provider = new SystemStatusProvider(
+            new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
+            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
+            () => new SteamPresentationSnapshot(0, false), () => true,
+            captureControllerBadge: _ => throw new InvalidOperationException("badge projection failed"));
+
+        var snapshot = await provider.CaptureAsync();
+
+        Assert.Equal(FrontendControllerBadgeState.Unavailable, snapshot.ControllerBadge);
     }
 
     [Fact]

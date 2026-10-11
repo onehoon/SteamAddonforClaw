@@ -14,7 +14,10 @@ internal static class FrontendSnapshotMapper
         new(MapPrerequisite(snapshot.Prerequisites.HidHide.Status), snapshot.Prerequisites.HidHide.Reason, MapPrerequisite(snapshot.Prerequisites.UsbIpWin2.Status), snapshot.Prerequisites.UsbIpWin2.Reason, MapPrerequisite(snapshot.Prerequisites.Viiper.Status), snapshot.Prerequisites.Viiper.Reason),
         new(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, MapSteamSource(snapshot.Steam.Source)),
         MapAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason, snapshot.RecoverySafe,
-        FrontendSetupStatus.Indeterminate, "Status must be refreshed before setup evaluation.", false);
+        FrontendSetupStatus.Indeterminate, "Status must be refreshed before setup evaluation.", false)
+    {
+        ControllerBadge = snapshot.ControllerBadge
+    };
 
     internal static FrontendStatusSnapshot ApplySetup(FrontendStatusSnapshot snapshot, FirstTimeSetupAssessment setup) => snapshot with
     {

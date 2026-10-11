@@ -168,7 +168,9 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 70: the Developer Vibration Test page adds the typed A2VM 8 rumble re-arm result and
 // Runtime-owned command for a verified PID1902 -> PID1901 -> PID1902 mode cycle. A v69 peer cannot
 // safely invoke this command or deserialize its software-restoration evidence.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 70; }
+// Version 71: the read-only Device summary adds a typed live controller-presentation badge to
+// FrontendStatusSnapshot. A v70 peer cannot deserialize the updated status contract safely.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 71; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

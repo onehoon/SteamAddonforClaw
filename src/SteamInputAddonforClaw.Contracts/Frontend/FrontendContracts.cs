@@ -535,7 +535,21 @@ public sealed record FrontendStatusSnapshot(
     bool RecoverySafe,
     FrontendSetupStatus SetupStatus,
     string SetupReason,
-    bool CanInstallRequiredComponents);
+    bool CanInstallRequiredComponents)
+{
+    public FrontendControllerBadgeState ControllerBadge { get; init; } = FrontendControllerBadgeState.Unavailable;
+}
+
+public enum FrontendControllerBadgeState
+{
+    Unavailable,
+    MsiNative,
+    Xbox360Active,
+    SteamDeckActive,
+    Initializing,
+    Reconnecting,
+    NeedsAttention
+}
 
 public enum FrontendUpdateState { Unavailable, Idle, Checking, UpToDate, ReadyToInstall, Installing, Failed }
 

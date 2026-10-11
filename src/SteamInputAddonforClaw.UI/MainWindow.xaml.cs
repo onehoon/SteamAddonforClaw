@@ -398,6 +398,12 @@ public sealed partial class MainWindow : Window
                 && exception is not FrontendProtocolException
                 && exception is not FrontendRemoteException)
             {
+                if (_latestSystemStatus is { } lastStatus)
+                {
+                    var unavailableStatus = DeviceSummaryPresentation.WithUnavailableControllerBadge(lastStatus);
+                    _latestSystemStatus = unavailableStatus;
+                    DeviceContent.RenderDeviceSummary(unavailableStatus);
+                }
                 AppLog.Debug("Status", "System status refresh skipped because Runtime transport is unavailable.",
                     ("Reason", exception.Message));
             }

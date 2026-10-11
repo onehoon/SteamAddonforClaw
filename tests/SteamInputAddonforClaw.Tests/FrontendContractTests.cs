@@ -22,7 +22,10 @@ public sealed class FrontendContractTests
         new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
         new(true, 480, FrontendSteamSource.BigPicture),
         FrontendAddonOperationalStatus.Ready, "Eligible", true,
-        FrontendSetupStatus.Complete, "Complete", false);
+        FrontendSetupStatus.Complete, "Complete", false)
+    {
+        ControllerBadge = FrontendControllerBadgeState.SteamDeckActive
+    };
 
     [Fact]
     public void Status_snapshot_round_trips_through_SystemTextJson()
@@ -36,6 +39,20 @@ public sealed class FrontendContractTests
         // never satisfy against the original array-backed instance -- this is a value-equality
         // check, not a reference check.
         Assert.Equivalent(SampleStatus, restored, strict: true);
+    }
+
+    [Fact]
+    public void Controller_badge_defaults_to_unavailable_and_maps_as_a_typed_status_field()
+    {
+        var defaultBadge = new FrontendStatusSnapshot(
+            SampleStatus.Device, SampleStatus.Hardware, SampleStatus.Prerequisites, SampleStatus.Steam,
+            SampleStatus.AddonStatus, SampleStatus.AddonReason, SampleStatus.RecoverySafe,
+            SampleStatus.SetupStatus, SampleStatus.SetupReason, SampleStatus.CanInstallRequiredComponents);
+        Assert.Equal(FrontendControllerBadgeState.Unavailable, defaultBadge.ControllerBadge);
+
+        var mapped = Snapshot(controllerBadge: FrontendControllerBadgeState.Xbox360Active);
+        Assert.Equal(FrontendControllerBadgeState.Xbox360Active, mapped.ControllerBadge);
+        Assert.Equal("Test", mapped.AddonReason);
     }
 
     [Fact]
@@ -80,7 +97,7 @@ public sealed class FrontendContractTests
     {
         const string retiredSurfaceFragment = "Gpu" + "Frequency" + "Probe";
 
-        Assert.Equal(70, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(71, FrontendTransportProtocol.CurrentVersion);
         Assert.DoesNotContain(typeof(IAddonFrontendControl).GetMethods(),
             method => method.Name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
         Assert.DoesNotContain(Enum.GetNames<FrontendRpcMethod>(),
@@ -331,7 +348,8 @@ public sealed class FrontendContractTests
         SteamSessionSource steamSource = SteamSessionSource.Actual,
         bool recoverySafe = true,
         PrerequisiteStatus hidHideStatus = PrerequisiteStatus.Ready,
-        AddonOperationalStatus addonStatus = AddonOperationalStatus.Ready)
+        AddonOperationalStatus addonStatus = AddonOperationalStatus.Ready,
+        FrontendControllerBadgeState controllerBadge = FrontendControllerBadgeState.Unavailable)
     {
         var runtime = new SystemStatusSnapshot(
             new("MSI", "Claw", "BOARD", []),
@@ -339,7 +357,10 @@ public sealed class FrontendContractTests
             new(new(PrerequisiteKind.HidHide, hidHideStatus, "Test"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Test")),
             new(steamActive, steamAppId, steamSource),
             new(addonStatus, "Test"),
-            recoverySafe);
+            recoverySafe)
+        {
+            ControllerBadge = controllerBadge
+        };
 
         return FrontendSnapshotMapper.Map(runtime);
     }

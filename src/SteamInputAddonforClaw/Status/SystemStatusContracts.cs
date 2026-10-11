@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Status;
 
@@ -18,7 +19,10 @@ internal sealed record SystemStatusSnapshot(
     AddonStatusSnapshot Addon,
     // This is a safety-boundary field with no safe default: a snapshot-construction
     // path that forgets to pass one must fail to compile rather than silently resolve to "safe".
-    bool RecoverySafe);
+    bool RecoverySafe)
+{
+    public FrontendControllerBadgeState ControllerBadge { get; init; } = FrontendControllerBadgeState.Unavailable;
+}
 
 internal interface IDeviceInformationProvider { DeviceStatusSnapshot Capture(DeviceProbeContext context); }
 internal interface ISystemStatusProvider { Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default); }

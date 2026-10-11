@@ -87,6 +87,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
 
     internal uint ActualRunningAppId => _steamRuntime.ActualRunningAppId;
 
+    internal bool RecoverySafe => _recoverySafetyState.Current == RecoverySafety.Safe;
+
     /// <summary>PR6: one raw Steam/BPM read for the first virtual-presentation decision, so
     /// <c>AddonProcessHost</c> does not reach into Steam internals.</summary>
     internal Steam.SteamPresentationSnapshot CapturePresentationSnapshot() => _steamRuntime.CapturePresentationSnapshot();

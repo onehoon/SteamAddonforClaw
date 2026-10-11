@@ -632,7 +632,7 @@ public sealed partial class DevicePage : UserControl
     {
         DeviceManufacturerText.Text = DeviceSummaryPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
         DeviceModelText.Text = snapshot.Device.Model;
-        DeviceSupportText.Text = DeviceSummaryPresentation.FormatDeviceCompatibility(snapshot.Hardware.Status);
+        DeviceSupportText.Text = DeviceSummaryPresentation.FormatControllerBadge(snapshot.Hardware.Status, snapshot.ControllerBadge);
         DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoard} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
     }
 

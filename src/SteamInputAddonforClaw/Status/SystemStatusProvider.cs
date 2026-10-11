@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Devices;
@@ -19,7 +20,8 @@ internal sealed class SystemStatusProvider(
     // operational status. A non-null result means the Runtime positively proved a healthy Full1902
     // Disabled-mode controller path (physical ownership + active presentation); null falls back to
     // the non-owned mapping below (Center M Enabled / startup still settling).
-    Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null) : ISystemStatusProvider
+    Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null,
+    Func<bool, FrontendControllerBadgeState>? captureControllerBadge = null) : ISystemStatusProvider
 {
     public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) =>
         Task.Run(() => CaptureCore(cancellationToken), cancellationToken);
@@ -52,8 +54,17 @@ internal sealed class SystemStatusProvider(
             AppLog.Debug("Status", "Full1902 Addon-status override threw; using the non-owned status.", ("Reason", exception.GetType().Name));
             addon = nonOwned;
         }
+        var controllerBadge = FrontendControllerBadgeState.Unavailable;
+        try { controllerBadge = captureControllerBadge?.Invoke(recoverySafe) ?? FrontendControllerBadgeState.Unavailable; }
+        catch (Exception exception)
+        {
+            AppLog.Debug("Status", "Controller badge projection failed; using Unavailable.", ("Reason", exception.GetType().Name));
+        }
         AppLog.Debug("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
-        return new SystemStatusSnapshot(device, hardwareCompatibility, prerequisites, steam, addon, recoverySafe);
+        return new SystemStatusSnapshot(device, hardwareCompatibility, prerequisites, steam, addon, recoverySafe)
+        {
+            ControllerBadge = controllerBadge
+        };
     }
 
     /// <summary>
