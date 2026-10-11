@@ -11,6 +11,7 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
     private const string A2VmGyroDevicePathToken = "VID_8087&PID_0AC2";
     private const string LegacyMotionSensorType = "E83AF229-8640-4D18-A213-E22675EBB2C3";
     private const string LegacyMotionDataFormat = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F";
+    private const int NonFreshReadBackoffMilliseconds = 1;
     private static readonly TimeSpan ReaderShutdownLimit = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan UnavailableWarningInterval = TimeSpan.FromSeconds(30);
 
@@ -20,6 +21,7 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
     private readonly Func<long> _getTimestamp;
     private readonly long _timestampFrequency;
     private readonly TimeSpan _readerShutdownLimit;
+    private readonly Action<CancellationToken, int> _waitForNextRead;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly object _snapshotGate = new();
     private CancellationTokenSource? _stop;
@@ -42,7 +44,8 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
         Func<ClawSensorProbeCandidate, IClawSensorProbeSourceHandle> openSource,
         Func<long> getTimestamp,
         long timestampFrequency,
-        TimeSpan? readerShutdownLimit = null)
+        TimeSpan? readerShutdownLimit = null,
+        Action<CancellationToken, int>? waitForNextRead = null)
     {
         _modelId = modelId;
         _discover = discover;
@@ -50,6 +53,7 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
         _getTimestamp = getTimestamp;
         _timestampFrequency = timestampFrequency;
         _readerShutdownLimit = readerShutdownLimit ?? ReaderShutdownLimit;
+        _waitForNextRead = waitForNextRead ?? WaitForNextRead;
     }
 
     internal bool IsRunning => Volatile.Read(ref _acceptingSamples) != 0;
@@ -331,7 +335,6 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
     {
         IClawSensorProbeSourceHandle? handle = null;
         DateTimeOffset? previousSensorTimestamp = null;
-        var pollDelayMs = PollDelayMilliseconds(candidate);
         var diagnostics = default(MsiClawMotionReaderDiagnostics);
         var diagnosticsActive = false;
         var diagnosticsConfigurationLogged = false;
@@ -343,7 +346,7 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
                 try
                 {
                     SynchronizeReaderDiagnostics(
-                        role, candidate, handle, pollDelayMs,
+                        role, candidate, handle,
                         ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
                 }
                 catch
@@ -390,7 +393,7 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
                     else if (debugStillEnabled && !diagnosticsActive)
                     {
                         StartReaderDiagnostics(
-                            role, candidate, handle, pollDelayMs,
+                            role, candidate, handle,
                             ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
                     }
                 }
@@ -409,8 +412,8 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
                 {
                     if (recordThisRead)
                         diagnostics.ObserveNoData();
-                    WaitForNextRead(cancellationToken, pollDelayMs);
-                    EmitReaderDiagnosticsIfDue(role, candidate, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
+                    WaitForReadOutcome(cancellationToken, hasData: false, duplicateSensorTimestamp: false);
+                    EmitReaderDiagnosticsIfDue(role, candidate, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
                     continue;
                 }
 
@@ -419,8 +422,8 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
                 {
                     if (recordThisRead)
                         diagnostics.ObserveDuplicateTimestamp();
-                    WaitForNextRead(cancellationToken, pollDelayMs);
-                    EmitReaderDiagnosticsIfDue(role, candidate, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
+                    WaitForReadOutcome(cancellationToken, hasData: true, duplicateSensorTimestamp: true);
+                    EmitReaderDiagnosticsIfDue(role, candidate, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
                     continue;
                 }
 
@@ -458,8 +461,8 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
                     }
                 }
 
-                WaitForNextRead(cancellationToken, pollDelayMs);
-                EmitReaderDiagnosticsIfDue(role, candidate, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
+                WaitForReadOutcome(cancellationToken, hasData: true, duplicateSensorTimestamp: false);
+                EmitReaderDiagnosticsIfDue(role, candidate, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged, handle);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -489,7 +492,6 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
         MotionRole role,
         ClawSensorProbeCandidate candidate,
         IClawSensorProbeSourceHandle handle,
-        int pollDelayMs,
         ref MsiClawMotionReaderDiagnostics diagnostics,
         ref bool diagnosticsActive,
         ref bool diagnosticsConfigurationLogged)
@@ -505,14 +507,13 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
         }
 
         if (!diagnosticsActive)
-            StartReaderDiagnostics(role, candidate, handle, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
+            StartReaderDiagnostics(role, candidate, handle, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
     }
 
     private void StartReaderDiagnostics(
         MotionRole role,
         ClawSensorProbeCandidate candidate,
         IClawSensorProbeSourceHandle handle,
-        int pollDelayMs,
         ref MsiClawMotionReaderDiagnostics diagnostics,
         ref bool diagnosticsActive,
         ref bool diagnosticsConfigurationLogged)
@@ -542,8 +543,8 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
                 ("WinRtMinimumReportIntervalMs", isWinRt ? configuration.MinimumReportIntervalMs : null),
                 ("WinRtRequestedReportIntervalMs", isWinRt ? configuration.RequestedReportIntervalMs : null),
                 ("WinRtEffectiveReportIntervalMs", isWinRt ? configuration.EffectiveReportIntervalMs : null),
-                ("PollDelayMs", pollDelayMs),
-                ("PollDelayMeaning", "ExtraApplicationWaitAfterEachRead"));
+                ("NonFreshBackoffMs", NonFreshReadBackoffMilliseconds),
+                ("FreshAcceptedExtraWaitMs", 0));
             diagnosticsConfigurationLogged = true;
         }
         catch
@@ -556,7 +557,6 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
     private void EmitReaderDiagnosticsIfDue(
         MotionRole role,
         ClawSensorProbeCandidate candidate,
-        int pollDelayMs,
         ref MsiClawMotionReaderDiagnostics diagnostics,
         ref bool diagnosticsActive,
         ref bool diagnosticsConfigurationLogged,
@@ -576,7 +576,7 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
 
             if (!diagnosticsActive)
             {
-                StartReaderDiagnostics(role, candidate, handle, pollDelayMs, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
+                StartReaderDiagnostics(role, candidate, handle, ref diagnostics, ref diagnosticsActive, ref diagnosticsConfigurationLogged);
                 return;
             }
 
@@ -598,7 +598,8 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
                 ("NoDataCount", summary.NoDataCount),
                 ("MissingSensorTimestampCount", summary.MissingSensorTimestampCount),
                 ("ActualFreshHz", summary.ActualFreshHz),
-                ("PollDelayMs", pollDelayMs),
+                ("NonFreshBackoffMs", NonFreshReadBackoffMilliseconds),
+                ("FreshAcceptedExtraWaitMs", 0),
                 ("ReadDurationMeanMs", summary.ReadDurationMeanMs),
                 ("ReadDurationMaxMs", summary.ReadDurationMaxMs),
                 ("FreshReceiveIntervalMeanMs", summary.FreshReceiveIntervalMeanMs),
@@ -783,11 +784,18 @@ internal sealed class MsiClawMotionSource : IAsyncDisposable
         return "MotionRoleAmbiguous";
     }
 
-    private static int PollDelayMilliseconds(ClawSensorProbeCandidate candidate) =>
-        int.TryParse(candidate.MinimumReportInterval, NumberStyles.None, CultureInfo.InvariantCulture, out var interval)
-        && interval > 0
-            ? interval
-            : 10;
+    internal static int ReadBackoffMilliseconds(bool hasData, bool duplicateSensorTimestamp) =>
+        !hasData || duplicateSensorTimestamp ? NonFreshReadBackoffMilliseconds : 0;
+
+    private void WaitForReadOutcome(
+        CancellationToken cancellationToken,
+        bool hasData,
+        bool duplicateSensorTimestamp)
+    {
+        var delayMilliseconds = ReadBackoffMilliseconds(hasData, duplicateSensorTimestamp);
+        if (delayMilliseconds > 0)
+            _waitForNextRead(cancellationToken, delayMilliseconds);
+    }
 
     private static void WaitForNextRead(CancellationToken cancellationToken, int delayMilliseconds) =>
         cancellationToken.WaitHandle.WaitOne(delayMilliseconds);

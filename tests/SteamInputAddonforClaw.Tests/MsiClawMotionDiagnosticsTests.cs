@@ -209,7 +209,9 @@ public sealed class MsiClawMotionDiagnosticsTests : IDisposable
         Assert.Contains($"Model={modelId}", log);
         Assert.Contains("Role=Gyroscope", log);
         Assert.Contains("Role=Accelerometer", log);
-        Assert.Contains("PollDelayMeaning=ExtraApplicationWaitAfterEachRead", log);
+        Assert.Contains("NonFreshBackoffMs=1", log);
+        Assert.Contains("FreshAcceptedExtraWaitMs=0", log);
+        Assert.DoesNotContain("PollDelayMeaning=ExtraApplicationWaitAfterEachRead", log);
         if (modelId.StartsWith("msi.claw.a2vm.", StringComparison.Ordinal))
         {
             Assert.Contains("Role=Gyroscope Backend=WinRtGyrometer", log);
@@ -229,6 +231,46 @@ public sealed class MsiClawMotionDiagnosticsTests : IDisposable
     }
 
     [Fact]
+    public async Task Debug_summary_uses_the_same_outcome_dependent_wait_contract_as_start_record()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        var gyro = Legacy("Physical Gyrometer", "{76000001-0012-0002-0000-000000000001}");
+        var accel = Legacy("Physical Accelerometer", "{73000001-0012-0002-0000-000000000001}");
+        using var releaseSecondRead = new ManualResetEventSlim();
+        var handles = new Dictionary<string, FakeSourceHandle>(StringComparer.OrdinalIgnoreCase)
+        {
+            [gyro.SensorId] = new(gyro, releaseSecondRead: releaseSecondRead),
+            [accel.SensorId] = new(accel, releaseSecondRead: releaseSecondRead)
+        };
+        var clock = new FakeClock();
+        await using var source = new MsiClawMotionSource(
+            new HandheldDeviceModelId("msi.claw.cg3em"),
+            () => new ClawSensorDiscovery([gyro, accel], null, null, []),
+            candidate => handles[candidate.SensorId],
+            clock.Read,
+            clock.Frequency);
+
+        Assert.True(await source.StartAsync("SummaryPolicyTest"));
+        await Task.WhenAll(handles.Values.Select(handle => handle.SecondReadObserved)).WaitAsync(TimeSpan.FromSeconds(3));
+        clock.Set(10_000);
+        releaseSecondRead.Set();
+        await Task.WhenAll(handles.Values.Select(handle => handle.ThirdReadObserved)).WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.True(await source.StopAsync("SummaryPolicyTest"));
+        AppLog.DrainForTests();
+
+        var log = AppLog.ReadAllTextForTests(AppLog.CurrentLogFilePath);
+        var summaries = log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.Contains("Event=MotionReaderDiagnosticsSummary", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(2, summaries.Length);
+        Assert.All(summaries, line =>
+        {
+            Assert.Contains("NonFreshBackoffMs=1", line);
+            Assert.Contains("FreshAcceptedExtraWaitMs=0", line);
+        });
+    }
+
+    [Fact]
     public async Task Info_level_keeps_existing_source_selection_and_failure_logs_without_debug_telemetry()
     {
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
@@ -237,7 +279,7 @@ public sealed class MsiClawMotionDiagnosticsTests : IDisposable
         var handles = new Dictionary<string, FakeSourceHandle>(StringComparer.OrdinalIgnoreCase)
         {
             [gyro.SensorId] = new(gyro, failRead: true),
-            [accel.SensorId] = new(accel)
+            [accel.SensorId] = new(accel, sensorTimestamp: DateTimeOffset.UnixEpoch)
         };
         var clock = new FakeClock();
         await using var source = new MsiClawMotionSource(
@@ -303,18 +345,25 @@ public sealed class MsiClawMotionDiagnosticsTests : IDisposable
 
     private sealed class FakeClock
     {
+        private long _timestamp;
         internal long Frequency => 1_000;
-        internal long Read() => 0;
+        internal long Read() => Interlocked.Read(ref _timestamp);
+        internal void Set(long timestamp) => Interlocked.Exchange(ref _timestamp, timestamp);
     }
 
     private sealed class FakeSourceHandle(
         ClawSensorProbeCandidate candidate,
         bool failRead = false,
-        DateTimeOffset? sensorTimestamp = null) : IClawSensorProbeSourceHandle
+        DateTimeOffset? sensorTimestamp = null,
+        ManualResetEventSlim? releaseSecondRead = null) : IClawSensorProbeSourceHandle
     {
         private int _readCount;
         private readonly TaskCompletionSource _firstReadObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondReadObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _thirdReadObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task FirstReadObserved => _firstReadObserved.Task;
+        internal Task SecondReadObserved => _secondReadObserved.Task;
+        internal Task ThirdReadObserved => _thirdReadObserved.Task;
         public ClawSensorProbeSourceConfiguration Configuration { get; } = candidate.Backend == ClawSensorProbeBackend.WinRtGyrometer
             ? new(ClawSensorProbeBackend.WinRtGyrometer, 10, 10, 10)
             : new(ClawSensorProbeBackend.LegacySensorApi, null, null, null);
@@ -325,6 +374,22 @@ public sealed class MsiClawMotionDiagnosticsTests : IDisposable
             _firstReadObserved.TrySetResult();
             if (failRead)
                 throw new InvalidOperationException("Synthetic reader failure.");
+
+            if (releaseSecondRead is not null && readCount >= 2)
+            {
+                if (readCount == 2)
+                {
+                    _secondReadObserved.TrySetResult();
+                    releaseSecondRead.Wait();
+                }
+                else if (readCount == 3)
+                {
+                    _thirdReadObserved.TrySetResult();
+                }
+
+                return ClawSensorReportReadResult.NoData();
+            }
+
             return ClawSensorReportReadResult.Data(0.25, -0.5, 0.75, sensorTimestamp ?? DateTimeOffset.UnixEpoch.AddMilliseconds(readCount));
         }
 
