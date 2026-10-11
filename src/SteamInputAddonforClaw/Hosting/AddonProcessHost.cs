@@ -3167,6 +3167,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             control.NotifyStateInvalidated();
     }
 
+    private void NotifySteamSessionStatusInvalidated() => NotifyControllerBadgeStateInvalidated();
+
     internal static async Task NotifyControllerBadgeIfChangedAfterAsync(
         Task operation,
         FrontendControllerBadgeState previousBadge,
@@ -3698,8 +3700,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnActualRunningAppIdChanged(uint appId)
     {
+        NotifySteamSessionStatusInvalidated();
         UpdateControllerCadenceDecision("SteamRunningAppIdChanged");
-        // PR7 section 8: request the Full-1902 X360 <-> SteamDeck reconcile up front, so it does not
+        // Request the Full-1902 presentation reconcile up front, so it does not
         // wait behind the unrelated CPU Boost / Power Mode / Resolution / TDP / FPS profile work
         // below. The switch itself runs asynchronously, serialized by the presentation owner's gate.
         RequestControllerPresentationReconcile("RunningAppIdChanged");
@@ -3858,6 +3861,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnBigPictureStateChanged(bool active)
     {
         if (_headlessUninstallPreparation) return;
+        NotifySteamSessionStatusInvalidated();
         UpdateControllerCadenceDecision("BigPictureChanged");
         RequestControllerPresentationReconcile("BigPictureChanged");
     }

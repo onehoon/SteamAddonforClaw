@@ -18,9 +18,6 @@ public sealed partial class SettingsPage : UserControl
     private bool _applyingGamingHomeState;
     private bool _applyingQuickSettingsPowerSourcePreference;
     private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
-    private bool _applyingSteamVirtualControllerState;
-    private int _steamVirtualControllerMutationInProgress;
-    private SteamVirtualControllerPreference _lastKnownSteamVirtualController = SteamVirtualControllerPreference.SteamDeck;
     private bool _isInitializingLogLevel;
     private FrontendLogLevel _lastKnownLogLevel;
     private string _logDirectoryPath = string.Empty;
@@ -44,8 +41,6 @@ public sealed partial class SettingsPage : UserControl
         SetLogLevel(_lastKnownLogLevel);
         _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
         SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
-        _lastKnownSteamVirtualController = bootstrap.Settings.SteamVirtualController;
-        RenderSteamVirtualController(_lastKnownSteamVirtualController);
         _ = RefreshAppUpdateAsync();
         _ = RefreshGamingHomeAsync();
     }
@@ -364,75 +359,6 @@ public sealed partial class SettingsPage : UserControl
                 _lastKnownQuickSettingsCurrentPowerSourceOnly,
                 refreshedValue);
             SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
-        }
-    }
-
-    private void RenderSteamVirtualController(SteamVirtualControllerPreference preference)
-    {
-        _applyingSteamVirtualControllerState = true;
-        try
-        {
-            SteamVirtualControllerComboBox.SelectedItem = SteamVirtualControllerComboBox.Items
-                .OfType<ComboBoxItem>()
-                .FirstOrDefault(item => string.Equals(item.Tag as string, preference.ToString(), StringComparison.Ordinal));
-            SteamVirtualControllerComboBox.IsEnabled = Volatile.Read(ref _steamVirtualControllerMutationInProgress) == 0;
-        }
-        finally
-        {
-            _applyingSteamVirtualControllerState = false;
-        }
-    }
-
-    private async void SteamVirtualControllerComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
-    {
-        if (_applyingSteamVirtualControllerState || _frontend is null
-            || SteamVirtualControllerComboBox.SelectedItem is not ComboBoxItem { Tag: string selectionText }
-            || !Enum.TryParse<SteamVirtualControllerPreference>(selectionText, ignoreCase: false, out var requested)
-            || !Enum.IsDefined(requested))
-            return;
-
-        if (requested == _lastKnownSteamVirtualController) return;
-        if (Interlocked.Exchange(ref _steamVirtualControllerMutationInProgress, 1) != 0)
-        {
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
-            return;
-        }
-
-        RenderSteamVirtualController(_lastKnownSteamVirtualController);
-        try
-        {
-            SteamVirtualControllerComboBox.IsEnabled = false;
-            var settings = await _frontend.SetSteamVirtualControllerAsync(requested).ConfigureAwait(true);
-            _lastKnownSteamVirtualController = settings.SteamVirtualController;
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
-            if (_lastKnownSteamVirtualController != requested)
-                SteamVirtualControllerCard.Description = "The saved controller choice was not changed.";
-            else
-                SteamVirtualControllerCard.Description = "Controls which virtual controller Steam sees while a Steam game or Big Picture is active. Normal Windows mode stays Xbox360; switching may briefly disconnect the controller.";
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Settings", "Steam virtual controller preference update failed.", exception);
-            var savedChoiceRefreshed = false;
-            try
-            {
-                var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
-                _lastKnownSteamVirtualController = bootstrap.Settings.SteamVirtualController;
-                savedChoiceRefreshed = true;
-            }
-            catch (Exception refreshException)
-            {
-                AppLog.Warn("Settings", "Steam virtual controller preference rollback could not refresh Runtime settings.", refreshException);
-            }
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
-            SteamVirtualControllerCard.Description = savedChoiceRefreshed
-                ? "The change could not be confirmed. The saved Runtime choice is selected."
-                : "The change could not be confirmed. Showing the last confirmed choice.";
-        }
-        finally
-        {
-            Volatile.Write(ref _steamVirtualControllerMutationInProgress, 0);
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
         }
     }
 

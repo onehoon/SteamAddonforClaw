@@ -1,6 +1,6 @@
 # Steam Addon for Claw
 
-Steam Addon for Claw adds controller integration and game-specific performance controls for supported MSI Claw handhelds. It can present the built-in controller as a Steam Deck or experimental DualSense Edge controller while Steam gaming is active, and as an Xbox 360 controller otherwise. You can also configure the controller's front and rear buttons, per-game settings, a performance HUD, shortcuts, a separate Quick Settings Overlay, and Windows gaming-home behavior.
+Steam Addon for Claw adds controller integration and game-specific performance controls for supported MSI Claw handhelds. It can present the built-in controller as a Steam Deck or DualSense Edge while Steam gaming is active, and as an Xbox 360 controller otherwise. You can choose a global Steam controller and an optional per-game Steam override, configure the controller's front and rear buttons, set per-game performance options, and use a performance HUD, shortcuts, a separate Quick Settings Overlay, and Windows gaming-home behavior.
 
 This guide describes the features currently exposed by the app. The Main App includes **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
 
@@ -80,9 +80,9 @@ Supported **virtual controller presentations** are:
 | --- | --- |
 | **Xbox 360** | Normal Windows use, outside an active Steam game or Big Picture |
 | **Steam Deck (Default)** | Steam game or Big Picture, when the default option is selected |
-| **DualSense Edge (Experimental)** | Steam game or Big Picture, when selected in **Settings → Steam / Big Picture Controller** |
+| **DualSense Edge** | Steam game or Big Picture, when selected in **Controller → Steam Virtual Controller** or an enabled Steam game profile |
 
-The **Settings → Steam / Big Picture Controller** choice selects Steam Deck (Default) or DualSense Edge (Experimental) for Steam games and Big Picture. Normal Windows mode continues to use Xbox 360. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the presentation that is active at the time of the press.
+Choose the global **Steam Deck (Default)** or **DualSense Edge** option at **Controller → Steam Virtual Controller**. An enabled Steam game profile can select its own controller or **Use default** to inherit this global choice. The global and per-game choices are disabled while a Steam game or Big Picture Mode is active. Steam game launch and exit still switch automatically to the enabled game's override and back to the global choice when Big Picture remains active. Outside Steam game and Big Picture activity, Windows continues to use Xbox 360. Only one virtual controller presentation is attached at a time. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the active presentation.
 
 ## Gyroscope / IMU — Steam Input configuration (English / 한국어)
 
@@ -90,9 +90,9 @@ The **Settings → Steam / Big Picture Controller** choice selects Steam Deck (D
 
 When the Addon is presenting the built-in controller as a **virtual Steam Deck** (during a Steam game or Big Picture), it passes available physical **gyroscope and accelerometer** data to Steam Input. The Addon does **not** perform gyro-to-mouse or gyro-to-joystick conversion itself, and its **Xbox 360 presentation does not provide gyro input**.
 
-DualSense Edge presentation also forwards available motion data through its existing publisher path. The mode remains experimental: full button behavior, PS/Quick Access pulses, rumble, and gyro orientation have not been comprehensively validated across supported devices and games.
+DualSense Edge presentation also forwards available motion data through its existing publisher path. Edge button, PS/Quick Access, rumble, and motion behavior have not been comprehensively verified across every supported device and game.
 
-**If you need gyro controls, we currently recommend DualSense Edge (Experimental).** Choose **Settings → Steam / Big Picture Controller → DualSense Edge**. On the tested A2VM 8, DualSense Edge gyro felt smooth, while virtual Steam Deck **Gyro To Mouse** was still reported choppy with Addon **0.1.365**. This is a practical recommendation based on current testing, not a guarantee for every device or game. See the [Steam Deck gyro investigation](docs/gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md).
+**If gyro is a priority, current A2VM 8 observations favor DualSense Edge.** Choose it at **Controller → Steam Virtual Controller** or in an enabled Steam game profile. On the tested A2VM 8, DualSense Edge gyro felt smooth, while virtual Steam Deck **Gyro To Mouse** was still reported choppy with Addon **0.1.365**. This is an observation from current testing, not a guarantee for every device or game. See the [Steam Deck gyro investigation](docs/gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md).
 
 **Verified on MSI Claw 8 AI+ A2VM (8-inch):** Steam's gyro calibration screen shows live motion. All three rotation axes and all six direction signs matched the user's genuine Steam Controller in a direct calibration-screen comparison. **Gyro-to-joystick camera control worked in Aniimo** with Steam Input's gyro activation set to **Always On** (Addon build **0.1.350.0**). This confirms the tested A2VM 8 end-to-end path, not every game's configuration or quantitative gyro accuracy.
 
@@ -104,9 +104,9 @@ A2VM 7-inch and EX/CG3EM gyro behavior has **not yet been physically verified**.
 
 Addon이 Steam 게임 실행 중 또는 Big Picture에서 내장 컨트롤러를 **가상 Steam Deck**으로 제공하면, 사용 가능한 물리 **자이로스코프 및 가속도 센서값**을 Steam Input으로 전달합니다. Addon 자체에서 자이로를 마우스나 조이스틱 입력으로 변환하지 않으며, **Xbox 360 컨트롤러 모드에서는 자이로 입력을 제공하지 않습니다**.
 
-DualSense Edge 모드도 기존 publisher 경로로 사용 가능한 모션 데이터를 전달합니다. 다만 버튼 동작, PS/Quick Access 펄스, 진동 및 자이로 방향의 기기·게임별 호환성은 아직 폭넓게 검증되지 않은 실험 기능입니다.
+DualSense Edge 모드도 기존 publisher 경로로 사용 가능한 모션 데이터를 전달합니다. Edge 버튼, PS/Quick Access, 진동 및 모션 동작은 모든 지원 기기와 게임에서 폭넓게 검증된 것은 아닙니다.
 
-**자이로 기능이 필요하다면 DualSense Edge (Experimental) 모드를 권장합니다.** **Settings → Steam / Big Picture Controller → DualSense Edge**에서 선택하세요. A2VM 8 테스트에서는 Edge 자이로 움직임이 부드러웠지만, 가상 Steam Deck의 **Gyro To Mouse**는 Addon **0.1.365**에서도 끊김이 보고되었습니다. 모든 기기와 게임에서 동일한 결과를 보장하지는 않습니다. 자세한 내용은 [Steam Deck 자이로 조사 기록](docs/gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md)을 참고하세요.
+**자이로를 중요하게 사용한다면 현재 A2VM 8 관찰 결과는 DualSense Edge를 우선 추천합니다.** **Controller → Steam Virtual Controller** 또는 활성화된 Steam 게임 프로필에서 선택하세요. A2VM 8 테스트에서는 Edge 자이로 움직임이 부드러웠지만, 가상 Steam Deck의 **Gyro To Mouse**는 Addon **0.1.365**에서도 끊김이 보고되었습니다. 이 결과가 모든 기기와 게임에 동일하게 적용되는 것은 아닙니다. 자세한 내용은 [Steam Deck 자이로 조사 기록](docs/gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md)을 참고하세요.
 
 **MSI Claw 8 AI+ A2VM(8인치) 실기 검증 완료:** Steam 자이로 보정 화면에서 센서값이 정상적으로 표시되며, 실제 Steam Controller와 직접 비교했을 때 **3개 회전축과 6개 방향의 부호가 모두 일치**했습니다. **Aniimo에서 Steam Input의 자이로 활성화 조건을 ‘Always On(항상 켜기)’으로 변경한 후 자이로 → 조이스틱 카메라 조작이 정상 작동**했습니다(Addon **0.1.350.0** 빌드). 이는 해당 A2VM 8 기기의 실제 동작 검증 결과이며, 모든 게임에서 동일하게 동작하거나 정밀 감도까지 검증되었다는 의미는 아닙니다.
 
@@ -139,6 +139,8 @@ For **TDP Control**, **CPU Boost**, and **Windows Power Mode**, turning the feat
 
 ### Controller
 
+At the top of **Controller**, choose the global **Steam Virtual Controller**: **Steam Deck (Default)** or **DualSense Edge**. This choice is used by Big Picture and by Steam games whose enabled profile uses **Use default**. You can change it only while no Steam game or Big Picture Mode is active; the current session status must be available.
+
 Use **Controller** to choose actions for the **Gamebar Button** (WING) and **Center M Button**. Each has separate **Normal** and **Steam Game / Big Picture** assignments. The current controller presentation selects which assignment is used; the buttons do not have to be remapped when Steam starts or stops.
 
 Available actions depend on the assignment group:
@@ -164,6 +166,8 @@ The **Vibration Strength** expander also contains **Vibration Recovery → Resto
 ### Steam
 
 The **Steam** page lists installed Steam games and Non-Steam shortcuts that Steam recognizes. Use **Refresh**, search, and the favorite control to find a game. Select a game to edit its profile. Profiles can be prepared before launching the game; use the profile's enable switch when you want it to apply.
+
+The first profile card is **Virtual Controller**. Choose **Use default**, **Steam Deck**, or **DualSense Edge**. The choice can be edited only while the profile is enabled and Steam / Big Picture is idle; turning the profile off retains its saved choice. With Big Picture active, a game's enabled override is selected automatically when Steam reports that game as active, then the global choice is restored when the game ends and Big Picture remains active. **Use default** always inherits **Controller → Steam Virtual Controller**.
 
 Per-game options include:
 
@@ -218,10 +222,6 @@ Choose **Check** to check again and download an available update. When a downloa
 
 Select **Off**, **Xbox**, or **Steam Big Picture** as the Windows gaming home. **Off** disables the Addon-selected gaming home. **Start on Windows startup** controls whether Windows starts directly in the selected gaming home. If Windows is already set to another app, **Other Windows app** shows that current selection; it cannot be selected as a new Addon-managed option, and the Addon does not manage its startup behavior.
 
-#### Steam / Big Picture Controller
-
-Choose **Steam Deck (Default)** or **DualSense Edge (Experimental)** for Steam game and Big Picture presentation. Windows outside Steam game or Big Picture activity continues to receive the Xbox 360 controller presentation. **DualSense Edge is currently recommended for gyro-dependent gameplay** because Steam Deck Gyro To Mouse choppiness is still under investigation. Edge's full controller compatibility remains experimental.
-
 #### Show only current power source
 
 When enabled, Quick Settings Overlay shows controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values.
@@ -237,6 +237,8 @@ Developer Menu is reserved for developer diagnostics and is not needed for norma
 ## Game profiles and setting priority
 
 You can create and edit Steam and XBOX game profiles before starting a game. Saved values are kept when a profile is disabled.
+
+A Steam game's **Virtual Controller** choice is available only while its master profile is enabled. **Use default** or a disabled/missing profile inherits the global **Controller → Steam Virtual Controller** choice. When a game starts in Big Picture, its enabled explicit choice is selected automatically; when it ends and Big Picture stays open, the global choice resumes. Manual global and per-game controller choices are locked while any Steam game or Big Picture Mode is active. Turning a profile off keeps its saved controller choice for when the profile is enabled again.
 
 **TDP Control**, **CPU Boost**, and **Windows Power Mode** exist at both Device and game-profile level. When one of these settings is enabled in the active game profile, the profile value takes priority. If that profile setting is off, the enabled Device setting can continue to apply.
 
@@ -317,7 +319,7 @@ If the controller has not returned after a short wait, try **Restart Addon** fro
 
 ### A Steam game appears as an Xbox controller
 
-Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. The selected Steam / Big Picture controller in Settings is used while a Steam game or Big Picture is active.
+Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. Set the global choice at **Controller → Steam Virtual Controller** before starting a game, or enable the Steam profile and choose its **Virtual Controller** override. Manual changes are disabled while a Steam game or Big Picture Mode is active.
 
 ### Gyro values appear in Steam calibration, but the game does not respond
 
@@ -367,7 +369,7 @@ Open **Settings → Required Components** to see the reported status. Follow the
 - The XBOX catalog includes recognized installed titles, not every app in Microsoft Store or Game Pass.
 - Steam profile tracking depends on Steam continuing to report the game or shortcut as active. Some launcher chains can cause a profile to stop applying when Steam loses that association.
 - Quick Settings Overlay is separate from Steam Quick Access. The Addon does not inject an Addon tab into Steam's menu.
-- **Steam Deck and DualSense Edge gyro / motion output are implemented.** A2VM 8 Steam Deck gyro direction/sign and Steam Input gyro-to-joystick gameplay have been tested, but Steam Deck Gyro To Mouse was still reported choppy in Addon 0.1.365. **DualSense Edge is recommended when gyro is needed**, based on smoother motion reported in current testing; its overall compatibility remains experimental. A2VM 7 and EX/CG3EM gyro validation remains pending. Activation and tuning are handled in **Steam Input**, not in the Addon.
+- **Steam Deck and DualSense Edge gyro / motion output are implemented.** A2VM 8 Steam Deck gyro direction/sign and Steam Input gyro-to-joystick gameplay have been tested, but Steam Deck Gyro To Mouse was still reported choppy in Addon 0.1.365. Current A2VM 8 observations favor DualSense Edge when gyro is needed; Edge controls and compatibility remain unverified across all devices and games. A2VM 7 and EX/CG3EM gyro validation remains pending. Activation and tuning are handled in **Steam Input**, not in the Addon.
 - A2VM 7 vibration-strength support and A2VM 7/8 `0x0230` LED writes follow shared-family and exact-firmware policy; A2VM 7 strength behavior and physical LED effects have not been individually validated. Unknown firmware remains unsupported. The boot-only mode cycle confirms software transitions, not physical motor output; SteamOS rumble is outside this Windows Addon's control.
 - A general Device-page Fan Control is not currently available as a user feature.
 - The product supports one interactive Windows user and session; Fast User Switching, Remote Desktop sessions, and multi-user use are not supported.

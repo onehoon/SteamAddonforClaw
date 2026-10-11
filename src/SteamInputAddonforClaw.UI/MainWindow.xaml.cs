@@ -102,6 +102,8 @@ public sealed partial class MainWindow : Window
         ControllerContent.MappingEditRequested += (_, mapping) => QueueFrontButtonMutation(mapping);
         ControllerContent.BackButtonMappingEditRequested += (_, mapping) => QueueBackButtonMutation(mapping);
         ControllerContent.ControllerLedEditRequested += (_, settings) => QueueControllerLedMutation(settings);
+        ControllerContent.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
+        ProfileContent.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
         MainNavigationView.SelectedItem = DeviceNavigationItem;
@@ -134,6 +136,15 @@ public sealed partial class MainWindow : Window
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         _frontend.StateInvalidated -= OnFrontendStateInvalidated;
+        ControllerContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
+        ProfileContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
+    }
+
+    private void OnSteamActivityRefreshRequested(object? sender, EventArgs args)
+    {
+        ControllerContent.SetSteamActivity(null);
+        ProfileContent.SetSteamActivity(null);
+        _ = RefreshSystemStatusAsync();
     }
 
     internal async Task CloseVibrationTestForUiShutdownAsync()
@@ -357,7 +368,12 @@ public sealed partial class MainWindow : Window
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
-        if (page == MainNavigationPage.Controller) ControllerContent.Activate();
+        if (page == MainNavigationPage.Controller)
+        {
+            ControllerContent.SetSteamActivity(null);
+            ControllerContent.Activate();
+            _ = RefreshSystemStatusAsync();
+        }
         else if (wasController) ControllerContent.Deactivate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how
@@ -366,7 +382,12 @@ public sealed partial class MainWindow : Window
         else if (wasVibrationTest) _vibrationTestContent?.Deactivate();
         if (page == MainNavigationPage.Device) DeviceContent.Activate();
         else if (wasDevice) DeviceContent.Deactivate();
-        if (page == MainNavigationPage.Profile) ProfileContent.Activate();
+        if (page == MainNavigationPage.Profile)
+        {
+            ProfileContent.SetSteamActivity(null);
+            ProfileContent.Activate();
+            _ = RefreshSystemStatusAsync();
+        }
         else if (wasProfile) ProfileContent.Deactivate();
         if (page == MainNavigationPage.Xbox) XboxContent.Activate();
         else if (wasXbox) XboxContent.Deactivate();
@@ -385,7 +406,12 @@ public sealed partial class MainWindow : Window
 
     private async Task RefreshSystemStatusAsync()
     {
-        if (_prerequisiteSetupInProgress) return;
+        if (_prerequisiteSetupInProgress)
+        {
+            ControllerContent.SetSteamActivity(null);
+            ProfileContent.SetSteamActivity(null);
+            return;
+        }
         if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0)
         {
             Volatile.Write(ref _statusRefreshPending, 1);
@@ -394,6 +420,8 @@ public sealed partial class MainWindow : Window
         try { RenderSystemStatus(await _frontend.CaptureStatusAsync()); }
         catch (Exception exception)
         {
+            ControllerContent.SetSteamActivity(null);
+            ProfileContent.SetSteamActivity(null);
             if (exception is FrontendTransportException
                 && exception is not FrontendProtocolException
                 && exception is not FrontendRemoteException)
@@ -423,6 +451,8 @@ public sealed partial class MainWindow : Window
     private void RenderSystemStatus(FrontendStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
+        ControllerContent.SetSteamActivity(snapshot.Steam.Active);
+        ProfileContent.SetSteamActivity(snapshot.Steam.Active);
         DeviceContent.RenderDeviceSummary(snapshot);
         SettingsContent.RenderRequiredComponents(snapshot);
         if (snapshot.CanInstallRequiredComponents)

@@ -1,6 +1,6 @@
 # Steam Addon for Claw
 
-Steam Addon for Claw는 지원되는 MSI Claw 핸드헬드의 내장 컨트롤러에 Steam 연동과 게임별 성능 설정을 제공합니다. Steam 게임 또는 Steam Big Picture가 활성화되면 내장 컨트롤러를 기본 Steam Deck 또는 선택 가능한 DualSense Edge(실험 기능)로, 그 외에는 Xbox 360 컨트롤러로 표현할 수 있습니다. 전면·후면 버튼, 게임별 설정, 성능 HUD, 바로가기, 별도의 Quick Settings Overlay, Windows 게임 홈 동작도 설정할 수 있습니다.
+Steam Addon for Claw는 지원되는 MSI Claw 핸드헬드의 내장 컨트롤러에 Steam 연동과 게임별 성능 설정을 제공합니다. Steam 게임 또는 Steam Big Picture가 활성화되면 내장 컨트롤러를 Steam Deck 또는 DualSense Edge로, 그 외에는 Xbox 360 컨트롤러로 표현할 수 있습니다. 전역 Steam 컨트롤러와 선택적인 Steam 게임별 컨트롤러도 지정할 수 있으며, 전면·후면 버튼, 성능 HUD, 바로가기, 별도의 Quick Settings Overlay, Windows 게임 홈 동작도 설정할 수 있습니다.
 
 이 안내서는 현재 앱에서 실제로 제공하는 기능을 설명합니다. 메인 앱에는 **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **How to Use**, **Settings**가 있습니다. **Quick Settings Overlay**는 컨트롤러로 조작하는 별도 창이며, Steam Quick Access나 ClawHUD와는 다릅니다.
 
@@ -78,21 +78,21 @@ MSI Center M의 컨트롤러 관리가 비활성화되어 Addon이 컨트롤러�
 | --- | --- |
 | **Xbox 360** | Steam 게임과 Big Picture가 활성 상태가 아닌 일반 Windows 환경 |
 | **Steam Deck (Default)** | Steam 게임 또는 Big Picture에서 기본 선택 사용 시 |
-| **DualSense Edge (Experimental)** | **Settings → Steam / Big Picture Controller**에서 선택한 경우 Steam 게임 또는 Big Picture에서 |
+| **DualSense Edge** | **Controller → Steam Virtual Controller** 또는 활성화된 Steam 게임 프로필에서 선택한 경우 |
 
-**Settings → Steam / Big Picture Controller**에서 Steam 게임 및 Big Picture용 **Steam Deck (Default)** 또는 **DualSense Edge (Experimental)**를 선택합니다. 일반 Windows 환경에서는 계속 Xbox 360을 사용합니다. **Normal** 또는 **Steam Game / Big Picture**에서 설정한 버튼 동작은 실제 활성화된 컨트롤러 표현에 맞춰 사용됩니다.
+전역 **Steam Deck (Default)** 또는 **DualSense Edge**는 **Controller → Steam Virtual Controller**에서 선택합니다. Steam 게임 프로필을 켜고 해당 게임의 Virtual Controller에서 별도 컨트롤러를 지정할 수도 있습니다. **Use default**는 전역 선택을 따릅니다. Steam 게임이나 Big Picture가 활성화된 동안에는 전역·게임별 컨트롤러 선택을 변경할 수 없습니다. Big Picture에서 게임이 시작되거나 끝나면 활성화된 게임의 선택과 전역 선택 사이를 자동 전환합니다. Steam 게임과 Big Picture가 모두 비활성 상태인 일반 Windows에서는 Xbox 360을 사용합니다. 한 번에 하나의 가상 컨트롤러만 연결됩니다. **Normal** 또는 **Steam Game / Big Picture**에서 설정한 버튼 동작은 실제 활성화된 컨트롤러 표현에 맞춰 사용됩니다.
 
 ## 자이로스코프 / IMU — Steam Input 설정
 
 Steam 게임 또는 Big Picture에서 가상 **Steam Deck**이나 **DualSense Edge**를 선택하면 Addon이 지원되는 물리 자이로스코프·가속도 값을 Steam Input에 전달합니다. Addon 자체에서는 자이로를 마우스나 조이스틱으로 변환하지 않습니다. **Xbox 360 모드에서는 자이로 입력을 제공하지 않습니다.**
 
-**자이로 기능이 필요하다면 DualSense Edge (Experimental) 사용을 권장합니다.** **Settings → Steam / Big Picture Controller → DualSense Edge**에서 선택하세요. A2VM 8 테스트에서는 Edge 자이로 움직임이 부드러웠지만, 가상 Steam Deck의 **Gyro To Mouse**는 Addon **0.1.365**에서도 끊김(Choppy)이 보고됐습니다. 다만 Edge는 실험 기능이며, 모든 기기·게임에서 동일한 동작을 보장하지 않습니다. [Steam Deck 자이로 조사 기록](../gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md)에서 현재까지의 결과를 확인할 수 있습니다.
+**자이로를 중요하게 사용한다면 현재 A2VM 8 관찰 결과는 DualSense Edge를 우선 추천합니다.** **Controller → Steam Virtual Controller** 또는 활성화된 Steam 게임 프로필에서 선택하세요. A2VM 8 테스트에서는 Edge 자이로 움직임이 부드러웠지만, 가상 Steam Deck의 **Gyro To Mouse**는 Addon **0.1.365**에서도 끊김(Choppy)이 보고됐습니다. 이 결과가 모든 기기·게임에 동일하게 적용되는 것은 아닙니다. [Steam Deck 자이로 조사 기록](../gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md)에서 현재까지의 결과를 확인할 수 있습니다.
 
 **MSI Claw 8 AI+ A2VM(8인치) 검증 기록:** Steam Deck 자이로 보정 화면에서 실제 센서 입력과 3개 회전축의 6개 방향이 확인됐으며, **Aniimo**에서는 Steam Input의 **Always On** 조건에서 자이로 → 조이스틱 조작이 동작했습니다(Addon **0.1.350.0**). 그러나 이 결과는 **Gyro To Mouse가 부드럽다는 검증이 아닙니다.**
 
 **자이로 동작과 활성화 조건, 감도는 Steam Input에서 설정하세요.** Steam에서 게임별 **컨트롤러 레이아웃 → 자이로 동작(Gyro Behavior)**을 열고 **Gyro To Mouse** 또는 자이로 → 조이스틱 동작을 선택합니다. 보정 화면에서 센서가 움직여도 활성화 버튼·조건에 따라 게임에서 동작하지 않을 수 있으므로, 처음에는 **Always On**으로 확인한 뒤 필요한 조건과 감도를 조정하세요.
 
-A2VM 7인치와 EX/CG3EM의 자이로 실기 검증은 아직 완료되지 않았으며, DualSense Edge의 버튼·PS/Quick Access·진동·모션 방향 호환성 역시 기기·게임 전반에 걸쳐 검증된 것은 아닙니다.
+A2VM 7인치와 EX/CG3EM의 자이로 실기 검증은 아직 완료되지 않았으며, DualSense Edge의 버튼·PS/Quick Access·진동·모션 방향 호환성 역시 모든 지원 기기와 게임에서 폭넓게 검증된 것은 아닙니다.
 
 ## MSI Center M과 내장 컨트롤러
 
@@ -119,6 +119,8 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 ### Controller
 
+페이지 맨 위의 **Steam Virtual Controller** 카드에서 전역 **Steam Deck (Default)** 또는 **DualSense Edge**를 선택합니다. Steam 게임이나 Big Picture가 활성화되면 수동 변경이 잠기므로, 상태를 확인할 수 없을 때도 선택은 비활성화됩니다.
+
 **Controller**에서 **Gamebar Button**(WING)과 **Center M Button**의 동작을 설정합니다. 각 버튼은 **Normal**과 **Steam Game / Big Picture**에서 서로 다른 동작을 가질 수 있습니다. 현재 컨트롤러 표현에 따라 사용할 설정이 자동으로 선택됩니다.
 
 설정 그룹에 따라 사용할 수 있는 동작이 다릅니다.
@@ -144,6 +146,8 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 ### Steam
 
 **Steam** 페이지에는 설치된 Steam 게임과 Steam이 인식하는 Non-Steam 바로가기가 표시됩니다. **Refresh**, 검색, 즐겨찾기를 사용해 게임을 찾고 선택하면 프로필을 편집할 수 있습니다. 게임을 실행하기 전에 미리 프로필을 설정하고, 실제 사용할 프로필의 활성화 스위치를 켜세요.
+
+게임 상세 설정 맨 위의 **Virtual Controller**에서 **Use default**, **Steam Deck**, **DualSense Edge**를 선택합니다. 이 선택은 프로필이 켜져 있고 Steam / Big Picture가 비활성 상태일 때만 편집할 수 있습니다. 프로필을 꺼도 선택한 값은 보존됩니다. **Use default** 또는 프로필이 없거나 꺼진 경우에는 **Controller → Steam Virtual Controller**의 전역 선택을 따릅니다. Big Picture에서 게임이 활성화되면 켜진 프로필의 명시적 선택이 자동 적용되고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아갑니다.
 
 게임별 설정은 다음과 같습니다.
 
@@ -196,10 +200,6 @@ Intel XeFG를 사용하는 경우 PresentMon이 드라이버에서 생성된 모
 
 Windows 게임 전체 화면 환경에 사용할 홈 앱을 **Off**, **Xbox**, **Steam Big Picture** 중 선택합니다. **Off**는 Addon이 선택한 게임 홈을 사용하지 않도록 합니다. **Start on Windows startup**은 다음 Windows 시작 시 선택한 홈 앱으로 바로 진입할지 정합니다. Windows가 이미 다른 앱을 사용 중이면 **Other Windows app**에 현재 선택이 표시됩니다. 새 옵션으로 선택하거나 해당 앱의 시작 동작을 Addon에서 관리할 수는 없습니다.
 
-#### Steam / Big Picture Controller
-
-Steam 게임 및 Big Picture에서 사용할 가상 컨트롤러를 **Steam Deck (Default)** 또는 **DualSense Edge (Experimental)** 중 선택합니다. 일반 Windows 환경은 Xbox 360이 유지됩니다. **자이로 기능이 필요할 때는 DualSense Edge를 권장**하며, Steam Deck Gyro To Mouse 끊김 현상은 현재 조사 보류 상태입니다. Edge 전체 기능의 호환성은 아직 실험 단계입니다.
-
 #### 현재 전원 소스만 표시 (Show only current power source)
 
 켜면 Quick Settings Overlay에서 현재 연결된 전원에 해당하는 컨트롤만 표시합니다. 메인 앱에서는 **Plugged in**과 **On battery** 설정을 계속 모두 볼 수 있습니다.
@@ -215,6 +215,8 @@ Developer Menu는 개발자용 진단 메뉴이며 일반적인 설정이나 사
 ## 게임 프로필과 설정 우선순위
 
 Steam 및 XBOX 게임 프로필은 게임을 실행하기 전에 미리 만들고 편집할 수 있습니다. 프로필을 꺼도 저장된 값은 유지됩니다.
+
+Steam 게임의 **Virtual Controller**는 마스터 프로필이 켜져 있을 때만 편집할 수 있습니다. **Use default** 또는 프로필이 없거나 꺼진 경우 **Controller → Steam Virtual Controller**의 전역 선택을 사용합니다. Big Picture에서 게임이 시작되면 켜진 프로필의 명시적 선택으로 자동 전환하고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아옵니다. Steam 게임 또는 Big Picture가 활성화된 동안 전역·게임별 컨트롤러 수동 선택은 잠깁니다. 프로필을 껐다 다시 켜도 게임별 선택은 보존됩니다.
 
 **TDP Control**, **CPU Boost**, **Windows Power Mode**는 Device와 게임 프로필 양쪽에 있는 기능입니다. 실행 중인 게임 프로필에서 해당 기능을 켜면 프로필 값이 우선합니다. 프로필에서 해당 기능을 끄면 활성화된 Device 설정을 계속 사용할 수 있습니다.
 
@@ -295,7 +297,7 @@ Windows 절전, 최대 절전, 복귀, 재시작 뒤 컨트롤러 표현과 설�
 
 ### Steam 게임이 Xbox 컨트롤러로 표시됩니다
 
-Steam이 실행 중이고 게임을 활성 상태로 인식하는지 확인하세요. Addon이 컨트롤러를 관리하도록 MSI Center M이 비활성화되어 있는지도 확인하세요. Steam 게임 및 Big Picture용 컨트롤러는 **Settings → Steam / Big Picture Controller**에서 Steam Deck 또는 DualSense Edge로 선택할 수 있습니다. 일반 Windows 환경에서는 Xbox 360이 사용됩니다.
+Steam이 실행 중이고 게임을 활성 상태로 인식하는지 확인하세요. Addon이 컨트롤러를 관리하도록 MSI Center M이 비활성화되어 있는지도 확인하세요. 게임을 시작하기 전에 전역 컨트롤러는 **Controller → Steam Virtual Controller**에서 선택하고, 필요하면 Steam 프로필을 켠 뒤 **Virtual Controller** 게임별 선택을 지정하세요. Steam 게임이나 Big Picture가 활성화되면 수동 선택은 잠깁니다. 일반 Windows 환경에서는 Xbox 360을 사용합니다.
 
 ### 절전 복귀 후 컨트롤러가 응답하지 않습니다
 
@@ -341,7 +343,7 @@ Addon이 컨트롤러를 관리하는 상태에서 **Controller → Vibration St
 - XBOX 카탈로그는 인식된 설치 게임을 표시하며 Microsoft Store 또는 Game Pass의 모든 앱을 포함하지 않습니다.
 - Steam 프로필은 Steam이 게임 또는 바로가기를 활성 상태로 보고하는지에 따라 달라집니다. 일부 런처 실행 방식에서는 Steam이 연결을 잃어 프로필 적용이 중단될 수 있습니다.
 - Quick Settings Overlay와 Steam Quick Access는 별개입니다. Steam 메뉴에 Addon 탭을 넣지 않습니다.
-- **Steam Deck과 DualSense Edge의 자이로/모션 출력은 구현되어 있습니다.** 다만 Steam Deck의 Gyro To Mouse는 Addon 0.1.365에서도 끊김이 보고되어 **자이로 사용 시 DualSense Edge를 권장**합니다. Edge 전체 컨트롤러 호환성은 실험 단계이며, A2VM 7 및 EX/CG3EM의 자이로 실기 검증은 아직 완료되지 않았습니다.
+- **Steam Deck과 DualSense Edge의 자이로/모션 출력은 구현되어 있습니다.** Steam Deck의 Gyro To Mouse는 Addon 0.1.365에서도 끊김이 보고됐습니다. 현재 A2VM 8 관찰 결과는 자이로 사용 시 DualSense Edge를 우선 추천하지만, Edge 제어와 호환성이 모든 기기·게임에서 확인된 것은 아닙니다. A2VM 7 및 EX/CG3EM의 자이로 실기 검증은 아직 완료되지 않았습니다.
 - 일반 Device 페이지의 Fan Control은 현재 사용자 기능으로 제공되지 않습니다.
 - A2VM 7 진동 강도와 A2VM 7/8 `0x0230` LED 쓰기는 공통 제품군 및 정확한 firmware 정책을 적용합니다. A2VM 7 진동 동작과 물리 LED 효과는 개별 실기 검증이 아직 없으며, 알 수 없는 firmware는 지원하지 않습니다. 부팅 모드 전환은 소프트웨어 상태만 확인하며 실제 모터 출력을 보증하지 않습니다. SteamOS 진동은 이 Windows Addon의 제어 범위가 아닙니다.
 - 한 명의 대화형 Windows 사용자와 세션을 지원합니다. 빠른 사용자 전환, 원격 데스크톱 세션 및 다중 사용자 사용은 지원하지 않습니다.
