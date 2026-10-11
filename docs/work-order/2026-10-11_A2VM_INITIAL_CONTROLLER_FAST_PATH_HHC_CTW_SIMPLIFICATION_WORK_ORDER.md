@@ -13,8 +13,9 @@ This product is **not yet released**. Stop retaining expensive initial-connectio
 
 **The desired product behavior:**
 
-- A2VM 7/8 with **Center M exactly Disabled** reaches a usable **single** SteamDeck/Xbox360 presentation as soon as **one strongly identified physical PID1902 controller**, a **live first-valid-state DirectInput source**, **PID1901 absence**, and the **exact HidHide isolation baseline** are confirmed.
-- Do **not** first wait for every intermediate PnP transition to be declared fully successful, then repeat nearly the same proof during the final owned-input acquisition.
+- A2VM 7/8 with **Center M exactly Disabled** reaches a usable **single** SteamDeck/Xbox360 presentation as soon as the **correct currently present PID1902 DirectInput gamepad collection**, a **live first-valid-state DirectInput source**, **PID1901 absence**, and the **exact HidHide isolation baseline** are confirmed.
+- **Hardware family/model is proven only once at startup**: `MS-1T42` → A2VM 7; `MS-1T52` → A2VM 8. Do not repeatedly prove that the already-supported machine is an A2VM by reconstructing physical-root/Container-ID/Strong-Identity equivalence at every PID handoff.
+- **Intermediate mode handoffs use fixed interface contracts** (VID/PID/Usage, exactly one currently present matching command HID) rather than fresh whole-device Strong-Identity proof. Do not first wait for every intermediate PnP transition to be declared fully successful, then repeat nearly the same proof during final acquisition.
 - Neither a PID1901 intermediate milestone nor a successful HID command write is itself authorization to attach the virtual controller.
 - The A2VM once-per-Windows-boot rumble-prime remains: initial PID1902 may require `1902 → 1901 → 1902`; initial PID1901 requires just `1901 → 1902`.
 - The **separate** Windows-session-end PID1901 best-effort restore work order remains independent. Do not implement its Windows shutdown notification handling in this PR:
@@ -23,7 +24,9 @@ This product is **not yet released**. Stop retaining expensive initial-connectio
 
 ### Non-negotiable realistic safety boundary
 
-Keep one clear controller owner, the Center M Disabled authority guard, strong/unique MSI Claw physical identity, exact target collection, no remaining PID1901 XInput physical gamepad at presentation time, successful DirectInput first input, persistent HidHide owned-target application/readback, and canonical VIIPER readiness/one attached virtual device. These protect concrete normal handheld failures (duplicate gamepad input, no usable controller, wrong device, stale native handle, failed teardown). **Remove duplicate intermediate checks, not this final safety proof.**
+Keep one clear controller owner, the **once-at-startup A2VM model gate**, the Center M Disabled authority guard before native writes, **one unambiguous currently present HID command endpoint per required leg**, the **exact final PID1902 primary gamepad collection**, no remaining physical PID1901 at presentation time, successful DirectInput first input, exact HidHide owned-target application/readback, and canonical VIIPER readiness/one attached virtual device. These protect concrete normal handheld failures (duplicate gamepad input, no usable controller, wrong/stale command interface, failed teardown).
+
+**Do not require separate Strong-Identity, physical-root, Container-ID or full native-state snapshot revalidation during each intermediate transition.** At the *final* DirectInput/HidHide boundary, read only the current device metadata necessary to select the exact supported gamepad collection and current HidHide targets; do not add another independent cross-PID identity-proof phase. A2VM hardware support is already established. Fail closed for **actually ambiguous multiple matching endpoints**, incompatible VID/PID/Usage, invalid final input, PID1901 still present at attachment, or failed HidHide/VIIPER; not for theoretical identity ambiguities that do not change which unique command HID is actually openable.
 
 Do not engineer theoretical fine-grained race defense, new lock/state/epoch/barrier/manager or additional full state capture to replace the old ones.
 
@@ -61,6 +64,26 @@ CTW source: `onehoon/ClawTweaks-Dev`, `release/v0.3.98.0`, `XboxGamingBarHelper/
 
 **Important interpretation:** HHC's fixed 2-second sleep and CTW's fixed ~2.5-second settle are not correctness proofs. In the observed A2VM 8 firmware, the first PID1901 command HID may require **5–8 seconds after the first write**. Therefore **do not copy their fixed sleep duration**. Copy their **simple observable-ready strategy**. CTW also documents a historical double-XInput interval when the virtual pad was attached before physical XInput disappeared; **do not copy that ordering**.
 
+### 2.1 Hardware identity is fixed; complete Windows device paths are not a product constant
+
+The support gate already checks the board model in `MsiClawDeviceModelResolver` against `MS-1T42` / `MS-1T52`. The supported MSI USB interface contract is:
+
+| Device/interface | Match using **fixed prefix/fields** | Avoid using as a hardcoded identity |
+| --- | --- | --- |
+| MSI vendor | VID `0x0DB0` | — |
+| XInput mode | PID `0x1901` | — |
+| DirectInput mode | PID `0x1902` | — |
+| PID1901 switch-command HID | Usage Page `0xFFA0`, Usage `0x0001` | Full HID instance suffix |
+| Supported PID1902 switch-command HID | Usage Page `0xFFF0`, Usage `0x0040` | Full HID instance suffix |
+| PID1902 physical DirectInput pad | `HID\\VID_0DB0&PID_1902&MI_00&COL01\\*` (gamepad usage) | Full PnP Instance ID / DirectInput Instance GUID |
+| PID1902 auxiliary HidHide collection | Known `COL02` control and `MI_01&COL03` consumer prefixes | Current enumerated instance suffix |
+
+All five inspected 2026-10-11 A2VM 8 boots returned the same full primary HID instance ID and USB physical-root string. **That is observed stability on one machine, not a guarantee** across driver reinstall, PnP rebuild, firmware or Windows changes. Resolve present endpoints by their **fixed interface identity and unique availability**, not by hardcoding the suffix, comparing repeated ancestor chains or persisting a runtime-selected full path as a universal constant.
+
+**Firmware variant caveat:** `MsiClawHardware.IsA2vm230ObservedControlEndpointCandidate` detects a `REV_0230` candidate with `0x0001/0x0040`, but the current native mode-writer contract treats that *alternative* as **unverified**. Do **not** silently assume it is the supported `0xFFF0/0x0040` command HID, pick an arbitrary fallback, or change vendor commands without evidence. This POC simplifies the verified interface path only; if that endpoint is unavailable, defer/fail as before rather than guess.
+
+**What is removed:** repeated cross-mode physical-root equality proofs, repeated Container-ID/Strong-Identity checks for already identified intermediate command endpoints, repeated whole-machine native snapshots, and duplicate PnP-settle proof. **What remains:** a currently present *single* correct command HID per write, actual final DirectInput input, the real PID1901-away condition, and compliant exact HidHide targets before virtual attach.
+
 ## 3. Measured Bottleneck: 0.1.355.0
 
 Five observed successful boot-prime sessions:
@@ -78,7 +101,8 @@ Five observed successful boot-prime sessions:
 2. The first A2VM leg spends 5 seconds in generic `MsiClawModeController` target verification, then potentially another 5-second target-scoped settle. The latter only needs a **fresh unique PID1901 command endpoint, with PID1902 absent**, to send the second command; do not perform two separate phases of similar observation.
 3. After the intermediate PID1901 command HID is proven, the next `_switchMode(DirectInput)` **re-enumerates the same source again** before the second write. The measured gap (1.57–4.59 s) is not all proven duplicate enumeration time, but this source reprobe is redundant if the handoff already holds the fresh, uniquely resolved control HID.
 4. The second-leg `MsiClawModeController` spends up to 5 seconds proving a PID1902 command-HID transition. If it times out, `AddonProcessHost` starts an **additional deferred `AcquireAsync`**, which again performs final PID1902 snapshot, gamepad-mode readback, DirectInput acquire and HidHide proof. Four of five sessions paid this extra transition-fail/then-reacquire path.
-5. For an A2VM initial-acquisition **write to DirectInput that succeeded**, the actual *first valid DirectInput gamepad input* together with strong correct PID1902 identity makes a second standalone GamepadMode-readback a candidate for removal on **this path only**. Do **not** remove startup readback/normalization when the device starts already PID1902 without a new successful DInput write.
+5. For an A2VM initial-acquisition **write to DirectInput that succeeded**, the *first valid input from the exact supported PID1902 DirectInput collection*, plus the final no-PID1901 and HidHide proof, replaces the extra standalone GamepadMode-readback on **this path only**. Do **not** remove startup readback/normalization when the device starts already PID1902 without a new successful DInput write.
+6. Existing mode-control resolution repeatedly requires Strong-Identity and physical-root/Container correlation even after A2VM hardware admission. For **this A2VM initial fast path only**, switch to a single fresh **VID/PID/Usage + unique currently present endpoint** lookup per command; avoid chaining the previous mode's root/container to the new mode's dynamically enumerated instance. Preserve ordinary strict writer behavior elsewhere.
 
 **Do not** promise impossible fixed latency improvements: actual physical PID1901 enumeration took 5–8 seconds and cannot be eliminated by code alone. The larger improvement is achieved when the separately planned shutdown restore causes the next boot to start **already PID1901**, avoiding the entire first leg.
 
@@ -91,18 +115,19 @@ For the **Center M Disabled** boot admission path only, replace the default **th
 - Preserve supported-hardware identification, exact Center M Disabled state, package prerequisites and HidHide baseline normalization/readback.
 - Preserve strict **Enabled / stock onboarding** topology behavior; do not change the shared default globally if doing so would weaken stock authority changes.
 - Retain existing `ControllerTopologyWaiter` and `StartupCoordinator`; a narrow readiness parameter/call-path on the same class is fine, but **no new startup manager/interface hierarchy**.
-- One present supported MSI controller with its expected command HID is enough for this *pre-admission* readiness. **Ambiguous/multiple physical roots remain indeterminate**; do not admit them based on just the first matching node.
-- As before, final `MsiClawAddonPhysicalOwnership` owns the last word on strong identity, usable input and HidHide targets.
+- Since the machine is already classified as A2VM 7/8, **one currently present supported VID/PID/Usage command HID** is enough for this pre-admission readiness. Do not require cross-mode root/Container matches or three identical PnP snapshots.
+- If there are **multiple matching command HID endpoints** and no unambiguous selection, do not arbitrarily choose the first. A genuinely missing current endpoint still waits within the existing bound.
+- Final `MsiClawAddonPhysicalOwnership` retains the authoritative exact primary gamepad input and HidHide proofs; do not repeat hardware-model identification here.
 
 ### 4.2 A2VM first leg — only wait until the next command is possible
 
 On A2VM 7/8 initial PID1902 and once-per-real-Windows-boot marker `Claimed`:
 
-1. Capture the current strong PID1902, require Center M Disabled and one exact supported PID1902 command HID. The existing initial admission and marker semantics stay.
-2. Write **one** `SwitchMode(XInput)` using the existing writer/source resolution. Do **not** run an additional independent 5-second *complete PID1901 transition verification* before looking for the PID1901 endpoint.
-3. From that write, perform **one bounded target-scoped wait** for **one fresh, strongly identified** PID1901 `0xFFA0/0x0001` command HID **and absence of the previous PID1902 device**. Return the endpoint evidence itself, not just a boolean that forces another expensive global source lookup.
-4. As soon as that evidence is true, issue **one** `SwitchMode(DirectInput)` on the **fresh PID1901 control HID** through the existing HID writer. **Do not re-run full global `ResolveSource` and then wait for intermediate PID1901 success again.**
-5. On missing/ambiguous endpoint or failed first write: keep virtual detached, preserve existing typed Device Arrival recovery when evidence is a normal transient absence, and **do not retry the native write speculatively**.
+1. Reuse the **already checked A2VM 7/8 model and Center M Disabled authority**. Determine the currently present PID and resolve **one** supported PID1902 `0xFFF0/0x0040` command HID using VID/PID/Usage. Do not revalidate the model via new whole-device Strong-Identity/Container/physical-root scans. Existing once-per-boot marker semantics stay.
+2. Write **one** `SwitchMode(XInput)` through the existing MSI HID writer. Do **not** perform an independent full PID1901 transition proof first.
+3. From that write, perform **one bounded target-scoped wait** for exactly **one currently present PID1901 `0xFFA0/0x0001` command HID**. Do **not** separately compare that new endpoint's Container ID, parent/root string or Strong-Identity to the vanished PID1902 source. Do not wait for *another* whole-device PID1902 disappearance proof at this intermediate step. Return the freshly resolved endpoint usable for the next write.
+4. As soon as the correct fresh PID1901 command HID can be opened, issue **one** `SwitchMode(DirectInput)` through the existing HID command implementation. **Do not re-run the full global `ResolveSource` / Strong-Identity validation after the endpoint has just been uniquely resolved.** Make sure the WinRT/HID writer opens that **same freshly enumerated exact instance**, not the previous PID1902 handle or an arbitrary VID-matching device.
+5. If the endpoint is absent, the opening/writing attempt fails, or there are multiple matches, **do not guess or force a write**. Keep virtual detached and use existing typed Device Arrival deferral for ordinary late enumeration. Do not repeat a successfully issued native write simply because a subsequent PnP check is late.
 
 **No fixed 2-second/2.5-second sleep.** Use a bounded wait that can cover the observed 5–8-second A2VM PID1901 re-enumeration, but progresses immediately when the required endpoint is ready. A single approximately **10-second** bound *measured from the first successful command write* is a reasonable starting ceiling, not a minimum delay.
 
@@ -110,47 +135,51 @@ On A2VM 7/8 initial PID1902 and once-per-real-Windows-boot marker `Claimed`:
 
 This applies **both** when A2VM initially boots as PID1901 (including a successful preceding-session shutdown preparation), and as the second half of the A2VM optional boot prime:
 
-1. Require one **fresh uniquely resolved** strong PID1901 command HID, Center M Disabled, and one expected physical MSI target.
-2. Write **one** DirectInput mode command through the existing writer. Successful **write** means only that the firmware command was submitted; it does not mean the controller is already owned.
-3. **Do not spend a separate 5 seconds proving `MsiClawModeController.SwitchModeAsync` reached its full target topology and then call the normal final capture again.** Proceed directly into the one final PID1902/DirectInput acquisition path.
-4. Wait for the actual final requirements as part of that *same* bounded physical-ownership operation:
-   - PID1901 old physical XInput mode is no longer present;
-   - supported, unique **Strong PID1902** physical identity with exact primary DirectInput collection;
-   - correct DirectInput device actually acquired and **first valid gamepad input** received;
-   - exact persistent HidHide target set applied and **read back compliant**;
-   - VIIPER Ready before attaching the one desired virtual presentation.
-5. When this path has **a confirmed newly-written DirectInput mode command** and all final actual-input requirements above pass, do not separately spend time on a redundant GamepadMode readback merely to reconfirm the write. When the device was **already PID1902** at startup without this write, retain existing explicit GamepadMode readback/normalization (same for non-boot recovery and developer/manual re-arm).
+1. Require exactly **one fresh, currently present PID1901 `0xFFA0/0x0001` command HID** and Center M Disabled. Do not require another Strong-Identity/root/Container proof of the known A2VM at this handoff.
+2. Write **one** DirectInput mode command through the existing HID writer, targeting that unique **actual instance**. Successful **write** means only firmware command submission, not physical ownership.
+3. **Do not spend a separate 5 seconds proving `MsiClawModeController.SwitchModeAsync` reached its full target topology and then capture the same topology again.** Proceed directly to final PID1902/DirectInput acquisition. Do not create a synthetic Strong-Identity handoff token just to replace the old root comparisons.
+4. Wait for these **final requirements only** as part of the same bounded physical-ownership operation:
+   - old PID1901 physical XInput mode is **absent** at the final attachment boundary;
+   - one **currently present** PID1902 **primary gamepad collection** with exact supported VID/PID/Usage/`MI_00&COL01` pattern (the Windows instance suffix is dynamically obtained, **not** hardcoded);
+   - that actual DirectInput device is successfully acquired and its **first valid gamepad input** received;
+   - the **current exact** primary and applicable auxiliary HidHide target set is applied and **read back compliant** using present PnP metadata;
+   - canonical VIIPER is Ready and only one virtual presentation is attached after all previous proofs.
+5. On a newly successful DirectInput mode write plus the final actual-input and HidHide proofs above, **skip the redundant GamepadMode readback and extra whole-native-state/Strong-Identity/root/Container re-proving**. Collect the minimum device metadata needed for exact primary collection and HidHide target binding **once**, not separate identity-validation rounds. When the controller starts already PID1902 without this write, retain the existing explicit GamepadMode readback/normalization (as for non-boot recovery and manual re-arm).
 6. Track a **single bounded final readiness window** from the successful DirectInput write, e.g. a **12-second maximum** rather than sequential `5s transition verification + 5s snapshot wait + 3s descriptor settle`. The window is a ceiling; *immediately publish upon completion of all final proofs*, and do not use a blind sleep. Reuse the existing owner and input-source operations; do not build a second state machine or polling service.
-7. If the bound expires with the PID1902 device/child *still normally enumerating*, return the **existing typed initial-acquisition deferral** and let the **same** host's Device Arrival watcher recheck. The marker remains consumed, so no boot cycle/write repeats. If a strong unsafe condition is discovered (wrong/ambiguous device, old PID1901 remains concurrently at final attach, failed cleanup, impossible ownership, HidHide readback mismatch), fail closed and do not attach.
+7. If the bound expires with the PID1902 device/child *still normally enumerating*, return the **existing typed initial-acquisition deferral** and let the **same** host's Device Arrival watcher recheck. The marker remains consumed, so no boot cycle/write repeats. Fail closed for **actual** wrong/ambiguous matching interfaces, old PID1901 still present at final attach, failed DirectInput acquisition, failed cleanup, HidHide readback mismatch or unsafe VIIPER state. Do not fail merely because an intermediate PID's root/container string differs from an earlier mode's root.
 
 This **replaces the separate second-leg “transition timeout → deferred reacquire” hot path with one final acquisition attempt**. Keep the existing host watcher as the fallback for genuinely late hardware; it is not an unconditional second stage.
 
 ### 4.4 Existing code boundaries — simplify, do not clone
 
-Prefer extending the existing `MsiClawModeController` / `MsiClawNativeStateManager` with the smallest **A2VM initial-only verified-source, write-once** primitive needed to reuse the exact PID1901 control HID returned from the first-leg target-scoped observation.
+Prefer extending the existing `MsiClawModeController` / `MsiClawNativeStateManager` with the **smallest A2VM-initial-only, unique-interface, write-once** entry point. Reuse the exact PID1901 endpoint returned by the first-leg wait, rather than rediscovering and re-proving the whole physical root for the second write.
 
-- Reuse `IMsiClawModeWriter` and existing exact HID resolver; **no duplicate Windows HID write implementation**.
-- Do **not** globally relax normal `SwitchModeAsync` success predicates: manual restore, EX/CG3EM and explicit stock restore still need their existing contracts.
-- All orchestration stays within `MsiClawAddonPhysicalOwnership.AcquireCoreAsync` and the already-existing host first-acquisition path.
+- Reuse the existing `IMsiClawModeWriter`, Windows HID transport and device selector; **no duplicate 64-byte command implementation**.
+- Inspect the existing `WindowsMsiClawModeWriter`: its general `WriteGamepadModeAsync` currently performs `StronglyMatches` on `MsiClawPhysicalIdentity` and matches a WinRT `DeviceInformation` by Instance ID / Container ID. **For this A2VM initial fast path only**, pass/select the single freshly enumerated supported VID/PID/Usage HID and match the **actual opened device's current Instance ID**. Do not make the **cross-mode Container/Root/Strong-Identity comparison** a prerequisite. Avoid weakening unrelated general writer callers.
+- **Keep uniqueness and exact endpoint type checks.** A2VM board identity does *not* mean an arbitrary PID1902/VID0DB0 interface is interchangeable with the command or gamepad collection. The A2VM `REV_0230` alternate Usage candidate remains **unverified**: no blind fallback.
+- Do **not** globally relax ordinary `SwitchModeAsync` success predicates: manual restore, EX/CG3EM and explicit stock restore retain their existing contracts.
+- All orchestration stays within `MsiClawAddonPhysicalOwnership.AcquireCoreAsync` and the existing host initial-acquisition path. Do not add a separate controller owner, interface hierarchy, extra lifecycle state machine or redundant physical-ID registry.
 - Remove old A2VM initial-only double-settle predicates/pending flags/recheck branches that become **provably unreachable** after the new single final wait. Do not retain a legacy state machine alongside the replacement.
 - Preserve existing publisher/VIIPER single ownership, HidHide baseline, PnP return, Sleep/Hibernate/Resume, PID1901 drift recovery, Restart/Crash/Shutdown, stock release and physical cleanup safety.
-- Keep the separate shutdown PID1901 preparation work order independent; do **not** add anything on Windows session-end in this PR.
+- Keep the separate shutdown PID1901 preparation work order independent; **do not** add Windows session-end behavior in this PR.
 
 ## 5. Test Matrix for Local Codex
 
 Replace tests asserting the **superseded A2VM initial sequence**; retain tests for preserved non-A2VM and real lifecycle contracts.
 
-1. A2VM initial PID1902, boot marker Claimed: exactly **one** XInput write, delayed unique PID1901 command child, exactly **one** DirectInput write on that fresh endpoint, then final PID1902+first-valid-input+HidHide proof → one VIIPER attach. No second generic global PID1901 resolver needed.
+1. A2VM initial PID1902, boot marker Claimed: exactly **one** XInput write, delayed unique PID1901 command child, exactly **one** DirectInput write on that fresh endpoint, then final PID1902 exact primary-collection + first-valid-input + HidHide proof → one VIIPER attach. **No second generic global PID1901 resolver and no cross-PID root/Container/Strong-Identity comparisons.**
 2. A2VM initial PID1901 (e.g. after the new optional Windows shutdown restoration): exactly one DInput write, no XInput write and no intermediate 5-second full-transition verification.
-3. PID1901 control HID becomes available 1 s / 7 s after write: both proceed **immediately at actual readiness**, no minimum fixed sleep and no prematurely terminal 5-second failure. Absence or identity ambiguity must never lead to a speculative second write.
+3. PID1901 control HID becomes available 1 s / 7 s after write: both proceed **immediately at actual readiness**, no minimum fixed sleep and no prematurely terminal 5-second failure. A changed Container ID / physical-root / Windows instance suffix across a normal PID transition **does not block** a newly unique supported command HID; absence, wrong Usage or **multiple competing** command HID candidates must never lead to a speculative second write.
 4. PID1902 parent arrives before exact HID/DirectInput; final owner waits once, no virtual attach while unready, and eventually attaches on proven first input + HidHide, with no duplicate DInput write.
 5. Delayed PID1902 past the final single budget: existing Device Arrival deferred recovery keeps VIIPER Ready, boot marker consumed and both native writes **not repeated** on retry; eventual exact Full1902 attach.
-6. Old PID1901 still present at would-be final attach, two conflicting physical roots, missing strong identity, incomplete DirectInput, HidHide readback failure, VIIPER unsafe teardown → **no live virtual attach**.
+6. Old PID1901 still present at would-be final attach, two simultaneously matching primary/gamepad command interfaces with no unique selection, unsupported Usage, incomplete DirectInput, missing current exact HidHide target, HidHide readback failure, VIIPER unsafe teardown → **no live virtual attach**. Do not reject a single valid endpoint solely for a changed root/container identity across mode transitions.
 7. A2VM **already PID1902**, boot marker AlreadyClaimed: no extra native write; existing GamepadMode direct-input normalization and ownership path still work. Same-boot Runtime restart unchanged.
 8. EX / CG3EM, manual Restore Vibration, Enable-and-Restart release, power suspend/resume and unexpected owned-session recovery: **no semantic changes**.
 9. Disabled-boot ready topology on its first observation no longer requires three identical snapshots; missing/ambiguous exact MSI control HID still waits/blocks as appropriate. Enabled/stock onboarding retains prior proof policy.
 10. Source command write fails; process shutting down; native HID handle disappears; PnP read failure or incorrect PID after write: no accidental success, no infinite/duplicated retries.
-11. Existing production controller/host tests pass after updating *only obsolete A2VM initial-flow assumptions*. Include timing phase logs to prove the second full mode-verify window has been removed.
+11. Fixed VID/PID/Usage/collection patterns work when **full instance suffixes and DirectInput Instance GUIDs change** after PnP re-enumeration, but never accept another Usage/collection or silently accept the unverified `REV_0230` alternate control HID.
+12. Verify the A2VM specific command-write entry does **not** execute the old full root/Container/StronglyMatches source reproving at each intermediate stage, while ordinary EX/CG3EM, manual re-arm and stock mode transition tests retain their stronger checks.
+13. Existing production controller/host tests pass after updating *only obsolete A2VM initial-flow assumptions*. Include timing phase logs proving the second full mode-verify window was removed.
 
 **Automated build/tests are Local Codex's responsibility. Physical hardware validation is done by the user after merge and MUST NOT be required for implementation completion, CI PASS or PR merge.**
 
@@ -174,10 +203,12 @@ Acceptance:
 - [ ] No 3-snapshot wait on already-usable **Disabled** boot topology; strict Enabled stock path unchanged.
 - [ ] No first-leg generic 5-second full-transition-verify *followed by* an additional PID1901 endpoint settle. There is **one target-scoped wait** to a usable PID1901 command child.
 - [ ] No second-leg generic 5-second full-transition-verify *followed by* a separate full PID1902 ownership attempt. There is **one final PID1902/DirectInput/HidHide admission**.
-- [ ] One command write per required leg; final actual-usage proof gates all attaches; no stale control HID, speculative retry or duplicate native mutation.
-- [ ] A2VM 7/8 boot only; all normal lifecycle safety and EX/CG3EM unchanged.
+- [ ] A2VM 7/8 board model is verified **once** at startup. Intermediate PID1902/PID1901 command stages match **unique currently present supported VID/PID/Usage endpoints** without repeated Strong-Identity, full physical-root, Container-ID comparisons or global native-state snapshots.
+- [ ] Full Windows HID instance suffix / DirectInput GUID are **discovered dynamically**, never hardcoded. The currently unverified `REV_0230` alternate command HID remains unsupported absent separate proof.
+- [ ] One command write per required leg; final **exact PID1902 primary-collection + live first input + PID1901 absence + HidHide readback** gates all attaches; no stale HID handle, speculative retry or duplicate native mutation.
+- [ ] A2VM 7/8 initial boot only; all normal lifecycle safety and EX/CG3EM unchanged.
 - [ ] Existing host Device Arrival fallback preserved; obsolete A2VM-only branches removed rather than carried along.
-- [ ] Update `docs/Full 1902 Implementation/README.md` and affected A2VM/Disabled startup portions of the authority architecture to state the **new initial proof path**, preserving stronger rules elsewhere.
+- [ ] Update `docs/Full 1902 Implementation/README.md` and affected A2VM/Disabled startup portions of the authority architecture to state the **once-only model gate, fixed-interface intermediate lookup, and single final DirectInput/HidHide proof**, preserving stronger checks for other lifecycles.
 - [ ] Run software-only automated tests and CI; physical testing remains the user's post-merge role.
 
 ### User-owned post-merge validation (not a blocker)
