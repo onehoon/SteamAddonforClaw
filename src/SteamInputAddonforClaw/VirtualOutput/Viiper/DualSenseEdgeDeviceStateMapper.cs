@@ -55,9 +55,10 @@ internal static class DualSenseEdgeDeviceStateMapper
         var result = new DSDeviceState
         {
             LX = ToSByte(state.LeftStick.X),
-            LY = ToSByte(state.LeftStick.Y),
+            // Claw reports physical UP as positive Y; Sony encodes UP as HID 0 and DOWN as 255.
+            LY = ToSByte(state.LeftStick.Y, invert: true),
             RX = ToSByte(state.RightStick.X),
-            RY = ToSByte(state.RightStick.Y),
+            RY = ToSByte(state.RightStick.Y, invert: true),
             Buttons = buttonMask,
             DPad = dpad,
             L2 = state.Triggers.Left,
@@ -99,9 +100,10 @@ internal static class DualSenseEdgeDeviceStateMapper
         return result;
     }
 
-    private static sbyte ToSByte(short value)
+    private static sbyte ToSByte(short value, bool invert = false)
     {
-        var rounded = Math.Round(value / 256d, MidpointRounding.AwayFromZero);
+        var signed = invert ? -(int)value : (int)value;
+        var rounded = Math.Round(signed / 256d, MidpointRounding.AwayFromZero);
         return (sbyte)Math.Clamp(rounded, sbyte.MinValue, sbyte.MaxValue);
     }
 
