@@ -487,6 +487,8 @@ Implementation work order: [DualSense Edge PR-A typed backend](work-order/DUALSE
 
 ### PR-B — Settings preference and runtime integration
 
+Implementation work order (written after PR #754 merged): [DualSense Edge PR-B Settings and Full1902 integration](work-order/DUALSENSE_EDGE_PR_B_SETTINGS_AND_RUNTIME_INTEGRATION_WORK_ORDER_2026-10-11.md). VIIPER dependency was independently updated in PR #753; PR-B must not re-update its binaries/header/lock.
+
 1. Add typed settings persistence, frontend RPC, version bump, and a standalone **SettingsPage SettingsCard** with **Steam Deck (Default)** / **DualSense Edge (Experimental)**; no DeveloperPage option.
 2. Add Edge to AddonPresentationKind and use one fresh selection resolver for first attach, ordinary reconcile, Resume and developer re-arm recovery.
 3. Integrate WING/Center M Steam domain selection, Deck/Edge semantic Steam and QAM pulses; preserve model-aware defaults.
