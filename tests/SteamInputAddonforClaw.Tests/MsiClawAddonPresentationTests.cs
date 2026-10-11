@@ -1092,6 +1092,67 @@ public sealed class MsiClawAddonPresentationTests
         await owner.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Windows_session_end_attempts_physical_stop_when_canceled_as_native_close_returns()
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        events.Clear();
+        using var cancellation = new CancellationTokenSource();
+        native.CloseServerReturning = () =>
+        {
+            native.CloseServerReturning = null;
+            cancellation.Cancel();
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => owner.PrepareForWindowsSessionEndAsync(cancellation.Token));
+
+        Assert.Equal(1, events.Count(item => item == "PhysicalStop"));
+        Assert.True(events.IndexOf("ViiperClosed") >= 0);
+        Assert.True(events.IndexOf("ViiperClosed") < events.IndexOf("PhysicalStop"));
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Windows_session_end_attempts_physical_stop_when_native_close_throws()
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)) events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default)).Succeeded);
+        events.Clear();
+        native.CloseServerException = new InvalidOperationException("simulated native close exception");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => owner.PrepareForWindowsSessionEndAsync(CancellationToken.None));
+
+        Assert.Equal(1, events.Count(item => item == "PhysicalStop"));
+        Assert.True(events.IndexOf("CloseUSBServer") >= 0);
+        Assert.True(events.IndexOf("CloseUSBServer") < events.IndexOf("PhysicalStop"));
+        Assert.DoesNotContain("ViiperClosed", events);
+        Assert.NotEqual(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        await owner.DisposeAsync();
+    }
+
     [Theory]
     [InlineData((int)USBDeviceDetachResult.UnsafeOutcomeUnknown)]
     [InlineData((int)USBDeviceDetachResult.Invalid)]
@@ -2361,14 +2422,22 @@ public sealed class MsiClawAddonPresentationTests
         internal Queue<USBDeviceAttachmentState> AttachmentStates { get; } = [];
         internal Queue<bool> StateResults { get; } = [];
         internal Queue<bool> CloseServerResults { get; } = [];
+        internal Action? CloseServerReturning { get; set; }
+        internal Exception? CloseServerException { get; set; }
         private readonly Dictionary<nuint, USBDeviceAttachmentState> _attachmentByHandle = [];
         public bool NewUSBServer(ref USBServerConfig config, out nuint handle, ViiperLogCallback? callback = null) { Calls.Add("NewUSBServer"); handle = 10; return true; }
         public bool CloseUSBServer(nuint handle)
         {
             Calls.Add("CloseUSBServer");
             LifecycleEvents?.Add("CloseUSBServer");
+            if (CloseServerException is { } exception)
+            {
+                CloseServerException = null;
+                throw exception;
+            }
             var closed = CloseServerResults.Count == 0 || CloseServerResults.Dequeue();
             if (closed) LifecycleEvents?.Add("ViiperClosed");
+            CloseServerReturning?.Invoke();
             return closed;
         }
         public bool CreateUSBBus(nuint handle, ref uint bus) { Calls.Add("CreateUSBBus"); bus = 42; return true; }
