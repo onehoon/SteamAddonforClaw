@@ -53,7 +53,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
         {
             if (_disposed) return new(false, "Disposed");
             if (string.IsNullOrWhiteSpace(devicePath)) return new(false, "EmptyDevicePath");
-            if (semanticPacket.Length != 11) return new(false, "InvalidSemanticLength");
+            if (semanticPacket.Length != MsiClawRumblePacketBuilder.PacketLength) return new(false, "InvalidSemanticLength");
             if (outputReportLength <= 0 || outputReportLength < semanticPacket.Length) return new(false, "InvalidOutputReportLength");
 
             if (!string.Equals(_devicePath, devicePath, StringComparison.OrdinalIgnoreCase))

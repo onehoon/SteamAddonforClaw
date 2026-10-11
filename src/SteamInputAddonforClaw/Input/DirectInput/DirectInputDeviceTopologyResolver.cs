@@ -31,7 +31,7 @@ internal sealed class DirectInputDeviceTopologyResolver(IControllerDeviceEnumera
             : new(devicePath, device.InstanceId, physicalRoot, usage.Page, usage.Usage, "VerifiedMsiPhysicalRoot");
     }
 
-    private static string? TryGetPnpInstanceId(string? devicePath)
+    internal static string? TryGetPnpInstanceId(string? devicePath)
     {
         if (string.IsNullOrWhiteSpace(devicePath)) return null;
         var path = devicePath.Trim();
@@ -42,7 +42,7 @@ internal sealed class DirectInputDeviceTopologyResolver(IControllerDeviceEnumera
             : null;
     }
 
-    private static bool IsMsiPhysicalRoot(string instanceId) => instanceId.StartsWith("USB\\VID_0DB0&PID_1902\\", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsMsiPhysicalRoot(string instanceId) => instanceId.StartsWith("USB\\VID_0DB0&PID_1902\\", StringComparison.OrdinalIgnoreCase);
 
     private static (ushort Page, ushort Usage)? TryGetUsage(IEnumerable<string> identifiers)
     {
