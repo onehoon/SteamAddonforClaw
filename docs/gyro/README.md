@@ -1,10 +1,14 @@
 # Gyro / IMU Research Index
 
 Status: research, diagnostic implementation, and hardware characterization  
-Last updated: 2026-10-09  
-Production status: **Gyro PR1 Motion Core merged in PR #731; Gyro PR2 Steam Deck IMU publication is implemented in review, with A2VM/EX hardware acceptance pending.**
+Last updated: 2026-10-11  
+Production status: **Steam Deck native gyro output present in Addon 0.1.365; production gyro polling improved; Deck gyro-to-mouse choppiness remains unresolved and its investigation is deferred.** Historical PR milestones below reflect the state when originally written.
 
 This folder is the single documentation home for MSI Claw gyro / accelerometer research and the Addon's SD6 motion feature track.
+
+## Deferred Steam Deck gyro-to-mouse choppiness investigation (2026-10-11)
+
+- [Full1902 Steam Deck Gyro Choppiness — Investigation and Deferred Handoff](FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md) — collected 0.1.359/0.1.360/0.1.365 sensor and publisher evidence, VIIPER PR #59 outcome, Classic Steam Controller vs Deck SDL/Linux comparison, HHC SteamDeckTarget reference, confirmed sporadic stalls, remaining unknown Windows/Steam Input host-consumption boundary, and the bounded deferred diagnostic plan. **No further implementation approved by this report; hardware checks remain user-owned after merge.**
 
 ## Current implementation state
 
