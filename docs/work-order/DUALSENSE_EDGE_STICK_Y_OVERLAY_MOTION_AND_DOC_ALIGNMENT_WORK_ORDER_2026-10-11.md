@@ -74,7 +74,7 @@ private static sbyte ToSByte(short value, bool invert = false)
 
 Keep the mapper's existing rounding and clipping policy; do not cast `short.MinValue` back to short, don't convert Y to `byte` in the managed ABI, and do not alter `DSDeviceState` layout or VIIPER.
 
-**Tests:** Update the existing `ConvertsStickBoundariesWithNearestAwayFromZeroAndPreservesQuadrants` expectations (**current `LY = +1, RY = +127` need to become `-1, -127` for that sample**). Add direction-semantic coverage for **BOTH** sticks with independent neutral, up-full, down-full, intermediate up/down and X-only cases:
+**Tests:** Update the existing `ConvertsStickBoundariesWithNearestAwayFromZeroAndPreservesQuadrants` expectations (**current `LY = +1, RY = +127` need to become `-1, -128` for that sample**; positive full-scale inverted Y rounds to -128, not -127). Add direction-semantic coverage for **BOTH** sticks with independent neutral, up-full, down-full, intermediate up/down and X-only cases:
 
 - source Y=+32767 (physical UP) -> Edge signed -128 / HID 0;
 - source Y=-32768 (physical DOWN) -> Edge signed +127 / HID 255;
