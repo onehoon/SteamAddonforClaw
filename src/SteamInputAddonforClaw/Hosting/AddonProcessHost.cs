@@ -41,7 +41,7 @@ internal enum AddonProcessStartupOutcome
 
 internal sealed class AddonProcessHost : IAsyncDisposable
 {
-    private static readonly TimeSpan WindowsSessionEndPreparationBudget = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan WindowsSessionEndPreparationBudget = TimeSpan.FromMilliseconds(2000);
     private readonly Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? _runtimeCompositionFactory;
     private readonly Func<string>? _frontendPipeNameFactory;
     private readonly bool _headlessUninstallPreparation;
@@ -156,7 +156,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawFrontButtonRuntime? _frontButtonRuntime;
     // PR7: the most recently requested runtime X360 <-> SteamDeck presentation reconcile. Serialized
     // inside the presentation owner's own gate; tracked only so controlled teardown can await it.
-    private Task _presentationReconcile = Task.CompletedTask;
+    private Task<bool> _presentationReconcile = Task.FromResult(true);
     // PR8: the one in-flight owned-DirectInput recovery, scheduled event-driven from an unexpected
     // owned-session completion. Serialized inside the physical owner's own gate; tracked only so
     // controlled teardown drains it BEFORE the presentation reconcile it may itself request.
@@ -3003,7 +3003,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             // Run the observed async sequence away from the native WndProc's thread. The handler
             // still waits for this one result, but only for the shared short deadline.
-            operation = Task.Run(() => PrepareForWindowsSessionEndAsync(deadline.Token));
+            operation = Task.Run(() => PrepareForWindowsSessionEndAsync(deadline.Token, startedAt));
             if (!operation.Wait(WindowsSessionEndPreparationBudget))
             {
                 deadline.Cancel();
@@ -3038,27 +3038,103 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     private async Task<SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long sessionEndStartedAt)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var admissionFailure = GetWindowsSessionEndAdmissionFailure();
+        var admissionStartedAt = Stopwatch.GetTimestamp();
+        var admissionReconcile = _presentationReconcile;
+        var admissionFailure = GetWindowsSessionEndAdmissionFailure(admissionReconcile);
         if (admissionFailure is not null)
             return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped(admissionFailure);
+
+        var presentation = _presentationOwnership!;
+        var physical = _physicalOwnership!;
+        var expectedSource = physical.LiveInputSource!;
+        var expectedIdentity = physical.OwnedPhysicalIdentity!;
+        var expectedTarget = physical.OwnedPrimaryHiddenTarget!;
 
         if (!TryBeginProcessShutdownCore())
             return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("RuntimeShutdownAlreadyStarted");
 
+        AppLog.Info("Lifecycle", "Windows session-end shutdown admission completed.",
+            ("Event", "A2vmWindowsSessionEndAdmissionCompleted"),
+            ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(admissionStartedAt).TotalMilliseconds),
+            ("ReconcilePending", !admissionReconcile.IsCompleted));
+
         cancellationToken.ThrowIfCancellationRequested();
-        var presentation = _presentationOwnership!;
-        var physical = _physicalOwnership!;
-        if (!await presentation.PrepareForWindowsSessionEndAsync(cancellationToken).ConfigureAwait(false))
+        var presentationReconcile = _presentationReconcile;
+        if (presentationReconcile.IsFaulted || presentationReconcile.IsCanceled)
+            return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationReconcileFailed");
+        if (!presentationReconcile.IsCompletedSuccessfully)
+        {
+            try
+            {
+                if (!await DrainWindowsSessionEndPresentationReconcileAsync(presentationReconcile, cancellationToken).ConfigureAwait(false))
+                    return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationReconcileFailed");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationReconcileCancelled");
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Lifecycle", "In-flight A2VM presentation reconcile did not complete safely before Windows session end.", exception,
+                    ("Event", "A2vmWindowsSessionEndPresentationReconcileFailed"));
+                return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationReconcileFailed:" + exception.GetType().Name);
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!presentationReconcile.IsCompletedSuccessfully)
+            return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationReconcileNotProvenComplete");
+
+        var postReconcileFailure = GetWindowsSessionEndPostReconcileFailure(
+            presentation,
+            physical,
+            expectedSource,
+            expectedIdentity,
+            expectedTarget);
+        if (postReconcileFailure is not null)
+            return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped(postReconcileFailure);
+
+        var presentationRetirementStartedAt = Stopwatch.GetTimestamp();
+        var presentationRetired = await presentation.PrepareForWindowsSessionEndAsync(cancellationToken).ConfigureAwait(false);
+        if (presentationRetired)
+            AppLog.Info("Lifecycle", "Windows session-end presentation retirement completed.",
+                ("Event", "A2vmWindowsSessionEndPresentationRetirement"),
+                ("Succeeded", true),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(presentationRetirementStartedAt).TotalMilliseconds));
+        else
+            AppLog.Warn("Lifecycle", "Windows session-end presentation retirement was not proven.", null,
+                ("Event", "A2vmWindowsSessionEndPresentationRetirement"),
+                ("Succeeded", false),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(presentationRetirementStartedAt).TotalMilliseconds));
+        if (!presentationRetired)
             return SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult.Skipped("PresentationRetirementUnproven");
 
         cancellationToken.ThrowIfCancellationRequested();
-        return await physical.PrepareForWindowsSessionEndAsync(cancellationToken).ConfigureAwait(false);
+        return await physical.PrepareForWindowsSessionEndAsync(
+            cancellationToken,
+            () => GetWindowsSessionEndRemainingBudget(sessionEndStartedAt)).ConfigureAwait(false);
     }
 
-    private string? GetWindowsSessionEndAdmissionFailure()
+    internal static Task<bool> DrainWindowsSessionEndPresentationReconcileAsync(
+        Task<bool> presentationReconcile,
+        CancellationToken cancellationToken) =>
+        presentationReconcile.WaitAsync(cancellationToken);
+
+    private static TimeSpan GetWindowsSessionEndRemainingBudget(long sessionEndStartedAt)
+    {
+        var remaining = WindowsSessionEndPreparationBudget - Stopwatch.GetElapsedTime(sessionEndStartedAt);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+    }
+
+    private string? GetWindowsSessionEndAdmissionFailure(Task<bool> presentationReconcile)
     {
         if (_startupResult?.HardwareDeviceModel is not { } model
             || !SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawAddonPhysicalOwnership.IsA2vmBootRumblePrimeModel(model))
@@ -3075,9 +3151,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             || Volatile.Read(ref _controllerOwnershipReleaseStarted) != 0
             || Volatile.Read(ref _developerRumbleRearmInProgress) != 0
             || Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0
-            || !_ownedControllerRecovery.IsCompletedSuccessfully
-            || !_presentationReconcile.IsCompletedSuccessfully)
+            || !_ownedControllerRecovery.IsCompletedSuccessfully)
             return "ControllerLifecycleOperationInProgress";
+        if (presentationReconcile.IsFaulted || presentationReconcile.IsCanceled
+            || presentationReconcile.IsCompletedSuccessfully && !presentationReconcile.Result)
+            return "PresentationReconcileFailed";
 
         var physical = _physicalOwnership;
         var presentation = _presentationOwnership;
@@ -3087,10 +3165,38 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(target))
             return "OwnedStrongPid1902SessionUnavailable";
         if (presentation is null
-            || !presentation.IsActivePresentationLive
             || presentation.IsSuspendPaused
             || presentation.IsOverlayPaused)
             return "LivePresentationUnavailable";
+        if (presentationReconcile.IsCompletedSuccessfully && !presentation.IsActivePresentationLive)
+            return "LivePresentationUnavailable";
+        return null;
+    }
+
+    private string? GetWindowsSessionEndPostReconcileFailure(
+        IMsiClawAddonPresentation presentation,
+        IMsiClawAddonPhysicalOwnership physical,
+        IMsiClawPreparedInputSource expectedSource,
+        MsiClawPhysicalIdentity expectedIdentity,
+        string expectedTarget)
+    {
+        if (_centerMStartupControl is null
+            || _centerMStartupControl.Capture().State != FrontendCenterMStartupState.Disabled)
+            return "CenterMAuthorityChangedDuringPresentationReconcile";
+
+        var currentIdentity = physical.OwnedPhysicalIdentity;
+        if (!ReferenceEquals(physical.LiveInputSource, expectedSource)
+            || expectedSource is not { IsRunning: true }
+            || currentIdentity is not { Confidence: MsiClawIdentityConfidence.Strong, VendorId: MsiClawHardware.VendorId, ProductId: MsiClawHardware.DirectInputProductId }
+            || !expectedIdentity.StronglyMatches(currentIdentity)
+            || !string.Equals(physical.OwnedPrimaryHiddenTarget, expectedTarget, StringComparison.OrdinalIgnoreCase))
+            return "OwnedPid1902SessionChangedDuringPresentationReconcile";
+
+        if (!presentation.IsActivePresentationLive
+            || presentation.IsSuspendPaused
+            || presentation.IsOverlayPaused)
+            return "LivePresentationUnprovenAfterReconcile";
+
         return null;
     }
 
@@ -3241,6 +3347,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // PR7 section 19.1: no new reconcile can be scheduled after BeginProcessShutdown cancelled
         // the token; drain the last in-flight one before tearing down the presentation owner.
         try { await _presentationReconcile.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
         catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Runtime presentation reconcile failed during shutdown.", exception); }
         if (_frontButtonRuntime is not null)
         {
@@ -3584,22 +3691,38 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// owner's gate is acquired, so overlapping RunningAppID/BPM events never apply stale state.</summary>
     private void RequestControllerPresentationReconcile(string trigger)
     {
-        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
-        if (Volatile.Read(ref _developerRumbleRearmInProgress) != 0)
+        Task<bool>? reconcile = null;
+        FrontendControllerBadgeState previousBadge = default;
+        var deferredForDeveloperRearm = false;
+        lock (_controllerOwnershipOperationSync)
         {
-            Interlocked.Exchange(ref _developerRumbleRearmPresentationReconcilePending, 1);
+            if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+            if (Volatile.Read(ref _developerRumbleRearmInProgress) != 0)
+            {
+                Interlocked.Exchange(ref _developerRumbleRearmPresentationReconcilePending, 1);
+                deferredForDeveloperRearm = true;
+            }
+            else if (_presentationOwnership is { } presentation && _physicalOwnership is { } physical)
+            {
+                previousBadge = CaptureCurrentControllerBadge();
+                reconcile = Task.Run(() => ReconcileControllerPresentationAsync(
+                    presentation,
+                    physical,
+                    trigger,
+                    _startupCancellationTokenSource.Token));
+                _presentationReconcile = reconcile;
+            }
+        }
+
+        if (deferredForDeveloperRearm)
+        {
             AppLog.Debug("ControllerPresentation", "Presentation reconcile deferred to the Developer rumble re-arm completion.",
                 ("Event", "DeveloperRumbleRearmPresentationReconcileSuppressed"), ("Trigger", trigger));
             return;
         }
-        var presentation = _presentationOwnership;
-        var physical = _physicalOwnership;
-        if (presentation is null || physical is null) return;
+        if (reconcile is null) return;
 
         AppLog.Debug("ControllerPresentation", "Runtime presentation reconcile requested.", ("Event", "PresentationReconcileRequested"), ("Trigger", trigger));
-        var previousBadge = CaptureCurrentControllerBadge();
-        var reconcile = ReconcileControllerPresentationAsync(presentation, physical, trigger, _startupCancellationTokenSource.Token);
-        _presentationReconcile = reconcile;
         _ = NotifyControllerBadgeIfChangedAfterAsync(
             reconcile,
             previousBadge,
@@ -3607,7 +3730,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             NotifyControllerBadgeStateInvalidated);
     }
 
-    private async Task ReconcileControllerPresentationAsync(
+    private async Task<bool> ReconcileControllerPresentationAsync(
         Devices.MSI.Claw.IMsiClawAddonPresentation presentation,
         Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical,
         string trigger,
@@ -3619,7 +3742,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (source is null)
             {
                 AppLog.Info("ControllerPresentation", "Runtime presentation reconcile skipped; no live PR5 input source.", ("Trigger", trigger));
-                return;
+                return false;
             }
             // Full1902 Policy B section 5.7: a Steam/BPM switch of an already-live presentation never
             // touches suppression, but a reconcile that would re-attach a live presentation after
@@ -3630,7 +3753,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             {
                 AppLog.Warn("ControllerPresentation", "Runtime presentation reconcile skipped; Win+G suppression is not armed.", null,
                     ("Trigger", trigger), ("Event", "Full1902WinGSuppressionArmFailed"));
-                return;
+                return false;
             }
 
             // Full1902 Suspend/Resume section 11.1 / review addendum B: the suspend-release pre-step
@@ -3646,7 +3769,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     // output neutral; existing PR8/PR10 recovery repairs it and re-enters here.
                     AppLog.Info("ControllerPresentation", "Suspend pause retained; physical source is not running.",
                         ("Trigger", trigger), ("Event", "PresentationResumeDeferredSourceUnavailable"));
-                    return;
+                    return false;
                 }
                 source.ResetLatestStateToNeutral();
                 var resume = await presentation.ResumeAfterSuspendAsync(
@@ -3657,7 +3780,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     ("Trigger", trigger), ("Outcome", resume.Outcome), ("Reason", resume.Reason));
                 if (resume.StillBlocked || resume.Outcome is Devices.MSI.Claw.SuspendResumeOutcome.SamePublisherResumed
                     or Devices.MSI.Claw.SuspendResumeOutcome.LeftNeutral)
-                    return;
+                    return !resume.StillBlocked
+                        && resume.Outcome == Devices.MSI.Claw.SuspendResumeOutcome.SamePublisherResumed;
                 // ReconcileRequired / NotPaused -> fall through to the normal PR7 reconcile below.
             }
 
@@ -3667,11 +3791,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
             AppLog.Info("ControllerPresentation", "Runtime presentation reconcile completed.",
                 ("Trigger", trigger), ("Outcome", result.Outcome), ("Presentation", result.Presentation?.ToString() ?? "None"), ("Reason", result.Reason));
+            return result.Succeeded;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception exception)
         {
             AppLog.Error("ControllerPresentation", "Runtime presentation reconcile threw; Runtime remains available.", exception, ("Trigger", trigger));
+            return false;
         }
         finally
         {

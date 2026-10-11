@@ -1253,6 +1253,58 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         await owner.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Windows_session_end_remaining_budget_guard_prevents_mode_command_dispatch()
+    {
+        var h = new Harness
+        {
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.AlreadyClaimed,
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+
+        var result = await owner.PrepareForWindowsSessionEndAsync(CancellationToken.None, () => TimeSpan.Zero);
+
+        Assert.Equal(A2vmWindowsSessionEndOutcome.Skipped, result.Outcome);
+        Assert.Equal("DeadlineExceededBeforeModeCommandDispatch", result.Reason);
+        Assert.Equal(0, h.XInputCommandWriteCalls);
+        Assert.False(h.InputSource.IsRunning);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Windows_session_end_reports_unconfirmed_result_when_mode_command_dispatch_is_canceled()
+    {
+        var h = new Harness
+        {
+            HardwareDeviceModel = new("msi.claw.a2vm.8"),
+            ClaimBootAttempt = () => BootSessionAttemptResult.AlreadyClaimed,
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.XInputCommandWriteOverride = async (_, cancellationToken) =>
+        {
+            writeStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new(true, true, "UnexpectedCompletion");
+        };
+        using var cancellation = new CancellationTokenSource();
+
+        var preparation = owner.PrepareForWindowsSessionEndAsync(cancellation.Token, () => TimeSpan.FromSeconds(1));
+        await writeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        var result = await preparation;
+
+        Assert.Equal(A2vmWindowsSessionEndOutcome.Skipped, result.Outcome);
+        Assert.Equal("DeadlineExceededAfterModeCommandDispatch;WriteResultUnconfirmed", result.Reason);
+        Assert.Equal(1, h.XInputCommandWriteCalls);
+        await owner.DisposeAsync();
+    }
+
     private static Harness CreateRearmHarness() => new()
     {
         RecordModeSwitchEvents = true,
@@ -2767,6 +2819,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public bool RecoverySwitchSucceeds { get; set; } = true;
         public int RecoverySwitchCalls { get; private set; }
         public bool XInputCommandWriteSucceeds { get; set; } = true;
+        public Func<MsiClawPhysicalIdentity, CancellationToken, Task<MsiClawModeCommandWriteResult>>? XInputCommandWriteOverride { get; set; }
         public int XInputCommandWriteCalls { get; private set; }
         public List<string> Events { get; } = [];
 
@@ -2929,11 +2982,13 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             hardwareDeviceModel: HardwareDeviceModel,
             claimA2vmBootAttempt: ClaimBootAttempt,
             getTimestamp: () => _timestamp,
-            writeXInputCommand: (_, cancellationToken) =>
+            writeXInputCommand: (identity, cancellationToken) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 XInputCommandWriteCalls++;
                 Events.Add("XInputCommand");
+                if (XInputCommandWriteOverride is { } writeOverride)
+                    return writeOverride(identity, cancellationToken);
                 return Task.FromResult(new MsiClawModeCommandWriteResult(
                     true,
                     XInputCommandWriteSucceeds,

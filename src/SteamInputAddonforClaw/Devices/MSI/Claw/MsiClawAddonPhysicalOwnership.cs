@@ -107,7 +107,9 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
     /// <summary>Windows shutdown/restart only: stop the already-owned A2VM PID1902 DirectInput
     /// session after presentation retirement, then issue at most one existing XInput command. It
     /// does not verify PID1901 arrival, change Center M, or mutate persistent HidHide state.</summary>
-    Task<A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(CancellationToken cancellationToken);
+    Task<A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(
+        CancellationToken cancellationToken,
+        Func<TimeSpan>? getRemainingBudget = null);
 
     /// <summary>One explicit Developer-only A2VM rumble re-arm. The caller has already stopped and
     /// drained the active virtual presentation. This method owns the physical serialization gate,
@@ -669,8 +671,13 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         finally { _gate.Release(); }
     }
 
-    public async Task<A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(CancellationToken cancellationToken)
+    public async Task<A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(
+        CancellationToken cancellationToken,
+        Func<TimeSpan>? getRemainingBudget = null)
     {
+        var physicalPreparationStartedAt = Stopwatch.GetTimestamp();
+        var ownerGateWaitStartedAt = physicalPreparationStartedAt;
+        var modeCommandDispatched = false;
         if (Volatile.Read(ref _disposed) != 0)
             return A2vmWindowsSessionEndResult.Skipped("OwnerDisposed");
         if (!IsA2vmBootRumblePrimeModel(_hardwareDeviceModel))
@@ -688,6 +695,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         {
             return A2vmWindowsSessionEndResult.Skipped("OwnerDisposed");
         }
+
+        AppLog.Info("ControllerOwnership", "Windows session-end physical owner gate acquired.",
+            ("Event", "A2vmWindowsSessionEndPhysicalOwnerGate"),
+            ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(ownerGateWaitStartedAt).TotalMilliseconds));
 
         try
         {
@@ -712,6 +723,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 || !string.Equals(liveSession.PnpInstanceId, target, StringComparison.OrdinalIgnoreCase))
                 return A2vmWindowsSessionEndResult.Skipped("LiveDirectInputIdentityDoesNotMatchOwnedTarget");
 
+            var topologyStartedAt = Stopwatch.GetTimestamp();
             IReadOnlyList<ControllerDeviceInfo> devices;
             try
             {
@@ -720,7 +732,9 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             catch (Exception exception)
             {
                 AppLog.Warn("ControllerOwnership", "Windows session-end PID1901 preparation could not enumerate the owned PID1902 topology.", exception,
-                    ("Event", "A2vmWindowsSessionEndPreflightFailed"));
+                    ("Event", "A2vmWindowsSessionEndPreflightFailed"),
+                    ("Stage", "OwnedPid1902Topology"),
+                    ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(topologyStartedAt).TotalMilliseconds));
                 return A2vmWindowsSessionEndResult.Skipped("OwnedPid1902EnumerationFailed");
             }
 
@@ -732,8 +746,15 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 || !identity.StronglyMatches(MsiClawPhysicalIdentity.From(primary)))
                 return A2vmWindowsSessionEndResult.Skipped("ExactOwnedPid1902PrimaryNotPresent");
 
-            if (new MsiClawControlHidResolver().Resolve(devices, MsiClawNativeMode.DirectInput, identity) is null)
+            var commandHid = new MsiClawControlHidResolver().Resolve(devices, MsiClawNativeMode.DirectInput, identity);
+            if (commandHid is null)
                 return A2vmWindowsSessionEndResult.Skipped("UniquePid1902CommandHidUnavailable");
+
+            AppLog.Info("ControllerOwnership", "Windows session-end PID1902 and command-HID preflight completed.",
+                ("Event", "A2vmWindowsSessionEndPhysicalPreflight"),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(topologyStartedAt).TotalMilliseconds),
+                ("ExactOwnedPid1902Primary", true),
+                ("UniqueCommandHid", true));
 
             cancellationToken.ThrowIfCancellationRequested();
             if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
@@ -745,6 +766,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             ClearLivePhysicalSession();
             _inputSource.ResetLatestStateToNeutral();
 
+            var directInputCleanupStartedAt = Stopwatch.GetTimestamp();
             bool cleanupProven;
             try
             {
@@ -753,13 +775,24 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             catch (Exception exception)
             {
                 AppLog.Warn("ControllerOwnership", "Windows session-end DirectInput cleanup threw; skipping the PID1901 command.", exception,
-                    ("Event", "A2vmWindowsSessionEndDirectInputStopFailed"));
+                    ("Event", "A2vmWindowsSessionEndDirectInputStopFailed"),
+                    ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(directInputCleanupStartedAt).TotalMilliseconds));
                 return A2vmWindowsSessionEndResult.Skipped("DirectInputCleanupUnproven");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
             if (!cleanupProven || _inputSource.IsRunning)
+            {
+                AppLog.Warn("ControllerOwnership", "Windows session-end DirectInput cleanup was not confirmed.", null,
+                    ("Event", "A2vmWindowsSessionEndDirectInputStopFailed"),
+                    ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(directInputCleanupStartedAt).TotalMilliseconds),
+                    ("CleanupProven", cleanupProven),
+                    ("InputSourceStillRunning", _inputSource.IsRunning));
                 return A2vmWindowsSessionEndResult.Skipped("DirectInputCleanupUnproven");
+            }
+            AppLog.Info("ControllerOwnership", "Windows session-end DirectInput cleanup was confirmed.",
+                ("Event", "A2vmWindowsSessionEndDirectInputStopped"),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(directInputCleanupStartedAt).TotalMilliseconds));
             if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
                 return A2vmWindowsSessionEndResult.Skipped("CenterMAuthorityChangedBeforeModeWrite");
             if (_writeXInputCommand is null)
@@ -768,7 +801,30 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             // The write-only mode-controller seam re-enumerates and resolves the exact strong
             // PID1902 command endpoint again, then performs one HID write with no PnP wait.
             cancellationToken.ThrowIfCancellationRequested();
+            var remainingBudget = getRemainingBudget?.Invoke();
+            if (remainingBudget is { } remaining && remaining <= TimeSpan.Zero)
+                return A2vmWindowsSessionEndResult.Skipped("DeadlineExceededBeforeModeCommandDispatch");
+            AppLog.Info("ControllerOwnership", "Windows session-end XInput mode command dispatch is starting.",
+                ("Event", "A2vmWindowsSessionEndModeCommandDispatch"),
+                ("RemainingBudgetMs", remainingBudget is { } budget ? (long)budget.TotalMilliseconds : null),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(physicalPreparationStartedAt).TotalMilliseconds));
+            modeCommandDispatched = true;
+            var modeCommandStartedAt = Stopwatch.GetTimestamp();
             var write = await _writeXInputCommand(identity, cancellationToken).ConfigureAwait(false);
+            if (write.WriteSucceeded)
+                AppLog.Info("ControllerOwnership", "Windows session-end XInput mode command dispatch completed.",
+                    ("Event", "A2vmWindowsSessionEndModeCommandDispatchCompleted"),
+                    ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(modeCommandStartedAt).TotalMilliseconds),
+                    ("CommandWriteAttempted", write.WriteAttempted),
+                    ("CommandWriteSucceeded", true),
+                    ("Reason", write.Reason));
+            else
+                AppLog.Warn("ControllerOwnership", "Windows session-end XInput mode command did not complete successfully.", null,
+                    ("Event", "A2vmWindowsSessionEndModeCommandDispatchCompleted"),
+                    ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(modeCommandStartedAt).TotalMilliseconds),
+                    ("CommandWriteAttempted", write.WriteAttempted),
+                    ("CommandWriteSucceeded", false),
+                    ("Reason", write.Reason));
             if (write.WriteSucceeded)
                 return new(A2vmWindowsSessionEndOutcome.CommandWritten, "XInputCommandWritten");
             return write.WriteAttempted
@@ -777,7 +833,9 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return A2vmWindowsSessionEndResult.Skipped("DeadlineExceededBeforeModeWrite");
+            return A2vmWindowsSessionEndResult.Skipped(modeCommandDispatched
+                ? "DeadlineExceededAfterModeCommandDispatch;WriteResultUnconfirmed"
+                : "DeadlineExceededBeforeModeCommandDispatch");
         }
         catch (Exception exception)
         {

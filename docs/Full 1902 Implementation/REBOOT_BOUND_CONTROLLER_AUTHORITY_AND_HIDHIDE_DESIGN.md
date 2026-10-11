@@ -903,6 +903,8 @@ Persistent HidHide baseline remains
 Only the narrowly gated A2VM 7/8 best-effort session-end command; no PID1901 PnP verification or authority release
 ```
 
+If a Steam/BPM presentation reconcile is already running when this callback is admitted, the Runtime closes further reconcile admission through its existing shutdown gate and may drain that one tracked task within the same bounded 2-second global shutdown deadline. It rechecks the live publisher, Center M Disabled state, and the exact strongly-owned PID1902 input session before normal presentation retirement. A failed, canceled, timed-out, or no-longer-proven reconcile skips the PID1901 command. VIIPER detach outcomes such as `UnsafeOutcomeUnknown` or `Invalid` remain failures; none are promoted to safe teardown.
+
 There is no normal steady state:
 
 ```text

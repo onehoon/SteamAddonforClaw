@@ -412,6 +412,101 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Session_end_write_only_mode_command_dispatches_through_native_state_manager_interface_once()
+    {
+        var source = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var enumerator = new SequenceEnumerator([source]);
+        var writer = new RecordingWriter();
+        IMsiClawModeController modeController = new MsiClawModeController(
+            enumerator,
+            new MsiClawControlHidResolver(),
+            writer);
+        var nativeState = new MsiClawNativeStateManager(enumerator, modeController);
+
+        var result = await nativeState.WriteXInputCommandAsync(
+            MsiClawPhysicalIdentity.From(source),
+            CancellationToken.None);
+
+        Assert.True(result.WriteAttempted);
+        Assert.True(result.WriteSucceeded);
+        Assert.Equal("CommandWritten", result.Reason);
+        Assert.Equal(1, writer.CallCount);
+        Assert.Equal(MsiClawNativeMode.XInput, writer.Mode);
+    }
+
+    [Theory]
+    [InlineData((int)MsiClawIdentityConfidence.Weak, 0x1902)]
+    [InlineData((int)MsiClawIdentityConfidence.Strong, 0x1901)]
+    public async Task Session_end_write_only_mode_command_rejects_unproven_identity_before_enumeration(int confidence, int productId)
+    {
+        var source = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var enumerator = new SequenceEnumerator([source]);
+        var writer = new RecordingWriter();
+        IMsiClawModeController modeController = new MsiClawModeController(
+            enumerator,
+            new MsiClawControlHidResolver(),
+            writer);
+        var nativeState = new MsiClawNativeStateManager(enumerator, modeController);
+        var identity = MsiClawPhysicalIdentity.From(source) with
+        {
+            Confidence = (MsiClawIdentityConfidence)confidence,
+            ProductId = (ushort)productId
+        };
+
+        var result = await nativeState.WriteXInputCommandAsync(identity, CancellationToken.None);
+
+        Assert.False(result.WriteAttempted);
+        Assert.False(result.WriteSucceeded);
+        Assert.Equal("StrongPid1902IdentityRequired", result.Reason);
+        Assert.Equal(0, enumerator.EnumerationCount);
+        Assert.Equal(0, writer.CallCount);
+    }
+
+    [Fact]
+    public async Task Session_end_write_only_mode_command_rejects_missing_source_without_write()
+    {
+        var source = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var enumerator = new SequenceEnumerator([Array.Empty<ControllerDeviceInfo>()]);
+        var writer = new RecordingWriter();
+        IMsiClawModeController modeController = new MsiClawModeController(
+            enumerator,
+            new MsiClawControlHidResolver(),
+            writer);
+        var nativeState = new MsiClawNativeStateManager(enumerator, modeController);
+
+        var result = await nativeState.WriteXInputCommandAsync(
+            MsiClawPhysicalIdentity.From(source),
+            CancellationToken.None);
+
+        Assert.False(result.WriteAttempted);
+        Assert.False(result.WriteSucceeded);
+        Assert.Contains("CommandSourceNotProven", result.Reason);
+        Assert.Equal(0, writer.CallCount);
+    }
+
+    [Fact]
+    public async Task Session_end_write_only_mode_command_reports_single_unconfirmed_write_failure()
+    {
+        var source = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var enumerator = new SequenceEnumerator([source]);
+        var writer = new RecordingWriter { FailuresRemaining = 1 };
+        IMsiClawModeController modeController = new MsiClawModeController(
+            enumerator,
+            new MsiClawControlHidResolver(),
+            writer);
+        var nativeState = new MsiClawNativeStateManager(enumerator, modeController);
+
+        var result = await nativeState.WriteXInputCommandAsync(
+            MsiClawPhysicalIdentity.From(source),
+            CancellationToken.None);
+
+        Assert.True(result.WriteAttempted);
+        Assert.False(result.WriteSucceeded);
+        Assert.Equal("ModeCommandWriteNotConfirmed", result.Reason);
+        Assert.Equal(1, writer.CallCount);
+    }
+
+    [Fact]
     public async Task Session_end_write_only_mode_command_rejects_ambiguous_control_endpoints()
     {
         var container = Guid.NewGuid();

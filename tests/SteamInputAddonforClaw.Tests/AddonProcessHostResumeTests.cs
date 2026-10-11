@@ -49,7 +49,7 @@ public sealed class AddonProcessHostResumeTests
 
         // B.1: in the reconcile entrypoint the suspend-release pre-step comes AFTER the source and
         // Win+G suppression guards, and ResetLatestStateToNeutral only runs inside that block.
-        var reconcile = host[host.IndexOf("private async Task ReconcileControllerPresentationAsync", StringComparison.Ordinal)..];
+        var reconcile = host[host.IndexOf("private async Task<bool> ReconcileControllerPresentationAsync", StringComparison.Ordinal)..];
         reconcile = reconcile[..reconcile.IndexOf("private", reconcile.IndexOf("ReconcileDesiredPresentationAsync", StringComparison.Ordinal))];
         Assert.True(
             reconcile.IndexOf("_winGSuppressionGuard.IsArmed", StringComparison.Ordinal)

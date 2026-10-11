@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Hosting;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -23,7 +24,7 @@ public sealed class AddonProcessHostWindowsSessionEndTests
     {
         var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
         var begin = Method(host, "private async Task<SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(");
-        var admission = begin.IndexOf("GetWindowsSessionEndAdmissionFailure()", StringComparison.Ordinal);
+        var admission = begin.IndexOf("GetWindowsSessionEndAdmissionFailure(admissionReconcile)", StringComparison.Ordinal);
         var shutdownGate = begin.IndexOf("TryBeginProcessShutdownCore()", admission, StringComparison.Ordinal);
         var presentation = begin.IndexOf("presentation.PrepareForWindowsSessionEndAsync", shutdownGate, StringComparison.Ordinal);
         var physical = begin.IndexOf("physical.PrepareForWindowsSessionEndAsync", presentation, StringComparison.Ordinal);
@@ -35,6 +36,91 @@ public sealed class AddonProcessHostWindowsSessionEndTests
         Assert.Contains("CenterMAuthorityNotDisabled", host, StringComparison.Ordinal);
         Assert.Contains("OwnedStrongPid1902SessionUnavailable", host, StringComparison.Ordinal);
         Assert.Contains("ControllerLifecycleOperationInProgress", host, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Session_end_drains_only_the_captured_reconcile_and_revalidates_owners_before_retirement()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
+        var begin = Method(host, "private async Task<SteamInputAddonforClaw.Devices.MSI.Claw.A2vmWindowsSessionEndResult> PrepareForWindowsSessionEndAsync(");
+        var capture = begin.IndexOf("var admissionReconcile = _presentationReconcile", StringComparison.Ordinal);
+        var shutdownGate = begin.IndexOf("TryBeginProcessShutdownCore()", capture, StringComparison.Ordinal);
+        var shutdownReconcile = begin.IndexOf("var presentationReconcile = _presentationReconcile", shutdownGate, StringComparison.Ordinal);
+        var boundedWait = begin.IndexOf("DrainWindowsSessionEndPresentationReconcileAsync(presentationReconcile, cancellationToken)", shutdownReconcile, StringComparison.Ordinal);
+        var revalidation = begin.IndexOf("GetWindowsSessionEndPostReconcileFailure", boundedWait, StringComparison.Ordinal);
+        var retirement = begin.IndexOf("presentation.PrepareForWindowsSessionEndAsync", revalidation, StringComparison.Ordinal);
+        var physical = begin.IndexOf("physical.PrepareForWindowsSessionEndAsync", retirement, StringComparison.Ordinal);
+
+        Assert.True(capture >= 0 && shutdownGate > capture && shutdownReconcile > shutdownGate && boundedWait > shutdownReconcile
+            && revalidation > boundedWait && retirement > revalidation && physical > retirement);
+        Assert.Contains("PresentationReconcileCancelled", begin, StringComparison.Ordinal);
+        Assert.Contains("PresentationReconcileFailed", begin, StringComparison.Ordinal);
+
+        var request = Method(host, "private void RequestControllerPresentationReconcile(");
+        Assert.Contains("lock (_controllerOwnershipOperationSync)", request, StringComparison.Ordinal);
+        Assert.Contains("Task.Run(() => ReconcileControllerPresentationAsync", request, StringComparison.Ordinal);
+        Assert.Contains("if (Volatile.Read(ref _processShutdownStarted) != 0) return", request, StringComparison.Ordinal);
+
+        var reconcile = Method(host, "private async Task<bool> ReconcileControllerPresentationAsync(");
+        Assert.Contains("catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)", reconcile, StringComparison.Ordinal);
+        Assert.Contains("throw;", reconcile, StringComparison.Ordinal);
+
+        var revalidateMethod = Method(host, "private string? GetWindowsSessionEndPostReconcileFailure(");
+        Assert.Contains("expectedIdentity.StronglyMatches(currentIdentity)", revalidateMethod, StringComparison.Ordinal);
+        Assert.Contains("presentation.IsActivePresentationLive", revalidateMethod, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Session_end_keeps_one_global_budget_and_reports_actual_stage_and_command_outcomes()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
+        var physical = ReadSource("src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPhysicalOwnership.cs");
+        var modeController = ReadSource("src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawModeController.cs");
+        var handler = Method(host, "private void HandleWindowsSessionEnd()");
+
+        Assert.Contains("TimeSpan.FromMilliseconds(2000)", host, StringComparison.Ordinal);
+        Assert.Contains("deadline.CancelAfter(WindowsSessionEndPreparationBudget)", handler, StringComparison.Ordinal);
+        Assert.Contains("operation.Wait(WindowsSessionEndPreparationBudget)", handler, StringComparison.Ordinal);
+        Assert.Equal(1, handler.Split("A2vmWindowsSessionEndPid1901Prepare", StringSplitOptions.None).Length - 1);
+        Assert.Contains("PnP1901Verified", handler, StringComparison.Ordinal);
+        Assert.Contains("(\"Outcome\"", handler, StringComparison.Ordinal);
+        Assert.Contains("A2vmWindowsSessionEndAdmissionCompleted", host, StringComparison.Ordinal);
+        Assert.Contains("A2vmWindowsSessionEndPresentationRetirement", host, StringComparison.Ordinal);
+        Assert.Contains("A2vmWindowsSessionEndPhysicalPreflight", physical, StringComparison.Ordinal);
+        Assert.Contains("A2vmWindowsSessionEndDirectInputStopped", physical, StringComparison.Ordinal);
+        Assert.Contains("RemainingBudgetMs", physical, StringComparison.Ordinal);
+        Assert.Contains("A2vmWindowsSessionEndCommandSourceResolved", modeController, StringComparison.Ordinal);
+        Assert.Contains("ResultUnconfirmed", modeController, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Session_end_reconcile_drain_waits_for_and_preserves_the_reconcile_result(bool succeeded)
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drain = AddonProcessHost.DrainWindowsSessionEndPresentationReconcileAsync(completion.Task, CancellationToken.None);
+
+        Assert.False(drain.IsCompleted);
+        completion.SetResult(succeeded);
+
+        Assert.Equal(succeeded, await drain);
+    }
+
+    [Fact]
+    public async Task Session_end_reconcile_drain_observes_task_and_deadline_cancellation()
+    {
+        var canceledReconcile = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceledDrain = AddonProcessHost.DrainWindowsSessionEndPresentationReconcileAsync(canceledReconcile.Task, CancellationToken.None);
+        canceledReconcile.SetCanceled();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledDrain);
+
+        var pendingReconcile = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var deadline = new CancellationTokenSource();
+        var deadlineDrain = AddonProcessHost.DrainWindowsSessionEndPresentationReconcileAsync(pendingReconcile.Task, deadline.Token);
+        deadline.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => deadlineDrain);
+        pendingReconcile.SetResult(true);
     }
 
     [Fact]
