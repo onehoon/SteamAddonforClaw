@@ -53,10 +53,51 @@ public sealed class DualSenseEdgeDeviceStateMapperTests
         var mapped = Map(source);
 
         Assert.Equal((sbyte)-128, mapped.LX);
-        Assert.Equal((sbyte)1, mapped.LY);
+        Assert.Equal((sbyte)-1, mapped.LY);
         Assert.Equal((sbyte)-1, mapped.RX);
-        Assert.Equal((sbyte)127, mapped.RY);
+        Assert.Equal((sbyte)-128, mapped.RY);
         Assert.Equal((sbyte)0, Map(State(default)).LX);
+    }
+
+    [Fact]
+    public void MapsPhysicalUpAndDownToSonyHidVerticalDirectionOnBothSticks()
+    {
+        var neutral = Map(State(default));
+        Assert.Equal((sbyte)0, neutral.LY);
+        Assert.Equal((sbyte)0, neutral.RY);
+
+        // Physical UP is positive in Claw state and must become Sony HID 0; DOWN becomes HID 255.
+        var leftUpRightDown = Map(State(default,
+            leftStick: new StickState(1111, short.MaxValue),
+            rightStick: new StickState(-2222, short.MinValue)));
+        Assert.Equal((sbyte)4, leftUpRightDown.LX);
+        Assert.Equal((sbyte)-128, leftUpRightDown.LY);
+        Assert.Equal((sbyte)-9, leftUpRightDown.RX);
+        Assert.Equal((sbyte)127, leftUpRightDown.RY);
+
+        var leftDownRightUp = Map(State(default,
+            leftStick: new StickState(short.MinValue, short.MinValue),
+            rightStick: new StickState(short.MaxValue, short.MaxValue)));
+        Assert.Equal((sbyte)-128, leftDownRightUp.LX);
+        Assert.Equal((sbyte)127, leftDownRightUp.LY);
+        Assert.Equal((sbyte)127, leftDownRightUp.RX);
+        Assert.Equal((sbyte)-128, leftDownRightUp.RY);
+
+        var intermediate = Map(State(default,
+            leftStick: new StickState(3210, 128),
+            rightStick: new StickState(-6543, -128)));
+        Assert.Equal((sbyte)13, intermediate.LX);
+        Assert.Equal((sbyte)-1, intermediate.LY);
+        Assert.Equal((sbyte)-26, intermediate.RX);
+        Assert.Equal((sbyte)1, intermediate.RY);
+
+        var xOnly = Map(State(default,
+            leftStick: new StickState(4096, 0),
+            rightStick: new StickState(-4096, 0)));
+        Assert.Equal((sbyte)16, xOnly.LX);
+        Assert.Equal((sbyte)0, xOnly.LY);
+        Assert.Equal((sbyte)-16, xOnly.RX);
+        Assert.Equal((sbyte)0, xOnly.RY);
     }
 
     [Fact]

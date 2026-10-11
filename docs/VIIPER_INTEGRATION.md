@@ -6,14 +6,14 @@
 > foreground presentation path) has been deleted. Passages below that describe a
 > "routing pipeline", route epochs, `AddonRoutingRuntime` ownership, or Game Bar
 > foreground presentation selection are retained as history only. Current
-> presentation authority is `MsiClawAddonPresentation` → `CanonicalViiperRuntime`
-> → exactly one live X360 **or** Steam Deck publisher, owned by `AddonProcessHost`
-> while Center M is Disabled.
+> presentation authority is `MsiClawAddonPresentation` → one
+> `CanonicalViiperRuntime` → exactly one attached device and publisher at a time:
+> Xbox360 for Windows mode, or Steam Deck / DualSense Edge for Steam/BPM.
 
 This document defines the current Addon integration with the canonical typed
-VIIPER API. Current production presentations are Xbox360 for regular Windows
-use and Steam Deck `28DE:1205` for Steam/Big Picture. Game Bar foreground does
-not switch between them.
+VIIPER API. The current selector uses Xbox360 for regular Windows use. During
+Steam/Big Picture, Settings selects Steam Deck (default) or DualSense Edge
+(experimental). Game Bar foreground does not select or switch presentations.
 
 ## Current status
 
@@ -22,14 +22,16 @@ not switch between them.
 | Canonical embedded API | `lib/viiper` typed ABI |
 | Embedded VIIPER revision | `0689d18416cf6cde9ba4fed04eb373a1a3383ddc` |
 | Tracked Windows usbip-win2 package | `0.9.8.1` |
-| Primary Steam routing target | Steam Deck `28DE:1205` |
+| Steam/BPM presentation | Steam Deck (default) or DualSense Edge (experimental), by Settings preference |
 | Regular Windows routing target | Typed Xbox360 |
 | Game Bar policy | Native Win+G/Game Bar path protected during active routing; no foreground-driven presentation switch |
-| Addon integration | Session, mapper, publisher, identity resolver, safety stage implemented |
-| Hardware status | EX basic non-gyro input validated; lifecycle evidence remains pending |
+| Addon integration | One canonical runtime/owner; Deck and Edge share the Steam-facing selector; Edge device creation is lazy |
+| Edge status | PR-A (#754) and PR-B (#755) merged; selectable production path, experimental pending physical validation |
+| Hardware status | EX basic non-gyro input validated; Edge recognition, controls, motion, PS/QAM, rumble, and lifecycle evidence remain pending |
 | Rumble | Production callback/authority/STOP wiring implemented; hardware validation pending |
-| Rumble / haptic feedback | Production two-motor translation/wiring implemented; hardware validation pending |
-| Gyro / IMU | Steam Deck output implemented; A2VM/EX hardware validation pending |
+| Steam Deck rumble / haptic feedback | Existing Deck-specific translation and wiring; do not generalize this mode to Edge |
+| DualSense Edge output callback | Ordinary two-motor rumble only is forwarded to the shared physical sink; LED-only, adaptive-trigger, audio, and specialized haptics are ignored |
+| Gyro / IMU | Steam Deck output implemented; Edge reuses the shared readers; Edge hardware validation remains pending |
 
 The DLL, generated header, managed P/Invoke definitions, ABI tests, hashes,
 and this contract must all refer to the same VIIPER revision.
@@ -124,20 +126,27 @@ the canonical typed Xbox360 surface (`CreateXbox360Device`,
 managed ABI binding for all of these exists in
 `ICanonicalViiperNativeApi`/`CanonicalViiperNativeApi`. The compatibility
 bool `AttachUSBDevice` / `DetachUSBDevice` surface remains available, but
-production Deck routing uses the classified attachment/query surface.
+production presentation attachment uses the classified attachment/query surface.
 
 `CanonicalViiperRuntime` production initialization owns one USB server, one
 caller-owned bus, and persistent detached-ready Xbox360 and Steam Deck logical
-devices. The production selector attaches and publishes exactly one: Xbox360
-for regular Windows use, or Steam Deck for Steam/Big Picture. It does not
-subscribe `GameBarForegroundWatcher` or switch presentation based on Game Bar
-foreground.
+devices. The Edge logical device is created only when an Edge presentation is
+requested. The selector attaches and publishes exactly one device at a time:
+Xbox360 for regular Windows use, or the Settings-selected Steam Deck (default)
+or DualSense Edge (experimental) for Steam/Big Picture. It does not subscribe
+`GameBarForegroundWatcher` or switch presentation based on Game Bar foreground.
 
 The DualSense Edge backend is an optional lazy extension of this same runtime.
 Its four typed exports are resolved only on explicit Edge use, and its logical
-device is created only on explicit Edge demand. PR-A adds no production caller
-or selection policy; ordinary startup and current Xbox360/Steam Deck routing do
-not create or require Edge.
+device is created only on explicit Edge demand. PR-A (#754) added the typed
+backend and PR-B (#755) added the production Settings selection and runtime
+integration. Normal startup and the default Steam Deck selection do not create
+or require the Edge logical device.
+
+The Edge output callback uses only valid ordinary two-motor rumble and forwards
+it to the shared physical rumble sink. LED callback values are unused; LED-only
+commands, adaptive triggers, audio, and specialized haptics are not translated.
+The existing Steam Deck haptic fallback remains Deck-specific.
 
 This distinction is application policy, not a VIIPER capability restriction.
 VIIPER's typed Xbox360 API remains supported and unchanged. The attachment
@@ -162,19 +171,18 @@ transitions. The software foundation was implemented incrementally, but the
 foreground switch was never promoted to hardware-validated production
 behavior.
 
-The current product direction therefore keeps one canonical Steam Deck
-presentation for the complete active Steam route. Route-bound native Win+G is
-protected while routing owns the controller. The first-install WING default is
-Steam Big Picture in Normal presentation and Steam Button in Steam Game / Big
-Picture presentation; Center M defaults to the Addon Quick Settings Overlay in
-both domains. Addon performance controls remain integrated with Steam QAM.
-These interactions remove the need for a foreground virtual-controller
-identity switch while keeping one clear presentation authority and teardown
-path.
+The current product direction uses one canonical Steam-facing presentation for
+the complete active Steam route: Steam Deck by default or DualSense Edge when
+selected in Settings. Route-bound native Win+G is protected while Addon
+authority owns the controller. The first-install WING default is Steam Big
+Picture in Normal presentation and Steam Button in Steam Game / Big Picture
+presentation; Center M defaults to the Addon Quick Settings Overlay in both
+domains. Addon performance controls remain integrated with Steam QAM. Game Bar
+foreground does not change the selected virtual-controller identity.
 
-The dormant Addon Xbox360 foundation remains in the current code for now, and
-VIIPER's generic typed Xbox360 capability remains supported. Neither fact makes
-Xbox360 part of the current Addon production presentation policy.
+The typed Xbox360 path is the current normal-Windows production presentation.
+The Steam/BPM selector uses the same canonical runtime and never attaches
+Xbox360 alongside the selected Steam-facing device.
 
 ## 1. Upstream authority
 
@@ -192,8 +200,8 @@ The Addon owns application policy and orchestration:
 
 - MSI Claw device discovery and exact physical-input selection;
 - normalized `ControllerState` production;
-- Steam-session and routing policy;
-- target-specific Steam Deck mapping;
+- Steam/BPM presentation selection and lifecycle policy;
+- target-specific Steam Deck and DualSense Edge mappings;
 - PnP identity and ownership verification;
 - HidHide, recovery, suspend/resume, and teardown safety.
 
@@ -206,23 +214,25 @@ unknown.
 
 1. Load the pinned `libVIIPER.dll` for process lifetime.
 2. Initialize one `CanonicalViiperRuntime`: one server, one caller-owned bus,
-   and detached-ready Xbox360 and Steam Deck logical devices. Optional Edge
-   creation is lazy and does not participate in default startup.
-3. Attach only the selected current production presentation: Xbox360 for
-   regular Windows use, or Steam Deck for Steam/Big Picture. Edge remains
-   dormant and unselected until a later integration step.
-4. On Steam route entry, record recovery intent, classified-attach the same
-   Deck handle, then resolve/stabilize exact `28DE:1205` PnP ownership.
+   and detached-ready Xbox360 and Steam Deck logical devices. Create the Edge
+   logical device lazily when an Edge presentation is requested.
+3. Use the current presentation selector: Xbox360 for regular Windows use;
+   during Steam/Big Picture, Steam Deck by default or DualSense Edge when the
+   experimental Settings preference is selected. Keep exactly one attached
+   virtual device and one publisher at a time.
+4. Attach the selected typed device through the same canonical runtime and
+   preserve the existing ownership and identity checks for that presentation.
+   The Steam Deck-specific `28DE:1205` identity contract remains in its Deck
+   section and does not describe Edge identity.
 5. Verify Addon ownership and HidHide state, then publish neutral and live
-   Steam Deck input.
-6. On route exit, stop publisher/feedback, clear callback, neutralize, perform
-   classified Deck detach, verify exact PnP absence, and complete recovery.
-7. Keep the Deck logical handle and the caller-owned bus/server alive while the
-   Runtime lives. Game Bar foreground does not attach or publish Xbox360 in
-   production.
-8. Only after canonical routing shutdown succeeds, final Runtime teardown
-   removes the retained logical devices, removes the bus, and closes the
-   server.
+   state through the selected presentation's publisher.
+6. On presentation retirement, stop/join its publisher, drain and disarm its
+   feedback callback, neutralize, use classified detach, and complete the
+   existing ownership/recovery checks for that device.
+7. Keep the logical devices and shared caller-owned bus/server alive while the
+   Runtime lives. Game Bar foreground does not select or switch a presentation.
+8. Only after canonical presentation shutdown succeeds, final Runtime teardown
+   removes the retained logical devices, removes the bus, and closes the server.
 9. Restore the physical MSI Claw stock state through the existing rollback and
    recovery path.
 
@@ -230,7 +240,7 @@ Public teardown waits outside the canonical native lifecycle lock. Unknown
 attachment or removal outcomes fail closed and preserve recovery evidence for a
 later explicit reconciliation.
 
-**PR2a foundation / PR2b production composition:** the process/runtime-
+**Historical PR2a foundation / PR2b production composition:** the process/runtime-
 lifetime persistent owner described above is implemented as
 `CanonicalViiperRuntime`: one server, one caller-owned bus, persistent
 detached-ready Steam Deck and Xbox360 logical devices created once
@@ -242,7 +252,7 @@ classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route. Final teardown is
 performed only by the runtime owner after routing shutdown succeeds; no second
 VIIPER server/bus owner exists in production. The production selector attaches
 and publishes Xbox360 or Steam Deck, never both concurrently.
-## PR2b production composition
+## Historical PR2b production composition
 
 `AddonRoutingRuntime` owns one `CanonicalViiperRuntime` for its lifetime. That
 runtime owns one server, one caller-owned bus, and persistent detached-ready

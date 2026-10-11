@@ -14,12 +14,14 @@ public sealed class MsiClawMotionSourceTests
     private const string A2VmGyroDeviceId = @"\\?\ACPI#INTC0AC2#VID_8087&PID_0AC2#0";
 
     [Fact]
-    public void Motion_readers_are_off_without_healthy_owned_Steam_Deck_presentation()
+    public void Motion_readers_are_off_without_healthy_live_Steam_facing_presentation()
     {
         Assert.False(AddonProcessHost.ShouldRunMotionReaders(false, AddonPresentationKind.SteamDeck, false, true));
         Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false, true));
         Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, null, false, true));
         Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, true, true));
+        // Overlay capture pauses Deck/Edge publication, so the shared motion readers must stop too.
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false, false));
         Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.DualSenseEdge, false, false));
     }
 
@@ -259,8 +261,10 @@ public sealed class MsiClawMotionSourceTests
         Assert.Equal((1d, 3d, -2d), (snapshot.GyroXDegPerSecond, snapshot.GyroYDegPerSecond, snapshot.GyroZDegPerSecond));
         Assert.Equal((0.1d, 0.9d, -0.2d), (snapshot.AccelXG, snapshot.AccelYG, snapshot.AccelZG));
 
+        var stopTask = source.StopAsync("Test");
+        Assert.False(source.LatestState.IsUsableForSteamDeckImu);
         releaseBlockedRead.Set();
-        Assert.True(await source.StopAsync("Test"));
+        Assert.True(await stopTask);
         Assert.Equal(handles[gyro.SensorId].FirstReadThreadId, handles[gyro.SensorId].DisposeThreadId);
         Assert.Equal(handles[accel.SensorId].FirstReadThreadId, handles[accel.SensorId].DisposeThreadId);
         Assert.NotEqual(handles[gyro.SensorId].FirstReadThreadId, handles[accel.SensorId].FirstReadThreadId);

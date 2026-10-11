@@ -2405,6 +2405,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _overlayInputRouter = router;
             _overlayCaptureActive = true;
             AppLog.Info("OverlayCapture", "Capture committed.", ("Event", "OverlayCaptureCommitted"));
+            // Publication is now paused. Cancel motion readers promptly, without delaying Overlay
+            // dismissal while a sensor worker completes its bounded shutdown.
+            _ = ReconcileMotionReadersAsync("OverlayCaptureCommitted");
             // SF-V2-02/09 section 16.2/8: Device+Profile state publish happens strictly AFTER capture
             // is committed, and is fire-and-forget -- a slow/failed snapshot must never extend how
             // long this method (and the _visibleSurfaceTransition it holds) delays a concurrent Hide.
