@@ -1401,9 +1401,14 @@ public sealed class UiArchitectureTests
         var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
         var mainUi = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
 
-        Assert.Contains("Header=\"M1 / M2 Physical Input &amp; Firmware Profile (Read Only)\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"M1 / M2 Physical Input &amp; Firmware Profile\"", developerXaml, StringComparison.Ordinal);
         Assert.Contains("Press and release M1 only, then M2 only; do not touch any other controls.", developerXaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Run 10s Diagnostic\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Restore M1/M2 DirectInput (Experimental)\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("ColumnDefinitions=\"*\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Stretch\" Opacity=\"0.7\" TextWrapping=\"Wrap\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("DefaultButton = ContentDialogButton.Close", developerCode, StringComparison.Ordinal);
+        Assert.Contains("RunMsiBackButtonManualRestoreAsync(cancellation.Token)", developerCode, StringComparison.Ordinal);
         Assert.Contains("Content=\"Cancel\"", developerXaml, StringComparison.Ordinal);
         Assert.Contains("Unloaded += DeveloperPage_Unloaded", developerCode, StringComparison.Ordinal);
         Assert.Contains("RunMsiBackButtonProfileAndRawInputDiagnosticAsync(cancellation.Token)", developerCode, StringComparison.Ordinal);
