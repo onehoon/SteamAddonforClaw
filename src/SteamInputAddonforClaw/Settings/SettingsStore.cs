@@ -72,6 +72,7 @@ public sealed class SettingsStore
                 ClawHudEnabled = clawHudEnabled,
                 DeveloperMenuEnabled = developerMenuEnabled,
                 QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
+                SteamVirtualController = ReadSteamVirtualController(root),
                 FrontButtonMapping = ReadFrontButtonMapping(root, selectedFrontButtonMappingDefault),
                 BackButtonMapping = ReadBackButtonMapping(root),
                 ControllerLed = ReadControllerLedSettings(root),
@@ -97,6 +98,25 @@ public sealed class SettingsStore
                 FrontButtonMapping = selectedFrontButtonMappingDefault
             };
         }
+    }
+
+    /// <summary>Reads the optional Steam-facing presentation choice in isolation; malformed values
+    /// fall back to Steam Deck without discarding other valid settings.</summary>
+    private static SteamVirtualControllerPreference ReadSteamVirtualController(JsonElement root)
+    {
+        if (!root.TryGetProperty("SteamVirtualController", out var property))
+            return SteamVirtualControllerPreference.SteamDeck;
+
+        if (property.ValueKind == JsonValueKind.String
+            && property.GetString() is { Length: > 0 } name
+            && char.IsLetter(name[0])
+            && Enum.TryParse<SteamVirtualControllerPreference>(name, ignoreCase: false, out var preference)
+            && Enum.IsDefined(preference))
+            return preference;
+
+        AppLog.Warn("Settings", "Steam virtual controller preference is malformed; using Steam Deck for this setting only.", null,
+            ("Reason", "InvalidSteamVirtualController"));
+        return SteamVirtualControllerPreference.SteamDeck;
     }
 
     /// <summary>Reads this optional feature in isolation; absent or malformed LED data uses Off defaults.</summary>
@@ -285,7 +305,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SteamVirtualController, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

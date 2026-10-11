@@ -16,29 +16,36 @@ public sealed class MsiClawMotionSourceTests
     [Fact]
     public void Motion_readers_are_off_without_healthy_owned_Steam_Deck_presentation()
     {
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(false, AddonPresentationKind.SteamDeck, false));
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false));
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, null, false));
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(false, AddonPresentationKind.SteamDeck, false, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, null, false, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, true, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.DualSenseEdge, false, false));
     }
 
     [Fact]
     public void Bpm_only_Steam_Deck_presentation_runs_motion_readers_without_a_running_game()
     {
         // BPM has RunningAppId == 0; the committed Steam Deck presentation is the activation fact.
-        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false));
+        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false, true));
     }
 
     [Fact]
     public void Active_Steam_game_Steam_Deck_presentation_runs_motion_readers()
     {
-        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false));
+        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false, true));
+    }
+
+    [Fact]
+    public void Healthy_live_DualSense_Edge_presentation_runs_motion_readers()
+    {
+        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.DualSenseEdge, false, true));
     }
 
     [Fact]
     public void Transition_back_to_Xbox360_disables_motion_readers()
     {
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false, true));
     }
 
     [Theory]

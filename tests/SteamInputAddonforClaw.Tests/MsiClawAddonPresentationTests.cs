@@ -19,15 +19,196 @@ public sealed class MsiClawAddonPresentationTests
     private static SteamPresentationSnapshot WantsXbox() => new(0, false);
     private static SteamPresentationSnapshot WantsDeck() => new(1234, false);
 
-    private static MsiClawAddonPresentation Build(FakeNative native, FakePublisher xbox360, FakePublisher deck)
+    private static MsiClawAddonPresentation Build(
+        FakeNative native, FakePublisher xbox360, FakePublisher deck,
+        SteamVirtualControllerPreference preference = SteamVirtualControllerPreference.SteamDeck,
+        FakePublisher? edge = null)
     {
+        native.EdgeCreateSucceeds = preference == SteamVirtualControllerPreference.DualSenseEdge;
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
         Assert.NotNull(runtime);
         return new MsiClawAddonPresentation(
             runtime,
             deckSessionFactory: r => new CanonicalSteamDeckSession(r),
             xbox360PublisherFactory: (_, _, fault) => { xbox360.Fault = fault; return xbox360; },
-            deckPublisherFactory: (_, _, _, fault) => { deck.Fault = fault; return deck; });
+            deckPublisherFactory: (_, _, _, fault) => { deck.Fault = fault; return deck; },
+            steamVirtualControllerPreferenceProvider: () => preference,
+            edgePublisherFactory: (_, _, _, fault) => { (edge ??= new FakePublisher()).Fault = fault; return edge; });
+    }
+
+    [Theory]
+    [InlineData(false, SteamVirtualControllerPreference.SteamDeck, (int)AddonPresentationKind.Xbox360)]
+    [InlineData(false, SteamVirtualControllerPreference.DualSenseEdge, (int)AddonPresentationKind.Xbox360)]
+    [InlineData(true, SteamVirtualControllerPreference.SteamDeck, (int)AddonPresentationKind.SteamDeck)]
+    [InlineData(true, SteamVirtualControllerPreference.DualSenseEdge, (int)AddonPresentationKind.DualSenseEdge)]
+    public void Desired_presentation_uses_steam_context_then_saved_preference(
+        bool steamActive, SteamVirtualControllerPreference preference, int expected)
+    {
+        var snapshot = steamActive ? WantsDeck() : WantsXbox();
+        Assert.Equal((AddonPresentationKind)expected, MsiClawAddonPresentation.ResolveDesiredPresentation(snapshot, preference));
+    }
+
+    [Fact]
+    public async Task Saved_Edge_preference_does_not_create_Edge_when_Steam_is_inactive()
+    {
+        var native = new FakeNative();
+        var owner = Build(native, new FakePublisher(), new FakePublisher(), SteamVirtualControllerPreference.DualSenseEdge);
+
+        var result = await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(AddonPresentationKind.Xbox360, result.Presentation);
+        Assert.DoesNotContain("CreateDualSenseEdgeDevice", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Changing_saved_preference_while_Xbox360_is_active_keeps_Xbox360_without_creating_Edge()
+    {
+        var h = new SwitchHarness { Snapshot = WantsXbox() };
+        Assert.True((await h.Owner.AttachInitialAsync(h.Source, h.Snapshot, default)).Succeeded);
+        h.Preference = SteamVirtualControllerPreference.DualSenseEdge;
+
+        var reconcile = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.NoChange, reconcile.Outcome);
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation);
+        Assert.DoesNotContain("CreateDualSenseEdgeDevice", h.Native.Calls);
+        Assert.Equal(1, h.Native.Calls.Count(call => call == "AttachUSBDeviceEx"));
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Failed_Edge_attach_does_not_fall_back_to_another_presentation()
+    {
+        var native = new FakeNative();
+        var edge = new FakePublisher();
+        var owner = Build(native, new FakePublisher(), new FakePublisher(), SteamVirtualControllerPreference.DualSenseEdge, edge);
+        native.EdgeCreateSucceeds = false;
+
+        var attach = await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+
+        Assert.False(attach.Succeeded);
+        Assert.Equal(AddonPresentationKind.DualSenseEdge, attach.Presentation);
+        Assert.Equal(0, native.Calls.Count(call => call == "AttachUSBDeviceEx"));
+        Assert.False(edge.Started);
+        Assert.Null(owner.ActivePresentation);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Edge_first_attach_is_lazy_neutral_then_starts_one_publisher()
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var edge = new FakePublisher { LifecycleEvents = events, StartEventName = "EdgePublisherStart" };
+        native.EdgeCreateSucceeds = true;
+        var owner = Build(native, new FakePublisher(), new FakePublisher(), SteamVirtualControllerPreference.DualSenseEdge, edge);
+
+        var result = await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(AddonPresentationKind.DualSenseEdge, owner.ActivePresentation);
+        Assert.True(edge.IsRunning);
+        Assert.Equal(1, native.Calls.Count(call => call == "CreateDualSenseEdgeDevice"));
+        Assert.True(events.IndexOf("SetDualSenseDeviceState") < events.IndexOf("EdgePublisherStart"));
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Deck_to_Edge_to_Deck_switches_through_the_single_existing_owner()
+    {
+        var h = new SwitchHarness { Snapshot = WantsDeck() };
+        var initial = await h.Owner.AttachInitialAsync(h.Source, h.Snapshot, default);
+        Assert.Equal(AddonPresentationKind.SteamDeck, initial.Presentation);
+
+        h.Preference = SteamVirtualControllerPreference.DualSenseEdge;
+        var edge = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+        Assert.Equal(PresentationReconcileOutcome.Switched, edge.Outcome);
+        Assert.Equal(AddonPresentationKind.DualSenseEdge, h.Owner.ActivePresentation);
+        Assert.False(h.DeckPublishers[0].IsRunning);
+        Assert.True(h.EdgePublishers[0].IsRunning);
+
+        h.Preference = SteamVirtualControllerPreference.SteamDeck;
+        var deck = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+        Assert.Equal(PresentationReconcileOutcome.Switched, deck.Outcome);
+        Assert.Equal(AddonPresentationKind.SteamDeck, h.Owner.ActivePresentation);
+        Assert.False(h.EdgePublishers[0].IsRunning);
+        Assert.True(h.DeckPublishers[^1].IsRunning);
+        Assert.Equal(1, h.Native.Calls.Count(call => call == "CreateDualSenseEdgeDevice"));
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Edge_system_pulses_are_live_only_and_cleared_by_overlay_and_suspend_lifecycle()
+    {
+        var h = new SwitchHarness { Snapshot = WantsDeck(), Preference = SteamVirtualControllerPreference.DualSenseEdge };
+        var attach = await h.Owner.AttachInitialAsync(h.Source, h.Snapshot, default);
+        Assert.True(attach.Succeeded);
+        var overlay = h.EdgeOverlays.Single();
+
+        Assert.True(h.Owner.TryRequestSteamPulse());
+        Assert.Equal(0x00010000u, overlay.Apply(default).Buttons);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await h.Owner.PauseForOverlayAsync(default)).Outcome);
+        Assert.Equal(0u, overlay.Apply(default).Buttons);
+        Assert.False(h.Owner.TryRequestQuickAccessPulse());
+        Assert.Equal(OverlayResumeOutcome.Resumed, (await h.Owner.ResumeAfterOverlayAsync(h.Source, default)).Outcome);
+
+        Assert.True(h.Owner.TryRequestQuickAccessPulse());
+        Assert.Equal(0x00010020u, overlay.Apply(default).Buttons);
+        Assert.Equal(SuspendPauseOutcome.Paused, (await h.Owner.PauseForSuspendAsync(default)).Outcome);
+        Assert.Equal(0u, overlay.Apply(default).Buttons);
+        Assert.False(h.Owner.TryRequestSteamPulse());
+        Assert.Equal(SuspendResumeOutcome.SamePublisherResumed,
+            (await h.Owner.ResumeAfterSuspendAsync(h.Source, h.Capture, default)).Outcome);
+        Assert.Equal(0u, overlay.Apply(default).Buttons);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Edge_publisher_fault_clears_pending_pulses_and_fails_closed_without_fallback()
+    {
+        var h = new SwitchHarness { Snapshot = WantsDeck(), Preference = SteamVirtualControllerPreference.DualSenseEdge };
+        Assert.True((await h.Owner.AttachInitialAsync(h.Source, h.Snapshot, default)).Succeeded);
+        var edgeOverlay = h.EdgeOverlays.Single();
+        var edgePublisher = h.EdgePublishers.Single();
+        edgeOverlay.RequestSteamPulse();
+        Assert.Equal(0x00010000u, edgeOverlay.Apply(default).Buttons);
+
+        edgePublisher.Fault!(new InvalidOperationException("Edge write failed"));
+        Assert.Equal(0u, edgeOverlay.Apply(default).Buttons);
+        await h.Owner.DisposeAsync();
+
+        Assert.True(edgePublisher.StopCalled);
+        Assert.Contains("DetachUSBDeviceEx", h.Native.Calls);
+        Assert.All(h.DeckPublishers, publisher => Assert.False(publisher.Started));
+        Assert.Null(h.Owner.ActivePresentation);
+    }
+
+    [Fact]
+    public async Task Edge_neutral_and_classified_detach_failure_retains_residual_owner_and_blocks_resume_and_attach()
+    {
+        var native = new FakeNative { EdgeCreateSucceeds = true };
+        var edge = new FakePublisher();
+        var owner = Build(native, new FakePublisher(), new FakePublisher(), SteamVirtualControllerPreference.DualSenseEdge, edge);
+        native.StateResults.Enqueue(false); // initial Edge neutral
+        native.StateResults.Enqueue(true);  // classified detach neutral
+        native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure);
+
+        var attach = await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+        Assert.False(attach.Succeeded);
+        Assert.Null(owner.ActivePresentation);
+
+        var reconcile = await owner.ReconcileDesiredPresentationAsync(new FakeSource(), WantsDeck, default);
+        Assert.Equal(PresentationReconcileOutcome.Blocked, reconcile.Outcome);
+        Assert.Contains("ResidualPresentation:ResidualDualSenseEdgeSession", reconcile.Reason);
+        var pause = await owner.PauseForSuspendAsync(default);
+        Assert.Equal(SuspendPauseOutcome.Blocked, pause.Outcome);
+
+        var resume = await owner.ResumeAfterSuspendAsync(new FakeSource(), WantsDeck, default);
+        Assert.Equal(SuspendResumeOutcome.DeferredUnsafePresentation, resume.Outcome);
+        Assert.Equal(1, native.Calls.Count(call => call == "CreateDualSenseEdgeDevice"));
+        await owner.DisposeAsync();
     }
 
     // ---- 25.2 / 25.4 Xbox360 first attach ----
@@ -865,22 +1046,28 @@ public sealed class MsiClawAddonPresentationTests
         public FakeNative Native { get; } = new();
         public FakeSource Source { get; } = new();
         public SteamPresentationSnapshot Snapshot { get; set; } = new(0, false);
+        public SteamVirtualControllerPreference Preference { get; set; } = SteamVirtualControllerPreference.SteamDeck;
         public List<FakePublisher> Xbox360Publishers { get; } = [];
         public List<FakePublisher> DeckPublishers { get; } = [];
+        public List<FakePublisher> EdgePublishers { get; } = [];
         public List<SteamInputAddonforClaw.VirtualOutput.Viiper.SteamDeckSystemButtonOverlay> DeckOverlays { get; } = [];
+        public List<DualSenseEdgeSystemButtonOverlay> EdgeOverlays { get; } = [];
         public MsiClawAddonPresentation Owner { get; }
 
         public Func<SteamPresentationSnapshot> Capture => () => Snapshot;
 
         public SwitchHarness()
         {
+            Native.EdgeCreateSucceeds = true;
             var runtime = CanonicalViiperRuntime.TryInitialize(Native, "127.0.0.1:3242");
             Assert.NotNull(runtime);
             Owner = new MsiClawAddonPresentation(
                 runtime,
                 deckSessionFactory: r => new CanonicalSteamDeckSession(r),
                 xbox360PublisherFactory: (_, _, fault) => { var p = new FakePublisher { Fault = fault }; Xbox360Publishers.Add(p); return p; },
-                deckPublisherFactory: (_, _, overlay, fault) => { var p = new FakePublisher { Fault = fault }; DeckOverlays.Add(overlay); DeckPublishers.Add(p); return p; });
+                deckPublisherFactory: (_, _, overlay, fault) => { var p = new FakePublisher { Fault = fault }; DeckOverlays.Add(overlay); DeckPublishers.Add(p); return p; },
+                steamVirtualControllerPreferenceProvider: () => Preference,
+                edgePublisherFactory: (_, _, overlay, fault) => { var p = new FakePublisher { Fault = fault }; EdgeOverlays.Add(overlay); EdgePublishers.Add(p); return p; });
         }
     }
 
@@ -897,8 +1084,11 @@ public sealed class MsiClawAddonPresentationTests
         Func<IXbox360UsbTraceCapture>? traceCaptureFactory = null,
         TimeSpan? rumbleLoopCycleIdle = null,
         Func<bool>? vibrationTestAvailable = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        SteamVirtualControllerPreference preference = SteamVirtualControllerPreference.SteamDeck,
+        FakePublisher? edgePublisher = null)
     {
+        native.EdgeCreateSucceeds = preference == SteamVirtualControllerPreference.DualSenseEdge;
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
         Assert.NotNull(runtime);
         return new MsiClawAddonPresentation(
@@ -913,7 +1103,9 @@ public sealed class MsiClawAddonPresentationTests
             rumbleLoopTerminalCallbackTimeout: rumbleLoopTerminalCallbackTimeout,
             rumbleLoopUsbTraceCaptureFactory: traceCaptureFactory,
             physicalRumbleTestAvailabilityProvider: vibrationTestAvailable,
-            delay: delay);
+            delay: delay,
+            steamVirtualControllerPreferenceProvider: () => preference,
+            edgePublisherFactory: (_, _, _, fault) => { var publisher = edgePublisher ?? new FakePublisher(); publisher.Fault = fault; return publisher; });
     }
 
     [Fact]
@@ -1504,6 +1696,79 @@ public sealed class MsiClawAddonPresentationTests
         Assert.Contains("SetSteamDeckOutputCallback", native.Calls);
         Assert.DoesNotContain("SetXbox360RumbleCallback", native.Calls);
         Assert.NotNull(native.ArmedSteamDeckOutputCallback);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DualSense_Edge_callback_maps_rumble_to_the_shared_physical_sink_and_detaches_safely()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            preference: SteamVirtualControllerPreference.DualSenseEdge);
+
+        var attached = await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+        Assert.True(attached.Succeeded);
+        Assert.Equal(AddonPresentationKind.DualSenseEdge, attached.Presentation);
+        Assert.NotNull(native.ArmedDualSenseOutputCallback);
+        native.ArmedDualSenseOutputCallback!(0, 10, 30, 255, 255, 255, 7);
+        Assert.Contains(new SteamInputAddonforClaw.Feedback.TwoMotorRumble(30 * 257, 10 * 257), sink.Writes);
+
+        Assert.True(await owner.ReleaseForCenterMEnableAsync(default));
+        Assert.Contains("ClearDualSenseOutputCallback", native.Calls);
+        Assert.Contains(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Edge_feedback_callback_registration_failure_does_not_disable_input_presentation()
+    {
+        var native = new FakeNative();
+        native.RumbleCallbackResults.Enqueue(false);
+        var edgePublisher = new FakePublisher();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), new FakeRumbleSink(),
+            preference: SteamVirtualControllerPreference.DualSenseEdge, edgePublisher: edgePublisher);
+
+        var attached = await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+
+        Assert.True(attached.Succeeded);
+        Assert.Equal(AddonPresentationKind.DualSenseEdge, owner.ActivePresentation);
+        Assert.True(edgePublisher.Started);
+        Assert.Null(native.ArmedDualSenseOutputCallback);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Windows_session_end_retires_Edge_and_confirms_feedback_stop_after_viiper_close()
+    {
+        var events = new List<string>();
+        var native = new FakeNative { LifecycleEvents = events };
+        var edgePublisher = new FakePublisher { LifecycleEvents = events };
+        var sink = new FakeRumbleSink
+        {
+            LifecycleEvents = events,
+            WriteObserver = rumble =>
+            {
+                if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
+                    events.Add("PhysicalStop");
+            },
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            preference: SteamVirtualControllerPreference.DualSenseEdge, edgePublisher: edgePublisher);
+        Assert.True((await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default)).Succeeded);
+        events.Clear();
+
+        var retired = await owner.PrepareForWindowsSessionEndAsync(CancellationToken.None);
+
+        Assert.True(retired);
+        Assert.True(edgePublisher.StopCalled);
+        Assert.Null(owner.ActivePresentation);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, owner.ViiperState);
+        Assert.Contains("RemoveDualSenseDeviceEx", native.Calls);
+        Assert.True(events.IndexOf("PublisherStop") < events.IndexOf("ViiperDetach"));
+        Assert.True(events.IndexOf("FeedbackCallbackCleared") < events.IndexOf("ViiperDetach"));
+        Assert.True(events.IndexOf("ViiperDetach") < events.IndexOf("ViiperClosed"));
+        Assert.True(events.IndexOf("ViiperClosed") < events.IndexOf("PhysicalStop"));
         await owner.DisposeAsync();
     }
 
@@ -2421,6 +2686,8 @@ public sealed class MsiClawAddonPresentationTests
         internal Queue<USBDeviceDetachResult> DetachResults { get; } = [];
         internal Queue<USBDeviceAttachmentState> AttachmentStates { get; } = [];
         internal Queue<bool> StateResults { get; } = [];
+        internal bool EdgeCreateSucceeds { get; set; }
+        internal List<DSDeviceState> DualSenseEdgeStates { get; } = [];
         internal Queue<bool> CloseServerResults { get; } = [];
         internal Action? CloseServerReturning { get; set; }
         internal Exception? CloseServerException { get; set; }
@@ -2442,7 +2709,7 @@ public sealed class MsiClawAddonPresentationTests
         }
         public bool CreateUSBBus(nuint handle, ref uint bus) { Calls.Add("CreateUSBBus"); bus = 42; return true; }
         public bool RemoveUSBBus(nuint handle, uint bus) { Calls.Add("RemoveUSBBus"); return true; }
-        public bool GetUSBDeviceIdentity(nuint handle, out uint bus, out uint id) { Calls.Add("GetUSBDeviceIdentity"); bus = 42; id = handle == 20 ? 9u : 10u; return true; }
+        public bool GetUSBDeviceIdentity(nuint handle, out uint bus, out uint id) { Calls.Add("GetUSBDeviceIdentity"); bus = 42; id = handle == 20 ? 9u : handle == 40 ? 13u : 10u; return true; }
         public bool AttachUSBDevice(nuint handle) => throw new NotSupportedException();
         public bool DetachUSBDevice(nuint handle) => throw new NotSupportedException();
         public USBDeviceAttachResult AttachUSBDeviceEx(nuint handle) { Calls.Add("AttachUSBDeviceEx"); var r = AttachResults.Count > 0 ? AttachResults.Dequeue() : USBDeviceAttachResult.Success; if (r == USBDeviceAttachResult.Success) _attachmentByHandle[handle] = USBDeviceAttachmentState.Attached; return r; }
@@ -2475,9 +2742,10 @@ public sealed class MsiClawAddonPresentationTests
         }
         public bool RemoveXbox360Device(nuint handle) { Calls.Add("RemoveXbox360Device"); return true; }
         public Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint handle) { Calls.Add("RemoveXbox360DeviceEx"); return Xbox360DeviceRemoveResult.Success; }
-        public bool CreateDualSenseEdgeDevice(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid, nint meta) { Calls.Add("CreateDualSenseEdgeDevice"); handle = 40; return false; }
-        public bool SetDualSenseDeviceState(nuint handle, DSDeviceState state) { Calls.Add("SetDualSenseDeviceState"); return true; }
-        public bool SetDualSenseOutputCallback(nuint handle, DualSenseOutputCallback? callback) { Calls.Add("SetDualSenseOutputCallback"); return true; }
+        public bool CreateDualSenseEdgeDevice(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid, nint meta) { Calls.Add("CreateDualSenseEdgeDevice"); handle = 40; return EdgeCreateSucceeds; }
+        public bool SetDualSenseDeviceState(nuint handle, DSDeviceState state) { Calls.Add("SetDualSenseDeviceState"); LifecycleEvents?.Add("SetDualSenseDeviceState"); DualSenseEdgeStates.Add(state); return StateResults.Count == 0 || StateResults.Dequeue(); }
+        public bool SetDualSenseOutputCallback(nuint handle, DualSenseOutputCallback? callback) { Calls.Add(callback is null ? "ClearDualSenseOutputCallback" : "SetDualSenseOutputCallback"); if (callback is null) LifecycleEvents?.Add("FeedbackCallbackCleared"); var ok = RumbleCallbackResults.Count == 0 || RumbleCallbackResults.Dequeue(); if (ok) ArmedDualSenseOutputCallback = callback; return ok; }
+        internal DualSenseOutputCallback? ArmedDualSenseOutputCallback { get; private set; }
         public DSDeviceRemoveResult RemoveDualSenseDeviceEx(nuint handle) { Calls.Add("RemoveDualSenseDeviceEx"); return DSDeviceRemoveResult.Success; }
     }
 }

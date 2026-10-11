@@ -14,6 +14,19 @@
                 <Button x:Name="UpdateButton" Content="Check" Click="UpdateButton_Click" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard
+                x:Name="SteamVirtualControllerCard"
+                Description="Controls which virtual controller Steam sees while a Steam game or Big Picture is active. Normal Windows mode stays Xbox360; switching may briefly disconnect the controller."
+                Header="Steam / Big Picture Controller">
+                <ComboBox
+                    x:Name="SteamVirtualControllerComboBox"
+                    MinWidth="240"
+                    SelectionChanged="SteamVirtualControllerComboBox_SelectionChanged">
+                    <ComboBoxItem Content="Steam Deck (Default)" Tag="SteamDeck" />
+                    <ComboBoxItem Content="DualSense Edge (Experimental)" Tag="DualSenseEdge" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsExpander
                 x:Name="GamingHomeExpander"
                 Description="Choose the home app used by Windows gaming full screen experience."

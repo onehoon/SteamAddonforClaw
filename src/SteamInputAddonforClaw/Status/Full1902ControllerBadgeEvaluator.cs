@@ -56,6 +56,7 @@ internal static class Full1902ControllerBadgeEvaluator
         {
             AddonPresentationKind.Xbox360 => FrontendControllerBadgeState.Xbox360Active,
             AddonPresentationKind.SteamDeck => FrontendControllerBadgeState.SteamDeckActive,
+            AddonPresentationKind.DualSenseEdge => FrontendControllerBadgeState.DualSenseEdgeActive,
             _ => FrontendControllerBadgeState.NeedsAttention
         };
     }

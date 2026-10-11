@@ -9,7 +9,7 @@ using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal enum AddonPresentationKind { Xbox360, SteamDeck }
+internal enum AddonPresentationKind { Xbox360, SteamDeck, DualSenseEdge }
 
 /// <summary>The one in-memory PR6 first-attach result. Not persisted.</summary>
 internal sealed record InitialPresentationResult(bool Succeeded, AddonPresentationKind? Presentation, string Reason);
@@ -197,10 +197,9 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
         SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor motor,
         CancellationToken cancellationToken);
 
-    /// <summary>Full1902 A2: request a synthetic SteamDeck <c>Steam</c> system-button pulse on the
-    /// existing publish path. Returns <see langword="false"/> (no-op) unless the current presentation
-    /// is a healthy live SteamDeck publication. No attach/detach, no VIIPER recreation, no PID
-    /// mutation, no retry loop.</summary>
+    /// <summary>Requests the Steam button through the existing publish path for the currently live
+    /// Steam-facing presentation. Returns <see langword="false"/> unless Deck or Edge is active and
+    /// healthy. No attach/detach, VIIPER recreation, PID mutation, or retry loop.</summary>
     bool TryRequestSteamPulse();
 
     /// <summary>Full1902 A2: request a synthetic SteamDeck <c>QuickAccess</c> system-button pulse on
@@ -304,8 +303,11 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     private readonly CanonicalViiperRuntime? _viiper;
     private readonly Func<CanonicalViiperRuntime, ICanonicalSteamDeckSession> _deckSessionFactory;
+    private readonly Func<CanonicalViiperRuntime, ICanonicalDualSenseEdgeSession> _edgeSessionFactory;
     private readonly Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher> _xbox360PublisherFactory;
     private readonly Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher> _deckPublisherFactory;
+    private readonly Func<IControllerStateSnapshotSource, ICanonicalDualSenseEdgeStateSink, DualSenseEdgeSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher> _edgePublisherFactory;
+    private readonly Func<SteamVirtualControllerPreference> _steamVirtualControllerPreferenceProvider;
     private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
     private readonly Func<IXbox360RumbleLoopXInput> _rumbleLoopXInputFactory;
     private readonly Func<IXbox360UsbTraceCapture>? _rumbleLoopUsbTraceCaptureFactory;
@@ -334,12 +336,14 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// button emits a pulse on the existing continuous publish path -- never a second publication
     /// path or a second VIIPER device. Cleared on every SteamDeck retirement.</summary>
     private readonly SteamDeckSystemButtonOverlay _systemButtonOverlay = new();
+    private readonly DualSenseEdgeSystemButtonOverlay _edgeSystemButtonOverlay = new();
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _faultLock = new();
     private AddonPresentationKind? _activeKind;
     private IAddonPresentationPublisher? _publisher;
     private ICanonicalSteamDeckSession? _deckSession;
+    private ICanonicalDualSenseEdgeSession? _edgeSession;
     private Task? _faultCleanup;
     private bool _disposed;
     private bool _overlayPaused;
@@ -368,7 +372,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         Func<bool>? physicalRumbleTestAvailabilityProvider = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Func<MsiClawMotionState>? motionSnapshotProvider = null,
-        Func<bool>? requires250Hz = null)
+        Func<bool>? requires250Hz = null,
+        Func<SteamVirtualControllerPreference>? steamVirtualControllerPreferenceProvider = null,
+        Func<CanonicalViiperRuntime, ICanonicalDualSenseEdgeSession>? edgeSessionFactory = null,
+        Func<IControllerStateSnapshotSource, ICanonicalDualSenseEdgeStateSink, DualSenseEdgeSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? edgePublisherFactory = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
@@ -383,6 +390,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         _motionSnapshotProvider = motionSnapshotProvider;
         _requires250Hz = requires250Hz ?? (static () => true);
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
+        _edgeSessionFactory = edgeSessionFactory ?? (runtime => new CanonicalDualSenseEdgeSession(runtime));
+        _steamVirtualControllerPreferenceProvider = steamVirtualControllerPreferenceProvider ?? (static () => SteamVirtualControllerPreference.SteamDeck);
         _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
         _xbox360PublisherFactory = xbox360PublisherFactory
             ?? ((source, setState, fault) => new PublisherAdapter(new CanonicalXbox360InputPublisher(
@@ -400,6 +409,14 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 systemButtonOverlay: overlay,
                 rearButtonSuppressionProvider: ShouldSuppressRearButton,
                 motionSnapshotProvider: _motionSnapshotProvider)));
+        _edgePublisherFactory = edgePublisherFactory
+            ?? ((source, sink, overlay, fault) => new PublisherAdapter(new CanonicalDualSenseEdgeInputPublisher(
+                source,
+                sink,
+                fault: fault,
+                rearButtonSuppressionProvider: ShouldSuppressRearButton,
+                motionSnapshotProvider: _motionSnapshotProvider,
+                systemButtonOverlay: overlay)));
     }
 
     /// <summary>The canonical VIIPER runtime state, or <see langword="null"/> if VIIPER could not be
@@ -509,15 +526,14 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     public bool IsSuspendPaused => _suspendPaused;
 
-    public bool TryRequestSteamPulse() => TryRequestSystemButtonPulse(_systemButtonOverlay.RequestSteamPulse);
+    public bool TryRequestSteamPulse() => TryRequestSystemButtonPulse(_systemButtonOverlay.RequestSteamPulse, _edgeSystemButtonOverlay.RequestSteamPulse);
 
-    public bool TryRequestQuickAccessPulse() => TryRequestSystemButtonPulse(_systemButtonOverlay.RequestQuickAccessPulse);
+    public bool TryRequestQuickAccessPulse() => TryRequestSystemButtonPulse(_systemButtonOverlay.RequestQuickAccessPulse, _edgeSystemButtonOverlay.RequestQuickAccessPulse);
 
-    /// <summary>Full1902 A2 section 4.2: eligibility-gated, non-blocking synthetic system-button
-    /// pulse. Acquire the owner gate without waiting (a press during an attach/switch/retire is
-    /// simply dropped, no queue), then merge the pulse into the shared overlay only on a healthy
-    /// live SteamDeck publication.</summary>
-    private bool TryRequestSystemButtonPulse(Action requestPulse)
+    /// <summary>Eligibility-gated, non-blocking synthetic system-button pulse. Acquire the owner gate
+    /// without waiting (a press during attach/switch/retire is dropped, not queued), then merge into
+    /// the active Deck or Edge publication overlay.</summary>
+    private bool TryRequestSystemButtonPulse(Action requestDeckPulse, Action requestEdgePulse)
     {
         if (!_gate.Wait(0)) return false;
         try
@@ -527,11 +543,20 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // Full1902 Suspend/Resume section 8.2: a pre-suspend Steam/QuickAccess pulse must never
             // survive Sleep and assert after Resume.
             if (_suspendPaused) return false;
-            if (_activeKind != AddonPresentationKind.SteamDeck) return false;
             if (_publisher is not { IsRunning: true }) return false;
-            if (_deckSession is not { State: CanonicalSteamDeckSessionState.Active }) return false;
-            requestPulse();
-            return true;
+            if (_activeKind == AddonPresentationKind.SteamDeck
+                && _deckSession is { State: CanonicalSteamDeckSessionState.Active })
+            {
+                requestDeckPulse();
+                return true;
+            }
+            if (_activeKind == AddonPresentationKind.DualSenseEdge
+                && _edgeSession is { State: CanonicalDualSenseEdgeSessionState.Active })
+            {
+                requestEdgePulse();
+                return true;
+            }
+            return false;
         }
         finally { _gate.Release(); }
     }
@@ -728,18 +753,21 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         {
             if (_disposed) return Fail(null, "Disposed", "OwnerDisposed");
             if (_activeKind is not null) return Fail(_activeKind, "Attach", "AlreadyAttached");
+            if (_edgeSession is not null) return Fail(AddonPresentationKind.DualSenseEdge, "Attach", "ResidualDualSenseEdgeSession");
             if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
                 return Fail(null, "ViiperReadiness", "ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"));
             if (source is null || !source.IsRunning)
                 return Fail(null, "LiveInputSource", "LiveInputSourceNotRunning");
 
-            var selected = snapshot.WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
+            var selected = ResolveDesiredPresentation(snapshot, _steamVirtualControllerPreferenceProvider());
             AppLog.Info("ControllerPresentation", "Initial presentation selected.", ("Event", "InitialPresentationSelected"),
                 ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive), ("Selected", selected));
 
             return selected == AddonPresentationKind.Xbox360
                 ? await AttachXbox360Async(source).ConfigureAwait(false)
-                : await AttachSteamDeckAsync(source).ConfigureAwait(false);
+                : selected == AddonPresentationKind.SteamDeck
+                    ? await AttachSteamDeckAsync(source).ConfigureAwait(false)
+                    : await AttachDualSenseEdgeAsync(source).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -784,7 +812,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         }
         else if (_rumbleSessionNeedsRecovery)
         {
-            if (_activeKind is not null || _publisher is not null || _armedFeedback is not null || _deckSession is not null)
+            if (_activeKind is not null || _publisher is not null || _armedFeedback is not null || _deckSession is not null || _edgeSession is not null)
                 return Blocked("RumbleSessionRecoveryRequiresRetiredPresentation");
             if (_rumbleSink is not IMsiClawRumbleSessionLifecycle lifecycle)
                 return Blocked("RumbleEndpointLifecycleUnavailable");
@@ -796,7 +824,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         }
 
         var snapshot = captureSnapshot();
-        var desired = snapshot.WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
+        if (_activeKind is null && _publisher is null && !TryProveNoResidualPresentationLocked(out var residualReason))
+            return Blocked("ResidualPresentation:" + residualReason);
+        var desired = ResolveDesiredPresentation(snapshot, _steamVirtualControllerPreferenceProvider());
         if (_activeKind == desired && _publisher is { IsRunning: true })
         {
             AppLog.Debug("ControllerPresentation", "Runtime presentation reconcile: no change.", ("Event", "PresentationReconcileNoChange"),
@@ -817,9 +847,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
         if (previous is not null && previous != desired)
             ArmRearButtonReleaseGate(source.LatestState);
-        var attach = desired == AddonPresentationKind.Xbox360
-            ? await AttachXbox360Async(source).ConfigureAwait(false)
-            : await AttachSteamDeckAsync(source).ConfigureAwait(false);
+        var attach = desired switch
+        {
+            AddonPresentationKind.Xbox360 => await AttachXbox360Async(source).ConfigureAwait(false),
+            AddonPresentationKind.SteamDeck => await AttachSteamDeckAsync(source).ConfigureAwait(false),
+            _ => await AttachDualSenseEdgeAsync(source).ConfigureAwait(false),
+        };
         if (!attach.Succeeded)
         {
             if (previous is not null && previous != desired)
@@ -1011,6 +1044,60 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         return new(true, AddonPresentationKind.SteamDeck, "Attached");
     }
 
+    private async Task<InitialPresentationResult> AttachDualSenseEdgeAsync(IMsiClawPreparedInputSource source)
+    {
+        _edgeSystemButtonOverlay.Clear();
+        var session = _edgeSessionFactory(_viiper!);
+        if (!session.Start() || session.State != CanonicalDualSenseEdgeSessionState.Active)
+        {
+            if (session.State == CanonicalDualSenseEdgeSessionState.Clean)
+                session.Dispose();
+            else
+                _edgeSession = session;
+            return Fail(AddonPresentationKind.DualSenseEdge, "DualSenseEdgeAttach", "DualSenseEdgeSessionNotActive:" + session.State);
+        }
+
+        if (!session.SetNeutral())
+        {
+            var detached = session.DetachDevice();
+            if (detached) session.Dispose();
+            else _edgeSession = session;
+            return Fail(AddonPresentationKind.DualSenseEdge, "DualSenseEdgeNeutral", "DualSenseEdgeNeutralRejected:Detached=" + detached);
+        }
+
+        IAddonPresentationPublisher publisher;
+        try
+        {
+            publisher = _edgePublisherFactory(source, session, _edgeSystemButtonOverlay, OnPublisherFault);
+            publisher.Start();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerPresentation", "DualSense Edge publisher setup failed; detaching.", exception);
+            var detached = session.DetachDevice();
+            if (detached) session.Dispose();
+            else _edgeSession = session;
+            return Fail(AddonPresentationKind.DualSenseEdge, "DualSenseEdgePublisherStart", "DualSenseEdgePublisherStartFailed:Detached=" + detached);
+        }
+
+        _edgeSession = session;
+        _publisher = publisher;
+        _activeKind = AddonPresentationKind.DualSenseEdge;
+        ArmFeedbackForActivePresentationLocked();
+        AppLog.Info("ControllerPresentation", "Initial presentation attached.", ("Event", "InitialPresentationAttached"),
+            ("Presentation", AddonPresentationKind.DualSenseEdge), ("PublisherStarted", true));
+        await Task.CompletedTask.ConfigureAwait(false);
+        return new(true, AddonPresentationKind.DualSenseEdge, "Attached");
+    }
+
+    internal static AddonPresentationKind ResolveDesiredPresentation(
+        SteamPresentationSnapshot snapshot, SteamVirtualControllerPreference preference) =>
+        !snapshot.WantsSteamDeck
+            ? AddonPresentationKind.Xbox360
+            : preference == SteamVirtualControllerPreference.DualSenseEdge
+                ? AddonPresentationKind.DualSenseEdge
+                : AddonPresentationKind.SteamDeck;
+
     // ---- publisher runtime fault: async fail-close only, no self-join, no re-attach, no PID touch ----
 
     // ---- production rumble feedback lifetime (part of the presentation lifecycle, _gate held) ----
@@ -1030,6 +1117,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                     diagnosticObserver: ObserveXbox360RumbleCallback),
             AddonPresentationKind.SteamDeck when _deckSession is { } session =>
                 SteamDeckRumbleFeedbackAdapter.TryArm(_rumbleSink, session.SetOutputCallback, session.ClearOutputCallback),
+            AddonPresentationKind.DualSenseEdge when _edgeSession is { } session =>
+                DualSenseEdgeRumbleFeedbackAdapter.TryArm(_rumbleSink, session.SetOutputCallback, session.ClearOutputCallback),
             _ => null,
         };
     }
@@ -1116,6 +1205,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     private void OnPublisherFault(Exception exception)
     {
+        _edgeSystemButtonOverlay.Clear();
         AppLog.Warn("ControllerPresentation", "Presentation publisher faulted; scheduling fail-close.", exception,
             ("Event", "PresentationFaulted"), ("Presentation", _activeKind?.ToString() ?? "None"));
         lock (_faultLock)
@@ -1146,8 +1236,11 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 return PauseBlocked("PublisherNotRunning");
             if (kind == AddonPresentationKind.SteamDeck && _deckSession is not { State: CanonicalSteamDeckSessionState.Active })
                 return PauseBlocked("SteamDeckSessionNotActive:" + (_deckSession?.State.ToString() ?? "None"));
+            if (kind == AddonPresentationKind.DualSenseEdge && _edgeSession is not { State: CanonicalDualSenseEdgeSessionState.Active })
+                return PauseBlocked("DualSenseEdgeSessionNotActive:" + (_edgeSession?.State.ToString() ?? "None"));
 
             await CancelRumbleLoopForLifecycleLockedAsync("OverlayPause").ConfigureAwait(false);
+            if (kind == AddonPresentationKind.DualSenseEdge) _edgeSystemButtonOverlay.Clear();
             // 1. Stop + prove the publisher joined. Never write neutral underneath a possibly-live
             //    publisher; never detach here.
             try
@@ -1177,9 +1270,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // 2. Write the SAME attached device neutral. A rejected neutral write on a proven-stopped
             //    publisher is a real output-safety failure: fail-close the current presentation
             //    through the existing owner. No alternate presentation fallback.
-            var neutral = kind == AddonPresentationKind.Xbox360
-                ? _viiper!.SetXbox360State(default)
-                : _deckSession!.SetNeutral();
+            var neutral = kind switch
+            {
+                AddonPresentationKind.Xbox360 => _viiper!.SetXbox360State(default),
+                AddonPresentationKind.SteamDeck => _deckSession!.SetNeutral(),
+                _ => _edgeSession!.SetNeutral(),
+            };
             if (!neutral)
             {
                 AppLog.Error("OverlayCapture", "Neutral write rejected on a stopped publisher; retiring the current presentation.", null,
@@ -1235,12 +1331,19 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 if (!_viiper!.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
                     return LeftNeutral("Xbox360AttachmentNotAttached:" + attachment);
             }
-            else
+            else if (kind == AddonPresentationKind.SteamDeck)
             {
                 if (_deckSession is not { State: CanonicalSteamDeckSessionState.Active } session)
                     return LeftNeutral("SteamDeckSessionNotActive:" + (_deckSession?.State.ToString() ?? "None"));
                 if (!session.TryGetTrackedAttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
                     return LeftNeutral("SteamDeckAttachmentNotAttached:" + attachment);
+            }
+            else
+            {
+                if (_edgeSession is not { State: CanonicalDualSenseEdgeSessionState.Active } session)
+                    return LeftNeutral("DualSenseEdgeSessionNotActive:" + (_edgeSession?.State.ToString() ?? "None"));
+                if (!session.TryGetTrackedAttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                    return LeftNeutral("DualSenseEdgeAttachmentNotAttached:" + attachment);
             }
 
             try
@@ -1275,6 +1378,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // a queued Steam/BPM event from attaching a live presentation after the suspend barrier.
             var wasAlreadyPaused = _suspendPaused;
             _suspendPaused = true;
+            _edgeSystemButtonOverlay.Clear();
             await CancelRumbleLoopForLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
             // Physical STOP is a separate safety fact from virtual presentation state. No configured
             // sink means there is no physical rumble output to stop; otherwise only a successful STOP
@@ -1349,6 +1453,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
             // 2. Clear any pending/active synthetic Steam/QuickAccess pulse (section 7.5).
             _systemButtonOverlay.Clear();
+            _edgeSystemButtonOverlay.Clear();
 
             // 3-6. Clear the feedback callback, DRAIN any in-progress physical rumble write, then
             //       request a final physical STOP (sections 7.1 / 12). Reuses the #488 helper.
@@ -1364,15 +1469,20 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 neutral = _viiper!.SetXbox360State(default);
             }
-            else if (_deckSession is { } deckSession)
+            else if (kind == AddonPresentationKind.SteamDeck && _deckSession is { } deckSession)
             {
                 neutral = deckSession.SetNeutral();
             }
+            else if (kind == AddonPresentationKind.DualSenseEdge && _edgeSession is { } edgeSession)
+            {
+                neutral = edgeSession.SetNeutral();
+            }
             else
             {
-                AppLog.Error("ControllerPresentation", "SteamDeck suspend pause has no session to write neutral through; pause stays unsafe.", null,
-                    ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "SteamDeckSessionMissing"));
-                return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, "SteamDeckSessionMissing", physicalRumbleStopConfirmed);
+                var missingSession = kind == AddonPresentationKind.SteamDeck ? "SteamDeckSessionMissing" : "DualSenseEdgeSessionMissing";
+                AppLog.Error("ControllerPresentation", "Typed-device suspend pause has no session to write neutral through; pause stays unsafe.", null,
+                    ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", missingSession));
+                return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, missingSession, physicalRumbleStopConfirmed);
             }
             if (!neutral)
             {
@@ -1436,7 +1546,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
             // Section 10.2: capture the fresh Steam/BPM desired kind at the actual resume boundary --
             // never the pre-sleep desired presentation.
-            var desired = captureSnapshot().WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
+            var desired = ResolveDesiredPresentation(captureSnapshot(), _steamVirtualControllerPreferenceProvider());
 
             // Section 7.2 pause case: the ACTUAL empty state -> nothing to resume. Review #490 (3rd
             // pass): apply the SAME structural residual-attachment proof PauseForSuspendAsync requires
@@ -1503,7 +1613,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                     return SuspendResumeReconcile("Xbox360AttachmentNotAttached:" + attachment, kind);
                 }
             }
-            else
+            else if (kind == AddonPresentationKind.SteamDeck)
             {
                 if (_deckSession is not { State: CanonicalSteamDeckSessionState.Active } session)
                 {
@@ -1514,6 +1624,19 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 {
                     _suspendPaused = false;
                     return SuspendResumeReconcile("SteamDeckAttachmentNotAttached:" + attachment, kind);
+                }
+            }
+            else
+            {
+                if (_edgeSession is not { State: CanonicalDualSenseEdgeSessionState.Active } session)
+                {
+                    _suspendPaused = false;
+                    return SuspendResumeReconcile("DualSenseEdgeSessionNotActive:" + (_edgeSession?.State.ToString() ?? "None"), kind);
+                }
+                if (!session.TryGetTrackedAttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                {
+                    _suspendPaused = false;
+                    return SuspendResumeReconcile("DualSenseEdgeAttachmentNotAttached:" + attachment, kind);
                 }
             }
 
@@ -1557,10 +1680,22 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             reason = "ResidualSteamDeckSession";
             return false;
         }
+        if (_edgeSession is not null)
+        {
+            reason = "ResidualDualSenseEdgeSession";
+            return false;
+        }
 
         // X360 has no separate managed session field, so prove the canonical device is detached.
         if (_viiper is { State: CanonicalViiperRuntimeState.Ready } runtime)
         {
+            if (runtime.DualSenseEdgeDeviceHandle != 0
+                && (!runtime.TryGetDualSenseEdgeAttachmentState(out var edgeAttachment)
+                    || edgeAttachment != USBDeviceAttachmentState.Detached))
+            {
+                reason = "ResidualDualSenseEdgeAttachment:" + edgeAttachment;
+                return false;
+            }
             if (!runtime.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Detached)
             {
                 reason = "ResidualXbox360Attachment:" + attachment;
@@ -1598,6 +1733,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private async Task<PresentationRetirementResult> RetireActivePresentationCoreAsync(string reason, CancellationToken cancellationToken = default)
     {
         await CancelRumbleLoopForLifecycleLockedAsync(reason).ConfigureAwait(false);
+        _edgeSystemButtonOverlay.Clear();
         cancellationToken.ThrowIfCancellationRequested();
         var physicalRumbleStopConfirmed = _rumbleSink is null;
 
@@ -1636,6 +1772,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         // publisher is retired so an old front-button pulse can never survive into a later new Deck
         // publisher (the overlay instance is shared across every SteamDeck publication).
         _systemButtonOverlay.Clear();
+        _edgeSystemButtonOverlay.Clear();
 
         // 2-3. Stop accepting old-presentation feedback and drain callbacks before any detach.
         //      Windows session end defers the physical STOP until the canonical runtime is Closed;
@@ -1728,6 +1865,34 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             }
             _deckSession?.Dispose();
             _deckSession = null;
+        }
+        else if (_activeKind == AddonPresentationKind.DualSenseEdge || _edgeSession is not null)
+        {
+            if (_edgeSession is { } session)
+            {
+                if (session.State is CanonicalDualSenseEdgeSessionState.Active or CanonicalDualSenseEdgeSessionState.CleanupPending)
+                {
+                    var detached = session.DetachDevice();
+                    typedDetachResult = detached ? "Success" : "Failed";
+                    if (!detached)
+                    {
+                        AppLog.Error("ControllerPresentation", "DualSense Edge detach did not succeed; ownership retained.", null,
+                            ("Event", string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal)
+                                ? "A2vmWindowsSessionEndTypedDetachFailed" : "PresentationTypedDetachFailed"),
+                            ("State", session.State), ("Reason", reason),
+                            ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(typedDetachStartedAt).TotalMilliseconds));
+                        return new(false, physicalRumbleStopConfirmed, feedbackDrainConfirmed);
+                    }
+                }
+                else if (session.State != CanonicalDualSenseEdgeSessionState.Clean)
+                {
+                    AppLog.Error("ControllerPresentation", "DualSense Edge session state is not safely detachable; ownership retained.", null,
+                        ("Event", "PresentationTypedDetachFailed"), ("State", session.State), ("Reason", reason));
+                    return new(false, physicalRumbleStopConfirmed, feedbackDrainConfirmed);
+                }
+                session.Dispose();
+                _edgeSession = null;
+            }
         }
         if (string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal))
             AppLog.Info("ControllerPresentation", "Windows session-end typed-device detach completed.",
@@ -1927,10 +2092,17 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     {
         private readonly CanonicalXbox360InputPublisher? _xbox360;
         private readonly CanonicalSteamDeckInputPublisher? _deck;
+        private readonly CanonicalDualSenseEdgeInputPublisher? _edge;
         internal PublisherAdapter(CanonicalXbox360InputPublisher xbox360) => _xbox360 = xbox360;
         internal PublisherAdapter(CanonicalSteamDeckInputPublisher deck) => _deck = deck;
-        public bool IsRunning => _xbox360?.IsRunning ?? _deck!.IsRunning;
-        public void Start() { if (_xbox360 is not null) _xbox360.Start(); else _deck!.Start(); }
-        public Task StopAsync() => _xbox360?.StopAsync() ?? _deck!.StopAsync();
+        internal PublisherAdapter(CanonicalDualSenseEdgeInputPublisher edge) => _edge = edge;
+        public bool IsRunning => _xbox360?.IsRunning ?? _deck?.IsRunning ?? _edge!.IsRunning;
+        public void Start()
+        {
+            if (_xbox360 is not null) _xbox360.Start();
+            else if (_deck is not null) _deck.Start();
+            else _edge!.Start();
+        }
+        public Task StopAsync() => _xbox360?.StopAsync() ?? _deck?.StopAsync() ?? _edge!.StopAsync();
     }
 }

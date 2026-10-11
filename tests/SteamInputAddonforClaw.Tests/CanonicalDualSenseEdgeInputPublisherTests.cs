@@ -65,6 +65,26 @@ public sealed class CanonicalDualSenseEdgeInputPublisherTests
         Assert.Equal(0x00400000u, sink.States[0].Buttons); // left rear/M2 -> L4; right rear/M1 suppressed
     }
 
+    [Fact]
+    public void Quick_access_pulse_is_merged_into_the_existing_edge_publisher_write()
+    {
+        var time = new FakeTimeProvider();
+        var overlay = new DualSenseEdgeSystemButtonOverlay(time);
+        overlay.RequestQuickAccessPulse();
+        var state = new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, default);
+        var sink = new RecordingSink();
+        var publisher = new CanonicalDualSenseEdgeInputPublisher(
+            new Snapshot(state), sink, systemButtonOverlay: overlay);
+
+        Assert.True(publisher.PublishCurrentStateOnceForTests());
+        time.Advance(TimeSpan.FromMilliseconds(101));
+        Assert.True(publisher.PublishCurrentStateOnceForTests());
+
+        Assert.Equal(2, sink.States.Count);
+        Assert.Equal(0x00010020u, sink.States[0].Buttons);
+        Assert.Equal(0x00000020u, sink.States[1].Buttons); // physical A/Cross remains held after the synthetic chord expires
+    }
+
     private sealed class Snapshot(ControllerState state) : IControllerStateSnapshotSource
     {
         public ControllerState LatestState => state;
@@ -104,5 +124,12 @@ public sealed class CanonicalDualSenseEdgeInputPublisherTests
             while (States.Count < count)
                 await _changed.WaitAsync(TimeSpan.FromSeconds(2));
         }
+    }
+
+    private sealed class FakeTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = DateTimeOffset.UnixEpoch;
+        public override DateTimeOffset GetUtcNow() => _now;
+        internal void Advance(TimeSpan duration) => _now += duration;
     }
 }

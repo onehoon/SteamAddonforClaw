@@ -18,6 +18,7 @@ internal sealed class CanonicalDualSenseEdgeInputPublisher
     private readonly Func<long> _timestampProvider;
     private readonly Func<ControllerState, AuxiliaryButtonSlot, bool> _rearButtonSuppressionProvider;
     private readonly Func<MsiClawMotionState>? _motionSnapshotProvider;
+    private readonly DualSenseEdgeSystemButtonOverlay? _systemButtonOverlay;
     private CancellationTokenSource? _stop;
     private Task? _task;
     private WindowsHighResolutionOneShotTimer? _timer;
@@ -37,7 +38,8 @@ internal sealed class CanonicalDualSenseEdgeInputPublisher
         Action<Exception>? fault = null,
         Func<long>? timestampProvider = null,
         Func<ControllerState, AuxiliaryButtonSlot, bool>? rearButtonSuppressionProvider = null,
-        Func<MsiClawMotionState>? motionSnapshotProvider = null)
+        Func<MsiClawMotionState>? motionSnapshotProvider = null,
+        DualSenseEdgeSystemButtonOverlay? systemButtonOverlay = null)
     {
         _snapshot = snapshot;
         _sink = sink;
@@ -46,6 +48,7 @@ internal sealed class CanonicalDualSenseEdgeInputPublisher
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
         _rearButtonSuppressionProvider = rearButtonSuppressionProvider ?? (static (_, _) => false);
         _motionSnapshotProvider = motionSnapshotProvider;
+        _systemButtonOverlay = systemButtonOverlay;
     }
 
     internal static Action<Thread>? WorkerThreadStartOverrideForTests { get; set; }
@@ -201,6 +204,8 @@ internal sealed class CanonicalDualSenseEdgeInputPublisher
                 motion,
                 _timestampProvider(),
                 Stopwatch.Frequency);
+            if (_systemButtonOverlay is { } overlay)
+                mapped = overlay.Apply(mapped);
             if (!_sink.SetState(mapped))
             {
                 ReportFault(new InvalidOperationException("Canonical VIIPER rejected a typed DualSense Edge state."));

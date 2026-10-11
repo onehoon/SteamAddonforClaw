@@ -1,6 +1,6 @@
 # Steam Addon for Claw
 
-Steam Addon for Claw adds controller integration and game-specific performance controls for supported MSI Claw handhelds. It can present the built-in controller as a Steam Deck controller while Steam gaming is active, and as an Xbox 360 controller otherwise. You can also configure the controller's front and rear buttons, per-game settings, a performance HUD, shortcuts, a separate Quick Settings Overlay, and Windows gaming-home behavior.
+Steam Addon for Claw adds controller integration and game-specific performance controls for supported MSI Claw handhelds. It can present the built-in controller as a Steam Deck or experimental DualSense Edge controller while Steam gaming is active, and as an Xbox 360 controller otherwise. You can also configure the controller's front and rear buttons, per-game settings, a performance HUD, shortcuts, a separate Quick Settings Overlay, and Windows gaming-home behavior.
 
 This guide describes the features currently exposed by the app. The Main App includes **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
 
@@ -76,16 +76,18 @@ When MSI Center M controller authority is disabled and the Addon is managing the
 
 | Current use | Controller presented to Windows |
 | --- | --- |
-| A Steam game is active, or Steam Big Picture is active | Steam Deck-style controller |
+| A Steam game is active, or Steam Big Picture is active | Steam Deck by default; DualSense Edge can be selected in Settings |
 | Otherwise | Xbox 360 controller |
 
-There is no separate “Steam Deck mode” switch. Presentation follows Steam game and Big Picture activity. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the presentation that is active at the time of the press.
+The **Settings → Steam / Big Picture Controller** choice selects Steam Deck (Default) or DualSense Edge (Experimental) for Steam games and Big Picture. Normal Windows mode continues to use Xbox 360. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the presentation that is active at the time of the press.
 
 ## Gyroscope / IMU — Steam Input configuration (English / 한국어)
 
 ### English
 
 When the Addon is presenting the built-in controller as a **virtual Steam Deck** (during a Steam game or Big Picture), it passes available physical **gyroscope and accelerometer** data to Steam Input. The Addon does **not** perform gyro-to-mouse or gyro-to-joystick conversion itself, and its **Xbox 360 presentation does not provide gyro input**.
+
+DualSense Edge presentation also forwards available motion data through its existing publisher path. Edge recognition, physical button behavior, PS/Quick Access pulses, rumble, and gyro orientation remain experimental and require hardware validation.
 
 **Verified on MSI Claw 8 AI+ A2VM (8-inch):** Steam's gyro calibration screen shows live motion. All three rotation axes and all six direction signs matched the user's genuine Steam Controller in a direct calibration-screen comparison. **Gyro-to-joystick camera control worked in Aniimo** with Steam Input's gyro activation set to **Always On** (Addon build **0.1.350.0**). This confirms the tested A2VM 8 end-to-end path, not every game's configuration or quantitative gyro accuracy.
 
@@ -96,6 +98,8 @@ A2VM 7-inch and EX/CG3EM gyro behavior has **not yet been physically verified**.
 ### 한국어
 
 Addon이 Steam 게임 실행 중 또는 Big Picture에서 내장 컨트롤러를 **가상 Steam Deck**으로 제공하면, 사용 가능한 물리 **자이로스코프 및 가속도 센서값**을 Steam Input으로 전달합니다. Addon 자체에서 자이로를 마우스나 조이스틱 입력으로 변환하지 않으며, **Xbox 360 컨트롤러 모드에서는 자이로 입력을 제공하지 않습니다**.
+
+DualSense Edge 모드도 기존 publisher 경로로 사용 가능한 모션 데이터를 전달합니다. Edge 인식, 물리 버튼 동작, PS/Quick Access 펄스, 진동 및 자이로 방향은 실기 검증 전까지 실험 기능입니다.
 
 **MSI Claw 8 AI+ A2VM(8인치) 실기 검증 완료:** Steam 자이로 보정 화면에서 센서값이 정상적으로 표시되며, 실제 Steam Controller와 직접 비교했을 때 **3개 회전축과 6개 방향의 부호가 모두 일치**했습니다. **Aniimo에서 Steam Input의 자이로 활성화 조건을 ‘Always On(항상 켜기)’으로 변경한 후 자이로 → 조이스틱 카메라 조작이 정상 작동**했습니다(Addon **0.1.350.0** 빌드). 이는 해당 A2VM 8 기기의 실제 동작 검증 결과이며, 모든 게임에서 동일하게 동작하거나 정밀 감도까지 검증되었다는 의미는 아닙니다.
 
@@ -207,6 +211,10 @@ Choose **Check** to check again and download an available update. When a downloa
 
 Select **Off**, **Xbox**, or **Steam Big Picture** as the Windows gaming home. **Off** disables the Addon-selected gaming home. **Start on Windows startup** controls whether Windows starts directly in the selected gaming home. If Windows is already set to another app, **Other Windows app** shows that current selection; it cannot be selected as a new Addon-managed option, and the Addon does not manage its startup behavior.
 
+#### Steam / Big Picture Controller
+
+Choose **Steam Deck (Default)** or **DualSense Edge (Experimental)** for Steam game and Big Picture presentation. Windows outside Steam game or Big Picture activity continues to receive the Xbox 360 controller presentation. Edge hardware behavior has not been physically validated as part of this release.
+
 #### Show only current power source
 
 When enabled, Quick Settings Overlay shows controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values.
@@ -302,7 +310,7 @@ If the controller has not returned after a short wait, try **Restart Addon** fro
 
 ### A Steam game appears as an Xbox controller
 
-Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. Steam Deck presentation follows Steam game and Big Picture activity; it is not selected manually.
+Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. The selected Steam / Big Picture controller in Settings is used while a Steam game or Big Picture is active.
 
 ### Gyro values appear in Steam calibration, but the game does not respond
 
@@ -352,7 +360,7 @@ Open **Settings → Required Components** to see the reported status. Follow the
 - The XBOX catalog includes recognized installed titles, not every app in Microsoft Store or Game Pass.
 - Steam profile tracking depends on Steam continuing to report the game or shortcut as active. Some launcher chains can cause a profile to stop applying when Steam loses that association.
 - Quick Settings Overlay is separate from Steam Quick Access. The Addon does not inject an Addon tab into Steam's menu.
-- **Steam Deck gyro / motion output is implemented.** A2VM 8 gyro direction/sign and Steam Input gyro-to-joystick gameplay are physically verified; A2VM 7 and EX/CG3EM gyro validation remains pending. Fine-tuning and activation are handled in **Steam Input**, not in the Addon.
+- **Steam Deck gyro / motion output is implemented.** A2VM 8 gyro direction/sign and Steam Input gyro-to-joystick gameplay are physically verified; A2VM 7 and EX/CG3EM gyro validation remains pending. Fine-tuning and activation are handled in **Steam Input**, not in the Addon. DualSense Edge motion and controller behavior are experimental and have not been physically validated.
 - A2VM 7 vibration-strength support and A2VM 7/8 `0x0230` LED writes follow shared-family and exact-firmware policy; A2VM 7 strength behavior and physical LED effects have not been individually validated. Unknown firmware remains unsupported. The boot-only mode cycle confirms software transitions, not physical motor output; SteamOS rumble is outside this Windows Addon's control.
 - A general Device-page Fan Control is not currently available as a user feature.
 - The product supports one interactive Windows user and session; Fast User Switching, Remote Desktop sessions, and multi-user use are not supported.

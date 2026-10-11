@@ -1,7 +1,7 @@
 # Full1902 DualSense Edge Virtual Presentation — Architecture and Integration Plan
 
 **Date:** 2026-10-11  
-**Status:** PR-A typed backend is implemented locally for review; it remains dormant and is not user-selectable until PR-B
+**Status:** PR-A typed backend is merged in PR #754. PR-B Settings and runtime integration is implemented on a topic branch for review; physical DualSense Edge verification remains with the user after merge.
 **Repository:** onehoon/SteamAddonforClaw  
 **Product:** Standalone Steam Addon for Claw / Full PID1902  
 **Scope:** Settings-selectable Steam/BPM virtual-controller presentation: existing Steam Deck or new Sony DualSense Edge. Xbox360 stays the normal Windows output.
@@ -475,7 +475,7 @@ Never log every input packet or add a new polling diagnostic loop. Avoid marking
 
 **Suggested two focused PRs, subject to latest code review:**
 
-### PR-A — Edge typed backend, no user-visible selection
+### PR-A — completed in PR #754
 
 Implementation work order: [DualSense Edge PR-A typed backend](work-order/DUALSENSE_EDGE_PR_A_TYPED_BACKEND_WORK_ORDER_2026-10-11.md). The user separately updates the VIIPER dependency.
 
@@ -485,16 +485,15 @@ Implementation work order: [DualSense Edge PR-A typed backend](work-order/DUALSE
 4. Add code-level tests for struct ABI, controls/M1/M2, gyro scales and neutrality, publisher stop/join, attach/retire, ownership/callback cleanup.
 5. Do **not** change the shipped Xbox360/Deck selection policy. Edge is not production-selected in this PR.
 
-### PR-B — Settings preference and runtime integration
+### PR-B — Settings preference and runtime integration (implemented for review)
 
 Implementation work order (written after PR #754 merged): [DualSense Edge PR-B Settings and Full1902 integration](work-order/DUALSENSE_EDGE_PR_B_SETTINGS_AND_RUNTIME_INTEGRATION_WORK_ORDER_2026-10-11.md). VIIPER dependency was independently updated in PR #753; PR-B must not re-update its binaries/header/lock.
 
-1. Add typed settings persistence, frontend RPC, version bump, and a standalone **SettingsPage SettingsCard** with **Steam Deck (Default)** / **DualSense Edge (Experimental)**; no DeveloperPage option.
-2. Add Edge to AddonPresentationKind and use one fresh selection resolver for first attach, ordinary reconcile, Resume and developer re-arm recovery.
-3. Integrate WING/Center M Steam domain selection, Deck/Edge semantic Steam and QAM pulses; preserve model-aware defaults.
-4. Include Edge in motion-reader activation policy; ensure mode switches stop/neutralize sensors appropriately.
-5. Extend actual-controller status badge and existing lifecycle/overlay-safe tests.
-6. Keep user hardware verification separate from PR acceptance.
+1. Typed settings persistence and frontend RPC are implemented at protocol 72, with a standalone **SettingsPage SettingsCard** for **Steam Deck (Default)** / **DualSense Edge (Experimental)**; there is no DeveloperPage option.
+2. One fresh selection resolver drives first attach, ordinary reconcile, Resume and developer re-arm recovery inside the existing presentation owner.
+3. WING/Center M use the Steam domain for a live Deck or Edge; Steam and QAM actions use Deck behavior or finite Edge PS / PS+Cross pulses.
+4. Edge uses the existing motion readers and the actual-live-controller badge; lifecycle and overlay-safe automated coverage is included.
+5. Physical Edge recognition, controls, motion, vibration and lifecycle verification remains a post-merge user task and is not represented as completed here.
 
 This division avoids exposing a partially wired Edge option while allowing one mergeable backend change and one integration change. If the latest implementation makes one smaller combined PR safer, minimizing lifecycle risk is more important than PR count; do not split a single owner across incomplete states.
 

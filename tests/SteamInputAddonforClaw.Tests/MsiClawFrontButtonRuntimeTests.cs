@@ -240,6 +240,8 @@ public sealed class MsiClawFrontButtonRuntimeTests
         Assert.True(
             host.IndexOf("_frontButtonRuntime.DisposeAsync", StringComparison.Ordinal)
             < host.IndexOf("_presentationOwnership.DisposeAsync", StringComparison.Ordinal));
+        Assert.Contains("IsActivePresentationLive: true", host, StringComparison.Ordinal);
+        Assert.Contains("presentation.ActivePresentation is Devices.MSI.Claw.AddonPresentationKind.SteamDeck or Devices.MSI.Claw.AddonPresentationKind.DualSenseEdge", host, StringComparison.Ordinal);
     }
 
     [Fact]

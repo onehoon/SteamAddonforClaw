@@ -28,6 +28,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public BackButtonMappingSettings BackButtonMapping => Settings.BackButtonMapping;
     public ControllerLedSettings ControllerLed => Settings.ControllerLed;
     public ControllerVibrationSettings ControllerVibration => Settings.ControllerVibration;
+    public SteamVirtualControllerPreference SteamVirtualController => Settings.SteamVirtualController;
     public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
     public event EventHandler? FrontButtonMappingChanged;
 
@@ -150,6 +151,27 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
         Settings = next;
         SteamInputAddonforClaw.Diagnostics.AppLog.Debug("Settings", "Controller vibration settings saved.",
             ("LeftPercent", settings.LeftPercent), ("RightPercent", settings.RightPercent));
+        return true;
+    }
+
+    /// <summary>Persists one validated Steam-facing controller choice before publishing it to the
+    /// existing presentation owner. A same-value request is an accepted no-op.</summary>
+    public bool ChangeSteamVirtualController(SteamVirtualControllerPreference preference)
+    {
+        if (!Enum.IsDefined(preference))
+        {
+            SteamInputAddonforClaw.Diagnostics.AppLog.Warn("Settings", "Rejected an invalid Steam virtual controller preference.", null,
+                ("Preference", preference));
+            return false;
+        }
+
+        if (Settings.SteamVirtualController == preference) return true;
+
+        var next = Settings with { SteamVirtualController = preference };
+        _settingsStore.Save(next);
+        Settings = next;
+        SteamInputAddonforClaw.Diagnostics.AppLog.Info("Settings", "Steam virtual controller preference saved.",
+            ("Preference", preference));
         return true;
     }
 

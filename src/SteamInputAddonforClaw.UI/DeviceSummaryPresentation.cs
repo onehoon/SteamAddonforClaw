@@ -34,6 +34,7 @@ internal static class DeviceSummaryPresentation
             FrontendControllerBadgeState.MsiNative => "MSI Native",
             FrontendControllerBadgeState.Xbox360Active => "Xbox 360 · Active",
             FrontendControllerBadgeState.SteamDeckActive => "Steam Deck · Active",
+            FrontendControllerBadgeState.DualSenseEdgeActive => "DualSense Edge · Active",
             FrontendControllerBadgeState.Initializing => "Initializing…",
             FrontendControllerBadgeState.Reconnecting => "Reconnecting…",
             FrontendControllerBadgeState.NeedsAttention => "Needs attention",
