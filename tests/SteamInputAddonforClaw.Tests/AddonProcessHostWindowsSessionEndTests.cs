@@ -27,9 +27,13 @@ public sealed class AddonProcessHostWindowsSessionEndTests
         var admission = begin.IndexOf("GetWindowsSessionEndAdmissionFailure(admissionReconcile)", StringComparison.Ordinal);
         var shutdownGate = begin.IndexOf("TryBeginProcessShutdownCore()", admission, StringComparison.Ordinal);
         var presentation = begin.IndexOf("presentation.PrepareForWindowsSessionEndAsync", shutdownGate, StringComparison.Ordinal);
+        var presentationFailureGate = begin.IndexOf("if (!presentationRetired)", presentation, StringComparison.Ordinal);
+        var presentationFailureReturn = begin.IndexOf("A2vmWindowsSessionEndResult.Skipped(\"PresentationRetirementUnproven\")", presentationFailureGate, StringComparison.Ordinal);
         var physical = begin.IndexOf("physical.PrepareForWindowsSessionEndAsync", presentation, StringComparison.Ordinal);
 
-        Assert.True(admission >= 0 && shutdownGate > admission && presentation > shutdownGate && physical > presentation);
+        Assert.True(admission >= 0 && shutdownGate > admission && presentation > shutdownGate
+            && presentationFailureGate > presentation && presentationFailureReturn > presentationFailureGate
+            && physical > presentationFailureReturn);
         Assert.DoesNotContain("ReleaseForCenterMEnableAsync", begin, StringComparison.Ordinal);
         Assert.DoesNotContain("SwitchModeAsync", begin, StringComparison.Ordinal);
         Assert.Contains("IsA2vmBootRumblePrimeModel", host, StringComparison.Ordinal);

@@ -486,12 +486,16 @@ Recommended shutdown/restart behavior:
 ```text
 actual `WM_ENDSESSION(TRUE)` for shutdown/restart, excluding logoff and app replacement
 → A2VM 7/8 + Center M Disabled + healthy, strongly owned PID1902 only
-→ neutral and retire publisher/typed virtual output; prove VIIPER teardown
+→ stop/join publisher and clear/drain feedback callbacks
+→ promptly attempt the canonical typed VIIPER detach; prove runtime Closed
+→ confirm physical PID1902 rumble STOP while the owned physical identity is still available
 → prove process-owned DirectInput cleanup
-→ if safe completion fits the short deadline, issue at most one PID1902 → PID1901 command
+→ freshly resolve the unique PID1902 command HID and, if the short deadline still permits, attempt at most one XInput write
 → do not wait for or claim PID1901 PnP verification; keep HidHide and Center M settings unchanged
 → on any failure/deadline, skip the mode command and allow Windows to exit
 ```
+
+If typed detach fails, a best-effort physical STOP may still be attempted only while the original PID1902 identity remains owned; the mode command remains blocked. A failure to prove VIIPER `Closed`, physical STOP, or DirectInput cleanup also blocks the command. This order applies only to actual Windows session end; ordinary presentation release, app restart/update, logoff, and sleep/resume keep their independent lifecycle policies.
 
 The physical device may remain PID1902, or firmware/Windows may later enumerate it as PID1901.
 

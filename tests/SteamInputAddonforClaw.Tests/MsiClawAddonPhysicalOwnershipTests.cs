@@ -1187,6 +1187,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         Assert.Equal(A2vmWindowsSessionEndOutcome.CommandWritten, result.Outcome);
         Assert.Equal(1, h.XInputCommandWriteCalls);
+        Assert.Equal(1, h.XInputCommandResolutionCalls);
         Assert.Empty(h.SwitchTargets); // no verified transition and no PID1901 wait
         Assert.True(h.Events.IndexOf("InputStop") >= 0);
         Assert.True(h.Events.IndexOf("InputStop") < h.Events.IndexOf("XInputCommand"));
@@ -1267,7 +1268,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(A2vmWindowsSessionEndOutcome.Skipped, result.Outcome);
         Assert.Equal("UniquePid1902CommandHidUnavailable", result.Reason);
         Assert.Equal(0, h.XInputCommandWriteCalls);
-        Assert.True(h.InputSource.IsRunning);
+        Assert.Equal(1, h.XInputCommandResolutionCalls);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Contains("InputStop", h.Events);
         await owner.DisposeAsync();
     }
 
@@ -1288,6 +1291,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         Assert.Equal(A2vmWindowsSessionEndOutcome.Skipped, result.Outcome);
         Assert.Equal(0, h.XInputCommandWriteCalls);
+        Assert.Equal(0, h.XInputCommandResolutionCalls);
         Assert.Contains("DirectInputCleanupUnproven", result.Reason);
         await owner.DisposeAsync();
     }
@@ -2908,6 +2912,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public bool XInputCommandWriteSucceeds { get; set; } = true;
         public Func<MsiClawPhysicalIdentity, CancellationToken, Task<MsiClawModeCommandWriteResult>>? XInputCommandWriteOverride { get; set; }
         public int XInputCommandWriteCalls { get; private set; }
+        public int XInputCommandResolutionCalls { get; private set; }
         public List<string> Events { get; } = [];
 
         private MsiClawNativeMode RecoveryCurrentMode => RecoverySwitchCalls > 0
@@ -3073,6 +3078,10 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             writeXInputCommand: (identity, cancellationToken) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                XInputCommandResolutionCalls++;
+                var currentDevices = PnpDeviceSnapshot?.Invoke() ?? PnpDevices ?? A2vmOwnedPnpDevices();
+                if (new MsiClawControlHidResolver().Resolve(currentDevices, MsiClawNativeMode.DirectInput, identity) is null)
+                    return Task.FromResult(new MsiClawModeCommandWriteResult(false, false, "UniquePid1902CommandHidUnavailable"));
                 XInputCommandWriteCalls++;
                 Events.Add("XInputCommand");
                 if (XInputCommandWriteOverride is { } writeOverride)

@@ -318,15 +318,18 @@ While Center M remains Disabled:
 ```text
 Actual Windows shutdown/restart (`WM_ENDSESSION(TRUE)`, not logoff or app replacement)
 → A2VM 7/8 + Center M Disabled + healthy, strongly owned PID1902 only
-→ safely retire virtual output/VIIPER and prove DirectInput cleanup
-→ if every step completes within the short deadline, issue at most one PID1902 → PID1901 command
+→ stop/join publisher and clear/drain feedback callbacks
+→ typed VIIPER detach and prove canonical runtime Closed
+→ physical PID1902 rumble STOP confirmed while the owned physical identity is still available
+→ DirectInput cleanup confirmed
+→ freshly resolve the unique PID1902 command HID and attempt at most one PID1902 → PID1901 write
 → do not wait for or claim PID1901 PnP verification; keep Center M Disabled and persistent HidHide unchanged
 → otherwise skip the command and let Windows exit
 
 Ordinary process exit, Addon restart/update, logoff, sleep, hibernate, and resume do not issue this command.
 ```
 
-If a Steam/BPM presentation reconcile is already in flight at this boundary, the Runtime closes further reconcile admission through the existing shutdown gate and may drain only that tracked task inside the same bounded 2-second global deadline. It then rechecks the live presentation and exact strong PID1902 ownership before retirement. A failed, canceled, timed-out, or uncertain reconcile skips the mode command; unknown/invalid VIIPER detach outcomes remain fail-closed.
+If a Steam/BPM presentation reconcile is already in flight at this boundary, the Runtime closes further reconcile admission through the existing shutdown gate and may drain only that tracked task inside the same bounded 2-second global deadline. It then rechecks the live presentation and exact strong PID1902 ownership before retirement. A failed, canceled, timed-out, or uncertain reconcile skips the mode command; unknown/invalid VIIPER detach outcomes remain fail-closed. The physical rumble STOP is intentionally after typed detach and proven VIIPER Closed only for this session-end path; other presentation retirement paths retain their current ordering. If typed detach fails, a best-effort STOP is allowed only while the original physical identity remains owned, but no mode command follows.
 
 The A2VM boot-only initialization is not a shutdown action. The separate Windows session-end command is best-effort physical preparation, not a stock authority release. User-invoked **Restore Vibration** is also a temporary recovery under Addon authority, not a stock release.
 

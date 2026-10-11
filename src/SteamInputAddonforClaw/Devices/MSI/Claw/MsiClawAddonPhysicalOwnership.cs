@@ -747,15 +747,11 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 || !identity.StronglyMatches(MsiClawPhysicalIdentity.From(primary)))
                 return A2vmWindowsSessionEndResult.Skipped("ExactOwnedPid1902PrimaryNotPresent");
 
-            var commandHid = new MsiClawControlHidResolver().Resolve(devices, MsiClawNativeMode.DirectInput, identity);
-            if (commandHid is null)
-                return A2vmWindowsSessionEndResult.Skipped("UniquePid1902CommandHidUnavailable");
-
-            AppLog.Info("ControllerOwnership", "Windows session-end PID1902 and command-HID preflight completed.",
+            AppLog.Info("ControllerOwnership", "Windows session-end PID1902 primary identity preflight completed; command HID will be freshly resolved at dispatch.",
                 ("Event", "A2vmWindowsSessionEndPhysicalPreflight"),
                 ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(topologyStartedAt).TotalMilliseconds),
                 ("ExactOwnedPid1902Primary", true),
-                ("UniqueCommandHid", true));
+                ("CommandHidResolutionDeferredToDispatch", true));
 
             cancellationToken.ThrowIfCancellationRequested();
             if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)

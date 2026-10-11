@@ -1089,6 +1089,25 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         }
     }
 
+    private bool RequestWindowsSessionEndPhysicalStopLocked(string stage)
+    {
+        var startedAt = Stopwatch.GetTimestamp();
+        var confirmed = RequestPhysicalRumbleStopLocked("WindowsSessionEnd:" + stage);
+        if (confirmed)
+            AppLog.Info("ControllerPresentation", "Windows session-end physical rumble STOP completed.",
+                ("Event", "A2vmWindowsSessionEndPhysicalStopCompleted"),
+                ("Stage", stage),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds),
+                ("PhysicalRumbleStopConfirmed", true));
+        else
+            AppLog.Warn("ControllerPresentation", "Windows session-end physical rumble STOP was not confirmed.", null,
+                ("Event", "A2vmWindowsSessionEndRumbleStopFailed"),
+                ("Stage", stage),
+                ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds),
+                ("PhysicalRumbleStopConfirmed", false));
+        return confirmed;
+    }
+
     private bool DisarmFeedbackAndStopLocked(string reason)
     {
         _ = TryDisarmFeedbackLocked(reason);
@@ -1618,12 +1637,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         // publisher (the overlay instance is shared across every SteamDeck publication).
         _systemButtonOverlay.Clear();
 
-        // 2-3. Stop accepting old-presentation feedback (clear the native callback) and request a
-        //      best-effort physical STOP before the typed device is detached, so a switch/release/
-        //      shutdown/fail-close can never leave a motor latched.
+        // 2-3. Stop accepting old-presentation feedback and drain callbacks before any detach.
+        //      Windows session end defers the physical STOP until the canonical runtime is Closed;
+        //      every other lifecycle retains its existing STOP-before-detach behavior.
         cancellationToken.ThrowIfCancellationRequested();
+        var windowsSessionEnd = string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal);
         var strictFeedbackRetirement = string.Equals(reason, "DeveloperRumbleRearm", StringComparison.Ordinal)
-            || string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal);
+            || windowsSessionEnd;
         var feedbackDrainConfirmed = true;
         var feedbackRetirementStartedAt = Stopwatch.GetTimestamp();
         try
@@ -1631,7 +1651,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             if (strictFeedbackRetirement)
             {
                 feedbackDrainConfirmed = TryDisarmFeedbackLocked(reason);
-                if (feedbackDrainConfirmed)
+                if (feedbackDrainConfirmed && !windowsSessionEnd)
                     physicalRumbleStopConfirmed = RequestPhysicalRumbleStopLocked(reason);
             }
             else
@@ -1641,20 +1661,22 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         }
         finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync(reason).ConfigureAwait(false); }
 
-        if (string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal))
+        if (windowsSessionEnd)
         {
-            var feedbackRetirementSucceeded = feedbackDrainConfirmed && physicalRumbleStopConfirmed;
-            if (feedbackRetirementSucceeded)
-                AppLog.Info("ControllerPresentation", "Windows session-end feedback drain and physical STOP completed.",
+            if (feedbackDrainConfirmed)
+                AppLog.Info("ControllerPresentation", "Windows session-end feedback callback drain completed; physical STOP is deferred until VIIPER retirement.",
                     ("Event", "A2vmWindowsSessionEndFeedbackRetired"),
                     ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(feedbackRetirementStartedAt).TotalMilliseconds),
-                    ("FeedbackDrainConfirmed", true), ("PhysicalRumbleStopConfirmed", true));
+                    ("FeedbackDrainConfirmed", true),
+                    ("PhysicalRumbleStopConfirmed", physicalRumbleStopConfirmed),
+                    ("PhysicalRumbleStopDeferred", !physicalRumbleStopConfirmed));
             else
-                AppLog.Warn("ControllerPresentation", "Windows session-end feedback drain or physical STOP was not confirmed.", null,
+                AppLog.Warn("ControllerPresentation", "Windows session-end feedback callback drain was not confirmed.", null,
                     ("Event", "A2vmWindowsSessionEndFeedbackRetired"),
                     ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(feedbackRetirementStartedAt).TotalMilliseconds),
                     ("FeedbackDrainConfirmed", feedbackDrainConfirmed),
-                    ("PhysicalRumbleStopConfirmed", physicalRumbleStopConfirmed));
+                    ("PhysicalRumbleStopConfirmed", physicalRumbleStopConfirmed),
+                    ("PhysicalRumbleStopDeferred", false));
         }
 
         if (!feedbackDrainConfirmed)
@@ -1669,13 +1691,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 ("Event", eventName), ("Presentation", _activeKind), ("Reason", reason));
             return new(false, false, false);
         }
-        if (string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal) && !physicalRumbleStopConfirmed)
-        {
-            AppLog.Error("ControllerPresentation", "Physical rumble STOP was not confirmed; retaining the typed device and aborting Windows session-end mode preparation.", null,
-                ("Event", "A2vmWindowsSessionEndRumbleStopFailed"));
-            return new(false, false, true);
-        }
-
         // 4. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
         cancellationToken.ThrowIfCancellationRequested();
         var typedDetachStartedAt = Stopwatch.GetTimestamp();
@@ -1691,6 +1706,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                         ? "A2vmWindowsSessionEndTypedDetachFailed" : "PresentationTypedDetachFailed"),
                     ("Result", detach), ("Reason", reason),
                     ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(typedDetachStartedAt).TotalMilliseconds));
+                if (windowsSessionEnd && feedbackDrainConfirmed)
+                    physicalRumbleStopConfirmed = RequestWindowsSessionEndPhysicalStopLocked("AfterTypedDetachFailure");
                 return new(false, physicalRumbleStopConfirmed);
             }
         }
@@ -1707,6 +1724,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                             ? "A2vmWindowsSessionEndTypedDetachFailed" : "PresentationTypedDetachFailed"),
                         ("State", session.State), ("Reason", reason),
                         ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(typedDetachStartedAt).TotalMilliseconds));
+                    if (windowsSessionEnd && feedbackDrainConfirmed)
+                        physicalRumbleStopConfirmed = RequestWindowsSessionEndPhysicalStopLocked("AfterTypedDetachFailure");
                     return new(false, physicalRumbleStopConfirmed);
                 }
             }
@@ -1769,7 +1788,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!(await RetireActivePresentationCoreAsync(reason, cancellationToken).ConfigureAwait(false)).Succeeded)
+            var isWindowsSessionEnd = string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal);
+            var retirement = await RetireActivePresentationCoreAsync(reason, cancellationToken).ConfigureAwait(false);
+            if (!retirement.Succeeded)
                 return false;
 
             // 3. Tear the canonical VIIPER runtime down to its proven-safe closed state.
@@ -1783,9 +1804,11 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                     AppLog.Error("ControllerPresentation", "Canonical VIIPER teardown could not be proven; ownership retained.", null,
                         ("State", runtime.State), ("Reason", reason),
                         ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(teardownStartedAt).TotalMilliseconds));
+                    if (isWindowsSessionEnd && retirement.FeedbackDrainConfirmed)
+                        _ = RequestWindowsSessionEndPhysicalStopLocked("AfterViiperCloseUnconfirmed");
                     return false;
                 }
-                if (string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal))
+                if (isWindowsSessionEnd)
                     AppLog.Info("ControllerPresentation", "Windows session-end VIIPER teardown reached Closed.",
                         ("Event", "A2vmWindowsSessionEndViiperClosed"),
                         ("State", runtime.State),
@@ -1794,7 +1817,26 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             else if (_viiper is { State: CanonicalViiperRuntimeState.Unsafe })
             {
                 AppLog.Error("ControllerPresentation", "Canonical VIIPER is Unsafe; cannot prove teardown.", null, ("Reason", reason));
+                if (isWindowsSessionEnd && retirement.FeedbackDrainConfirmed)
+                    _ = RequestWindowsSessionEndPhysicalStopLocked("AfterViiperCloseUnconfirmed");
                 return false;
+            }
+
+            if (isWindowsSessionEnd)
+            {
+                if (_viiper is not { State: CanonicalViiperRuntimeState.Closed })
+                {
+                    AppLog.Error("ControllerPresentation", "Windows session-end VIIPER Closed state was not proven; skipping PID1901 preparation.", null,
+                        ("Event", "A2vmWindowsSessionEndViiperClosed"),
+                        ("State", _viiper?.State.ToString() ?? "Unavailable"));
+                    if (retirement.FeedbackDrainConfirmed)
+                        _ = RequestWindowsSessionEndPhysicalStopLocked("AfterViiperCloseUnconfirmed");
+                    return false;
+                }
+
+                if (!retirement.PhysicalRumbleStopConfirmed
+                    && !RequestWindowsSessionEndPhysicalStopLocked("AfterViiperClosed"))
+                    return false;
             }
             cancellationToken.ThrowIfCancellationRequested();
 
