@@ -4,7 +4,7 @@
 **Status:** Design approved in principle; implementation not yet started  
 **Repository:** onehoon/SteamAddonforClaw  
 **Product:** Standalone Steam Addon for Claw / Full PID1902  
-**Scope:** Developer-selectable Steam/BPM virtual-controller presentation: existing Steam Deck or new Sony DualSense Edge. Xbox360 stays the normal Windows output.
+**Scope:** Settings-selectable Steam/BPM virtual-controller presentation: existing Steam Deck or new Sony DualSense Edge. Xbox360 stays the normal Windows output.
 
 > This is an architecture/design authority for the proposed feature, **not** evidence that virtual DualSense Edge already works in Steam Input or Xbox Game Bar. The local Codex implements code and automated tests; **physical device verification belongs exclusively to the user after merge**, and is never a PR review/CI/merge blocker.
 
@@ -14,7 +14,7 @@
 
 Add exactly **one experimental DualSense Edge presentation**, not ordinary DualSense and not Xbox Elite.
 
-Developer Menu exposes one saved preference:
+The ordinary **Settings** page exposes one saved preference in a **standalone SettingsCard**, not inside Developer Menu:
 
 - **Steam Deck (Default)** — existing behavior.
 - **DualSense Edge (Experimental)** — when the existing Full1902 Steam/BPM selector asks for the Steam-facing controller, attach/publish Edge instead of Deck.
@@ -30,7 +30,7 @@ Center M Disabled / healthy Full1902 PID1902 ownership
        |
        +-- neither is active ---------------------> Xbox360
        |
-       +-- Steam game or Big Picture active ------> developer preference
+       +-- Steam game or Big Picture active ------> Settings preference
                                                      | Steam Deck (default)
                                                      | DualSense Edge (experimental)
                                                      v
@@ -38,7 +38,7 @@ Center M Disabled / healthy Full1902 PID1902 ownership
                                           start ONLY its one input publisher
 ~~~
 
-The current shipped behavior is **Xbox360 <-> Steam Deck**, with no modification unless the developer explicitly selects Edge.
+The current shipped behavior is **Xbox360 <-> Steam Deck**, with no modification unless the user explicitly selects experimental Edge on Settings.
 
 ### 1.1 What is and is not changing
 
@@ -50,7 +50,7 @@ The current shipped behavior is **Xbox360 <-> Steam Deck**, with no modification
 | Virtual bus | One canonical VIIPER server/bus | Unchanged |
 | Steam/BPM selection condition | RunningAppId != 0 OR BigPictureActive | Unchanged |
 | No Steam/BPM | Xbox360 | Xbox360 |
-| Steam/BPM active | Steam Deck | Steam Deck OR Edge, by saved developer preference |
+| Steam/BPM active | Steam Deck | Steam Deck OR Edge, by saved Settings preference (Steam Deck default) |
 | Maximum attached virtual controllers | Exactly one | Exactly one |
 | M1/M2 in Steam-facing presentation | Separate R4/L4 | Separate R4/L4 |
 | Gyro acquisition | Shared Full1902 Motion Core | Reuse same core, encode Edge reports |
@@ -58,7 +58,7 @@ The current shipped behavior is **Xbox360 <-> Steam Deck**, with no modification
 | Steam/QAM | Native Deck Steam/QuickAccess fields | Edge PS and PS+Cross synthetic button pulses |
 | Feedback | Model-specific callback -> owned physical rumble sink | Edge ordinary two-channel rumble only |
 | Native Game Bar suppression | WING Win+G guard while Addon owns controller | Unchanged |
-| Frontend | Developer Menu already exists | Add one developer-only preference control |
+| Frontend | Ordinary Settings page already uses SettingsCard controls | Add one standalone Settings options card |
 
 ### 1.2 Explicit non-goals
 
@@ -104,7 +104,7 @@ Current code wins over historical work-order implementation sketches. Useful imp
 | Settings/AppSettings.cs / SettingsStore.cs / StartupSettingsCoordinator.cs | Persisted settings, loaded into Runtime | Add one enum preference; missing/invalid settings -> Steam Deck default |
 | Contracts/Frontend/FrontendContracts.cs | Settings snapshot, mutation APIs, controller badge | Extend typed preference and Edge active status |
 | Frontend/InProcessAddonFrontendControl.cs and FrontendTransport | Runtime mutation and named-pipe UI contract | One typed setter + snapshot and protocol version update |
-| UI/Views/DeveloperPage.xaml(.cs) | Developer-only UI | One radio group/ComboBox for two options, selected/current status |
+| UI/Views/SettingsPage.xaml(.cs) | Ordinary Settings page | Standalone SettingsCard and selection, not Developer Menu |
 | Contracts/FrontButtons/FrontButtonMapping.cs | User editable normal/Steam mappings, hardware defaults | Keep mapping schema/defaults; Edge counts as an actual Steam presentation |
 | Devices/MSI/Claw/MsiClawFrontButtonRuntime.cs | Dispatches WING/Center M actions from real active presentation | Change Steam-domain check from Deck-only to Deck-or-Edge |
 | CenterM/FrontButtonActionExecutor.cs | Shared SteamButton/SteamQuickAccess semantic action names | Keep action names; active presentation resolves the pulse behavior |
@@ -142,11 +142,11 @@ public SteamVirtualControllerPreference SteamVirtualController { get; init; }
     = SteamVirtualControllerPreference.SteamDeck;
 ~~~
 
-The name identifies a **Steam-facing virtual presentation**, not Valve's original 2015 Steam Controller hardware. The Developer Menu should label it "Steam / Big Picture Controller" with options "Steam Deck (Default)" and "DualSense Edge (Experimental)".
+The name identifies a **Steam-facing virtual presentation**, not Valve's original 2015 Steam Controller hardware. The standalone Settings card should label it "Steam / Big Picture Controller" with options "Steam Deck (Default)" and "DualSense Edge (Experimental)".
 
 Only two accepted enum names; a missing, malformed, numeric, or unknown value uses the existing Steam Deck behavior. Do not globally reset unrelated persisted settings on an invalid field. Existing SettingsStore string-enum contract and normalization pattern should be followed.
 
-The selected preference persists across Runtime/UI restart. Turning off Developer Menu visibility must not silently reset the selected device.
+The selected preference persists across Runtime/UI restart. Developer Menu visibility is unrelated to this ordinary Settings preference and must never reset it.
 
 ### 3.2 Single resolver
 
@@ -187,7 +187,7 @@ Normal startup with a saved Edge preference but **no Steam/BPM** must still init
 
 ### 3.4 User switching while app is running
 
-User selects Edge in Developer Menu -> validate/store selection -> trigger the **existing** RequestControllerPresentationReconcile pathway -> presentation gate reads fresh desired state. If the current actual state is Xbox360 and Steam is inactive, there is no virtual-device churn. If Steam-facing presentation is currently live, existing orderly stop/neutral/detach/attach behavior applies.
+User selects Edge in Settings -> validate/store selection -> trigger the **existing** RequestControllerPresentationReconcile pathway -> presentation gate reads fresh desired state. If the current actual state is Xbox360 and Steam is inactive, there is no virtual-device churn. If Steam-facing presentation is currently live, existing orderly stop/neutral/detach/attach behavior applies.
 
 On switch in a running game, a brief device disconnect/reconnect and Steam per-device layout refresh are expected. The UI must not report "Edge active" merely because the preference was saved: actual status comes from the existing presentation owner. No application restart or MSI PID mode cycle should be required by design.
 
@@ -435,9 +435,9 @@ Continue the existing retirement ordering, classified native Edge detach/removal
 
 ## 10. Frontend, settings and observability
 
-### 10.1 Developer Menu (not main Controller settings yet)
+### 10.1 Ordinary Settings page — standalone option card
 
-Add one SettingsCard on the existing DeveloperPage with:
+Add one standalone SettingsCard on the existing SettingsPage (not DeveloperPage) with:
 
 - Header: **Steam / Big Picture Controller**
 - ComboBox or RadioButtons: **Steam Deck (Default)** / **DualSense Edge (Experimental)**
@@ -445,7 +445,7 @@ Add one SettingsCard on the existing DeveloperPage with:
 - On mutation: disable duplicate submission, await existing frontend RPC, update selection from returned persisted snapshot; show a short error and restore prior value if mutation rejected.
 - If practical, show read-only **Actual active output** separately from saved preference; do not conflate the two.
 
-Do not create a new settings page, overlay tab, profile preference, local cache or secondary settings file. The Developer Menu visibility flag remains a UI gate, not controller authority or runtime gating.
+Do not create a new settings page, overlay tab, profile preference, local cache or secondary settings file. Developer Menu visibility is unrelated to this ordinary Settings choice and never gates the controller.
 
 ### 10.2 IPC
 
@@ -475,15 +475,17 @@ Never log every input packet or add a new polling diagnostic loop. Avoid marking
 
 ### PR-A — Edge typed backend, no user-visible selection
 
-1. Review current fork header/binary compatibility, add managed typed Edge ABI/state/callback and classified removal.
+Implementation work order: [DualSense Edge PR-A typed backend](work-order/DUALSENSE_EDGE_PR_A_TYPED_BACKEND_WORK_ORDER_2026-10-11.md). The user separately updates the VIIPER dependency.
+
+1. Add managed typed Edge ABI/state/callback and classified removal. **The user independently updates the VIIPER DLL/header/dependency pin; PR-A must not change dependency artifacts.**
 2. Extend same canonical VIIPER owner with lazy/optional Edge logical device and complete teardown.
 3. Add Edge state mapper/publisher, native neutral, motion encoding and basic ordinary rumble callback.
 4. Add code-level tests for struct ABI, controls/M1/M2, gyro scales and neutrality, publisher stop/join, attach/retire, ownership/callback cleanup.
 5. Do **not** change the shipped Xbox360/Deck selection policy. Edge is not production-selected in this PR.
 
-### PR-B — Developer preference and runtime integration
+### PR-B — Settings preference and runtime integration
 
-1. Add typed settings persistence, frontend RPC, version bump, DeveloperPage choice.
+1. Add typed settings persistence, frontend RPC, version bump, and a standalone **SettingsPage SettingsCard** with **Steam Deck (Default)** / **DualSense Edge (Experimental)**; no DeveloperPage option.
 2. Add Edge to AddonPresentationKind and use one fresh selection resolver for first attach, ordinary reconcile, Resume and developer re-arm recovery.
 3. Integrate WING/Center M Steam domain selection, Deck/Edge semantic Steam and QAM pulses; preserve model-aware defaults.
 4. Include Edge in motion-reader activation policy; ensure mode switches stop/neutralize sensors appropriately.
@@ -525,7 +527,7 @@ The following are **manual investigation targets after merge**, explicitly not C
 
 | Manual step | Evidence to collect |
 | --- | --- |
-| Developer Menu default | Old installs show Deck selected; Windows no Steam still Xbox360 |
+| Settings card default | Old installs show Steam Deck selected; Windows no Steam still Xbox360 |
 | Select Edge, enter BPM/start game | Windows PnP reports Sony VID_054C PID_0DF2 and Steam Input identifies DualSense Edge |
 | Standard controls | Stick axes, D-Pad, Cross/Circle, shoulders/triggers, Options/Create and L3/R3 operate correctly |
 | Paddles | M1 -> independent R4; M2 -> independent L4; editable separately in Steam Input |
@@ -567,7 +569,7 @@ These are the realistic boundaries of the requested experimental feature. Do not
 A complete implementation:
 
 1. Leaves existing Full1902 Xbox360/SteamDeck behavior untouched by default.
-2. Makes one persisted Developer Menu preference choose the **Steam-facing** output while preserving the original Steam/BPM condition.
+2. Makes one persisted Settings card preference choose the **Steam-facing** output while preserving the original Steam/BPM condition.
 3. Adds a real canonical VIIPER Edge typed state/publisher on the existing USB bus, with only one attached controller at any time.
 4. Maps base controls, independent M1/M2 Edge paddles, normalized motion and ordinary two-channel rumble; excludes Sony advanced effects.
 5. Preserves user-editable WING/Center M mappings while translating semantic Steam/QAM actions to Edge PS and PS+Cross pulses.
