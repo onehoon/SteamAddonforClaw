@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     8902b5308a58e2fc86fb8fda20eed7df8d8ff664
+Commit:     0689d18416cf6cde9ba4fed04eb373a1a3383ddc
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -33,8 +33,8 @@ Artifact hashes (recomputed independently from the fetched files, matching
 the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
-Generated header SHA-256: 165086ca138b5e8ffe1389ec1bd0f6f7ded83d236695e89941b5fb80d399fbb0
-DLL SHA-256:              422278dcccec3fbf1dfff931600b6e9ea75200ec22baf6d263b7c847d98343d6
+Generated header SHA-256: 2e70012583747384c18f7229e270f5dfc092a79d0625e6f0bc999efe6e5dbde0
+DLL SHA-256:              e7eb94adb4df0347928507f28bcd7491029663ff47d06cd3d85c00899c718015
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
