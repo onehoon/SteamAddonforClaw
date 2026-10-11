@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal sealed record MsiClawRumbleEndpointCandidate(
@@ -27,20 +29,61 @@ internal interface IMsiClawRumbleEndpointResolver
 internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointResolver
 {
     private readonly Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>> _catalog;
+    private readonly Func<MsiClawPhysicalInputIdentity, MsiClawRumbleEndpointCandidate?>? _ownedPathCatalog;
 
     internal MsiClawRumbleEndpointResolver(
-        Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>>? catalog = null)
+        Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>>? catalog = null,
+        Func<MsiClawPhysicalInputIdentity, MsiClawRumbleEndpointCandidate?>? ownedPathCatalog = null)
     {
-        _catalog = catalog ?? (identity => new WindowsMsiClawRumbleEndpointCatalog().Find(identity));
+        if (catalog is null)
+        {
+            var windowsCatalog = new WindowsMsiClawRumbleEndpointCatalog();
+            _catalog = windowsCatalog.Find;
+            _ownedPathCatalog = ownedPathCatalog ?? windowsCatalog.TryResolveExactOwnedInterface;
+        }
+        else
+        {
+            _catalog = catalog;
+            _ownedPathCatalog = ownedPathCatalog;
+        }
     }
 
     public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
+    {
+        if (_ownedPathCatalog is not null)
+        {
+            try
+            {
+                var ownedPathCandidate = _ownedPathCatalog(identity);
+                if (ownedPathCandidate is not null)
+                {
+                    var exact = ResolveCandidates(identity, [ownedPathCandidate]);
+                    if (exact.IsAvailable) return exact;
+                }
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                try
+                {
+                    AppLog.Debug("Rumble", "Exact owned HID path resolution failed; falling back to the full catalog.",
+                        ("Reason", exception.GetType().Name));
+                }
+                catch { }
+            }
+        }
+
+        return ResolveCandidates(identity, _catalog(identity));
+    }
+
+    private static MsiClawRumbleEndpointResolution ResolveCandidates(
+        MsiClawPhysicalInputIdentity identity,
+        IReadOnlyList<MsiClawRumbleEndpointCandidate> sourceCandidates)
     {
         // Do not assume a fixed OutputReportLength -- the real PID1902 gamepad HID collection on
         // proven hardware (HHC/ClawTweaks) reports OutputReportLength=32, not 64. The gamepad
         // collection is instead identified by its HID Usage (Game Pad or Joystick) on the Generic
         // Desktop usage page, matching the exact contract HHC/ClawTweaks both rely on.
-        var candidates = _catalog(identity).Where(candidate =>
+        var candidates = sourceCandidates.Where(candidate =>
             candidate.VendorId == MsiClawHardware.VendorId &&
             candidate.ProductId == MsiClawHardware.DirectInputProductId).ToArray();
         var matchingRoot = candidates.Where(candidate =>
@@ -49,7 +92,7 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
         var verified = gamepadUsage.Where(candidate =>
             candidate.CapabilitiesReadSucceeded &&
             candidate.InputReportLength == 64 &&
-            candidate.OutputReportLength > 0 &&
+            candidate.OutputReportLength >= MsiClawRumblePacketBuilder.PacketLength &&
             candidate.OpenSucceeded &&
             !string.IsNullOrWhiteSpace(candidate.DevicePath)).ToArray();
         return verified.Length switch

@@ -1,6 +1,7 @@
 using Windows.Devices.Enumeration;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Input.DirectInput;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -14,6 +15,8 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
     private const uint GenericReadWrite = GenericRead | GenericWrite;
     private const uint ShareReadWrite = 0x00000001 | 0x00000002;
     private const uint OpenExisting = 3;
+    private const string HidInterfacePathPrefix = "\\\\?\\HID#";
+    private const string HidInterfacePathSuffix = "#{4D1E55B2-F16F-11CF-88CB-001111000030}";
 
     private readonly IControllerDeviceEnumerator _devices;
     private readonly IMsiClawNativeHidApi _hidApi;
@@ -47,7 +50,7 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
                 AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: topology mismatch.", ("PnpInstanceId", pnp), ("MatchCount", topology.Length));
                 continue;
             }
-            var physicalRoot = topology[0].AncestorInstanceIds.FirstOrDefault(root => root.StartsWith("USB\\VID_0DB0&PID_1902\\", StringComparison.OrdinalIgnoreCase));
+            var physicalRoot = topology[0].AncestorInstanceIds.FirstOrDefault(DirectInputDeviceTopologyResolver.IsMsiPhysicalRoot);
             if (string.IsNullOrWhiteSpace(physicalRoot))
             {
                 AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: no physical root.", ("PnpInstanceId", pnp));
@@ -69,6 +72,43 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
                 MsiClawHardware.DirectInputProductId, inputLength, outputLength, usagePage, usage, openSucceeded));
         }
         return candidates;
+    }
+
+    internal MsiClawRumbleEndpointCandidate? TryResolveExactOwnedInterface(MsiClawPhysicalInputIdentity identity)
+    {
+        var devicePath = identity.DevicePath;
+        if (string.IsNullOrWhiteSpace(devicePath) ||
+            !devicePath.StartsWith(HidInterfacePathPrefix, StringComparison.OrdinalIgnoreCase) ||
+            !devicePath.EndsWith(HidInterfacePathSuffix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var pnpInstanceId = DirectInputDeviceTopologyResolver.TryGetPnpInstanceId(devicePath);
+        if (string.IsNullOrWhiteSpace(pnpInstanceId) ||
+            !string.Equals(pnpInstanceId, identity.PnpInstanceId, StringComparison.OrdinalIgnoreCase) ||
+            !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(pnpInstanceId) ||
+            string.IsNullOrWhiteSpace(identity.PhysicalIdentity))
+            return null;
+
+        var device = _devices.FindPresentDevice(pnpInstanceId);
+        if (device is null ||
+            !MsiClawHardware.IsDirectInputHidCollection(device) ||
+            !string.Equals(device.InstanceId, pnpInstanceId, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var physicalRoots = device.AncestorInstanceIds.Where(DirectInputDeviceTopologyResolver.IsMsiPhysicalRoot).ToArray();
+        if (physicalRoots.Length != 1 || !MatchesPhysicalRoot(physicalRoots[0], identity.PhysicalIdentity))
+            return null;
+
+        if (!TryReadHidCapabilities(devicePath, out var inputLength, out var outputLength, out var usagePage, out var usage, out var openSucceeded, out _, out _) ||
+            !openSucceeded ||
+            inputLength != 64 ||
+            outputLength < MsiClawRumblePacketBuilder.PacketLength ||
+            usagePage != MsiClawHardware.DirectInputUsagePage ||
+            usage is not (MsiClawHardware.DirectInputUsage or MsiClawHardware.DirectInputJoystickUsage))
+            return null;
+
+        return new(devicePath, pnpInstanceId, physicalRoots[0], MsiClawHardware.VendorId,
+            MsiClawHardware.DirectInputProductId, inputLength, outputLength, usagePage, usage, openSucceeded);
     }
 
     /// <summary>

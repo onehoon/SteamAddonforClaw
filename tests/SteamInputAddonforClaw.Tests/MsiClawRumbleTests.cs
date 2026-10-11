@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Feedback;
 using Xunit;
@@ -8,6 +9,10 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class MsiClawRumbleTests
 {
+    private const string OwnedDirectInputPath = "\\\\?\\hid#vid_0db0&pid_1902&mi_00&col01#7&test&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+    private const string OwnedDirectInputPnp = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\7&TEST&0&0000";
+    private const string OwnedPhysicalRoot = "USB\\VID_0DB0&PID_1902\\5&ROOT&0&4";
+
     [Fact]
     public void Endpoint_diagnostics_compare_physical_roots_case_insensitively()
     {
@@ -482,6 +487,175 @@ public sealed class MsiClawRumbleTests
         Assert.NotEqual(0, hidStatus);
     }
 
+    [Theory]
+    [InlineData(MsiClawHardware.DirectInputUsage)]
+    [InlineData(MsiClawHardware.DirectInputJoystickUsage)]
+    public void First_stop_uses_the_verified_directinput_path_without_global_enumeration_and_preserves_report_width(ushort usage)
+    {
+        var devices = new DirectPathEnumerator(DirectPathDevice(OwnedDirectInputPnp, OwnedPhysicalRoot));
+        var capabilityApi = new FakeCapabilityHidApi { Usage = usage };
+        var directCatalog = new WindowsMsiClawRumbleEndpointCatalog(devices, capabilityApi);
+        var fallbackCalls = 0;
+        var resolver = new MsiClawRumbleEndpointResolver(
+            _ => { fallbackCalls++; return [Candidate("catalog-path")]; },
+            directCatalog.TryResolveExactOwnedInterface);
+        var native = new FakeNativeHid();
+        var transport = new WindowsMsiClawRumbleTransport(native);
+        using var sink = new MsiClawRumbleSink(
+            new FakeIdentity(new(Guid.NewGuid(), OwnedDirectInputPath, OwnedDirectInputPnp, OwnedPhysicalRoot)) { Generation = 1 },
+            transport,
+            resolver);
+
+        var result = sink.SetRumble(TwoMotorRumble.Stopped);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, result.Status);
+        Assert.Equal(0, fallbackCalls);
+        Assert.Equal(1, devices.FindCalls);
+        Assert.Equal(0, devices.BroadEnumerationCalls);
+        Assert.Equal([OwnedDirectInputPath], capabilityApi.OpenPaths);
+        Assert.Equal([OwnedDirectInputPath], native.OpenPaths);
+        Assert.Equal(32, native.Writes.Single().Length);
+        Assert.Equal(MsiClawRumblePacketBuilder.Build(TwoMotorRumble.Stopped), native.Writes.Single()[..11]);
+    }
+
+    [Theory]
+    [InlineData("wrong-pnp")]
+    [InlineData("wrong-root")]
+    [InlineData("non-primary-collection")]
+    [InlineData("wrong-interface-guid")]
+    [InlineData("unsupported-usage")]
+    [InlineData("wrong-input-length")]
+    [InlineData("short-output-length")]
+    [InlineData("open-failed")]
+    [InlineData("capabilities-failed")]
+    public void Direct_path_must_be_proven_before_the_existing_catalog_fallback_is_used(string failure)
+    {
+        var pnp = failure == "non-primary-collection"
+            ? "HID\\VID_0DB0&PID_1902&MI_00&COL02\\7&TEST&0&0001"
+            : OwnedDirectInputPnp;
+        var path = failure == "non-primary-collection"
+            ? "\\\\?\\hid#vid_0db0&pid_1902&mi_00&col02#7&test&0&0001#{4d1e55b2-f16f-11cf-88cb-001111000030}"
+            : OwnedDirectInputPath;
+        if (failure == "wrong-interface-guid")
+            path = "\\\\?\\hid#vid_0db0&pid_1902&mi_00&col01#7&test&0&0000#{00000000-0000-0000-0000-000000000000}";
+        var root = failure == "wrong-root" ? "USB\\VID_0DB0&PID_1902\\OTHER" : OwnedPhysicalRoot;
+        var device = DirectPathDevice(pnp, root);
+        var devices = new DirectPathEnumerator(device);
+        var capabilityApi = new FakeCapabilityHidApi
+        {
+            UsagePage = failure == "unsupported-usage" ? (ushort)0x000C : MsiClawHardware.DirectInputUsagePage,
+            Usage = failure == "unsupported-usage" ? (ushort)0x0001 : MsiClawHardware.DirectInputUsage,
+            InputReportLength = failure == "wrong-input-length" ? 32 : 64,
+            OutputReportLength = failure == "short-output-length" ? 10 : 32,
+            OpenSucceeds = failure != "open-failed",
+            CapabilitiesSucceed = failure != "capabilities-failed"
+        };
+        var directCatalog = new WindowsMsiClawRumbleEndpointCatalog(devices, capabilityApi);
+        var fallbackCalls = 0;
+        var resolver = new MsiClawRumbleEndpointResolver(
+            _ => { fallbackCalls++; return [Candidate("catalog-safe-path", physical: OwnedPhysicalRoot)]; },
+            directCatalog.TryResolveExactOwnedInterface);
+        var expectedPnp = failure == "wrong-pnp" ? "HID\\VID_0DB0&PID_1902&MI_00&COL01\\DIFFERENT" : pnp;
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), path, expectedPnp, OwnedPhysicalRoot);
+
+        var result = resolver.Resolve(identity);
+
+        Assert.Equal("catalog-safe-path", result.DevicePath);
+        Assert.Equal(1, fallbackCalls);
+        Assert.Equal(0, devices.BroadEnumerationCalls);
+    }
+
+    [Fact]
+    public void Direct_path_endpoint_cache_is_replaced_after_physical_generation_changes()
+    {
+        var pnpA = OwnedDirectInputPnp;
+        var pathA = OwnedDirectInputPath;
+        var rootA = OwnedPhysicalRoot;
+        var pathB = "\\\\?\\hid#vid_0db0&pid_1902&mi_00&col01#7&other&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+        var pnpB = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\7&OTHER&0&0000";
+        var rootB = "USB\\VID_0DB0&PID_1902\\5&OTHER&0&4";
+        var devices = new DirectPathEnumerator(DirectPathDevice(pnpA, rootA));
+        var capabilityApi = new FakeCapabilityHidApi();
+        var directCatalog = new WindowsMsiClawRumbleEndpointCatalog(devices, capabilityApi);
+        var fallbackCalls = 0;
+        var resolver = new MsiClawRumbleEndpointResolver(
+            _ => { fallbackCalls++; return []; },
+            directCatalog.TryResolveExactOwnedInterface);
+        var identity = new FakeIdentity(new(Guid.NewGuid(), pathA, pnpA, rootA)) { Generation = 1 };
+        var native = new FakeNativeHid();
+        using var sink = new MsiClawRumbleSink(identity, new WindowsMsiClawRumbleTransport(native), resolver);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+
+        devices.Current = DirectPathDevice(pnpB, rootB);
+        identity.Current = new(Guid.NewGuid(), pathB, pnpB, rootB);
+        identity.Generation++;
+        sink.BeginPhysicalSession();
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Equal([pathA, pathB], capabilityApi.OpenPaths);
+        Assert.Equal([pathA, pathB], native.OpenPaths);
+        Assert.Equal(0, fallbackCalls);
+    }
+
+    [Fact]
+    public void Direct_path_rejection_remains_unavailable_when_the_full_catalog_has_no_safe_endpoint()
+    {
+        var devices = new DirectPathEnumerator(DirectPathDevice(OwnedDirectInputPnp, "USB\\VID_0DB0&PID_1902\\OTHER"));
+        var directCatalog = new WindowsMsiClawRumbleEndpointCatalog(devices, new FakeCapabilityHidApi());
+        var fallbackCalls = 0;
+        var resolver = new MsiClawRumbleEndpointResolver(
+            _ => { fallbackCalls++; return []; },
+            directCatalog.TryResolveExactOwnedInterface);
+
+        var result = resolver.Resolve(new(Guid.NewGuid(), OwnedDirectInputPath, OwnedDirectInputPnp, OwnedPhysicalRoot));
+
+        Assert.False(result.IsAvailable);
+        Assert.Equal("NoPhysicalGamepadEndpoint", result.Reason);
+        Assert.Equal(1, fallbackCalls);
+    }
+
+    [Fact]
+    public void Direct_path_probe_exception_falls_back_to_the_existing_full_catalog()
+    {
+        var fallbackCalls = 0;
+        var resolver = new MsiClawRumbleEndpointResolver(
+            _ => { fallbackCalls++; return [Candidate("catalog-path", physical: OwnedPhysicalRoot)]; },
+            _ => throw new InvalidOperationException("Exact PnP lookup failed."));
+
+        var result = resolver.Resolve(new(Guid.NewGuid(), OwnedDirectInputPath, OwnedDirectInputPnp, OwnedPhysicalRoot));
+
+        Assert.Equal("catalog-path", result.DevicePath);
+        Assert.Equal(1, fallbackCalls);
+    }
+
+    private static ControllerDeviceInfo DirectPathDevice(string pnp, string root, string? hardwareIds = null) => new(
+        pnp, Guid.NewGuid(), root, [root], "HID",
+        (hardwareIds ?? "HID\\VID_0DB0&PID_1902&MI_00&COL01 | HID\\VID_0DB0&UP:0001_U:0005").Split(" | "),
+        [], "HIDClass", null, null, MsiClawHardware.VendorId, MsiClawHardware.DirectInputProductId, true);
+
+    private sealed class DirectPathEnumerator(ControllerDeviceInfo? current) : IControllerDeviceEnumerator
+    {
+        public ControllerDeviceInfo? Current { get; set; } = current;
+        public int FindCalls { get; private set; }
+        public int BroadEnumerationCalls { get; private set; }
+
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            BroadEnumerationCalls++;
+            return Current is null ? [] : [Current];
+        }
+
+        public ControllerDeviceInfo? FindPresentDevice(string instanceId)
+        {
+            FindCalls++;
+            return Current is { Present: true } device &&
+                string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase)
+                ? device
+                : null;
+        }
+    }
+
     private static MsiClawRumbleEndpointCandidate Candidate(
         string path, ushort pid = 0x1902, int inputLength = 64, int outputLength = 32,
         ushort usagePage = MsiClawHardware.DirectInputUsagePage, ushort usage = MsiClawHardware.DirectInputUsage,
@@ -550,12 +724,14 @@ public sealed class MsiClawRumbleTests
         Assert.Null(result.DevicePath);
     }
 
-    [Fact]
-    public void Endpoint_resolver_rejects_zero_output_report_length()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10)]
+    public void Endpoint_resolver_rejects_output_report_lengths_that_cannot_hold_the_rumble_packet(int outputLength)
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
 
-        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", outputLength: 0)]).Resolve(identity);
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", outputLength: outputLength)]).Resolve(identity);
 
         Assert.Equal("PhysicalRumbleEndpointUnusable", result.Reason);
     }
@@ -878,6 +1054,7 @@ public sealed class MsiClawRumbleTests
         public bool ThrowOnCancelWrite { get; set; }
         public bool DenyReadWriteOpen { get; set; }
         public List<uint> OpenAccessRequests { get; } = [];
+        public List<string> OpenPaths { get; } = [];
         public int WriteCalls { get; private set; }
         public int CancelWriteCalls { get; private set; }
         public TaskCompletionSource FirstWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -885,6 +1062,7 @@ public sealed class MsiClawRumbleTests
         public List<byte[]> Writes { get; } = [];
         public SafeFileHandle Open(string path, uint desiredAccess, uint shareMode, uint creationDisposition)
         {
+            OpenPaths.Add(path);
             OpenAccessRequests.Add(desiredAccess);
             const uint GenericRead = 0x80000000;
             if (DenyReadWriteOpen && (desiredAccess & GenericRead) != 0)
@@ -945,10 +1123,12 @@ public sealed class MsiClawRumbleTests
         public int OpenCalls { get; private set; }
         public int CapabilityCalls { get; private set; }
         public List<uint> OpenAccessRequests { get; } = [];
+        public List<string> OpenPaths { get; } = [];
 
         public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
         {
             OpenCalls++;
+            OpenPaths.Add(devicePath);
             OpenAccessRequests.Add(desiredAccess);
             const uint GenericRead = 0x80000000;
             if (!OpenSucceeds || (DenyReadWriteOpen && (desiredAccess & GenericRead) != 0))
