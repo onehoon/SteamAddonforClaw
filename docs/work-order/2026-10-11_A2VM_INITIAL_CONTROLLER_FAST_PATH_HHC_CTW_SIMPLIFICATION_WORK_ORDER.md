@@ -98,7 +98,7 @@ Five observed successful boot-prime sessions:
 **Actual improvements to pursue:**
 
 1. `ControllerTopologyWaiter` reports first usable controller topology at ~0.77 s but by default requires **three equal successful samples**; 09:12 reaches Stable at **2.89 s**. This is a ~2-second avoidable *pre-ownership* barrier in an already-supported, Center M Disabled boot. Final ownership separately proves exact hardware and isolation.
-2. The first A2VM leg spends 5 seconds in generic `MsiClawModeController` target verification, then potentially another 5-second target-scoped settle. The latter only needs a **fresh unique PID1901 command endpoint, with PID1902 absent**, to send the second command; do not perform two separate phases of similar observation.
+2. The first A2VM leg spends 5 seconds in generic `MsiClawModeController` target verification, then potentially another 5-second target-scoped settle. The latter needs only a **fresh unique PID1901 command HID** to send the second command; do not separately hold the intermediate leg for a full PID1902-disappearance/root/Container proof. **PID1901 absence is checked at the final PID1902 presentation boundary**, not confused with this intermediate handoff.
 3. After the intermediate PID1901 command HID is proven, the next `_switchMode(DirectInput)` **re-enumerates the same source again** before the second write. The measured gap (1.57–4.59 s) is not all proven duplicate enumeration time, but this source reprobe is redundant if the handoff already holds the fresh, uniquely resolved control HID.
 4. The second-leg `MsiClawModeController` spends up to 5 seconds proving a PID1902 command-HID transition. If it times out, `AddonProcessHost` starts an **additional deferred `AcquireAsync`**, which again performs final PID1902 snapshot, gamepad-mode readback, DirectInput acquire and HidHide proof. Four of five sessions paid this extra transition-fail/then-reacquire path.
 5. For an A2VM initial-acquisition **write to DirectInput that succeeded**, the *first valid input from the exact supported PID1902 DirectInput collection*, plus the final no-PID1901 and HidHide proof, replaces the extra standalone GamepadMode-readback on **this path only**. Do **not** remove startup readback/normalization when the device starts already PID1902 without a new successful DInput write.
@@ -110,10 +110,10 @@ Five observed successful boot-prime sessions:
 
 ### 4.1 Faster Disabled-boot topology admission (simple prerequisite cleanup)
 
-For the **Center M Disabled** boot admission path only, replace the default **three-consecutive-equal-topology-snapshots** requirement with **first unambiguous usable control-HID observation**. Keep the existing bounded wait when the exact control HID is missing; do **not** convert a temporarily absent Claw into an unconditional Ready.
+For the **A2VM 7/8 + Center M Disabled** boot admission path only, replace the default **three-consecutive-equal-topology-snapshots** requirement with **first unambiguous usable control-HID observation**. Keep the existing bounded wait when the exact control HID is missing; do **not** convert a temporarily absent Claw into an unconditional Ready.
 
 - Preserve supported-hardware identification, exact Center M Disabled state, package prerequisites and HidHide baseline normalization/readback.
-- Preserve strict **Enabled / stock onboarding** topology behavior; do not change the shared default globally if doing so would weaken stock authority changes.
+- Preserve strict **Enabled / stock onboarding and EX/CG3EM Disabled-boot** topology behavior; do not change the shared default globally.
 - Retain existing `ControllerTopologyWaiter` and `StartupCoordinator`; a narrow readiness parameter/call-path on the same class is fine, but **no new startup manager/interface hierarchy**.
 - Since the machine is already classified as A2VM 7/8, **one currently present supported VID/PID/Usage command HID** is enough for this pre-admission readiness. Do not require cross-mode root/Container matches or three identical PnP snapshots.
 - If there are **multiple matching command HID endpoints** and no unambiguous selection, do not arbitrarily choose the first. A genuinely missing current endpoint still waits within the existing bound.
