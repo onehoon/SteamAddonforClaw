@@ -517,6 +517,8 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(fake.MsiBackButtonManualRestoreResult.RomSyncIssued, result.RomSyncIssued);
         Assert.Equal(fake.MsiBackButtonManualRestoreResult.RomSyncTransportSucceeded, result.RomSyncTransportSucceeded);
         Assert.Equal(fake.MsiBackButtonManualRestoreResult.ReadbackObserved, result.ReadbackObserved);
+        Assert.Equal(fake.MsiBackButtonManualRestoreResult.ProfileReadbackVerified, result.ProfileReadbackVerified);
+        Assert.Equal(fake.MsiBackButtonManualRestoreResult.RawInput15_16Observed, result.RawInput15_16Observed);
         Assert.Equal(1, fake.MsiBackButtonManualRestoreCount);
         Assert.True(result.M1.WriteIssued);
         Assert.True(result.M2.WriteIssued);
@@ -2475,14 +2477,14 @@ public sealed class FrontendNamedPipeTransportTests
         public TaskCompletionSource MsiBackButtonDiagnosticStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource MsiBackButtonDiagnosticCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public FrontendMsiBackButtonManualRestoreResult MsiBackButtonManualRestoreResult { get; } = new(
-            FrontendMsiBackButtonManualRestoreOutcome.Restored, "msi.claw.a2vm.8", 0x0230,
-            "Both profile slots read back with the known DirectInput header.",
+            FrontendMsiBackButtonManualRestoreOutcome.Unverified, "msi.claw.a2vm.8", 0x0230,
+            "Profile headers are verified; physical raw input is not yet verified.",
             new("M1", 0x00BA, FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed,
                 FrontendMsiBackButtonProfileClassification.ObservedLinuxRightBraceCandidate, "01040059FFFFFFFF", true, true,
-                FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed, FrontendMsiBackButtonProfileClassification.OtherFormat, "01000000FFFFFFFF"),
+                FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed, FrontendMsiBackButtonProfileClassification.OtherFormat, "01000059FFFFFFFF"),
             new("M2", 0x0163, FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed,
                 FrontendMsiBackButtonProfileClassification.ObservedLinuxLeftBraceCandidate, "01040058FFFFFFFF", true, true,
-                FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed, FrontendMsiBackButtonProfileClassification.OtherFormat, "01000000FFFFFFFF"),
+                FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed, FrontendMsiBackButtonProfileClassification.OtherFormat, "01000058FFFFFFFF"),
             true, true, true,
             new(FrontendRawDirectInputButtonTransitionOutcome.Completed, "Completed", 10_000, 10_000, 128, 2, 1250,
                 [new(15, 1, 1)], true, false, true, false));

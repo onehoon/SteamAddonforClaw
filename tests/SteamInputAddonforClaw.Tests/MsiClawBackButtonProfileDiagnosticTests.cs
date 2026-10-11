@@ -197,14 +197,17 @@ public sealed class MsiClawBackButtonProfileDiagnosticTests
     }
 
     [Fact]
-    public async Task Manual_restore_writes_only_exact_candidate_pair_then_syncs_and_verifies_both_slots()
+    public async Task Manual_restore_writes_only_exact_candidate_pair_then_syncs_and_reports_profile_readback_only()
     {
         var fixture = new ReaderFixture(0x0230);
         var result = await fixture.CreateReader().RestoreKnownDirectInputProfileAsync(
             "msi.claw.a2vm.8", () => fixture.AllowOwner ? fixture.Identity : null,
             () => true, () => true, CancellationToken.None);
 
-        Assert.Equal(FrontendMsiBackButtonManualRestoreOutcome.Restored, result.Outcome);
+        Assert.Equal(FrontendMsiBackButtonManualRestoreOutcome.Unverified, result.Outcome);
+        Assert.True(result.ProfileReadbackVerified);
+        Assert.False(result.RawInput15_16Observed);
+        Assert.Contains("physical M1/M2 input is not yet verified", result.Status, StringComparison.Ordinal);
         Assert.Equal("01040059FFFFFFFF", result.M1.BeforePayloadHex);
         Assert.Equal("01040058FFFFFFFF", result.M2.BeforePayloadHex);
         Assert.Equal("01000059FFFFFFFF", result.M1.AfterPayloadHex);
@@ -326,6 +329,26 @@ public sealed class MsiClawBackButtonProfileDiagnosticTests
     }
 
     [Fact]
+    public async Task Manual_restore_does_not_verify_profile_readback_when_rom_sync_fails()
+    {
+        var fixture = new ReaderFixture(0x0230);
+        fixture.Transport.FailWriteAt = 3;
+
+        var result = await fixture.CreateReader().RestoreKnownDirectInputProfileAsync(
+            "msi.claw.a2vm.8", () => fixture.Identity, () => true, () => true, CancellationToken.None);
+
+        Assert.Equal(FrontendMsiBackButtonManualRestoreOutcome.Unverified, result.Outcome);
+        Assert.True(result.WriteTransportSucceeded);
+        Assert.True(result.RomSyncIssued);
+        Assert.False(result.RomSyncTransportSucceeded);
+        Assert.True(result.ReadbackObserved);
+        Assert.False(result.ProfileReadbackVerified);
+        Assert.Equal("01000059FFFFFFFF", result.M1.AfterPayloadHex);
+        Assert.Equal("01000058FFFFFFFF", result.M2.AfterPayloadHex);
+        Assert.Contains("ROM sync transport failed", result.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Manual_restore_mismatched_post_read_is_unverified_even_when_transport_and_sync_succeed()
     {
         var fixture = new ReaderFixture(0x0419);
@@ -337,6 +360,7 @@ public sealed class MsiClawBackButtonProfileDiagnosticTests
         Assert.True(result.WriteTransportSucceeded);
         Assert.True(result.RomSyncIssued && result.RomSyncTransportSucceeded);
         Assert.True(result.ReadbackObserved);
+        Assert.False(result.ProfileReadbackVerified);
         Assert.Equal("01040059FFFFFFFF", result.M1.AfterPayloadHex);
         Assert.Equal("01040058FFFFFFFF", result.M2.AfterPayloadHex);
     }

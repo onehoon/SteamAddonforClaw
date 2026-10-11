@@ -1946,25 +1946,29 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     RawInput = await ownedInput.RunRawDirectInputButtonTransitionDiagnosticAsync(cancellationToken)
                         .ConfigureAwait(false),
                 };
+                result = ApplyManualRestoreRawInputEvidence(result);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                result = result with
+                result = ApplyManualRestoreRawInputEvidence(result with
                 {
                     RawInput = FrontendRawDirectInputButtonTransitionResult.Unavailable(
                         "Raw input confirmation was cancelled after the profile operation; no additional firmware command was issued."),
-                };
+                });
             }
         }
 
-        if (result.ReadbackObserved
+        if (result.WriteTransportSucceeded
+            && result.RomSyncIssued
+            && result.RomSyncTransportSucceeded
+            && result.ProfileReadbackVerified
             && (result.RawInput.Outcome is FrontendRawDirectInputButtonTransitionOutcome.Completed
                 or FrontendRawDirectInputButtonTransitionOutcome.NoRawButtonTransitionsObserved)
             && !result.RawInput15_16Observed)
         {
             result = result with
             {
-                Status = result.Status + " MayRequireReenumeration: profile readback did not independently confirm raw button 15/16; use an ordinary controlled Windows restart before another read-only test. No live mode switch was issued.",
+                Status = result.Status + $" MayRequireReenumeration: the post-write capture did not observe both raw indices 15 and 16 (15={result.RawInput.Button15PressedAndReleasedObserved}, 16={result.RawInput.Button16PressedAndReleasedObserved}); use an ordinary controlled Windows restart before another read-only test. No live mode switch was issued.",
             };
         }
 
@@ -1976,9 +1980,34 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             ("RomSyncIssued", result.RomSyncIssued),
             ("RomSyncTransportSucceeded", result.RomSyncTransportSucceeded),
             ("ReadbackObserved", result.ReadbackObserved),
+            ("ProfileReadbackVerified", result.ProfileReadbackVerified),
             ("RawInputOutcome", result.RawInput.Outcome),
+            ("RawButton15PressedAndReleasedObserved", result.RawInput.Button15PressedAndReleasedObserved),
+            ("RawButton16PressedAndReleasedObserved", result.RawInput.Button16PressedAndReleasedObserved),
             ("RawInput15_16Observed", result.RawInput15_16Observed),
             ("Status", result.Status));
+        return result;
+    }
+
+    internal static FrontendMsiBackButtonManualRestoreResult ApplyManualRestoreRawInputEvidence(
+        FrontendMsiBackButtonManualRestoreResult result)
+    {
+        if (result.Outcome == FrontendMsiBackButtonManualRestoreOutcome.Unverified
+            && result.WriteTransportSucceeded
+            && result.RomSyncIssued
+            && result.RomSyncTransportSucceeded
+            && result.ReadbackObserved
+            && result.ProfileReadbackVerified
+            && result.RawInput.Outcome == FrontendRawDirectInputButtonTransitionOutcome.Completed
+            && result.RawInput15_16Observed)
+        {
+            return result with
+            {
+                Outcome = FrontendMsiBackButtonManualRestoreOutcome.Restored,
+                Status = "Both DirectInput profile readbacks and both physical button press/release transitions verified.",
+            };
+        }
+
         return result;
     }
 

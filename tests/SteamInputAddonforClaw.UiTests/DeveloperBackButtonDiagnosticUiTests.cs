@@ -48,6 +48,8 @@ public sealed class DeveloperBackButtonDiagnosticUiTests
         var result = FrontendMsiBackButtonManualRestoreResult.Unavailable("Manual action unavailable.") with
         {
             Outcome = FrontendMsiBackButtonManualRestoreOutcome.PartialVolatileWritePossible,
+            RawInput = new(FrontendRawDirectInputButtonTransitionOutcome.Completed, "partial", 10_000, 10_000,
+                128, 1, 1, [new(15, 1, 1)], true, false, true, false),
             M1 = new("M1", 0x00BA, FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed,
                 FrontendMsiBackButtonProfileClassification.ObservedLinuxRightBraceCandidate,
                 "01040059FFFFFFFF", true, true, null, null, null),
@@ -59,7 +61,8 @@ public sealed class DeveloperBackButtonDiagnosticUiTests
         Assert.Contains("M1 candidate=True; 01040059FFFFFFFF → n/a", text, StringComparison.Ordinal);
         Assert.Contains("M2 candidate=False; n/a → n/a", text, StringComparison.Ordinal);
         Assert.Contains("ROM sync issued/succeeded=False/False", text, StringComparison.Ordinal);
-        Assert.Contains("both readbacks=False", text, StringComparison.Ordinal);
+        Assert.Contains("readbacks=False, DirectInput headers verified=False", text, StringComparison.Ordinal);
+        Assert.Contains("raw index15=True, index16=False, both=False", text, StringComparison.Ordinal);
     }
 
     private static FrontendMsiBackButtonDiagnosticResult DiagnosticResult(

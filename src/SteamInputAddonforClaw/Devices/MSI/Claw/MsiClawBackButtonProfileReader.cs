@@ -374,13 +374,10 @@ internal sealed class MsiClawBackButtonProfileReader(
             var matchesPrepared = readbackObserved
                 && IsKnownDirectInputProfile(after!.M1Payload)
                 && IsKnownDirectInputProfile(after.M2Payload);
-            var finalOutcome = requestedOutcome == FrontendMsiBackButtonManualRestoreOutcome.Unverified
-                ? syncSucceeded && matchesPrepared
-                    ? FrontendMsiBackButtonManualRestoreOutcome.Restored
-                    : FrontendMsiBackButtonManualRestoreOutcome.Unverified
-                : requestedOutcome;
-            var finalStatus = finalOutcome == FrontendMsiBackButtonManualRestoreOutcome.Restored
-                ? "Both slots read back with the known DirectInput header after successful ROM sync. Raw button evidence is reported independently."
+            var profileReadbackVerified = m1Succeeded && m2Succeeded && syncIssued && syncSucceeded && matchesPrepared;
+            var finalOutcome = requestedOutcome;
+            var finalStatus = requestedOutcome == FrontendMsiBackButtonManualRestoreOutcome.Unverified && profileReadbackVerified
+                ? "Both DirectInput profile headers read back; physical M1/M2 input is not yet verified."
                 : status;
 
             var result = new FrontendMsiBackButtonManualRestoreResult(
@@ -403,6 +400,7 @@ internal sealed class MsiClawBackButtonProfileReader(
                 ("M1After", result.M1.AfterPayloadHex ?? "Unavailable"),
                 ("M2After", result.M2.AfterPayloadHex ?? "Unavailable"),
                 ("ReadbackObserved", result.ReadbackObserved),
+                ("ProfileReadbackVerified", result.ProfileReadbackVerified),
                 ("Status", result.Status));
             return result;
         }

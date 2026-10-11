@@ -478,7 +478,16 @@ public sealed record FrontendMsiBackButtonManualRestoreResult(
     FrontendRawDirectInputButtonTransitionResult RawInput)
 {
     public bool WriteTransportSucceeded => M1.WriteTransportSucceeded && M2.WriteTransportSucceeded;
-    public bool RawInput15_16Observed => RawInput.Button15PressedAndReleasedObserved || RawInput.Button16PressedAndReleasedObserved;
+    public bool ProfileReadbackVerified =>
+        WriteTransportSucceeded
+        && RomSyncIssued
+        && RomSyncTransportSucceeded
+        && ReadbackObserved
+        && M1.AfterOutcome == FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed
+        && M2.AfterOutcome == FrontendMsiBackButtonProfileReadOutcome.ReadbackParsed
+        && M1.AfterPayloadHex?.StartsWith("0100", StringComparison.OrdinalIgnoreCase) == true
+        && M2.AfterPayloadHex?.StartsWith("0100", StringComparison.OrdinalIgnoreCase) == true;
+    public bool RawInput15_16Observed => RawInput.Button15PressedAndReleasedObserved && RawInput.Button16PressedAndReleasedObserved;
 
     public static FrontendMsiBackButtonManualRestoreResult Unavailable(string status) => new(
         FrontendMsiBackButtonManualRestoreOutcome.Unavailable,

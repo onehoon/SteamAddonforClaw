@@ -258,7 +258,7 @@ public sealed partial class DeveloperPage : UserControl
         return $"{result.Outcome} · {result.ModelId} · FW {firmware}\r\n" +
                $"M1 candidate={m1Candidate}; {result.M1.BeforePayloadHex ?? "n/a"} → {result.M1.AfterPayloadHex ?? "n/a"}; write={result.M1.WriteIssued}/{result.M1.WriteTransportSucceeded}\r\n" +
                $"M2 candidate={m2Candidate}; {result.M2.BeforePayloadHex ?? "n/a"} → {result.M2.AfterPayloadHex ?? "n/a"}; write={result.M2.WriteIssued}/{result.M2.WriteTransportSucceeded}\r\n" +
-               $"ROM sync issued/succeeded={result.RomSyncIssued}/{result.RomSyncTransportSucceeded}; both readbacks={result.ReadbackObserved}; raw 15/16 observed={result.RawInput15_16Observed} ({raw.Outcome})\r\n" +
+               $"ROM sync issued/succeeded={result.RomSyncIssued}/{result.RomSyncTransportSucceeded}; readbacks={result.ReadbackObserved}, DirectInput headers verified={result.ProfileReadbackVerified}; raw index15={raw.Button15PressedAndReleasedObserved}, index16={raw.Button16PressedAndReleasedObserved}, both={result.RawInput15_16Observed} ({raw.Outcome})\r\n" +
                CompactStatus(result.Status);
     }
 
