@@ -19,8 +19,9 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 ///
 /// <para>
 /// The OEM1 Normal/Routing mapping domain and the OEM1/WING "Steam"/"Quick Access" actions are all
-/// resolved against the live Full1902 SteamDeck presentation via the supplied callbacks -- never the
-/// legacy routing runtime status or its Steam Deck output stage.
+/// resolved against the active Steam-facing Full1902 presentation identity via the supplied callbacks.
+/// Mapping-domain selection is independent from whether the publisher can currently accept a system-
+/// button pulse; it never uses the legacy routing runtime status or its Steam Deck output stage.
 /// </para>
 /// </summary>
 internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
@@ -64,9 +65,10 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
     /// hardware (the OEM1 mapping feature only exists on a supported MSI Claw), matching the previous
     /// <c>MsiClawRoutingComposition.ConfigureOem1ActionPath</c> hardware gate.
     /// </summary>
-    /// <param name="isSteamDeckPresentationActive">App UI PR-C section 5: <see langword="true"/> when
-    /// the active Full1902 presentation is SteamDeck. Selects the Steam Game / Big Picture mapping
-    /// domain for both physical buttons.</param>
+    /// <param name="isSteamFacingPresentationActive">App UI PR-C section 5: <see langword="true"/> when
+    /// the active Full1902 presentation is SteamDeck or DualSenseEdge. Selects the Steam Game / Big
+    /// Picture mapping domain for both physical buttons even while the publisher is paused. System-
+    /// button pulse eligibility is checked separately by the supplied pulse callbacks.</param>
     /// <param name="requestOverlayToggle">The <c>QuickSettingsOverlay</c> action -- the existing
     /// Runtime-owned coordinated Overlay toggle seam (<c>AddonProcessHost.RequestOverlayToggle</c>),
     /// never the Overlay process controller or transport directly.</param>
@@ -80,7 +82,7 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
     internal static MsiClawFrontButtonRuntime Create(
         bool hardwareSupported,
         Settings.IFrontButtonMappingPreference frontButtonMappingPreference,
-        Func<bool> isSteamDeckPresentationActive,
+        Func<bool> isSteamFacingPresentationActive,
         Action requestOverlayToggle,
         Func<bool> tryRequestQuickAccessPulse,
         Func<bool> tryRequestSteamPulse,
@@ -97,7 +99,7 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
         TimeProvider? wingTimeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(frontButtonMappingPreference);
-        ArgumentNullException.ThrowIfNull(isSteamDeckPresentationActive);
+        ArgumentNullException.ThrowIfNull(isSteamFacingPresentationActive);
         ArgumentNullException.ThrowIfNull(requestOverlayToggle);
         ArgumentNullException.ThrowIfNull(tryRequestQuickAccessPulse);
         ArgumentNullException.ThrowIfNull(tryRequestSteamPulse);
@@ -134,7 +136,7 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
             doubleClickWindow: TimeSpan.FromMilliseconds(200),
             delay: oem1GestureDelay, clock: oem1GestureClock);
         var oem1Bridge = new Oem1EventGestureBridge(oem1EventSource, oem1Recognizer);
-        var oem1Dispatcher = new Oem1ActionDispatcher(captureMapping, isSteamDeckPresentationActive, actionExecutor);
+        var oem1Dispatcher = new Oem1ActionDispatcher(captureMapping, isSteamFacingPresentationActive, actionExecutor);
 
         var runtime = new MsiClawFrontButtonRuntime(oem1EventSource, oem1Recognizer, oem1Bridge,
             wingEventSourceOverride ?? new WmiMsiEventSource(), suppressionReady);
@@ -156,7 +158,7 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
         var wingRecognizer = new WingGestureRecognizer(
             doubleEnabled: static () => false,
             delay: wingGestureDelay, timeProvider: wingTimeProvider);
-        var wingDispatcher = new WingActionDispatcher(captureMapping, isSteamDeckPresentationActive, actionExecutor);
+        var wingDispatcher = new WingActionDispatcher(captureMapping, isSteamFacingPresentationActive, actionExecutor);
         var wingBridge = new WingEventGestureBridge(runtime._wingEventSource!, wingRecognizer, runtime.CaptureWingAuthority, wingDispatcher);
         runtime._wingBridge = wingBridge;
         if (!runtime._wingEventSource!.Start())

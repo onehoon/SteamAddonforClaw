@@ -1126,8 +1126,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _frontButtonRuntime ??= Devices.MSI.Claw.MsiClawFrontButtonRuntime.Create(
                 hardwareSupported: context.StartupResult.HardwareSupported,
                 frontButtonMappingPreference: context.StartupSettings,
-                isSteamDeckPresentationActive: () => _presentationOwnership is { IsActivePresentationLive: true } presentation
-                    && presentation.ActivePresentation is Devices.MSI.Claw.AddonPresentationKind.SteamDeck or Devices.MSI.Claw.AddonPresentationKind.DualSenseEdge,
+                // Mapping follows the retained Steam-facing presentation identity while Overlay has
+                // stopped publication. The pulse delegates below keep their own live-output gates.
+                isSteamFacingPresentationActive: () => _presentationOwnership?.ActivePresentation
+                    is Devices.MSI.Claw.AddonPresentationKind.SteamDeck or Devices.MSI.Claw.AddonPresentationKind.DualSenseEdge,
                 requestOverlayToggle: RequestOverlayToggle,
                 tryRequestQuickAccessPulse: RequestSteamQuickAccess,
                 tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false,

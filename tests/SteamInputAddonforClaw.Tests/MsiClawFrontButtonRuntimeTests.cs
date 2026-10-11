@@ -16,7 +16,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         FrontButtonMappingSettings mapping,
         FakeEventSource oem1,
         FakeEventSource wing,
-        bool steamDeckActive = false,
+        bool steamFacingPresentationActive = false,
         Action? requestOverlayToggle = null,
         Func<bool>? quickAccessPulse = null,
         Func<bool>? steamPulse = null,
@@ -26,7 +26,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         MsiClawFrontButtonRuntime.Create(
             hardwareSupported: true,
             frontButtonMappingPreference: new FakePref(mapping),
-            isSteamDeckPresentationActive: () => steamDeckActive,
+            isSteamFacingPresentationActive: () => steamFacingPresentationActive,
             requestOverlayToggle: requestOverlayToggle ?? (() => { }),
             tryRequestQuickAccessPulse: quickAccessPulse ?? (() => false),
             tryRequestSteamPulse: steamPulse ?? (() => false),
@@ -46,7 +46,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         await using var runtime = MsiClawFrontButtonRuntime.Create(
             hardwareSupported: false,
             frontButtonMappingPreference: new FakePref(FrontButtonMappingSettings.Default),
-            isSteamDeckPresentationActive: () => true,
+            isSteamFacingPresentationActive: () => true,
             requestOverlayToggle: () => { },
             tryRequestQuickAccessPulse: () => true,
             tryRequestSteamPulse: () => true,
@@ -104,7 +104,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         var oem1 = new FakeEventSource();
         var wing = new FakeEventSource();
         await using var runtime = Create(FrontButtonMappingSettings.Default, oem1, wing,
-            steamDeckActive: true,
+            steamFacingPresentationActive: true,
             requestOverlayToggle: () => overlay++,
             quickAccessPulse: () => { quickAccess++; return true; },
             steamPulse: () => { steamPulses++; return true; });
@@ -123,13 +123,13 @@ public sealed class MsiClawFrontButtonRuntimeTests
         var overlay = 0;
         var bigPicture = 0;
         var steamPulses = 0;
-        var steamDeckActive = false;
+        var steamFacingPresentationActive = false;
         var oem1 = new FakeEventSource();
         var wing = new FakeEventSource();
         await using var runtime = MsiClawFrontButtonRuntime.Create(
             hardwareSupported: true,
             frontButtonMappingPreference: new FakePref(FrontButtonMappingSettings.Default),
-            isSteamDeckPresentationActive: () => steamDeckActive,
+            isSteamFacingPresentationActive: () => steamFacingPresentationActive,
             requestOverlayToggle: () => overlay++,
             tryRequestQuickAccessPulse: () => false,
             tryRequestSteamPulse: () => { steamPulses++; return true; },
@@ -146,7 +146,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         Assert.Equal(0, overlay);
         Assert.Equal(0, steamPulses);
 
-        steamDeckActive = true;
+        steamFacingPresentationActive = true;
         wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
         Assert.Equal(1, bigPicture);
         Assert.Equal(0, overlay);
@@ -178,7 +178,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         await using var runtime = MsiClawFrontButtonRuntime.Create(
             hardwareSupported: true,
             frontButtonMappingPreference: new FakePref(mapping),
-            isSteamDeckPresentationActive: () => false,
+            isSteamFacingPresentationActive: () => false,
             requestOverlayToggle: () => overlay++,
             tryRequestQuickAccessPulse: () => false,
             tryRequestSteamPulse: () => false,
@@ -240,8 +240,8 @@ public sealed class MsiClawFrontButtonRuntimeTests
         Assert.True(
             host.IndexOf("_frontButtonRuntime.DisposeAsync", StringComparison.Ordinal)
             < host.IndexOf("_presentationOwnership.DisposeAsync", StringComparison.Ordinal));
-        Assert.Contains("IsActivePresentationLive: true", host, StringComparison.Ordinal);
-        Assert.Contains("presentation.ActivePresentation is Devices.MSI.Claw.AddonPresentationKind.SteamDeck or Devices.MSI.Claw.AddonPresentationKind.DualSenseEdge", host, StringComparison.Ordinal);
+        Assert.Contains("isSteamFacingPresentationActive: () => _presentationOwnership?.ActivePresentation", host, StringComparison.Ordinal);
+        Assert.Contains("Devices.MSI.Claw.AddonPresentationKind.SteamDeck or Devices.MSI.Claw.AddonPresentationKind.DualSenseEdge", host, StringComparison.Ordinal);
     }
 
     [Fact]

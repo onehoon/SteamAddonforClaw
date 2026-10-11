@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using SteamInputAddonforClaw.CenterM;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -432,6 +434,81 @@ public sealed class MsiClawAddonPresentationTests
         Assert.Equal(AddonPresentationKind.SteamDeck, owner.ActivePresentation);
         Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
         await owner.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData(SteamVirtualControllerPreference.SteamDeck, (int)AddonPresentationKind.SteamDeck)]
+    [InlineData(SteamVirtualControllerPreference.DualSenseEdge, (int)AddonPresentationKind.DualSenseEdge)]
+    public async Task Front_button_domain_tracks_steam_facing_identity_while_overlay_pauses_output(
+        SteamVirtualControllerPreference preference,
+        int expectedPresentationValue)
+    {
+        var expectedPresentation = (AddonPresentationKind)expectedPresentationValue;
+        var owner = Build(new FakeNative(), new FakePublisher(), new FakePublisher(), preference, new FakePublisher());
+        var source = new FakeSource();
+        var attach = await owner.AttachInitialAsync(source, WantsDeck(), default);
+        Assert.True(attach.Succeeded);
+        Assert.Equal(expectedPresentation, owner.ActivePresentation);
+
+        var mapping = FrontButtonMappingSettings.Default
+            .With(FrontButtonKind.Gamebar, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture))
+            .With(FrontButtonKind.Gamebar, FrontButtonDomain.Steam, FrontButtonBinding.Of(FrontButtonAction.SteamButton))
+            .With(FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.XboxApp))
+            .With(FrontButtonKind.CenterM, FrontButtonDomain.Steam, FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay));
+        var oem1 = new FakeFrontButtonEventSource();
+        var wing = new FakeFrontButtonEventSource();
+        var overlayToggles = 0;
+        var bigPictureLaunches = 0;
+        var xboxLaunches = 0;
+        var pulseResults = new List<bool>();
+        var frontButtons = MsiClawFrontButtonRuntime.Create(
+            hardwareSupported: true,
+            frontButtonMappingPreference: new FakeFrontButtonPreference(mapping),
+            isSteamFacingPresentationActive: () => owner.ActivePresentation
+                is AddonPresentationKind.SteamDeck or AddonPresentationKind.DualSenseEdge,
+            requestOverlayToggle: () => overlayToggles++,
+            tryRequestQuickAccessPulse: () => owner.TryRequestQuickAccessPulse(),
+            tryRequestSteamPulse: () =>
+            {
+                var result = owner.TryRequestSteamPulse();
+                pulseResults.Add(result);
+                return result;
+            },
+            nativeWinGSuppressionReady: () => true,
+            oem1EventSourceOverride: oem1,
+            wingEventSourceOverride: wing,
+            oem1GestureDelay: new ImmediateFrontButtonDelay(),
+            oem1GestureClock: new ZeroFrontButtonClock(),
+            launchBigPictureOverride: () => bigPictureLaunches++,
+            launchXboxAppOverride: () => xboxLaunches++,
+            wingGestureDelay: new ImmediateFrontButtonDelay());
+
+        try
+        {
+            var pause = await owner.PauseForOverlayAsync(default);
+            Assert.Equal(OverlayPauseOutcome.Paused, pause.Outcome);
+            Assert.False(owner.IsActivePresentationLive);
+            Assert.Equal(expectedPresentation, owner.ActivePresentation);
+            Assert.False(owner.TryRequestSteamPulse());
+
+            wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+            oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+
+            Assert.Equal(new[] { false }, pulseResults);
+            Assert.Equal(1, overlayToggles);
+            Assert.Equal(0, bigPictureLaunches);
+            Assert.Equal(0, xboxLaunches);
+
+            var resume = await owner.ResumeAfterOverlayAsync(source, default);
+            Assert.Equal(OverlayResumeOutcome.Resumed, resume.Outcome);
+            wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+            Assert.Equal(new[] { false, true }, pulseResults);
+        }
+        finally
+        {
+            await frontButtons.DisposeAsync();
+            await owner.DisposeAsync();
+        }
     }
 
     [Fact]
@@ -2660,6 +2737,31 @@ public sealed class MsiClawAddonPresentationTests
             if (StopThrows) throw new InvalidOperationException("join failed");
             _running = false;
         }
+    }
+
+    private sealed class FakeFrontButtonPreference(FrontButtonMappingSettings mapping) : Settings.IFrontButtonMappingPreference
+    {
+        public FrontButtonMappingSettings FrontButtonMapping { get; } = mapping;
+        public event EventHandler? FrontButtonMappingChanged { add { } remove { } }
+    }
+
+    private sealed class FakeFrontButtonEventSource : IMsiEventSource
+    {
+        public event Action<MsiOemEvent>? EventReceived;
+        public bool Start() => true;
+        public void Emit(MsiOemEvent value) => EventReceived?.Invoke(value);
+        public void Dispose() { }
+    }
+
+    private sealed class ImmediateFrontButtonDelay : IOem1GestureDelay
+    {
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class ZeroFrontButtonClock : IOem1GestureClock
+    {
+        public long GetTimestamp() => 0;
+        public TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp) => TimeSpan.Zero;
     }
 
     private sealed class FakeXbox360UsbTraceCapture(ConcurrentQueue<string> lifecycleEvents) : IXbox360UsbTraceCapture
