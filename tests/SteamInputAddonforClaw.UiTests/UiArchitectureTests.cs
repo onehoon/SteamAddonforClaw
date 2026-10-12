@@ -693,7 +693,8 @@ public sealed class UiArchitectureTests
         Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerPressed")));
         Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerMoved")));
         Assert.All(actionButtons, button => Assert.NotNull(button.Attribute("Click")));
-        var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon");
+        var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon"
+            && (string?)element.Attribute("AutomationProperties.Name") == "Drag to reorder this Shortcut");
         Assert.Equal("Drag to reorder this Shortcut", (string?)dragGlyph.Attribute("AutomationProperties.Name"));
         Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("private const double ShortcutCardHorizontalGap = 12;", shortcutCode, StringComparison.Ordinal);
@@ -971,6 +972,52 @@ public sealed class UiArchitectureTests
         Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, "Screenshot", "Screenshot"));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(true, "My Capture", "Screenshot"));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "Persisted title", null));
+    }
+
+    [Fact]
+    public void Shortcut_icon_picker_stages_curated_choices_and_keeps_card_reorder_separate()
+    {
+        var root = FindRepositoryRoot();
+        var shortcutXamlPath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml");
+        var shortcutXaml = File.ReadAllText(shortcutXamlPath);
+        var shortcutDocument = XDocument.Load(shortcutXamlPath);
+        var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
+        var selectionHandlerStart = shortcutCode.IndexOf("actionPicker.SelectionChanged +=", StringComparison.Ordinal);
+        var selectionHandlerEnd = shortcutCode.IndexOf("executableBrowse.Click", selectionHandlerStart, StringComparison.Ordinal);
+        var selectionHandler = shortcutCode[selectionHandlerStart..selectionHandlerEnd];
+        var saveStart = shortcutCode.IndexOf("var intent = new FrontendShortcutMutationIntent(", StringComparison.Ordinal);
+        var primarySaveGuard = shortcutCode.LastIndexOf("if (result != ContentDialogResult.Primary) return;", saveStart, StringComparison.Ordinal);
+        var itemTemplate = shortcutDocument.Descendants().Single(element => element.Name.LocalName == "DataTemplate"
+            && (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Key") == "ShortcutCardTemplate");
+        var title = itemTemplate.Descendants().Single(element => element.Name.LocalName == "TextBlock"
+            && (string?)element.Attribute("Text") == "{x:Bind Title}");
+        var titleRow = title.Parent!;
+        var titleRowChildren = titleRow.Elements().ToArray();
+        var titleGlyph = titleRowChildren[0];
+        var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon"
+            && (string?)element.Attribute("AutomationProperties.Name") == "Drag to reorder this Shortcut");
+
+        Assert.Contains("Glyph=\"{x:Bind IconGlyph}\"", shortcutXaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xE7C3;\"", shortcutXaml, StringComparison.Ordinal);
+        Assert.Equal("FontIcon", titleGlyph.Name.LocalName);
+        Assert.Equal("{x:Bind IconGlyph}", (string?)titleGlyph.Attribute("Glyph"));
+        Assert.Equal("TextBlock", titleRowChildren[1].Name.LocalName);
+        Assert.Same(titleGlyph, titleRow.Elements().First());
+        Assert.NotSame(dragGlyph, titleGlyph);
+        Assert.Contains("ShortcutIconCatalog.Choices", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("Content = \"Change icon\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("Content = \"Use default\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.SetToolTip(choiceButton, choice.Name)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.SetName(choiceButton, choice.Name)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("iconFlyout.ShowAt(changeIconButton)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("RenderIconPreview(selectedKind)", selectionHandler, StringComparison.Ordinal);
+        Assert.Contains("stagedIconGlyphOverride = choice.Glyph", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("stagedIconGlyphOverride = null", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("IconGlyphOverride: stagedIconGlyphOverride", shortcutCode, StringComparison.Ordinal);
+        Assert.True(primarySaveGuard >= 0 && saveStart > primarySaveGuard);
+        Assert.Contains("PointerPressed=\"ShortcutTile_PointerPressed\"", shortcutXaml, StringComparison.Ordinal);
+        Assert.Contains("PointerMoved=\"ShortcutTile_PointerMoved\"", shortcutXaml, StringComparison.Ordinal);
+        Assert.Contains("ShortcutTile_PointerReleased", shortcutXaml, StringComparison.Ordinal);
     }
 
     [Fact]

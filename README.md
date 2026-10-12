@@ -196,6 +196,8 @@ The **Application (.exe)** and **PowerShell** Add/Edit panels include **Run as a
 
 The Screenshot action captures the primary display as a JPEG. Its save folder is configured inside that Screenshot Shortcut's Add/Edit dialog: choose a custom folder or use the default Windows `Pictures\Screenshots` folder. **Browse** stages a folder, **Use default** stages the default location, **Open folder** opens the currently selected location, and **Save** commits the folder with the Shortcut; **Cancel** discards staged changes. The normal editor allows at most one Screenshot Shortcut. A shortcut displayed in the Overlay runs the action you configured here; the Overlay receives only the tile and never the folder path.
 
+Shortcut tiles use an action-specific Fluent icon by default. In the Main App's Add/Edit dialog, choose a curated icon or restore the action default; the icon appears before the tile title in both the Main App and Overlay.
+
 ### Settings
 
 #### Application updates

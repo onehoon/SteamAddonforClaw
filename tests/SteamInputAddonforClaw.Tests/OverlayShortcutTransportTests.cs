@@ -459,7 +459,8 @@ public sealed class OverlayShortcutTransportTests
     }
 
     private static FrontendShortcutDashboardSnapshot Snapshot(params string[] titles) => new(true,
-        titles.Select(title => new FrontendShortcutTile(Guid.NewGuid(), title, null, FrontendShortcutTileState.Neutral, true)).ToArray());
+        titles.Select(title => new FrontendShortcutTile(Guid.NewGuid(), title, null,
+            FrontendShortcutTileState.Neutral, true, "\uE722")).ToArray());
 
     private static string NewPipeName() => $"SteamInputAddonforClaw.Overlay.Shortcut.Tests.{Guid.NewGuid():N}";
 }

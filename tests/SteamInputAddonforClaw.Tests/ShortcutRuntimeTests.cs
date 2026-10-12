@@ -29,6 +29,9 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.True(File.Exists(ShortcutsPath));
         Assert.Equal(ShortcutLoadStatus.Loaded, loaded.Status);
         Assert.Equal(ShortcutDocument.CurrentSchemaVersion, loaded.Document.SchemaVersion);
+        using var seedJson = JsonDocument.Parse(File.ReadAllText(ShortcutsPath));
+        Assert.All(seedJson.RootElement.GetProperty("dashboard").GetProperty("tiles").EnumerateArray(), tile =>
+            Assert.False(tile.TryGetProperty("iconGlyphOverride", out _)));
 
         var tiles = loaded.Document.Dashboard.Tiles;
         Assert.Equal(
@@ -46,6 +49,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
             Assert.Equal(1, tile.Action.SchemaVersion);
             Assert.Equal(JsonValueKind.Object, tile.Action.Parameters.ValueKind);
             Assert.Empty(tile.Action.Parameters.EnumerateObject());
+            Assert.Null(tile.IconGlyphOverride);
         });
         Assert.Equal(tiles.Count, tiles.Select(tile => tile.TileId).Distinct().Count());
 
@@ -55,6 +59,8 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.True(editor.Available);
         Assert.Equal(tiles.Select(tile => (tile.TileId, tile.Title)), dashboard.Tiles.Select(tile => (tile.TileId, tile.Title)));
         Assert.Equal(tiles.Select(tile => (tile.TileId, tile.Title)), editor.Tiles.Select(tile => (tile.TileId, tile.Title)));
+        Assert.Equal(["\uE722", "\uE7FC", "\uE7F4", "\uE990"], dashboard.Tiles.Select(tile => tile.IconGlyph));
+        Assert.Equal(dashboard.Tiles.Select(tile => tile.IconGlyph), editor.Tiles.Select(tile => tile.IconGlyph));
         Assert.Null(editor.Tiles[0].Action.ScreenshotFolder);
         Assert.False(editor.Tiles[0].CloseOverlayAfterLaunch);
         Assert.All(editor.Tiles.Skip(1), tile => Assert.True(tile.CloseOverlayAfterLaunch));
@@ -177,6 +183,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var projected = Assert.Single(runtime.Capture().Tiles);
         var result = await runtime.ExecuteAsync(tile.TileId);
 
+        Assert.Equal(ShortcutIconCatalog.FallbackGlyph, projected.IconGlyph);
         Assert.False(projected.Enabled);
         Assert.Equal(FrontendShortcutTileState.Unavailable, projected.State);
         Assert.Equal("Unsupported", projected.StatusText);

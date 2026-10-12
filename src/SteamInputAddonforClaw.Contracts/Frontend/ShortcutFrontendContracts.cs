@@ -15,7 +15,8 @@ public sealed record FrontendShortcutTile(
     string Title,
     string? StatusText,
     FrontendShortcutTileState State,
-    bool Enabled);
+    bool Enabled,
+    string IconGlyph = ShortcutIconCatalog.FallbackGlyph);
 
 /// <summary>Ordered Shortcut presentation published by the Runtime.</summary>
 public sealed record FrontendShortcutDashboardSnapshot(

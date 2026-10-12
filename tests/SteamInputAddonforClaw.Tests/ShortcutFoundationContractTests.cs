@@ -142,6 +142,8 @@ public sealed class ShortcutFoundationContractTests
         Assert.DoesNotContain("ExecutablePath", propertyNames);
         Assert.DoesNotContain("Arguments", propertyNames);
         Assert.DoesNotContain("CloseOverlayAfterLaunch", propertyNames);
+        Assert.Contains("IconGlyph", propertyNames);
+        Assert.DoesNotContain("IconGlyphOverride", propertyNames);
     }
 
     [Fact]

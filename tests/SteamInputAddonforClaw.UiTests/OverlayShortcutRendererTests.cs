@@ -36,6 +36,11 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("if (!_shortcutSnapshot.Available", renderer, StringComparison.Ordinal);
         Assert.Contains("tile.Enabled", renderer, StringComparison.Ordinal);
         Assert.Contains("Text = tile.Title", renderer, StringComparison.Ordinal);
+        Assert.Contains("new FontIcon", renderer, StringComparison.Ordinal);
+        Assert.Contains("Glyph = tile.IconGlyph", renderer, StringComparison.Ordinal);
+        Assert.Contains("header.Children.Add(title)", renderer, StringComparison.Ordinal);
+        Assert.Contains("header.Children.Add(new FontIcon", renderer, StringComparison.Ordinal);
+        Assert.Contains("MaxWidth = contentWidth", renderer, StringComparison.Ordinal);
         Assert.Contains("tile.StatusText", renderer, StringComparison.Ordinal);
         Assert.Contains("Text = tile.StatusText", renderer, StringComparison.Ordinal);
         Assert.Contains("ApplyTextStyle(status, \"QamCaptionTextStyle\")", renderer, StringComparison.Ordinal);
@@ -43,8 +48,8 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("TextAlignment = TextAlignment.Center", renderer, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment = VerticalAlignment.Center", renderer, StringComparison.Ordinal);
         Assert.Contains("<x:Double x:Key=\"QamShortcutTileSize\">117.33333333333333</x:Double>", resources, StringComparison.Ordinal);
-        Assert.Contains("Width = OverlayQamResources.Get(\"QamShortcutTileSize\", 117.33333333333333)", renderer, StringComparison.Ordinal);
-        Assert.Contains("Height = OverlayQamResources.Get(\"QamShortcutTileSize\", 117.33333333333333)", renderer, StringComparison.Ordinal);
+        Assert.Contains("Width = tileSize", renderer, StringComparison.Ordinal);
+        Assert.Contains("Height = tileSize", renderer, StringComparison.Ordinal);
         Assert.DoesNotContain("_shortcutStatus", renderer, StringComparison.Ordinal);
         Assert.Contains("ResetShortcutForShow", renderer, StringComparison.Ordinal);
     }

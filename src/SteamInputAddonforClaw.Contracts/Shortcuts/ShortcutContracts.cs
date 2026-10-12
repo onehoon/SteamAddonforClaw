@@ -18,7 +18,9 @@ public sealed record ShortcutTileDefinition(
     Guid TileId,
     string Title,
     [property: JsonRequired] bool CloseOverlayAfterLaunch,
-    ShortcutActionSpec Action);
+    ShortcutActionSpec Action,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? IconGlyphOverride = null);
 
 /// <summary>The ordered Shortcut dashboard definition.</summary>
 public sealed record ShortcutDashboardDefinition(

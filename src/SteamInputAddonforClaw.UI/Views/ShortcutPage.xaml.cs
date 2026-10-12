@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -165,6 +166,126 @@ public sealed partial class ShortcutPage : UserControl
             Margin = new Thickness(0, 0, 0, 12)
         };
         var actionPicker = new ComboBox { Header = "Action type", MinWidth = 280 };
+        string? stagedIconGlyphOverride = existing?.IconGlyphOverride;
+        var iconPreview = new FontIcon
+        {
+            FontFamily = new FontFamily("Segoe Fluent Icons"),
+            FontSize = 20,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var iconName = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
+        var iconPreviewPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { iconPreview, iconName }
+        };
+        var iconChoiceGrid = new Grid { ColumnSpacing = 4, RowSpacing = 4 };
+        const int iconChoiceColumnCount = 4;
+        for (var column = 0; column < iconChoiceColumnCount; column++)
+            iconChoiceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var iconChoiceRows = (ShortcutIconCatalog.Choices.Count + iconChoiceColumnCount - 1) / iconChoiceColumnCount;
+        for (var row = 0; row < iconChoiceRows; row++)
+            iconChoiceGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var iconFlyout = new Flyout();
+        void RenderIconPreview(FrontendShortcutEditorActionKind kind)
+        {
+            iconPreview.Glyph = ShortcutIconCatalog.GetEffectiveGlyph(kind, stagedIconGlyphOverride);
+            iconName.Text = ShortcutIconCatalog.GetEffectiveName(kind, stagedIconGlyphOverride);
+            AutomationProperties.SetName(iconPreview, $"{iconName.Text} Shortcut icon");
+        }
+
+        for (var index = 0; index < ShortcutIconCatalog.Choices.Count; index++)
+        {
+            var choice = ShortcutIconCatalog.Choices[index];
+            var choiceButton = new Button
+            {
+                Width = 96,
+                Height = 70,
+                Padding = new Thickness(4),
+                Content = new StackPanel
+                {
+                    Spacing = 3,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Children =
+                    {
+                        new FontIcon
+                        {
+                            FontFamily = new FontFamily("Segoe Fluent Icons"),
+                            FontSize = 20,
+                            Glyph = choice.Glyph,
+                        },
+                        new TextBlock
+                        {
+                            Text = choice.Name,
+                            FontSize = 12,
+                            TextAlignment = TextAlignment.Center,
+                            TextWrapping = TextWrapping.Wrap,
+                            MaxWidth = 88,
+                        }
+                    }
+                }
+            };
+            AutomationProperties.SetName(choiceButton, choice.Name);
+            ToolTipService.SetToolTip(choiceButton, choice.Name);
+            choiceButton.Click += (_, _) =>
+            {
+                stagedIconGlyphOverride = choice.Glyph;
+                var kind = (actionPicker.SelectedItem as ComboBoxItem)?.Tag is FrontendShortcutEditorActionKind selectedKind
+                    ? selectedKind
+                    : FrontendShortcutEditorActionKind.Unsupported;
+                RenderIconPreview(kind);
+                iconFlyout.Hide();
+            };
+            Grid.SetRow(choiceButton, index / iconChoiceColumnCount);
+            Grid.SetColumn(choiceButton, index % iconChoiceColumnCount);
+            iconChoiceGrid.Children.Add(choiceButton);
+        }
+
+        var useDefaultIconButton = new Button
+        {
+            Content = "Use default",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+        useDefaultIconButton.Click += (_, _) =>
+        {
+            stagedIconGlyphOverride = null;
+            var kind = (actionPicker.SelectedItem as ComboBoxItem)?.Tag is FrontendShortcutEditorActionKind selectedKind
+                ? selectedKind
+                : FrontendShortcutEditorActionKind.Unsupported;
+            RenderIconPreview(kind);
+            iconFlyout.Hide();
+        };
+        iconFlyout.Content = new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                new ScrollViewer { MaxHeight = 420, Content = iconChoiceGrid },
+                useDefaultIconButton
+            }
+        };
+        var changeIconButton = new Button { Content = "Change icon", VerticalAlignment = VerticalAlignment.Center };
+        changeIconButton.Click += (_, _) => iconFlyout.ShowAt(changeIconButton);
+        var iconRow = new StackPanel
+        {
+            Spacing = 8,
+            Margin = new Thickness(0, 0, 0, 12),
+            Children =
+            {
+                new TextBlock { Text = "Icon", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 16,
+                    Children = { iconPreviewPanel, changeIconButton }
+                }
+            }
+        };
         AddActionChoice(actionPicker, "Application (.exe)", FrontendShortcutEditorActionKind.Executable);
         AddActionChoice(actionPicker, "PowerShell", FrontendShortcutEditorActionKind.PowerShell);
         AddActionChoice(actionPicker, "Website (URL)", FrontendShortcutEditorActionKind.Url);
@@ -324,6 +445,8 @@ public sealed partial class ShortcutPage : UserControl
             if (actionPicker.SelectedItem is not ComboBoxItem { Tag: FrontendShortcutEditorActionKind selectedKind })
                 return;
 
+            RenderIconPreview(selectedKind);
+
             closeOverlayToggle.Visibility = selectedKind == FrontendShortcutEditorActionKind.ScreenshotFullscreen
                 ? Visibility.Collapsed
                 : Visibility.Visible;
@@ -349,6 +472,9 @@ public sealed partial class ShortcutPage : UserControl
                 .FirstOrDefault(item => item.Tag is FrontendShortcutEditorActionKind kind && kind == selected);
         }
         if (actionPicker.SelectedItem is null) actionPicker.SelectedIndex = 0;
+        RenderIconPreview((actionPicker.SelectedItem as ComboBoxItem)?.Tag is FrontendShortcutEditorActionKind previewKind
+            ? previewKind
+            : FrontendShortcutEditorActionKind.Unsupported);
         UpdateEditorPanel(actionPicker, panels);
 
         var content = new StackPanel
@@ -356,7 +482,7 @@ public sealed partial class ShortcutPage : UserControl
             Spacing = 10,
             Children =
             {
-                titleBox, actionPicker, closeOverlayToggle, executablePanel, scriptPanel, urlPanel,
+                titleBox, iconRow, actionPicker, closeOverlayToggle, executablePanel, scriptPanel, urlPanel,
                 steamBigPicturePanel, steamClientPanel, xboxAppPanel, screenshotPanel
             }
         };
@@ -405,7 +531,8 @@ public sealed partial class ShortcutPage : UserControl
             existing?.TileId,
             titleBox.Text,
             action,
-            selectedKind != FrontendShortcutEditorActionKind.ScreenshotFullscreen && closeOverlayToggle.IsOn);
+            selectedKind != FrontendShortcutEditorActionKind.ScreenshotFullscreen && closeOverlayToggle.IsOn,
+            IconGlyphOverride: stagedIconGlyphOverride);
         await ApplyMutationAsync(intent);
     }
 

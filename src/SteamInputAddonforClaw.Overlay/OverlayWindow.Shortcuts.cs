@@ -81,14 +81,35 @@ public sealed partial class OverlayWindow
                 _shortcutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var tile = _shortcutSnapshot.Tiles[index];
+            var tilePadding = OverlayQamResources.Get("QamTilePadding", new Thickness(12));
+            var tileSize = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333);
+            var contentWidth = Math.Max(1, tileSize - tilePadding.Left - tilePadding.Right);
             var title = new TextBlock
             {
                 Text = tile.Title,
                 TextWrapping = TextWrapping.Wrap,
                 TextAlignment = TextAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
+                MaxWidth = Math.Max(1, contentWidth - 22),
             };
             OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
+
+            var header = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = contentWidth,
+                Spacing = 6,
+            };
+            header.Children.Add(new FontIcon
+            {
+                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons"),
+                Glyph = tile.IconGlyph,
+                FontSize = 16,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            header.Children.Add(title);
 
             var content = new StackPanel
             {
@@ -96,7 +117,7 @@ public sealed partial class OverlayWindow
                 VerticalAlignment = VerticalAlignment.Center,
                 Spacing = string.IsNullOrWhiteSpace(tile.StatusText) ? 0 : 4,
             };
-            content.Children.Add(title);
+            content.Children.Add(header);
             if (!string.IsNullOrWhiteSpace(tile.StatusText))
             {
                 var status = new TextBlock
@@ -105,6 +126,7 @@ public sealed partial class OverlayWindow
                     TextWrapping = TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Center,
+                    MaxWidth = contentWidth,
                 };
                 OverlayQamResources.ApplyTextStyle(status, "QamCaptionTextStyle");
                 content.Children.Add(status);
@@ -113,9 +135,9 @@ public sealed partial class OverlayWindow
             var border = new Border
             {
                 Child = content,
-                Padding = OverlayQamResources.Get("QamTilePadding", new Thickness(12)),
-                Width = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333),
-                Height = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333),
+                Padding = tilePadding,
+                Width = tileSize,
+                Height = tileSize,
                 CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
                 BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
                 BorderBrush = OverlayQamResources.Brush("QamFocusBorderBrush"),
