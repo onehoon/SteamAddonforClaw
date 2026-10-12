@@ -3,7 +3,7 @@
 **Date:** 2026-10-12  
 **Repository:** `onehoon/SteamAddonforClaw`  
 **Product:** Standalone Steam Addon for Claw / Full PID1902  
-**Status:** Architecture proposal with **confirmed product policy** and **explicitly unverified Windows input/VRR feasibility**. No implementation or MSI Claw touch interception has been claimed.  
+**Status:** Architecture + Phase 0 evidence record. A **standalone, single-zone** Windows touch-capture PoC was implemented in merged PR #768 and validated on the user's MSI Claw on 2026-10-12. Desktop touch interception/suppression and Minecraft Independent Flip retention were observed; **physical VRR continuity, game-wide input compatibility, and production VIIPER touch publication remain unverified**.  
 **Implementation role:** Local Codex. **Physical verification role:** User, after merge; never a mandatory local-Codex deliverable or a PR/CI/merge blocker.
 
 > This document consolidates the user decisions made through 2026-10-12. In particular, the Steam-game profile master switch governs this feature, exactly like the existing per-game virtual-controller override. There is **no global Virtual Touchpad ON/OFF**. The previously considered independent-of-master behavior is **rejected**.
@@ -36,7 +36,7 @@ The existing Full1902 controller owner, profile store, game detection, virtual p
 
 ### Explicitly undecided or subject to proof
 
-- Whether a completely unrendered, non-redirection, touch-target Win32 HWND reliably receives events above all target game display modes **while preserving VRR**. This is **not yet proven**.
+- The single bottom-right-quarter non-rendering Win32 HWND **was proven to receive and suppress desktop touch** on the user's MSI Claw (Phase 0); behavior above **all** game display modes and preservation of **physical panel VRR** are **not yet proven**.
 - Whether the Claw touchscreen's digitizer reports usable touch pressure; do **not** claim physical force sensing without hardware evidence.
 - Whether a synthesized physical pad click (`LPadPress`/`RPadPress`) should be bound to a user-selected gesture. Initial scope is contact/coordinates; **do not convert every tap into a click**.
 - The precise location of the zone editor inside Main App. Preferred: a clearly linked editor in the Steam game's Virtual Touchpad section, backed by one **shared layout**. **Per-game placement** has not been requested; only per-game enablement is frozen.
@@ -168,6 +168,20 @@ WS_EX_TOPMOST
 
 An input-only window is still a **top-level window**. The claim that it cannot affect DWM/VRR solely because it submits no graphics is **not proven**.
 
+### 5.1.1 Phase 0 implementation and real-device evidence (2026-10-12)
+
+**Code boundary:** [PR #768](https://github.com/onehoon/SteamAddonforClaw/pull/768) merged the standalone .NET 10 / Win32 diagnostic at [\`tools/TouchpadPoc/\`](../tools/TouchpadPoc/), following the [single-zone Phase 0 work order](work-order/TOUCHPAD_POC_PHASE0_BOTTOM_RIGHT_QUARTER_WORK_ORDER_2026-10-12.md). This is **not** Runtime-integrated, a Steam Input publisher, a VIIPER touch mapper, an editor, or the final two-zone system. No production routing ownership changed.
+
+- **Exactly one window and one input area:** the bottom-right quarter of the primary physical display. On the measured **1920 x 1200, 150% DPI** Claw setup, primary/window dimensions were **\`X=960, Y=600, W=960, H=600\`**, with per-monitor-v2 DPI awareness, \`windowDpi=144\`. The requested and observed window rectangles and extended styles matched. The recorded EXSTYLE was \`0x08200088\` (\`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST\`).
+- **Pointer collection:** two standalone desktop runs yielded **33 Down / 3,446 Move / 33 Up** and **13 Down / 1,833 Move / 13 Up**, respectively. Both ended by Ctrl+C with zero active contacts, zero CaptureLost/Cancel, no logged errors, no orphan Move/Up, and no sequence gaps. The measured Move-interval medians were approximately **8.33 ms**; this is pointer-message timing, **not panel refresh frequency**.
+- **Drag outside zone:** touch starting inside remained owned until Up even after the finger moved outside the rectangle. Example pointer #6 ended at \`(460,995)\`, pointer #12 at \`(1444,298)\`, both outside the original area. The user confirmed that underlying desktop programs **did not receive those contacts**, including during drag beyond the boundary. This validates desktop touch suppression; merely receiving \`WM_POINTER\` would not have sufficed.
+- **Limits:** both sessions showed at most **one concurrent active pointer**; simultaneous two-finger behavior was not demonstrated. Both ended manually (not by 90-second timeout). Desktop suppression is validated; do not generalize it to all games, exclusive-fullscreen/FSE, Overlay open/close, or game-focus preservation without their own evidence.
+
+**Primary touch logs:** [run 1 (18:17)](https://drive.google.com/file/d/19QGg4en8DPeTy86Q2e6IJTR_X3Vh3QO1/view), [run 2 (18:19)](https://drive.google.com/file/d/1pHndZb2nUroG-fZuyda0f552kSNQhfD4/view).
+
+**Architecture consequence:** the narrow non-rendering Win32 input target has graduated from an entirely untested hypothesis to a **working desktop acquisition/isolation candidate**, without demonstrating universal game coverage or the native Deck/Edge mapping. Keep the initial simple HWND approach; do not replace it with global pointer rerouting, a driver, a rendered overlay, or new synchronization machinery based only on unproven concerns.
+
+
 ### 5.2 Windows global pointer rerouting: not initial scope
 
 `RegisterPointerInputTarget(hwnd, PT_TOUCH)` is a documented global pointer redirection API, not a per-rectangle hook. Microsoft documents:
@@ -218,7 +232,42 @@ ClawHUD renders D3D11 displayable BGRA textures via Direct2D, DirectComposition,
 
 **Critical diagnostic finding:** an old synthetic HUD test rendering every 100 ms produced a fixed-120-Hz observation even when normal production HUD and a more representative 500-ms diagnostic did not. Merely retaining a particular PresentMode is **not proof of active physical VRR**. Avoid any per-touch redraw/present path.
 
-### Nonnegotiable VRR evidence
+
+### 6.1 Phase 0 Minecraft comparison — three measured conditions (2026-10-12)
+
+The user tested **Minecraft.Windows.exe** on the MSI Claw with the PoC fully stopped, the PoC armed without touching, and the PoC armed with touch/drag. All three 15-second \`ClawHUD.Diag.exe\` runs used the **same PID 2012, HWND \`0x210546\`, dominant swapchain \`0x2704DBE8020\`**, PresentMon API 3.4, nominal **120.002 Hz** display mode, and exact-match Intel Arc Sync \`EXCELLENT / ENABLED\` profile with **48–120 Hz** range.
+
+| Signal | PoC OFF, game running | PoC ON, no touch | PoC ON, touch/drag |
+| --- | ---: | ---: | ---: |
+| PresentMon game frames / 15 seconds | 1,155 | 1,146 | 948 |
+| Mean observed frames per second (frame count / 15 s) | 77.0 | 76.4 | 63.2 |
+| Independent Flip family | **100%** | **100%** | **100%** |
+| PresentMode breakdown | 1,155 composed-independent | 1,146 composed-independent | 934 composed-independent + 14 hardware-independent |
+| \`AllowsTearing\` | 100% true | 100% true | 100% true |
+| Dropped flags | 0 | 0 | 0 |
+| \`BetweenDisplayChange\` P50 | 10.97 ms | 12.12 ms | **16.67 ms** |
+| \`BetweenDisplayChange\` P95 / P99 | 17.05 / 18.10 ms | 17.10 / 18.13 ms | 16.89 / 18.01 ms |
+| \`DisplayLatency\` P50 | 15.23 ms | 15.57 ms | 22.68 ms |
+| \`DisplayLatency\` P95 | 26.20 ms | 25.98 ms | 26.52 ms |
+| PresentMon **display-content-change rate** | 91.14 Hz | 82.50 Hz | 60.00 Hz |
+| D3DKMT cadence samples | **0** | **0** | **0** |
+| Overall physical-VRR inference | INCONCLUSIVE / LOW | INCONCLUSIVE / LOW | INCONCLUSIVE / LOW |
+
+**What was proven:** the invisible PoC HWND by itself did **not** cause a presentation-path regression in these Minecraft captures. All frames in every run remained within the Independent Flip family, and no dropped frames were reported. The ON-idle run closely tracked the OFF baseline in 15-second frame count and upper-tail frame/latency metrics. The 14 \`HARDWARE_INDEPENDENT_FLIP\` samples in the ON-touch run are **not** composed-path failures.
+
+**Observed FPS reduction and causal control:** the ON-touch run averaged approximately 63.2 observed frames/s, with a median content-change interval of 16.67 ms, lower than the OFF and ON-idle runs. **The user subsequently confirmed that touching outside the PoC zone also caused the same visible frame-rate reduction, and—most importantly—that touching the game with the PoC completely terminated also caused the reduction.** Therefore the reduction is **not demonstrated to be a PoC-specific regression**. Ordinary physical touchscreen interaction with Minecraft/Windows is a plausible common cause, but the responsible subsystem is unknown. The PoC-OFF-with-touch comparison was a **user visual observation, not a fourth captured PresentMon/D3DKMT dataset**; do not claim a controlled, quantitative exclusion of every possible additional PoC cost.
+
+**Physical VRR cannot be concluded from this dataset.** \`D3DKMTWaitForVerticalBlankEvent2\` failed identically in all three runs with \`NTSTATUS 0xC0000022 (STATUS_ACCESS_DENIED)\`, producing **zero VBlank samples**. Each summary correctly reported \`INCONCLUSIVE / LOW\`. Intel's 48–120 Hz capability/profile is **configuration evidence**, not live panel scanout; \`Independent Flip=100%\` and \`AllowsTearing=TRUE\` are **VRR-safe presentation-path evidence**, not proof that the panel was dynamically refreshing. PresentMon's 60.00 Hz in the touch run is the **content-change rate, not physical panel refresh Hz**.
+
+**Saved datasets:**
+- [PoC OFF report](https://drive.google.com/file/d/1xfX89xbVdfqz_E_LUNVlf1BDKfhqFGmE/view) / [frames](https://drive.google.com/file/d/1ENyaRIlKGNe02zxszhnD68S7m9_F4jr5/view) / [VBlank](https://drive.google.com/file/d/1ya0RDEsklD_PKv7ST479YL6TEYCmXFGs/view)
+- [PoC ON, no touch report](https://drive.google.com/file/d/1yJXq85sC70kj8UJw1HW1bjnE7-9xfsio/view) / [frames](https://drive.google.com/file/d/17Wi3ZGAayJeMwHEruS436FQvV7ZjJu5N/view) / [VBlank](https://drive.google.com/file/d/1VouEujsseYOYyCkRqwqM7z50N29rLC4U/view)
+- [PoC ON, touch report](https://drive.google.com/file/d/120bMBchFM4ntGbe9yCPdYhOEPGd2DR2P/view) / [frames](https://drive.google.com/file/d/1goHzKHe8rQa1wZ6mLvintbwOuCgAmK-O/view) / [VBlank](https://drive.google.com/file/d/1SMK7JjrB1B3MlLcdc8z_7crlBD9wpEaJ/view)
+
+**Next evidence boundary:** no PoC code or architecture replacement is justified by the measured Minecraft touch-induced frame reduction alone. Continue small, bounded integration/prototyping using the existing Full1902 authority and publisher. **Before claiming production VRR compatibility**, obtain an independent physical-variable-rate observation (e.g. an appropriate Special K variable-rate/LFC display or a subsequently working cadence probe), with a PoC OFF/ON comparison, and test representative real-game focus/touch isolation. Fixing D3DKMT may improve diagnosis but is **not** a precondition for merging otherwise correct code; hardware validation remains the user's post-merge role.
+
+### 6.2 Remaining VRR acceptance and future test plan
+
 
 Compare, in the **same** game, resolution, driver, Windows refresh/VRR settings, overlay environment, and presentation path:
 
@@ -434,9 +483,11 @@ The Steam Deck has local trackpad haptic behavior; the Claw touchscreen has **no
 
 ### Phase 0 — Windows interception and VRR viability PoC
 
-**Only goal:** determine whether an invisible, non-rendering region can (a) get a touchscreen Down/Move/Up, (b) prevent the original game from receiving that touch, (c) preserve game focus, (d) preserve active VRR/Independent Flip in real use.
+**Scope:** prove one non-rendering touch region can (a) acquire Down/Move/Up, (b) isolate desktop/game touch, (c) preserve game focus, and (d) preserve VRR-safe presentation and active physical VRR. **Status as of 2026-10-12: PARTIAL PASS / PHYSICAL VRR OPEN.**
 
-Minimal code: Runtime-compatible Win32 class/window, configurable fixed test rectangles, pointer ID/coordinate debug, correct handled-message behavior, no native input publication required. Do not build the full Main App layout editor, profile mutation, Edge mapping, or haptics yet.
+The merged [PR #768](https://github.com/onehoon/SteamAddonforClaw/pull/768) implemented a **standalone one-window** `tools/TouchpadPoc/` console test using the fixed **bottom-right 25%** of the physical display, not two windows and not a production Runtime owner. Real-device testing confirmed touch acquisition, desktop touch suppression, drag capture beyond region bounds, clean pointer IDs/termination, and Minecraft Independent Flip retention with the window armed. The physical VRR state, game-wide suppression/focus, and simultaneous two-finger behavior remain unproven. See **§5.1.1** and **§6.1** for exact logs, results, and limitations.
+
+The Phase 0 diagnostic deliberately contains **no** game-profile mutation, VIIPER touch publication, Edge mapping, Main App layout editor, or haptics. The proposed production Runtime-owned two-zone integration remains a distinct future phase.
 
 Deterministic local validation: compile, window flags/hit-test/coordinate transformations/neutral lifecycle tests where practical, no desktop-wide touch registration; keep instrumentation lean and bounded.
 
@@ -481,7 +532,7 @@ These are engineering phases, **not commitments to a fixed PR count**. Local Cod
 - Touching a region does **not** also click/drag/gesture in that game, while touching outside behaves as Windows touch.
 - Window does not steal game focus, create visible pixels, show desktop/window switcher artifacts or unintended cursor visual feedback.
 - Borderless/Steam FSE/fullscreen modes tested separately with results recorded rather than claimed universal.
-- Baseline/ON-idle/ON-active VRR and latency/pacing comparison using ClawHUD diagnostic lessons, variable versus fixed refresh and no unexpected XeFG effects.
+- Baseline/ON-idle/ON-active VRR and latency/pacing comparison using ClawHUD diagnostic lessons; **Minecraft Independent Flip/path comparison was completed on 2026-10-12**, while a reliable physical variable-versus-fixed refresh comparison, touch-induced frame-rate causality under controlled conditions, and XeFG compatibility remain open.
 - Native Deck left/right touch and Edge mapping in actual Steam Input, game-specific profile toggles, Overlay capture and optional rumble behavior.
 - Suspend/resume, Restart/Crash/Shutdown, physical loss/PnP recovery, presentation transitions and game exit.
 
@@ -522,6 +573,10 @@ The user conducts all physical tests **after merge**. A PR with correct code, ap
 - [ClawHUD display/VRR decision history](https://github.com/onehoon/ClawHUD/blob/main/docs/HUD_PRESENTATION_VRR_DECISION_HISTORY.md)
 - [ClawHUD hardware validation record](https://github.com/onehoon/ClawHUD/blob/main/docs/VRR_HARDWARE_VALIDATION_RESULTS.md)
 - [ClawHUD original VRR PoC runbook](https://github.com/onehoon/ClawHUD/blob/main/docs/PHASE0-VRR-POC.md)
+- [Phase 0 one-zone work order](work-order/TOUCHPAD_POC_PHASE0_BOTTOM_RIGHT_QUARTER_WORK_ORDER_2026-10-12.md)
+- [Merged Phase 0 TouchpadPoc PR #768](https://github.com/onehoon/SteamAddonforClaw/pull/768)
+- [Standalone TouchpadPoc tool](../tools/TouchpadPoc/)
+- [ClawHUD standalone VRR diagnostic source](https://github.com/onehoon/ClawHUD/tree/main/src/ClawHUD.Diag)
 
 ### Official Windows / Steam references
 
@@ -560,8 +615,10 @@ The user conducts all physical tests **after merge**. A PR with correct code, ap
 | Overlay capture | No touch/game controller publication during capture; new Down after release | **Frozen** |
 | Game-time zone visuals | None; editor-only visualization | **Frozen** |
 | Game touch isolation | Required for in-zone touches; no game mouse/touch leak | **Frozen acceptance** |
-| Windows input mechanism | Narrow non-rendering Win32 target HWND first | **PoC hypothesis** |
-| Active VRR and Independent Flip | Must not regress; use ClawHUD validation evidence | **Frozen acceptance, not yet verified for this feature** |
+| Windows input mechanism | Narrow non-rendering Win32 target HWND first; one bottom-right zone validated for desktop input isolation and outside-region drag | **Phase 0 desktop PASS; broader game/display-mode coverage open** |
+| Minecraft presentation path | 3 matching 15 s runs: OFF / ON idle / ON touch, Independent Flip family 100%, dropped 0 throughout | **Phase 0 presentation-path PASS (Minecraft only)** |
+| Touch-induced FPS reduction | Seen with PoC ON, outside PoC region, **and with PoC OFF**; not proven PoC-specific | **Observed common touch behavior; cause unknown** |
+| Active physical VRR | Required to remain functional; D3DKMT failed `0xC0000022` with zero samples in all 3 runs | **Frozen acceptance; still unverified** |
 | Native mappings | Deck L/R, Edge one pad; reuse VIIPER ABI and owner | **Design direction** |
 | Short tap, drag, double tap, long touch | Preserve actual contact sequences; Steam Input decides bindings | **Design direction** |
 | Physical click, pressure | No automatic click, force neutral initially | **Initial design** |
