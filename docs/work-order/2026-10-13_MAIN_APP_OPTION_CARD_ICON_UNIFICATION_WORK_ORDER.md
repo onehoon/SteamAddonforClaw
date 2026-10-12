@@ -310,11 +310,11 @@ For the Overlay rail, change **only three return strings** inside the existing `
 ```csharp
 private static string GlyphFor(AddonQuickSettingsTabId id) => id switch
 {
-    AddonQuickSettingsTabId.Device => "\\uE772",     // Devices
-    AddonQuickSettingsTabId.Profile => "\\uE8A5",    // Document
-    AddonQuickSettingsTabId.Controller => "\\uE7FC", // Game, unchanged
-    AddonQuickSettingsTabId.Shortcut => "\\uE71B",   // Link
-    AddonQuickSettingsTabId.Setting => "\\uE713",    // Settings, unchanged
+    AddonQuickSettingsTabId.Device => "\uE772",     // Devices
+    AddonQuickSettingsTabId.Profile => "\uE8A5",    // Document
+    AddonQuickSettingsTabId.Controller => "\uE7FC", // Game, unchanged
+    AddonQuickSettingsTabId.Shortcut => "\uE71B",   // Link
+    AddonQuickSettingsTabId.Setting => "\uE713",    // Settings, unchanged
     _ => throw new ArgumentOutOfRangeException(nameof(id), id, "Unknown Overlay tab identity."),
 };
 ```
