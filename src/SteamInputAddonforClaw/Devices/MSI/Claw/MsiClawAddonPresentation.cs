@@ -1768,16 +1768,14 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 if (!await _beforePresentationRetire(cancellationToken).ConfigureAwait(false))
                 {
-                    AppLog.Error("ControllerPresentation", "Touch capture could not be confirmed disarmed before presentation retirement.", null,
+                    AppLog.Warn("Touchpad", "Capture close unconfirmed; proceeding with canonical presentation retirement.", null,
                         ("Reason", reason), ("Event", "TouchpadDisarmBeforePresentationRetireFailed"));
-                    return new(false, _rumbleSink is null, FeedbackDrainConfirmed: false);
                 }
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                AppLog.Error("ControllerPresentation", "Touch capture teardown failed before presentation retirement.", exception,
+                AppLog.Warn("Touchpad", "Optional capture teardown failed; proceeding with canonical presentation retirement.", exception,
                     ("Reason", reason), ("Event", "TouchpadDisarmBeforePresentationRetireFailed"));
-                return new(false, _rumbleSink is null, FeedbackDrainConfirmed: false);
             }
         }
 

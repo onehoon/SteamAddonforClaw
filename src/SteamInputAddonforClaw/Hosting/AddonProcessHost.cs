@@ -1001,7 +1001,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 steamVirtualControllerPreferenceProvider: () => startupSettings.SteamVirtualController,
                 steamGameControllerPreferenceProvider: appId => _gameProfileMutations?.CaptureSteamVirtualController(appId) ?? (false, null),
                 rightPadProvider: _touchpadCapture.RightPadProvider,
-                beforePresentationRetire: token => _touchpadCapture.SetArmedAsync(false, "PresentationRetirement", token));
+                beforePresentationRetire: async token =>
+                {
+                    _touchpadCapture.CloseAdmission();
+                    return await _touchpadCapture.SetArmedAsync(false, "PresentationRetirement", token).ConfigureAwait(false);
+                });
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));
@@ -4086,8 +4090,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Volatile.Read(ref _processShutdownStarted) != 0)
             return true;
 
-        if (!await _touchpadCapture.SetArmedAsync(false, "Suspend", cancellationToken).ConfigureAwait(false))
-            return false;
+        // Close admission and request the HWND close immediately. Run the mandatory controller
+        // pause before awaiting its bounded thread join, which can outlast the suspend deadline.
+        _touchpadCapture.CloseAdmission();
         Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
 
         lock (_controllerOwnershipOperationSync)
@@ -4097,19 +4102,23 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var shouldInvalidateBadge = false;
         try
         {
-            if (Volatile.Read(ref _processShutdownStarted) != 0)
-                return true;
+            return await QuiescePresentationThenStopTouchCaptureForSuspendAsync(
+                async () =>
+                {
+                    if (Volatile.Read(ref _processShutdownStarted) != 0)
+                        return true;
 
-            var presentation = _presentationOwnership;
-            if (presentation is null)
-                return true;
+                    var presentation = _presentationOwnership;
+                    if (presentation is null)
+                        return true;
 
-            shouldInvalidateBadge = true;
-
-            var pause = await presentation.PauseForSuspendAsync(cancellationToken).ConfigureAwait(false);
-            AppLog.Info("ControllerPresentation", "Full1902 suspend participant quiesced.",
-                ("Event", "PresentationSuspendPauseParticipant"), ("Outcome", pause.Outcome), ("Reason", pause.Reason), ("Safe", pause.Safe));
-            return pause.Safe;
+                    shouldInvalidateBadge = true;
+                    var pause = await presentation.PauseForSuspendAsync(cancellationToken).ConfigureAwait(false);
+                    AppLog.Info("ControllerPresentation", "Full1902 suspend participant quiesced.",
+                        ("Event", "PresentationSuspendPauseParticipant"), ("Outcome", pause.Outcome), ("Reason", pause.Reason), ("Safe", pause.Safe));
+                    return pause.Safe;
+                },
+                () => _touchpadCapture.SetArmedAsync(false, "Suspend", CancellationToken.None)).ConfigureAwait(false);
         }
         finally
         {
@@ -4117,6 +4126,36 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 NotifyControllerBadgeStateInvalidated();
             await StopMotionSourceAsync("Suspend").ConfigureAwait(false);
         }
+    }
+
+    internal static async Task<bool> QuiescePresentationThenStopTouchCaptureForSuspendAsync(
+        Func<Task<bool>> quiescePresentation,
+        Func<Task<bool>> stopTouchCapture)
+    {
+        var presentationSafe = false;
+        var touchCaptureStopped = false;
+        try
+        {
+            presentationSafe = await quiescePresentation().ConfigureAwait(false);
+        }
+        finally
+        {
+            Exception? stopException = null;
+            try
+            {
+                touchCaptureStopped = await stopTouchCapture().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                stopException = exception;
+            }
+
+            if (!touchCaptureStopped)
+                AppLog.Warn("Touchpad", "Capture close unconfirmed after core suspend quiesce.", stopException,
+                    ("Event", "TouchpadDisarmAfterSuspendQuiesceUnconfirmed"));
+        }
+
+        return presentationSafe && touchCaptureStopped;
     }
 
     /// <summary>Full1902 Suspend/Resume review addendum A.1: the one small host-local adapter. It is
