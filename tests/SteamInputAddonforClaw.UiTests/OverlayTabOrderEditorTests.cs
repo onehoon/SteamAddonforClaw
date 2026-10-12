@@ -14,7 +14,7 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
     [Fact]
     public void LiveReorderKeepsTheSelectedEditorRowIdentityNotItsOldSlot()
     {
-        var state = new OverlayTabState(); // Device, Profile, Controller, Shortcut, Setting
+        var state = new OverlayTabState(); // Shortcut, Device, Controller, Setting, Profile
         var selection = new OverlayRowSelection();
         selection.SetRows([Selectable(), Selectable(), Selectable(), Selectable(), Selectable()]);
 

@@ -521,8 +521,12 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.True(JsonSerializer.SerializeToUtf8Bytes(response, FrontendWireCodec.Json).Length < FrontendWireCodec.MaxFrameBytes);
     }
 
-    private ShortcutRuntime CreateRuntime(Func<ProcessStartInfo, Process?>? startProcess = null) =>
-        new(new ShortcutStore(DocumentPath), startProcess);
+    private ShortcutRuntime CreateRuntime(Func<ProcessStartInfo, Process?>? startProcess = null)
+    {
+        if (!File.Exists(DocumentPath) && !Directory.Exists(DocumentPath))
+            new ShortcutStore(DocumentPath).Save(new ShortcutDocument());
+        return new ShortcutRuntime(new ShortcutStore(DocumentPath), startProcess);
+    }
 
     private void Save(params ShortcutTileDefinition[] tiles)
     {

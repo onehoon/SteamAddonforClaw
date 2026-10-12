@@ -77,14 +77,55 @@ internal sealed class ShortcutRuntime
         _saveDocument = saveDocument;
 
         var load = store.Load();
-        _available = load.Status is ShortcutLoadStatus.Loaded or ShortcutLoadStatus.NotFound;
         _document = load.Document;
 
-        if (!_available)
+        if (load.Status == ShortcutLoadStatus.NotFound)
+        {
+            var defaults = CreateInitialShortcutDocument();
+            try
+            {
+                _store.Save(defaults);
+                _document = defaults;
+                _available = true;
+                AppLog.Info("Shortcuts", "Initial Shortcut defaults created.",
+                    ("TileCount", defaults.Dashboard.Tiles.Count));
+            }
+            catch (Exception exception)
+            {
+                _available = false;
+                AppLog.Warn("Shortcuts", "Initial Shortcut defaults could not be saved; Shortcut Runtime is unavailable.", null,
+                    ("FailureCategory", exception.GetType().Name));
+            }
+        }
+        else
+        {
+            _available = load.Status == ShortcutLoadStatus.Loaded;
+        }
+
+        if (!_available && load.Status != ShortcutLoadStatus.NotFound)
         {
             AppLog.Warn("Shortcuts", "Shortcut Runtime is unavailable; continuing without Shortcut actions.", null,
                 ("Status", load.Status));
         }
+    }
+
+    private static ShortcutDocument CreateInitialShortcutDocument()
+    {
+        var emptyParameters = JsonSerializer.SerializeToElement(new { });
+        ShortcutTileDefinition Tile(string title, string typeId, bool closeOverlayAfterLaunch) =>
+            new(Guid.NewGuid(), title, closeOverlayAfterLaunch,
+                new ShortcutActionSpec(typeId, SupportedActionSchemaVersion, emptyParameters));
+
+        return new ShortcutDocument
+        {
+            Dashboard = new ShortcutDashboardDefinition(
+            [
+                Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, false),
+                Tile("Steam", ShortcutActionTypeIds.SteamClient, true),
+                Tile("Steam Big Picture", ShortcutActionTypeIds.SteamBigPicture, true),
+                Tile("Xbox", ShortcutActionTypeIds.XboxApp, true),
+            ])
+        };
     }
 
     internal FrontendShortcutDashboardSnapshot Capture()

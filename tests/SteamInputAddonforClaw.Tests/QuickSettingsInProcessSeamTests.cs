@@ -273,11 +273,11 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     {
         var order = new[]
         {
-            AddonQuickSettingsTabId.Device,
-            AddonQuickSettingsTabId.Profile,
-            AddonQuickSettingsTabId.Controller,
             AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Controller,
             AddonQuickSettingsTabId.Setting,
+            AddonQuickSettingsTabId.Profile,
         };
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = order }, store, new FakeStartupManager());
@@ -289,7 +289,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
 
         Assert.True(result.Succeeded);
         Assert.Null(result.FailureMessage);
-        Assert.Equal([AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Shortcut], result.State.Rows.Select(row => row.TabId));
+        Assert.Equal([AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Profile], result.State.Rows.Select(row => row.TabId));
         Assert.Equal(result.State.Rows.Select(row => row.TabId), coordinator.AddonQuickSettingsTabOrder);
         Assert.Equal(result.State.Rows.Select(row => row.TabId), store.Load().AddonQuickSettingsTabOrder);
         Assert.Equal(1, invalidations);
@@ -305,7 +305,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         control.StateInvalidated += (_, _) => invalidations++;
         var before = coordinator.AddonQuickSettingsTabOrder.ToArray();
 
-        var result = await control.MoveAddonQuickSettingsTabAsync(new(AddonQuickSettingsTabId.Device, -1));
+        var result = await control.MoveAddonQuickSettingsTabAsync(new(AddonQuickSettingsTabId.Shortcut, -1));
 
         Assert.False(result.Succeeded);
         Assert.Equal(before, result.State.Rows.Select(row => row.TabId));
@@ -401,6 +401,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
 
     public void Dispose()
     {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DrainForTests();
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = null;
         if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, recursive: true);
     }

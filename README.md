@@ -247,7 +247,7 @@ To use a Steam profile for a regular Windows game, first add that game to Steam 
 
 ## Quick Settings Overlay
 
-Quick Settings Overlay is the Addon's separate controller-friendly settings window. It uses the same saved settings as the Main App. Its tabs are **Device**, **Profile**, **Controller**, **Shortcut**, and **Setting**; you can change their order from **Setting → Tab Order**.
+Quick Settings Overlay is the Addon's separate controller-friendly settings window. It uses the same saved settings as the Main App. Its default tab order is **Shortcut**, **Device**, **Controller**, **Setting**, and **Profile**; you can change their order from **Setting → Tab Order**.
 
 - **Device** — quick access to supported device-wide TDP Control, CPU Boost, Windows Power Mode, and battery charge-limit settings.
 - **Profile** — settings for the currently active recognized game. When no game is active, the page says: “No game is currently running. Start a game to configure its profile.” The available rows depend on the game and device; XBOX profiles can also expose M1/M2 mapping.

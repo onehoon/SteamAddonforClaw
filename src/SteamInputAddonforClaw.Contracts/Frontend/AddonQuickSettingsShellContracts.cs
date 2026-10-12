@@ -15,11 +15,11 @@ public static class AddonQuickSettingsTabOrderContract
 {
     private static readonly AddonQuickSettingsTabId[] Default =
     [
-        AddonQuickSettingsTabId.Device,
-        AddonQuickSettingsTabId.Profile,
-        AddonQuickSettingsTabId.Controller,
         AddonQuickSettingsTabId.Shortcut,
+        AddonQuickSettingsTabId.Device,
+        AddonQuickSettingsTabId.Controller,
         AddonQuickSettingsTabId.Setting,
+        AddonQuickSettingsTabId.Profile,
     ];
 
     public static IReadOnlyList<AddonQuickSettingsTabId> DefaultOrder => (AddonQuickSettingsTabId[])Default.Clone();
