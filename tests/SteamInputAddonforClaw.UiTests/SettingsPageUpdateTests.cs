@@ -42,6 +42,25 @@ public sealed class SettingsPageUpdateTests
     }
 
     [Fact]
+    public void Rendered_update_snapshot_is_published_after_the_existing_card_is_updated()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml.cs");
+        var methodStart = source.IndexOf("private void RenderAppUpdate(FrontendUpdateSnapshot snapshot)", StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("private async Task RefreshGamingHomeAsync", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+
+        var description = method.IndexOf("UpdateCard.Description = snapshot.Message", StringComparison.Ordinal);
+        var buttonContent = method.IndexOf("UpdateButton.Content = snapshot.CanInstall", StringComparison.Ordinal);
+        var buttonEnabled = method.IndexOf("UpdateButton.IsEnabled = snapshot.CanCheck || snapshot.CanInstall", StringComparison.Ordinal);
+        var publish = method.IndexOf("AppUpdateSnapshotRendered?.Invoke(snapshot)", StringComparison.Ordinal);
+
+        Assert.Contains("internal event Action<FrontendUpdateSnapshot>? AppUpdateSnapshotRendered", source, StringComparison.Ordinal);
+        Assert.True(description >= 0 && buttonContent > description && buttonEnabled > buttonContent && publish > buttonEnabled);
+        Assert.Equal(publish, method.TrimEnd().LastIndexOf("AppUpdateSnapshotRendered?.Invoke(snapshot)", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Gaming_home_expander_uses_separate_guarded_selection_and_startup_mutations()
     {
         var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");

@@ -30,7 +30,9 @@ public sealed partial class MainWindow : Window
     private ElementTheme _systemAppThemeFallback = ElementTheme.Dark;
     private UISettings? _systemUiSettings;
     private readonly MainNavigationState _navigationState = new();
+    private readonly InfoBadge _updateReadyDotBadge = new();
     private FrontendStatusSnapshot? _latestSystemStatus;
+    private bool _isUpdateReady;
     // Bootstrap is captured once at startup and never re-fetched; a mutation made through the
     // frontend (e.g. suppressing the developer menu warning) must update this live flag directly,
     // or the same process would keep re-showing a warning the user already dismissed.
@@ -99,6 +101,11 @@ public sealed partial class MainWindow : Window
         _controllerLedPersistedSettings = bootstrap.Settings.ControllerLed;
 
         InitializeComponent();
+        if (Application.Current.Resources.TryGetValue("InformationalDotInfoBadgeStyle", out var infoBadgeStyle)
+            && infoBadgeStyle is Style style)
+        {
+            _updateReadyDotBadge.Style = style;
+        }
         _systemAppThemeFallback = MainAppRoot.ActualTheme is ElementTheme.Light or ElementTheme.Dark
             ? MainAppRoot.ActualTheme
             : ElementTheme.Dark;
@@ -110,6 +117,7 @@ public sealed partial class MainWindow : Window
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
         SettingsContent.AppThemeSelectionRequested += OnAppThemeSelectionRequested;
+        SettingsContent.AppUpdateSnapshotRendered += OnAppUpdateSnapshotRendered;
         SettingsContent.Initialize(_bootstrap, _frontend, _mainUiThemePreference);
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
@@ -164,6 +172,7 @@ public sealed partial class MainWindow : Window
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         SettingsContent.AppThemeSelectionRequested -= OnAppThemeSelectionRequested;
+        SettingsContent.AppUpdateSnapshotRendered -= OnAppUpdateSnapshotRendered;
         if (_systemUiSettings is not null)
             _systemUiSettings.ColorValuesChanged -= SystemUiSettings_ColorValuesChanged;
         _frontend.StateInvalidated -= OnFrontendStateInvalidated;
@@ -195,6 +204,19 @@ public sealed partial class MainWindow : Window
         ApplyMainUiTheme();
         SettingsContent.SetAppThemeSelection(_mainUiThemePreference);
         AppLog.Info("Theme", "Main UI theme changed.", ("Theme", _mainUiThemePreference));
+    }
+
+    private void OnAppUpdateSnapshotRendered(FrontendUpdateSnapshot snapshot)
+    {
+        _isUpdateReady = snapshot.CanInstall;
+        Title = FormatWindowTitle(GetDisplayVersion(), _isUpdateReady);
+        ApplyUpdateReadySettingsBadge();
+    }
+
+    private void ApplyUpdateReadySettingsBadge()
+    {
+        if (MainNavigationView.SettingsItem is NavigationViewItem settingsItem)
+            settingsItem.InfoBadge = _isUpdateReady ? _updateReadyDotBadge : null;
     }
 
     private void ApplyMainUiTheme()
@@ -829,6 +851,7 @@ public sealed partial class MainWindow : Window
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
     {
         SetEnglishSettingsItemContent();
+        ApplyUpdateReadySettingsBadge();
         if (_prerequisiteSetupPendingActivation && _windowActivatedForUser)
             _ = RefreshSystemStatusAsync();
 
@@ -885,6 +908,10 @@ public sealed partial class MainWindow : Window
         return Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.1.0";
     }
 
-    internal static string FormatWindowTitle(string version) => $"Steam Addon for Claw v{version}";
+    internal static string FormatWindowTitle(string version, bool updateReady = false)
+    {
+        var title = $"Steam Addon for Claw v{version}";
+        return updateReady ? title + " — Update ready" : title;
+    }
 
 }
