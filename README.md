@@ -196,6 +196,8 @@ The **Application (.exe)** and **PowerShell** Add/Edit panels include **Run as a
 
 The Screenshot action captures the primary display as a JPEG. Its save folder is configured inside that Screenshot Shortcut's Add/Edit dialog: choose a custom folder or use the default Windows `Pictures\Screenshots` folder. **Browse** stages a folder, **Use default** stages the default location, **Open folder** opens the currently selected location, and **Save** commits the folder with the Shortcut; **Cancel** discards staged changes. The normal editor allows at most one Screenshot Shortcut. A shortcut displayed in the Overlay runs the action you configured here; the Overlay receives only the tile and never the folder path.
 
+Shortcut tiles use an action-specific Fluent icon by default. In the Main App's Add/Edit dialog, choose a curated icon or restore the action default; the icon appears before the tile title in both the Main App and Overlay.
+
 ### Settings
 
 #### Application updates
@@ -247,7 +249,7 @@ To use a Steam profile for a regular Windows game, first add that game to Steam 
 
 ## Quick Settings Overlay
 
-Quick Settings Overlay is the Addon's separate controller-friendly settings window. It uses the same saved settings as the Main App. Its tabs are **Device**, **Profile**, **Controller**, **Shortcut**, and **Setting**; you can change their order from **Setting → Tab Order**.
+Quick Settings Overlay is the Addon's separate controller-friendly settings window. It uses the same saved settings as the Main App. Its default tab order is **Shortcut**, **Device**, **Controller**, **Setting**, and **Profile**; you can change their order from **Setting → Tab Order**.
 
 - **Device** — quick access to supported device-wide TDP Control, CPU Boost, Windows Power Mode, and battery charge-limit settings.
 - **Profile** — settings for the currently active recognized game. When no game is active, the page says: “No game is currently running. Start a game to configure its profile.” The available rows depend on the game and device; XBOX profiles can also expose M1/M2 mapping.

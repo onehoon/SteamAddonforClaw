@@ -42,7 +42,9 @@ public sealed record FrontendShortcutEditorTile(
     string Title,
     string TargetSummary,
     bool CloseOverlayAfterLaunch,
-    FrontendShortcutEditorAction Action);
+    FrontendShortcutEditorAction Action,
+    string? IconGlyphOverride = null,
+    string IconGlyph = ShortcutIconCatalog.FallbackGlyph);
 
 public sealed record FrontendShortcutEditorSnapshot(
     bool Available,
@@ -67,7 +69,8 @@ public sealed record FrontendShortcutMutationIntent(
     string? Title = null,
     FrontendShortcutActionInput? Action = null,
     bool? CloseOverlayAfterLaunch = null,
-    int? TargetIndex = null);
+    int? TargetIndex = null,
+    string? IconGlyphOverride = null);
 
 public sealed record FrontendShortcutMutationResult(
     bool Succeeded,
@@ -104,6 +107,7 @@ public static class FrontendShortcutEditorPayloadPolicy
 
     private static bool MutationFieldsWithinLimit(FrontendShortcutMutationIntent intent) =>
         IsFieldWithinLimit(intent.Title)
+        && IsFieldWithinLimit(intent.IconGlyphOverride)
         && (intent.Action is null
             || IsFieldWithinLimit(intent.Action.ExecutablePath)
             && IsFieldWithinLimit(intent.Action.ExecutableArguments)

@@ -77,14 +77,55 @@ internal sealed class ShortcutRuntime
         _saveDocument = saveDocument;
 
         var load = store.Load();
-        _available = load.Status is ShortcutLoadStatus.Loaded or ShortcutLoadStatus.NotFound;
         _document = load.Document;
 
-        if (!_available)
+        if (load.Status == ShortcutLoadStatus.NotFound)
+        {
+            var defaults = CreateInitialShortcutDocument();
+            try
+            {
+                _store.Save(defaults);
+                _document = defaults;
+                _available = true;
+                AppLog.Info("Shortcuts", "Initial Shortcut defaults created.",
+                    ("TileCount", defaults.Dashboard.Tiles.Count));
+            }
+            catch (Exception exception)
+            {
+                _available = false;
+                AppLog.Warn("Shortcuts", "Initial Shortcut defaults could not be saved; Shortcut Runtime is unavailable.", null,
+                    ("FailureCategory", exception.GetType().Name));
+            }
+        }
+        else
+        {
+            _available = load.Status == ShortcutLoadStatus.Loaded;
+        }
+
+        if (!_available && load.Status != ShortcutLoadStatus.NotFound)
         {
             AppLog.Warn("Shortcuts", "Shortcut Runtime is unavailable; continuing without Shortcut actions.", null,
                 ("Status", load.Status));
         }
+    }
+
+    private static ShortcutDocument CreateInitialShortcutDocument()
+    {
+        var emptyParameters = JsonSerializer.SerializeToElement(new { });
+        ShortcutTileDefinition Tile(string title, string typeId, bool closeOverlayAfterLaunch) =>
+            new(Guid.NewGuid(), title, closeOverlayAfterLaunch,
+                new ShortcutActionSpec(typeId, SupportedActionSchemaVersion, emptyParameters));
+
+        return new ShortcutDocument
+        {
+            Dashboard = new ShortcutDashboardDefinition(
+            [
+                Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, false),
+                Tile("Steam", ShortcutActionTypeIds.SteamClient, true),
+                Tile("Steam Big Picture", ShortcutActionTypeIds.SteamBigPicture, true),
+                Tile("Xbox", ShortcutActionTypeIds.XboxApp, true),
+            ])
+        };
     }
 
     internal FrontendShortcutDashboardSnapshot Capture()
@@ -101,7 +142,8 @@ internal sealed class ShortcutRuntime
                 tile.Title,
                 resolution.StatusText,
                 resolution.State,
-                resolution.Enabled));
+                resolution.Enabled,
+                GetEffectiveIconGlyph(tile)));
         }
 
         return new FrontendShortcutDashboardSnapshot(true, tiles);
@@ -182,10 +224,12 @@ internal sealed class ShortcutRuntime
                 if (!IsValidTitle(intent.Title))
                     return Fail("Enter a valid Shortcut title.", out failureMessage);
                 if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
+                if (!TryResolveMutationIconOverride(intent.IconGlyphOverride, null, out var iconGlyphOverride, out failureMessage))
+                    return false;
                 if (IsScreenshotAction(action!) && tiles.Any(IsScreenshotAction))
                     return Fail("Only one Screenshot Shortcut can be added.", out failureMessage);
                 tiles.Add(new ShortcutTileDefinition(Guid.NewGuid(), intent.Title,
-                    IsScreenshotAction(action!) ? false : intent.CloseOverlayAfterLaunch.Value, action!));
+                    IsScreenshotAction(action!) ? false : intent.CloseOverlayAfterLaunch.Value, action!, iconGlyphOverride));
                 changed = true;
                 break;
             }
@@ -201,6 +245,9 @@ internal sealed class ShortcutRuntime
                 if (!ProjectEditorAction(tiles[index].Action).Editable)
                     return Fail("This Shortcut action cannot be edited in this version.", out failureMessage);
                 if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
+                if (!TryResolveMutationIconOverride(intent.IconGlyphOverride, tiles[index].IconGlyphOverride,
+                        out var iconGlyphOverride, out failureMessage))
+                    return false;
                 if (IsScreenshotAction(action!)
                     && tiles.Any(tile => tile.TileId != tileId && IsScreenshotAction(tile)))
                     return Fail("Only one Screenshot Shortcut can be added.", out failureMessage);
@@ -208,7 +255,8 @@ internal sealed class ShortcutRuntime
                 {
                     Title = intent.Title,
                     CloseOverlayAfterLaunch = IsScreenshotAction(action!) ? false : intent.CloseOverlayAfterLaunch.Value,
-                    Action = action!
+                    Action = action!,
+                    IconGlyphOverride = iconGlyphOverride,
                 };
                 changed = true;
                 break;
@@ -216,7 +264,8 @@ internal sealed class ShortcutRuntime
             case FrontendShortcutMutationKind.Delete:
             {
                 if (intent.TileId is not { } tileId || tileId == Guid.Empty || intent.Title is not null
-                    || intent.Action is not null || intent.CloseOverlayAfterLaunch is not null || intent.TargetIndex is not null)
+                    || intent.Action is not null || intent.CloseOverlayAfterLaunch is not null || intent.TargetIndex is not null
+                    || intent.IconGlyphOverride is not null)
                     return Fail("Shortcut delete request is invalid.", out failureMessage);
                 var index = tiles.FindIndex(tile => tile.TileId == tileId);
                 if (index < 0) return Fail("Shortcut tile was not found.", out failureMessage);
@@ -228,7 +277,7 @@ internal sealed class ShortcutRuntime
             {
                 if (intent.TileId is not { } tileId || tileId == Guid.Empty || intent.Title is not null
                     || intent.Action is not null || intent.CloseOverlayAfterLaunch is not null
-                    || intent.TargetIndex is not { } targetIndex)
+                    || intent.TargetIndex is not { } targetIndex || intent.IconGlyphOverride is not null)
                     return Fail("Shortcut move request is invalid.", out failureMessage);
                 var currentIndex = tiles.FindIndex(tile => tile.TileId == tileId);
                 if (currentIndex < 0) return Fail("Shortcut tile was not found.", out failureMessage);
@@ -256,12 +305,43 @@ internal sealed class ShortcutRuntime
     }
 
     private static FrontendShortcutEditorSnapshot ProjectEditorSnapshot(ShortcutDocument document) =>
-        new(true, document.Dashboard.Tiles.Select(tile => new FrontendShortcutEditorTile(
-            tile.TileId,
-            tile.Title,
-            GetEditorTargetSummary(tile.Action),
-            tile.CloseOverlayAfterLaunch,
-            ProjectEditorAction(tile.Action))).ToArray());
+        new(true, document.Dashboard.Tiles.Select(tile =>
+        {
+            var actionKind = GetEditorActionKind(tile.Action.TypeId) ?? FrontendShortcutEditorActionKind.Unsupported;
+            return new FrontendShortcutEditorTile(
+                tile.TileId,
+                tile.Title,
+                GetEditorTargetSummary(tile.Action),
+                tile.CloseOverlayAfterLaunch,
+                ProjectEditorAction(tile.Action),
+                tile.IconGlyphOverride,
+                ShortcutIconCatalog.GetEffectiveGlyph(actionKind, tile.IconGlyphOverride));
+        }).ToArray());
+
+    private static string GetEffectiveIconGlyph(ShortcutTileDefinition tile)
+    {
+        var actionKind = GetEditorActionKind(tile.Action.TypeId) ?? FrontendShortcutEditorActionKind.Unsupported;
+        return ShortcutIconCatalog.GetEffectiveGlyph(actionKind, tile.IconGlyphOverride);
+    }
+
+    private static bool TryResolveMutationIconOverride(
+        string? requestedGlyph,
+        string? storedGlyph,
+        out string? iconGlyphOverride,
+        out string? failureMessage)
+    {
+        iconGlyphOverride = requestedGlyph;
+        failureMessage = null;
+        if (requestedGlyph is null || ShortcutIconCatalog.IsKnownGlyph(requestedGlyph))
+            return true;
+
+        if (string.Equals(requestedGlyph, storedGlyph, StringComparison.Ordinal))
+            return true;
+
+        iconGlyphOverride = null;
+        failureMessage = "Choose a supported Shortcut icon.";
+        return false;
+    }
 
     private static FrontendShortcutEditorAction ProjectEditorAction(ShortcutActionSpec action)
     {

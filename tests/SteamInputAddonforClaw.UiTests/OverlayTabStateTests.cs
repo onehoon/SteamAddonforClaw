@@ -12,11 +12,11 @@ public sealed class OverlayTabStateTests
         Assert.Equal(
             new[]
             {
-                AddonQuickSettingsTabId.Device,
-                AddonQuickSettingsTabId.Profile,
-                AddonQuickSettingsTabId.Controller,
                 AddonQuickSettingsTabId.Shortcut,
+                AddonQuickSettingsTabId.Device,
+                AddonQuickSettingsTabId.Controller,
                 AddonQuickSettingsTabId.Setting,
+                AddonQuickSettingsTabId.Profile,
             },
             OverlayTabState.DefaultOrder);
 
@@ -29,7 +29,7 @@ public sealed class OverlayTabStateTests
     {
         var state = new OverlayTabState();
 
-        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
     }
 
     [Fact]
@@ -57,11 +57,11 @@ public sealed class OverlayTabStateTests
     public void ResetForShowReturnsToTheFirstTabInDefaultOrder()
     {
         var state = new OverlayTabState();
-        state.Select(AddonQuickSettingsTabId.Shortcut);
+        state.Select(AddonQuickSettingsTabId.Device);
 
         state.ResetForShow();
 
-        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class OverlayTabStateTests
             var state = new OverlayTabState(order);
 
             Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
-            Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
+            Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
         }
     }
 
@@ -149,10 +149,10 @@ public sealed class OverlayTabStateTests
         var state = new OverlayTabState();
 
         Assert.True(state.SelectNext());
-        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
 
         Assert.True(state.SelectPrevious());
-        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
     }
 
     [Fact]
@@ -161,17 +161,17 @@ public sealed class OverlayTabStateTests
         var state = new OverlayTabState();
 
         Assert.True(state.SelectPrevious());
-        Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
     }
 
     [Fact]
     public void NextAtTheLastTabWrapsToTheFirstTab()
     {
         var state = new OverlayTabState();
-        state.Select(AddonQuickSettingsTabId.Setting);
+        state.Select(AddonQuickSettingsTabId.Profile);
 
         Assert.True(state.SelectNext());
-        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
     }
 
     [Fact]

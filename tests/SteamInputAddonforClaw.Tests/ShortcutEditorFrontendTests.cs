@@ -22,7 +22,9 @@ public sealed class ShortcutEditorFrontendTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
         Directory.CreateDirectory(_directory);
         var settings = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
-        var shortcutRuntime = new ShortcutRuntime(new ShortcutStore(Path.Combine(_directory, "shortcuts.json")));
+        var shortcutStore = new ShortcutStore(Path.Combine(_directory, "shortcuts.json"));
+        shortcutStore.Save(new ShortcutDocument());
+        var shortcutRuntime = new ShortcutRuntime(shortcutStore);
         var control = new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null, shortcutRuntime: shortcutRuntime);
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
@@ -74,6 +76,7 @@ public sealed class ShortcutEditorFrontendTests : IDisposable
             new SettingsStore(settingsPath), new NoOpStartupManager());
         var shortcutsPath = Path.Combine(_directory, "shortcuts.json");
         var shortcutStore = new ShortcutStore(shortcutsPath);
+        shortcutStore.Save(new ShortcutDocument());
         var control = new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null,
             shortcutRuntime: new ShortcutRuntime(shortcutStore));
         var invalidations = 0;

@@ -20,15 +20,118 @@ public sealed class ShortcutRuntimeTests : IDisposable
     private string ShortcutsPath => Path.Combine(_testDirectory, "shortcuts.json");
 
     [Fact]
-    public void Missing_document_is_an_available_empty_dashboard()
+    public void Missing_document_persists_the_exact_first_install_shortcut_defaults()
     {
+        var store = new ShortcutStore(ShortcutsPath);
+        var runtime = new ShortcutRuntime(store);
+        var loaded = store.Load();
+
+        Assert.True(File.Exists(ShortcutsPath));
+        Assert.Equal(ShortcutLoadStatus.Loaded, loaded.Status);
+        Assert.Equal(ShortcutDocument.CurrentSchemaVersion, loaded.Document.SchemaVersion);
+        using var seedJson = JsonDocument.Parse(File.ReadAllText(ShortcutsPath));
+        Assert.All(seedJson.RootElement.GetProperty("dashboard").GetProperty("tiles").EnumerateArray(), tile =>
+            Assert.False(tile.TryGetProperty("iconGlyphOverride", out _)));
+
+        var tiles = loaded.Document.Dashboard.Tiles;
+        Assert.Equal(
+            new[]
+            {
+                ("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, false),
+                ("Steam", ShortcutActionTypeIds.SteamClient, true),
+                ("Steam Big Picture", ShortcutActionTypeIds.SteamBigPicture, true),
+                ("Xbox", ShortcutActionTypeIds.XboxApp, true),
+            },
+            tiles.Select(tile => (tile.Title, tile.Action.TypeId, tile.CloseOverlayAfterLaunch)));
+        Assert.All(tiles, tile =>
+        {
+            Assert.NotEqual(Guid.Empty, tile.TileId);
+            Assert.Equal(1, tile.Action.SchemaVersion);
+            Assert.Equal(JsonValueKind.Object, tile.Action.Parameters.ValueKind);
+            Assert.Empty(tile.Action.Parameters.EnumerateObject());
+            Assert.Null(tile.IconGlyphOverride);
+        });
+        Assert.Equal(tiles.Count, tiles.Select(tile => tile.TileId).Distinct().Count());
+
+        var dashboard = runtime.Capture();
+        var editor = runtime.CaptureEditor();
+        Assert.True(dashboard.Available);
+        Assert.True(editor.Available);
+        Assert.Equal(tiles.Select(tile => (tile.TileId, tile.Title)), dashboard.Tiles.Select(tile => (tile.TileId, tile.Title)));
+        Assert.Equal(tiles.Select(tile => (tile.TileId, tile.Title)), editor.Tiles.Select(tile => (tile.TileId, tile.Title)));
+        Assert.Equal(["\uE722", "\uE7FC", "\uE7F4", "\uE990"], dashboard.Tiles.Select(tile => tile.IconGlyph));
+        Assert.Equal(dashboard.Tiles.Select(tile => tile.IconGlyph), editor.Tiles.Select(tile => tile.IconGlyph));
+        Assert.Null(editor.Tiles[0].Action.ScreenshotFolder);
+        Assert.False(editor.Tiles[0].CloseOverlayAfterLaunch);
+        Assert.All(editor.Tiles.Skip(1), tile => Assert.True(tile.CloseOverlayAfterLaunch));
+
+        var persistedIds = tiles.Select(tile => tile.TileId).ToArray();
+        var restartedRuntime = new ShortcutRuntime(store);
+        Assert.Equal(persistedIds, restartedRuntime.Capture().Tiles.Select(tile => tile.TileId));
+        Assert.Equal(persistedIds, restartedRuntime.CaptureEditor().Tiles.Select(tile => tile.TileId));
+    }
+
+    [Fact]
+    public void Existing_empty_document_is_not_seeded_or_rewritten()
+    {
+        var store = new ShortcutStore(ShortcutsPath);
+        store.Save(new ShortcutDocument());
+        var existingBytes = File.ReadAllBytes(ShortcutsPath);
+
+        var runtime = new ShortcutRuntime(store);
+
+        Assert.True(runtime.Capture().Available);
+        Assert.Empty(runtime.Capture().Tiles);
+        Assert.True(runtime.CaptureEditor().Available);
+        Assert.Empty(runtime.CaptureEditor().Tiles);
+        Assert.Equal(existingBytes, File.ReadAllBytes(ShortcutsPath));
+    }
+
+    [Fact]
+    public void Existing_nonempty_document_is_not_seeded_or_rewritten()
+    {
+        var existing = Tile("My Shortcut", "future.vendor.action", new { value = 1 });
+        Save([existing]);
+        var existingBytes = File.ReadAllBytes(ShortcutsPath);
+
         var runtime = new ShortcutRuntime(new ShortcutStore(ShortcutsPath));
 
-        var snapshot = runtime.Capture();
+        Assert.Equal(existing.TileId, Assert.Single(runtime.Capture().Tiles).TileId);
+        Assert.Equal(existing.TileId, Assert.Single(runtime.CaptureEditor().Tiles).TileId);
+        Assert.Equal(existingBytes, File.ReadAllBytes(ShortcutsPath));
+    }
 
-        Assert.True(snapshot.Available);
-        Assert.Empty(snapshot.Tiles);
-        Assert.False(File.Exists(ShortcutsPath));
+    [Fact]
+    public void Initial_seed_write_failure_makes_only_shortcuts_unavailable()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var blockedDirectory = Path.Combine(_testDirectory, "not-a-directory");
+        File.WriteAllText(blockedDirectory, "block");
+        var shortcutsPath = Path.Combine(blockedDirectory, "shortcuts.json");
+
+        var runtime = new ShortcutRuntime(new ShortcutStore(shortcutsPath));
+
+        Assert.False(runtime.Capture().Available);
+        Assert.False(runtime.CaptureEditor().Available);
+        Assert.False(File.Exists(shortcutsPath));
+    }
+
+    [Fact]
+    public void Unreadable_document_is_unavailable_and_preserved_without_seeding()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        const string original = "{\"schemaVersion\":2,\"dashboard\":{\"tiles\":[]}}";
+        File.WriteAllText(ShortcutsPath, original);
+
+        ShortcutRuntime runtime;
+        using (new FileStream(ShortcutsPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            runtime = new ShortcutRuntime(new ShortcutStore(ShortcutsPath));
+            Assert.False(runtime.Capture().Available);
+            Assert.False(runtime.CaptureEditor().Available);
+        }
+
+        Assert.Equal(original, File.ReadAllText(ShortcutsPath));
     }
 
     [Theory]
@@ -80,6 +183,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var projected = Assert.Single(runtime.Capture().Tiles);
         var result = await runtime.ExecuteAsync(tile.TileId);
 
+        Assert.Equal(ShortcutIconCatalog.FallbackGlyph, projected.IconGlyph);
         Assert.False(projected.Enabled);
         Assert.Equal(FrontendShortcutTileState.Unavailable, projected.State);
         Assert.Equal("Unsupported", projected.StatusText);

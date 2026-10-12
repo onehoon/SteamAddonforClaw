@@ -27,7 +27,14 @@
                         Opacity="0.65"
                         AutomationProperties.Name="Drag to reorder this Shortcut" />
                     <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
-                        <TextBlock FontSize="16" FontWeight="SemiBold" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon
+                                FontFamily="Segoe Fluent Icons"
+                                FontSize="16"
+                                Glyph="{x:Bind IconGlyph}"
+                                AutomationProperties.Name="Shortcut icon" />
+                            <TextBlock FontSize="16" FontWeight="SemiBold" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
                         <TextBlock Opacity="0.75" Text="{x:Bind TargetSummary}" TextTrimming="CharacterEllipsis" />
                         <TextBlock
                             Foreground="{ThemeResource SystemFillColorCautionBrush}"

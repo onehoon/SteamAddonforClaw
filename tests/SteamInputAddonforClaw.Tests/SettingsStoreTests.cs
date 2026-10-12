@@ -535,9 +535,31 @@ public sealed class SettingsStoreTests : IDisposable
     ];
 
     [Fact]
-    public void NewAppSettings_DefaultsAddonQuickSettingsTabOrderToTheFrozenOrder()
+    public void NewAppSettings_DefaultsAddonQuickSettingsTabOrderToTheShortcutFirstOrder()
     {
         Assert.Equal(AddonQuickSettingsTabOrderContract.DefaultOrder, new AppSettings().AddonQuickSettingsTabOrder);
+    }
+
+    [Fact]
+    public void Load_WhenSettingsFileIsAbsent_PersistsAndReloadsTheShortcutFirstTabOrder()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+
+        var settings = store.Load();
+
+        Assert.True(File.Exists(path));
+        Assert.Equal(AddonQuickSettingsTabOrderContract.DefaultOrder, settings.AddonQuickSettingsTabOrder);
+        using (var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path)))
+        {
+            var persistedOrder = document.RootElement.GetProperty("OverlayTabOrder").EnumerateArray()
+                .Select(item => item.GetString());
+            Assert.Equal(
+                ["Shortcut", "Device", "Controller", "Setting", "Profile"],
+                persistedOrder);
+        }
+
+        Assert.Equal(AddonQuickSettingsTabOrderContract.DefaultOrder, store.Load().AddonQuickSettingsTabOrder);
     }
 
     [Fact]

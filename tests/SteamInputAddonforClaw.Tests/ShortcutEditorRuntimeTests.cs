@@ -51,6 +51,179 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.DoesNotContain("do-not-project", JsonSerializer.Serialize(snapshot), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(FrontendShortcutEditorActionKind.ScreenshotFullscreen, "system.screenshot-fullscreen", "\uE722")]
+    [InlineData(FrontendShortcutEditorActionKind.SteamClient, "system.steam-client", "\uE7FC")]
+    [InlineData(FrontendShortcutEditorActionKind.SteamBigPicture, "system.steam-big-picture", "\uE7F4")]
+    [InlineData(FrontendShortcutEditorActionKind.XboxApp, "system.xbox-app", "\uE990")]
+    [InlineData(FrontendShortcutEditorActionKind.Executable, "system.executable", "\uE71D")]
+    [InlineData(FrontendShortcutEditorActionKind.PowerShell, "system.powershell", "\uE756")]
+    [InlineData(FrontendShortcutEditorActionKind.Url, "system.url", "\uE774")]
+    public void Runtime_projects_action_default_icon_from_type_id_not_title_or_tile_id(
+        FrontendShortcutEditorActionKind kind,
+        string typeId,
+        string expectedGlyph)
+    {
+        Save(Tile("Misleading custom title", typeId, "{}"));
+        var projected = Assert.Single(CreateRuntime().Capture().Tiles);
+        var editor = Assert.Single(CreateRuntime().CaptureEditor().Tiles);
+
+        Assert.Equal(expectedGlyph, projected.IconGlyph);
+        Assert.Equal(kind, editor.Action.Kind);
+        Assert.Equal(expectedGlyph, editor.IconGlyph);
+        Assert.Null(editor.IconGlyphOverride);
+    }
+
+    [Theory]
+    [InlineData(FrontendShortcutEditorActionKind.ScreenshotFullscreen, "system.screenshot-fullscreen", "\uE722")]
+    [InlineData(FrontendShortcutEditorActionKind.SteamClient, "system.steam-client", "\uE7FC")]
+    [InlineData(FrontendShortcutEditorActionKind.SteamBigPicture, "system.steam-big-picture", "\uE7F4")]
+    [InlineData(FrontendShortcutEditorActionKind.XboxApp, "system.xbox-app", "\uE990")]
+    public void Deleted_and_recreated_builtin_uses_default_icon_with_new_identity_and_title(
+        FrontendShortcutEditorActionKind kind,
+        string typeId,
+        string expectedGlyph)
+    {
+        var store = new ShortcutStore(DocumentPath);
+        var runtime = new ShortcutRuntime(store);
+        var original = Assert.Single(runtime.CaptureEditor().Tiles, tile => tile.Action.TypeId == typeId);
+
+        var deleted = runtime.MutateEditor(new(FrontendShortcutMutationKind.Delete, original.TileId));
+        var recreated = runtime.MutateEditor(CreateIntent("User-chosen title", kind,
+            closeOverlayAfterLaunch: kind != FrontendShortcutEditorActionKind.ScreenshotFullscreen));
+
+        Assert.True(deleted.Succeeded);
+        Assert.True(recreated.Succeeded);
+        var replacement = Assert.Single(recreated.Snapshot.Tiles, tile => tile.Action.TypeId == typeId);
+        Assert.NotEqual(original.TileId, replacement.TileId);
+        Assert.Equal("User-chosen title", replacement.Title);
+        Assert.Equal(expectedGlyph, replacement.IconGlyph);
+        Assert.Null(replacement.IconGlyphOverride);
+        Assert.Null(Assert.Single(store.Load().Document.Dashboard.Tiles, tile => tile.Action.TypeId == typeId).IconGlyphOverride);
+    }
+
+    [Fact]
+    public void Custom_icon_survives_create_save_reload_rename_and_reorder()
+    {
+        var runtime = CreateRuntime();
+        var created = runtime.MutateEditor(CreateIntent("Web", FrontendShortcutEditorActionKind.Url,
+            url: "https://example.com") with { IconGlyphOverride = "\uE722" });
+        var second = runtime.MutateEditor(CreateIntent("Steam", FrontendShortcutEditorActionKind.SteamClient));
+        var firstTile = created.Snapshot.Tiles[0];
+        var secondTileId = second.Snapshot.Tiles.Single(tile => tile.Title == "Steam").TileId;
+
+        var renamed = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, firstTile.TileId,
+            "Renamed Web", new(FrontendShortcutEditorActionKind.Url, Url: "https://example.com"),
+            CloseOverlayAfterLaunch: false, IconGlyphOverride: "\uE722"));
+        var moved = runtime.MutateEditor(new(FrontendShortcutMutationKind.Move, firstTile.TileId, TargetIndex: 1));
+        var restarted = CreateRuntime();
+
+        Assert.True(created.Succeeded && second.Succeeded && renamed.Succeeded && moved.Succeeded);
+        Assert.Equal(new[] { secondTileId, firstTile.TileId }, moved.Snapshot.Tiles.Select(tile => tile.TileId));
+        var stored = Assert.Single(restarted.CaptureEditor().Tiles, tile => tile.TileId == firstTile.TileId);
+        Assert.Equal("Renamed Web", stored.Title);
+        Assert.Equal("\uE722", stored.IconGlyphOverride);
+        Assert.Equal("\uE722", stored.IconGlyph);
+        Assert.Equal("\uE722", Assert.Single(restarted.Capture().Tiles, tile => tile.TileId == firstTile.TileId).IconGlyph);
+        using var json = JsonDocument.Parse(File.ReadAllText(DocumentPath));
+        Assert.Equal("\uE722", json.RootElement.GetProperty("dashboard").GetProperty("tiles")[1]
+            .GetProperty("iconGlyphOverride").GetString());
+    }
+
+    [Fact]
+    public void Use_default_clears_override_and_action_change_updates_default_glyph()
+    {
+        var runtime = CreateRuntime();
+        var created = runtime.MutateEditor(CreateIntent("Web", FrontendShortcutEditorActionKind.Url,
+            url: "https://example.com") with { IconGlyphOverride = "\uE722" });
+        var tile = Assert.Single(created.Snapshot.Tiles);
+
+        var changedActionKeepingOverride = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update,
+            tile.TileId, "Web", new(FrontendShortcutEditorActionKind.SteamClient),
+            CloseOverlayAfterLaunch: true, IconGlyphOverride: "\uE722"));
+        var reset = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, tile.TileId,
+            "Web", new(FrontendShortcutEditorActionKind.SteamClient),
+            CloseOverlayAfterLaunch: true, IconGlyphOverride: null));
+        var changedAgain = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, tile.TileId,
+            "Web", new(FrontendShortcutEditorActionKind.PowerShell, PowerShellScript: "Write-Output 1"),
+            CloseOverlayAfterLaunch: true, IconGlyphOverride: null));
+
+        Assert.True(changedActionKeepingOverride.Succeeded && reset.Succeeded && changedAgain.Succeeded);
+        Assert.Equal("\uE722", Assert.Single(changedActionKeepingOverride.Snapshot.Tiles).IconGlyph);
+        var resetTile = Assert.Single(reset.Snapshot.Tiles);
+        Assert.Null(resetTile.IconGlyphOverride);
+        Assert.Equal("\uE7FC", resetTile.IconGlyph);
+        var changedTile = Assert.Single(changedAgain.Snapshot.Tiles);
+        Assert.Null(changedTile.IconGlyphOverride);
+        Assert.Equal("\uE756", changedTile.IconGlyph);
+        Assert.Null(Assert.Single(Load().Dashboard.Tiles).IconGlyphOverride);
+    }
+
+    [Fact]
+    public void Invalid_icon_mutations_are_rejected_without_saving_and_delete_move_cannot_change_icons()
+    {
+        var existing = Tile("Existing", ShortcutActionTypeIds.Url, "{\"url\":\"https://example.com\"}");
+        Save(existing);
+        var runtime = CreateRuntime();
+        var before = File.ReadAllBytes(DocumentPath);
+
+        var invalidCreate = runtime.MutateEditor(CreateIntent("Invalid", FrontendShortcutEditorActionKind.Url,
+            url: "https://example.org") with { IconGlyphOverride = "\uEFFF" });
+        var invalidUpdate = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, existing.TileId,
+            "Updated", new(FrontendShortcutEditorActionKind.Url, Url: "https://example.org"),
+            CloseOverlayAfterLaunch: false, IconGlyphOverride: "not-a-glyph"));
+        var deleteWithIcon = runtime.MutateEditor(new(FrontendShortcutMutationKind.Delete, existing.TileId,
+            IconGlyphOverride: "\uE722"));
+        var moveWithIcon = runtime.MutateEditor(new(FrontendShortcutMutationKind.Move, existing.TileId,
+            TargetIndex: 0, IconGlyphOverride: "\uE722"));
+
+        Assert.False(invalidCreate.Succeeded);
+        Assert.False(invalidUpdate.Succeeded);
+        Assert.False(deleteWithIcon.Succeeded);
+        Assert.False(moveWithIcon.Succeeded);
+        Assert.Equal(before, File.ReadAllBytes(DocumentPath));
+    }
+
+    [Fact]
+    public async Task Unknown_persisted_icon_falls_back_preserves_value_and_does_not_disable_execution()
+    {
+        var unknownGlyph = "future-icon-codepoint";
+        var tile = Tile("Steam", ShortcutActionTypeIds.SteamClient, "{}") with { IconGlyphOverride = unknownGlyph };
+        Save(tile);
+        var original = File.ReadAllBytes(DocumentPath);
+        var runtime = CreateRuntime(_ => new Process());
+
+        var dashboardTile = Assert.Single(runtime.Capture().Tiles);
+        var editorTile = Assert.Single(runtime.CaptureEditor().Tiles);
+        var execution = await runtime.ExecuteAsync(tile.TileId);
+        var renamed = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, tile.TileId,
+            "Renamed Steam", new(FrontendShortcutEditorActionKind.SteamClient),
+            CloseOverlayAfterLaunch: false, IconGlyphOverride: unknownGlyph));
+
+        Assert.Equal("\uE7FC", dashboardTile.IconGlyph);
+        Assert.Equal(unknownGlyph, editorTile.IconGlyphOverride);
+        Assert.Equal("\uE7FC", editorTile.IconGlyph);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, execution.Outcome);
+        Assert.True(renamed.Succeeded);
+        Assert.Equal(unknownGlyph, Assert.Single(Load().Dashboard.Tiles).IconGlyphOverride);
+        Assert.NotEqual(original, File.ReadAllBytes(DocumentPath));
+    }
+
+    [Fact]
+    public void Schema_two_document_without_icon_property_loads_and_is_not_rewritten()
+    {
+        Directory.CreateDirectory(_directory);
+        const string original = "{\"schemaVersion\":2,\"dashboard\":{\"tiles\":[{\"tileId\":\"22222222-2222-2222-2222-222222222222\",\"title\":\"Steam\",\"closeOverlayAfterLaunch\":false,\"action\":{\"typeId\":\"system.steam-client\",\"schemaVersion\":1,\"parameters\":{}}}]}}";
+        File.WriteAllText(DocumentPath, original);
+
+        var runtime = new ShortcutRuntime(new ShortcutStore(DocumentPath));
+
+        Assert.True(runtime.Capture().Available);
+        Assert.Equal("\uE7FC", Assert.Single(runtime.Capture().Tiles).IconGlyph);
+        Assert.Null(Assert.Single(runtime.CaptureEditor().Tiles).IconGlyphOverride);
+        Assert.Equal(original, File.ReadAllText(DocumentPath));
+    }
+
     [Fact]
     public void Create_update_move_delete_round_trip_through_the_runtime_store()
     {
@@ -521,8 +694,12 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.True(JsonSerializer.SerializeToUtf8Bytes(response, FrontendWireCodec.Json).Length < FrontendWireCodec.MaxFrameBytes);
     }
 
-    private ShortcutRuntime CreateRuntime(Func<ProcessStartInfo, Process?>? startProcess = null) =>
-        new(new ShortcutStore(DocumentPath), startProcess);
+    private ShortcutRuntime CreateRuntime(Func<ProcessStartInfo, Process?>? startProcess = null)
+    {
+        if (!File.Exists(DocumentPath) && !Directory.Exists(DocumentPath))
+            new ShortcutStore(DocumentPath).Save(new ShortcutDocument());
+        return new ShortcutRuntime(new ShortcutStore(DocumentPath), startProcess);
+    }
 
     private void Save(params ShortcutTileDefinition[] tiles)
     {

@@ -11,11 +11,11 @@ public sealed class AddonQuickSettingsTabOrderContractTests
         Assert.Equal(
             new[]
             {
-                AddonQuickSettingsTabId.Device,
-                AddonQuickSettingsTabId.Profile,
-                AddonQuickSettingsTabId.Controller,
                 AddonQuickSettingsTabId.Shortcut,
+                AddonQuickSettingsTabId.Device,
+                AddonQuickSettingsTabId.Controller,
                 AddonQuickSettingsTabId.Setting,
+                AddonQuickSettingsTabId.Profile,
             },
             AddonQuickSettingsTabOrderContract.DefaultOrder);
 
@@ -28,7 +28,7 @@ public sealed class AddonQuickSettingsTabOrderContractTests
         var first = AddonQuickSettingsTabOrderContract.DefaultOrder;
         ((AddonQuickSettingsTabId[])first)[0] = AddonQuickSettingsTabId.Setting;
 
-        Assert.Equal(AddonQuickSettingsTabId.Device, AddonQuickSettingsTabOrderContract.DefaultOrder[0]);
+        Assert.Equal(AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabOrderContract.DefaultOrder[0]);
     }
 
     [Fact]
@@ -162,20 +162,20 @@ public sealed class AddonQuickSettingsTabOrderContractTests
     public void Product_move_swaps_exactly_one_adjacent_pair(int delta)
     {
         var current = AddonQuickSettingsTabOrderContract.DefaultOrder;
-        var intent = new AddonQuickSettingsTabOrderMoveIntent(AddonQuickSettingsTabId.Profile, delta);
+        var intent = new AddonQuickSettingsTabOrderMoveIntent(AddonQuickSettingsTabId.Controller, delta);
 
         Assert.True(AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(current, intent, out var proposed));
         Assert.Equal(
             delta < 0
-                ? [AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting]
-                : [AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting],
+                ? [AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Profile]
+                : [AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Profile],
             proposed);
     }
 
     [Theory]
     [InlineData((AddonQuickSettingsTabId)99, 1)]
-    [InlineData(AddonQuickSettingsTabId.Device, -1)]
-    [InlineData(AddonQuickSettingsTabId.Setting, 1)]
+    [InlineData(AddonQuickSettingsTabId.Shortcut, -1)]
+    [InlineData(AddonQuickSettingsTabId.Profile, 1)]
     [InlineData(AddonQuickSettingsTabId.Profile, 0)]
     [InlineData(AddonQuickSettingsTabId.Profile, 2)]
     public void Product_rejects_invalid_or_boundary_moves(AddonQuickSettingsTabId tabId, int delta)

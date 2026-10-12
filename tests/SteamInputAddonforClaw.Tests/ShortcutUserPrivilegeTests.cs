@@ -184,8 +184,12 @@ public sealed class ShortcutUserPrivilegeTests : IDisposable
         Assert.Empty(requests[3].StartInfo.ArgumentList);
     }
 
-    private ShortcutRuntime CreateRuntime(UserProcessLauncher launcher, Func<string, bool>? fileExists = null) =>
-        new(new ShortcutStore(StorePath), fileExists: fileExists, userProcessLauncher: launcher);
+    private ShortcutRuntime CreateRuntime(UserProcessLauncher launcher, Func<string, bool>? fileExists = null)
+    {
+        if (!File.Exists(StorePath) && !Directory.Exists(StorePath))
+            new ShortcutStore(StorePath).Save(new ShortcutDocument());
+        return new ShortcutRuntime(new ShortcutStore(StorePath), fileExists: fileExists, userProcessLauncher: launcher);
+    }
 
     private void Save(params ShortcutTileDefinition[] tiles) =>
         new ShortcutStore(StorePath).Save(new ShortcutDocument { Dashboard = new ShortcutDashboardDefinition(tiles) });
