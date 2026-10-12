@@ -20,6 +20,9 @@ public sealed record AppSettings(
 
     public bool DeveloperMenuEnabled { get; init; }
 
+    /// <summary>Experimental right-side touchscreen mapping; disabled unless explicitly enabled.</summary>
+    public bool ExperimentalVirtualTouchpadEnabled { get; init; }
+
     /// <summary>When enabled, compact Quick Settings surfaces show only the currently active AC/DC
     /// side. The complete saved configuration is always retained.</summary>
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }

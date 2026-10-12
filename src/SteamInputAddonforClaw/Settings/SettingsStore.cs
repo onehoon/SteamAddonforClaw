@@ -61,6 +61,8 @@ public sealed class SettingsStore
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
             var developerMenuEnabled = root.TryGetProperty("DeveloperMenuEnabled", out var developerMenuProperty) && developerMenuProperty.ValueKind == JsonValueKind.True && developerMenuProperty.GetBoolean();
+            var experimentalVirtualTouchpadEnabled = root.TryGetProperty("ExperimentalVirtualTouchpadEnabled", out var touchpadProperty)
+                && touchpadProperty.ValueKind == JsonValueKind.True && touchpadProperty.GetBoolean();
             var quickSettingsCurrentPowerSourceOnly = root.TryGetProperty("QuickSettingsCurrentPowerSourceOnly", out var currentPowerProperty)
                 && currentPowerProperty.ValueKind == JsonValueKind.True && currentPowerProperty.GetBoolean();
             var clawHudEnabled = root.TryGetProperty("ClawHudEnabled", out var clawHudProperty)
@@ -71,6 +73,7 @@ public sealed class SettingsStore
             {
                 ClawHudEnabled = clawHudEnabled,
                 DeveloperMenuEnabled = developerMenuEnabled,
+                ExperimentalVirtualTouchpadEnabled = experimentalVirtualTouchpadEnabled,
                 QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
                 SteamVirtualController = ReadSteamVirtualController(root),
                 FrontButtonMapping = ReadFrontButtonMapping(root, selectedFrontButtonMappingDefault),
@@ -305,7 +308,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SteamVirtualController, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SteamVirtualController, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

@@ -43,6 +43,13 @@ public sealed class AddonProcessHostResumeTests
         Assert.Contains("if (presentation is null)", quiesce);
         Assert.Contains("PauseForSuspendAsync", quiesce);
         Assert.True(
+            quiesce.IndexOf("_touchpadCapture.CloseAdmission()", StringComparison.Ordinal)
+            < quiesce.IndexOf("QuiescePresentationThenStopTouchCaptureForSuspendAsync(", StringComparison.Ordinal));
+        Assert.True(
+            quiesce.IndexOf("PauseForSuspendAsync", StringComparison.Ordinal)
+            < quiesce.IndexOf("SetArmedAsync(false, \"Suspend\", CancellationToken.None)", StringComparison.Ordinal),
+            "the controller pause must not wait behind the optional capture-window join");
+        Assert.True(
             quiesce.IndexOf("PauseForSuspendAsync", StringComparison.Ordinal)
             < quiesce.IndexOf("await StopMotionSourceAsync(\"Suspend\")", StringComparison.Ordinal),
             "the presentation safety pause must complete before joining potentially blocked sensor readers");
@@ -60,6 +67,31 @@ public sealed class AddonProcessHostResumeTests
         Assert.True(
             reconcile.IndexOf("source.ResetLatestStateToNeutral()", StringComparison.Ordinal)
             < reconcile.IndexOf("ResumeAfterSuspendAsync", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Suspend_runs_core_presentation_quiesce_even_when_optional_touch_capture_stop_fails(bool throws)
+    {
+        var events = new List<string>();
+
+        var safe = await AddonProcessHost.QuiescePresentationThenStopTouchCaptureForSuspendAsync(
+            () =>
+            {
+                events.Add("PresentationPause");
+                return Task.FromResult(true);
+            },
+            () =>
+            {
+                events.Add("TouchCaptureStop");
+                return throws
+                    ? Task.FromException<bool>(new InvalidOperationException("touch window close failed"))
+                    : Task.FromResult(false);
+            });
+
+        Assert.Equal(new[] { "PresentationPause", "TouchCaptureStop" }, events);
+        Assert.False(safe);
     }
 
     [Fact]

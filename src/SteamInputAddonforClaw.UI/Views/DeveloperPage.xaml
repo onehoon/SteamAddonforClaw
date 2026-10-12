@@ -22,6 +22,16 @@
                 Text="These diagnostics are for developers only. General users should not use this menu."
                 TextWrapping="Wrap" />
 
+            <ctcontrols:SettingsCard Header="Virtual Touchpad (Experimental)" Description="Right quarter of the primary touchscreen. Active only during a foreground Steam game with a live Steam Deck virtual controller; not in BPM browsing, Xbox360, or DualSense Edge.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="TouchPointer" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <StackPanel Spacing="4">
+                    <ToggleSwitch x:Name="ExperimentalVirtualTouchpadToggle" OffContent="" OnContent="" Toggled="ExperimentalVirtualTouchpadToggle_Toggled" />
+                    <TextBlock x:Name="ExperimentalVirtualTouchpadStatusText" Opacity="0.7" TextWrapping="Wrap" Visibility="Collapsed" />
+                </StackPanel>
+            </ctcontrols:SettingsCard>
+
             <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
                 <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

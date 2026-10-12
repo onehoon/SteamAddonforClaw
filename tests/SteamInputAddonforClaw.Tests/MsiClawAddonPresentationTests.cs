@@ -249,6 +249,36 @@ public sealed class MsiClawAddonPresentationTests
         await h.Owner.DisposeAsync();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Optional_touch_capture_retirement_failure_does_not_block_native_presentation_switch(bool throws)
+    {
+        var callbackCount = 0;
+        var h = new SwitchHarness(_ =>
+        {
+            callbackCount++;
+            return throws
+                ? Task.FromException<bool>(new InvalidOperationException("touch window close failed"))
+                : Task.FromResult(false);
+        }) { Snapshot = WantsDeck() };
+
+        var initial = await h.Owner.AttachInitialAsync(h.Source, h.Snapshot, default);
+        Assert.True(initial.Succeeded);
+        var oldPublisher = Assert.Single(h.DeckPublishers);
+
+        h.Snapshot = WantsXbox();
+        var switched = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Switched, switched.Outcome);
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation);
+        Assert.Equal(1, callbackCount);
+        Assert.True(oldPublisher.StopCalled);
+        Assert.Contains("DetachUSBDeviceEx", h.Native.Calls);
+        Assert.Equal(2, h.Native.Calls.Count(call => call == "AttachUSBDeviceEx"));
+        await h.Owner.DisposeAsync();
+    }
+
     [Fact]
     public async Task Edge_system_pulses_are_live_only_and_cleared_by_overlay_and_suspend_lifecycle()
     {
@@ -1242,7 +1272,7 @@ public sealed class MsiClawAddonPresentationTests
 
         public Func<SteamPresentationSnapshot> Capture => () => Snapshot;
 
-        public SwitchHarness()
+        public SwitchHarness(Func<CancellationToken, Task<bool>>? beforePresentationRetire = null)
         {
             Native.EdgeCreateSucceeds = true;
             var runtime = CanonicalViiperRuntime.TryInitialize(Native, "127.0.0.1:3242");
@@ -1256,7 +1286,8 @@ public sealed class MsiClawAddonPresentationTests
                 steamGameControllerPreferenceProvider: appId => GamePreferences.TryGetValue(appId, out var gamePreference)
                     ? gamePreference
                     : (false, (SteamVirtualControllerPreference?)null),
-                edgePublisherFactory: (_, _, overlay, fault) => { var p = new FakePublisher { Fault = fault }; EdgeOverlays.Add(overlay); EdgePublishers.Add(p); return p; });
+                edgePublisherFactory: (_, _, overlay, fault) => { var p = new FakePublisher { Fault = fault }; EdgeOverlays.Add(overlay); EdgePublishers.Add(p); return p; },
+                beforePresentationRetire: beforePresentationRetire);
         }
     }
 

@@ -51,6 +51,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? _controllerLedProfileReadProbe;
     private readonly Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? _testControllerVibrationMotor;
     private readonly Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? _runDeveloperRumbleRearm;
+    private readonly Func<CancellationToken, Task<bool>>? _reconcileExperimentalVirtualTouchpad;
     private int _controllerExclusiveOperationInFlight;
 
     /// <summary>Wraps the Runtime-owned <see cref="ClawSensorProbeCoordinator"/> for one active
@@ -171,7 +172,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? controllerLedProfileReadProbe = null,
         Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null,
         Action<string>? requestControllerPresentationReconcile = null,
-        Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null)
+        Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null,
+        Func<CancellationToken, Task<bool>>? reconcileExperimentalVirtualTouchpad = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -219,6 +221,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _controllerLedProfileReadProbe = controllerLedProfileReadProbe;
         _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
         _requestControllerPresentationReconcile = requestControllerPresentationReconcile;
+        _reconcileExperimentalVirtualTouchpad = reconcileExperimentalVirtualTouchpad;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -952,6 +955,27 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _settings.ChangeQuickSettingsCurrentPowerSourceOnly(enabled);
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(MapSettings());
+    }
+
+    public async Task<FrontendSettingsSnapshot> SetExperimentalVirtualTouchpadEnabledAsync(
+        bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var previous = _settings.ExperimentalVirtualTouchpadEnabled;
+        _settings.ChangeExperimentalVirtualTouchpadEnabled(enabled);
+        if (previous == enabled)
+            return MapSettings();
+
+        AppLog.Info("Touchpad", "Experimental touchpad preference saved.",
+            ("Event", "TouchpadToggleSaved"), ("PreviousEnabled", previous), ("Enabled", enabled));
+        var reconciled = _reconcileExperimentalVirtualTouchpad is null
+            || await _reconcileExperimentalVirtualTouchpad(CancellationToken.None).ConfigureAwait(false);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        if (!reconciled)
+            AppLog.Warn("Touchpad", "Preference persisted, but the capture window lifecycle did not confirm the requested state.", null,
+                ("Event", "TouchpadCaptureUnavailable"), ("Enabled", enabled));
+        return MapSettings();
     }
 
     public Task<FrontendSettingsSnapshot> SetSteamVirtualControllerAsync(
@@ -1693,7 +1717,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1

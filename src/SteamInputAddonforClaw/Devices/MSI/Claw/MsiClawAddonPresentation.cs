@@ -316,6 +316,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly Func<IXbox360RumbleLoopXInput> _rumbleLoopXInputFactory;
     private readonly Func<IXbox360UsbTraceCapture>? _rumbleLoopUsbTraceCaptureFactory;
     private readonly Func<MsiClawMotionState>? _motionSnapshotProvider;
+    private readonly Func<SteamDeckRightPadContact>? _rightPadProvider;
+    private readonly Func<CancellationToken, Task<bool>>? _beforePresentationRetire;
     private readonly TimeSpan _rumbleLoopBurstStepCadence;
     private readonly TimeSpan _rumbleLoopCycleIdle;
     private readonly TimeSpan _rumbleLoopTerminalCallbackTimeout;
@@ -380,7 +382,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         Func<SteamVirtualControllerPreference>? steamVirtualControllerPreferenceProvider = null,
         Func<CanonicalViiperRuntime, ICanonicalDualSenseEdgeSession>? edgeSessionFactory = null,
         Func<IControllerStateSnapshotSource, ICanonicalDualSenseEdgeStateSink, DualSenseEdgeSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? edgePublisherFactory = null,
-        Func<uint, (bool Enabled, SteamVirtualControllerPreference? Preference)>? steamGameControllerPreferenceProvider = null)
+        Func<uint, (bool Enabled, SteamVirtualControllerPreference? Preference)>? steamGameControllerPreferenceProvider = null,
+        Func<SteamDeckRightPadContact>? rightPadProvider = null,
+        Func<CancellationToken, Task<bool>>? beforePresentationRetire = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
@@ -393,6 +397,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         _physicalRumbleTestAvailabilityProvider = physicalRumbleTestAvailabilityProvider;
         _delay = delay ?? Task.Delay;
         _motionSnapshotProvider = motionSnapshotProvider;
+        _rightPadProvider = rightPadProvider;
+        _beforePresentationRetire = beforePresentationRetire;
         _requires250Hz = requires250Hz ?? (static () => true);
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
         _edgeSessionFactory = edgeSessionFactory ?? (runtime => new CanonicalDualSenseEdgeSession(runtime));
@@ -414,7 +420,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 fault: fault,
                 systemButtonOverlay: overlay,
                 rearButtonSuppressionProvider: ShouldSuppressRearButton,
-                motionSnapshotProvider: _motionSnapshotProvider)));
+                motionSnapshotProvider: _motionSnapshotProvider,
+                rightPadProvider: _rightPadProvider)));
         _edgePublisherFactory = edgePublisherFactory
             ?? ((source, sink, overlay, fault) => new PublisherAdapter(new CanonicalDualSenseEdgeInputPublisher(
                 source,
@@ -1755,6 +1762,23 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// Assumes <see cref="_gate"/> is already held; never reacquires it (work order PR7 section 14).</summary>
     private async Task<PresentationRetirementResult> RetireActivePresentationCoreAsync(string reason, CancellationToken cancellationToken = default)
     {
+        if ((_activeKind is not null || _publisher is not null) && _beforePresentationRetire is not null)
+        {
+            try
+            {
+                if (!await _beforePresentationRetire(cancellationToken).ConfigureAwait(false))
+                {
+                    AppLog.Warn("Touchpad", "Capture close unconfirmed; proceeding with canonical presentation retirement.", null,
+                        ("Reason", reason), ("Event", "TouchpadDisarmBeforePresentationRetireFailed"));
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                AppLog.Warn("Touchpad", "Optional capture teardown failed; proceeding with canonical presentation retirement.", exception,
+                    ("Reason", reason), ("Event", "TouchpadDisarmBeforePresentationRetireFailed"));
+            }
+        }
+
         await CancelRumbleLoopForLifecycleLockedAsync(reason).ConfigureAwait(false);
         _edgeSystemButtonOverlay.Clear();
         cancellationToken.ThrowIfCancellationRequested();

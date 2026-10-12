@@ -264,6 +264,40 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.True(store.Load().DeveloperMenuEnabled);
     }
 
+    [Theory]
+    [InlineData("{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true}")]
+    [InlineData("{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true,\"ExperimentalVirtualTouchpadEnabled\":null}")]
+    [InlineData("{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true,\"ExperimentalVirtualTouchpadEnabled\":1}")]
+    [InlineData("{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true,\"ExperimentalVirtualTouchpadEnabled\":\"true\"}")]
+    public void ExperimentalVirtualTouchpad_MissingOrMalformedValueDefaultsOffWithoutResettingOtherSettings(string json)
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var path = Path.Combine(_testDirectory, "settings.json");
+        File.WriteAllText(path, json);
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.False(settings.ExperimentalVirtualTouchpadEnabled);
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+        Assert.True(settings.DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void ExperimentalVirtualTouchpadCoordinatorPersistsTrueAndFalse()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        coordinator.ChangeExperimentalVirtualTouchpadEnabled(true);
+        Assert.True(coordinator.ExperimentalVirtualTouchpadEnabled);
+        Assert.True(store.Load().ExperimentalVirtualTouchpadEnabled);
+
+        coordinator.ChangeExperimentalVirtualTouchpadEnabled(false);
+        Assert.False(coordinator.ExperimentalVirtualTouchpadEnabled);
+        Assert.False(store.Load().ExperimentalVirtualTouchpadEnabled);
+    }
+
     [Fact]
     public void QuickSettingsCurrentPowerSourceOnly_DefaultsToFalse_WhenMissing()
     {
