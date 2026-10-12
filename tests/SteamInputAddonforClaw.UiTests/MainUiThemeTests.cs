@@ -127,6 +127,9 @@ public sealed class MainUiThemeTests
             element.Name.LocalName == "Grid"
             && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "MainAppRoot");
         var mainWindowCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
+        var themeMethodStart = mainWindowCode.IndexOf("private void ApplyMainUiTheme()", StringComparison.Ordinal);
+        var themeMethodEnd = mainWindowCode.IndexOf("private ElementTheme ReadWindowsAppTheme()", themeMethodStart, StringComparison.Ordinal);
+        var themeMethod = mainWindowCode[themeMethodStart..themeMethodEnd];
 
         Assert.Contains(root.Elements(), element => element.Name.LocalName == "NavigationView");
         Assert.Contains(root.Elements(), element =>
@@ -135,6 +138,11 @@ public sealed class MainUiThemeTests
         Assert.Contains("MainAppRoot.RequestedTheme =", mainWindowCode, StringComparison.Ordinal);
         Assert.Contains("AppsUseLightTheme", mainWindowCode, StringComparison.Ordinal);
         Assert.Contains("_systemUiSettings.ColorValuesChanged += SystemUiSettings_ColorValuesChanged", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("var theme = _mainUiThemePreference switch", themeMethod, StringComparison.Ordinal);
+        Assert.Contains("MainAppRoot.RequestedTheme = theme;", themeMethod, StringComparison.Ordinal);
+        Assert.Contains("AppWindow.TitleBar.PreferredTheme = theme == ElementTheme.Dark", themeMethod, StringComparison.Ordinal);
+        Assert.Contains("? TitleBarTheme.Dark", themeMethod, StringComparison.Ordinal);
+        Assert.Contains(": TitleBarTheme.Light;", themeMethod, StringComparison.Ordinal);
         Assert.DoesNotContain("Application.Current.RequestedTheme =", mainWindowCode, StringComparison.Ordinal);
         Assert.DoesNotContain("App.Current.RequestedTheme =", mainWindowCode, StringComparison.Ordinal);
     }

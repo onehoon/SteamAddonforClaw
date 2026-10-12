@@ -199,12 +199,17 @@ public sealed partial class MainWindow : Window
 
     private void ApplyMainUiTheme()
     {
-        MainAppRoot.RequestedTheme = _mainUiThemePreference switch
+        var theme = _mainUiThemePreference switch
         {
             MainUiTheme.Light => ElementTheme.Light,
             MainUiTheme.Dark => ElementTheme.Dark,
             _ => ReadWindowsAppTheme(),
         };
+
+        MainAppRoot.RequestedTheme = theme;
+        AppWindow.TitleBar.PreferredTheme = theme == ElementTheme.Dark
+            ? TitleBarTheme.Dark
+            : TitleBarTheme.Light;
     }
 
     private ElementTheme ReadWindowsAppTheme()
