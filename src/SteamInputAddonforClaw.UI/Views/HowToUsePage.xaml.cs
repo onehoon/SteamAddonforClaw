@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using Windows.UI;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -76,7 +77,7 @@ public sealed partial class HowToUsePage : UserControl
         if (_documentationWebView is not null)
             return _documentationWebView;
 
-        var webView = new WebView2();
+        var webView = new WebView2 { DefaultBackgroundColor = Color.FromArgb(255, 255, 255, 255) };
         DocumentationWebViewHost.Children.Add(webView);
         _documentationWebView = webView;
         AppLog.Debug("HowToUse", "WebView2 control created lazily.");

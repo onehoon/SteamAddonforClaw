@@ -12,9 +12,12 @@ using Windows.Foundation;
 using WinRT.Interop;
 using System.Diagnostics;
 using Microsoft.UI.Dispatching;
+using Microsoft.Win32;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.UI;
 using SteamInputAddonforClaw.Views;
+using Windows.UI.ViewManagement;
 
 namespace SteamInputAddonforClaw;
 
@@ -22,6 +25,10 @@ public sealed partial class MainWindow : Window
 {
     private readonly IAddonFrontendControl _frontend;
     private readonly FrontendBootstrapSnapshot _bootstrap;
+    private readonly MainUiThemePreferenceStore? _mainUiThemePreferenceStore;
+    private MainUiTheme _mainUiThemePreference = MainUiTheme.System;
+    private ElementTheme _systemAppThemeFallback = ElementTheme.Dark;
+    private UISettings? _systemUiSettings;
     private readonly MainNavigationState _navigationState = new();
     private FrontendStatusSnapshot? _latestSystemStatus;
     // Bootstrap is captured once at startup and never re-fetched; a mutation made through the
@@ -68,6 +75,21 @@ public sealed partial class MainWindow : Window
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         _bootstrap = bootstrap ?? throw new ArgumentNullException(nameof(bootstrap));
+        MainUiThemePreferenceStore? themePreferenceStore = null;
+        var mainUiThemePreference = MainUiTheme.System;
+        try
+        {
+            themePreferenceStore = new MainUiThemePreferenceStore(bootstrap.LogDirectoryPath);
+            mainUiThemePreference = themePreferenceStore.Load(out var loadFailure);
+            if (loadFailure is not null)
+                AppLog.Warn("Theme", "Main UI theme preference could not be read; using System.", loadFailure);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Theme", "Main UI theme preference path could not be initialized; using System.", exception);
+        }
+        _mainUiThemePreferenceStore = themePreferenceStore;
+        _mainUiThemePreference = mainUiThemePreference;
         _suppressDeveloperMenuWarning = bootstrap.Settings.SuppressDeveloperMenuWarning;
         _frontButtonUiMapping = bootstrap.Settings.FrontButtonMapping;
         _frontButtonPersistedMapping = bootstrap.Settings.FrontButtonMapping;
@@ -77,12 +99,18 @@ public sealed partial class MainWindow : Window
         _controllerLedPersistedSettings = bootstrap.Settings.ControllerLed;
 
         InitializeComponent();
+        _systemAppThemeFallback = MainAppRoot.ActualTheme is ElementTheme.Light or ElementTheme.Dark
+            ? MainAppRoot.ActualTheme
+            : ElementTheme.Dark;
+        ApplyMainUiTheme();
+        InitializeSystemThemeTracking();
         Title = FormatWindowTitle(GetDisplayVersion());
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ApplyDefaultWindowSize();
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
-        SettingsContent.Initialize(_bootstrap, _frontend);
+        SettingsContent.AppThemeSelectionRequested += OnAppThemeSelectionRequested;
+        SettingsContent.Initialize(_bootstrap, _frontend, _mainUiThemePreference);
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
         XboxContent.Initialize(_frontend);
@@ -135,9 +163,98 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        SettingsContent.AppThemeSelectionRequested -= OnAppThemeSelectionRequested;
+        if (_systemUiSettings is not null)
+            _systemUiSettings.ColorValuesChanged -= SystemUiSettings_ColorValuesChanged;
         _frontend.StateInvalidated -= OnFrontendStateInvalidated;
         ControllerContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
         ProfileContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
+    }
+
+    private void OnAppThemeSelectionRequested(MainUiTheme theme)
+    {
+        if (theme == _mainUiThemePreference)
+        {
+            SettingsContent.SetAppThemeSelection(_mainUiThemePreference);
+            return;
+        }
+
+        Exception? saveFailure = null;
+        if (_mainUiThemePreferenceStore is null
+            || !_mainUiThemePreferenceStore.TrySave(theme, out saveFailure))
+        {
+            AppLog.Warn("Theme", "Main UI theme preference could not be saved; retaining the previous selection.",
+                saveFailure ?? new IOException("The theme preference store is unavailable."));
+            SettingsContent.SetAppThemeSelection(
+                _mainUiThemePreference,
+                "Theme could not be saved. The previous selection was kept.");
+            return;
+        }
+
+        _mainUiThemePreference = theme;
+        ApplyMainUiTheme();
+        SettingsContent.SetAppThemeSelection(_mainUiThemePreference);
+        AppLog.Info("Theme", "Main UI theme changed.", ("Theme", _mainUiThemePreference));
+    }
+
+    private void ApplyMainUiTheme()
+    {
+        var theme = _mainUiThemePreference switch
+        {
+            MainUiTheme.Light => ElementTheme.Light,
+            MainUiTheme.Dark => ElementTheme.Dark,
+            _ => ReadWindowsAppTheme(),
+        };
+
+        MainAppRoot.RequestedTheme = theme;
+        AppWindow.TitleBar.PreferredTheme = theme == ElementTheme.Dark
+            ? TitleBarTheme.Dark
+            : TitleBarTheme.Light;
+    }
+
+    private ElementTheme ReadWindowsAppTheme()
+    {
+        try
+        {
+            using var personalization = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                writable: false);
+            var appsUseLightTheme = personalization?.GetValue("AppsUseLightTheme") as int?;
+            _systemAppThemeFallback = MainUiThemePreferenceStore.ResolveSystemTheme(
+                appsUseLightTheme,
+                _systemAppThemeFallback);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            AppLog.Warn("Theme", "Windows app appearance could not be read; retaining the last known system theme.", exception);
+        }
+
+        return _systemAppThemeFallback;
+    }
+
+    private void InitializeSystemThemeTracking()
+    {
+        try
+        {
+            _systemUiSettings = new UISettings();
+            _systemUiSettings.ColorValuesChanged += SystemUiSettings_ColorValuesChanged;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Theme", "Windows appearance change notifications are unavailable.", exception);
+        }
+    }
+
+    private void SystemUiSettings_ColorValuesChanged(UISettings sender, object args)
+    {
+        if (!DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_mainUiThemePreference == MainUiTheme.System)
+                    ApplyMainUiTheme();
+            }))
+        {
+            AppLog.Debug("Theme", "Windows appearance change ignored because the UI dispatcher is unavailable.");
+        }
     }
 
     private void OnSteamActivityRefreshRequested(object? sender, EventArgs args)

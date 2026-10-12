@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.UI;
 using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.Views;
@@ -19,25 +20,29 @@ public sealed partial class SettingsPage : UserControl
     private bool _applyingQuickSettingsPowerSourcePreference;
     private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
     private bool _isInitializingLogLevel;
+    private bool _isApplyingAppThemeSelection;
     private FrontendLogLevel _lastKnownLogLevel;
     private string _logDirectoryPath = string.Empty;
+    private const string DefaultAppThemeDescription = "Choose the main app appearance.";
     private bool IsStartupWritable =>
         _gamingHomeSnapshot.Available
         && _gamingHomeSnapshot.Selection is FrontendGamingHomeSelection.Xbox or FrontendGamingHomeSelection.SteamBigPicture
         && Volatile.Read(ref _gamingHomeMutationInProgress) == 0;
     public event EventHandler? DeveloperMenuRequested;
+    internal event Action<MainUiTheme>? AppThemeSelectionRequested;
 
     public SettingsPage()
     {
         InitializeComponent();
     }
 
-    internal void Initialize(FrontendBootstrapSnapshot bootstrap, IAddonFrontendControl frontend)
+    internal void Initialize(FrontendBootstrapSnapshot bootstrap, IAddonFrontendControl frontend, MainUiTheme appTheme)
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
         _lastKnownLogLevel = bootstrap.Settings.LogLevel;
         _logDirectoryPath = bootstrap.LogDirectoryPath;
+        SetAppThemeSelection(appTheme);
         SetLogLevel(_lastKnownLogLevel);
         _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
         SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
@@ -47,6 +52,35 @@ public sealed partial class SettingsPage : UserControl
 
     internal void RequestAppUpdateRefresh() => _ = RefreshAppUpdateAsync();
     internal void RequestGamingHomeRefresh() => _ = RefreshGamingHomeAsync();
+
+    internal void SetAppThemeSelection(MainUiTheme theme, string? failureDescription = null)
+    {
+        _isApplyingAppThemeSelection = true;
+        try
+        {
+            AppThemeComboBox.SelectedItem = AppThemeComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, theme.ToString(), StringComparison.Ordinal));
+            AppThemeCard.Description = failureDescription ?? DefaultAppThemeDescription;
+        }
+        finally
+        {
+            _isApplyingAppThemeSelection = false;
+        }
+    }
+
+    private void AppThemeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_isApplyingAppThemeSelection
+            || AppThemeComboBox.SelectedItem is not ComboBoxItem { Tag: string value }
+            || !Enum.TryParse<MainUiTheme>(value, ignoreCase: false, out var theme)
+            || !Enum.IsDefined(theme))
+        {
+            return;
+        }
+
+        AppThemeSelectionRequested?.Invoke(theme);
+    }
 
     private async Task RefreshAppUpdateAsync()
     {
