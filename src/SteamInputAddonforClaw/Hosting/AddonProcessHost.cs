@@ -799,7 +799,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
         // scheduled once shutdown admission closes.
         _frontendControl.StateInvalidated += OnFrontendStateInvalidatedForOverlay;
-        _overlayStartup = StartOverlayWarmupAsync();
 
         // Full1902 Policy B: _startupComposition is retained (nulled at dispose) so the deferred
         // Disabled-mode controller startup can reuse it off the message-loop thread.
@@ -2797,6 +2796,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (cancellationToken.IsCancellationRequested
                 || Volatile.Read(ref _processShutdownStarted) != 0)
                 return;
+
+            // Optional Overlay warmup starts only after the initial Full1902 controller attempt
+            // has completed. It remains non-blocking and is independent of acquisition success.
+            _overlayStartup = StartOverlayWarmupAsync();
 
             // CH-A2: optional ClawHUD work starts only after the Full1902 controller-critical
             // attempt has completed and its admission barrier has been cleared.
