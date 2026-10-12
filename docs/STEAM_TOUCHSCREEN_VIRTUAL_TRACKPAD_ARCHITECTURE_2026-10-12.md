@@ -170,11 +170,11 @@ An input-only window is still a **top-level window**. The claim that it cannot a
 
 ### 5.1.1 Phase 0 implementation and real-device evidence (2026-10-12)
 
-**Code boundary:** [PR #768](https://github.com/onehoon/SteamAddonforClaw/pull/768) merged the standalone .NET 10 / Win32 diagnostic at [\`tools/TouchpadPoc/\`](../tools/TouchpadPoc/), following the [single-zone Phase 0 work order](work-order/TOUCHPAD_POC_PHASE0_BOTTOM_RIGHT_QUARTER_WORK_ORDER_2026-10-12.md). This is **not** Runtime-integrated, a Steam Input publisher, a VIIPER touch mapper, an editor, or the final two-zone system. No production routing ownership changed.
+**Code boundary:** [PR #768](https://github.com/onehoon/SteamAddonforClaw/pull/768) merged the standalone .NET 10 / Win32 diagnostic at [`tools/TouchpadPoc/`](../tools/TouchpadPoc/), following the [single-zone Phase 0 work order](work-order/TOUCHPAD_POC_PHASE0_BOTTOM_RIGHT_QUARTER_WORK_ORDER_2026-10-12.md). This is **not** Runtime-integrated, a Steam Input publisher, a VIIPER touch mapper, an editor, or the final two-zone system. No production routing ownership changed.
 
-- **Exactly one window and one input area:** the bottom-right quarter of the primary physical display. On the measured **1920 x 1200, 150% DPI** Claw setup, primary/window dimensions were **\`X=960, Y=600, W=960, H=600\`**, with per-monitor-v2 DPI awareness, \`windowDpi=144\`. The requested and observed window rectangles and extended styles matched. The recorded EXSTYLE was \`0x08200088\` (\`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST\`).
+- **Exactly one window and one input area:** the bottom-right quarter of the primary physical display. On the measured **1920 x 1200, 150% DPI** Claw setup, primary/window dimensions were **`X=960, Y=600, W=960, H=600`**, with per-monitor-v2 DPI awareness, `windowDpi=144`. The requested and observed window rectangles and extended styles matched. The recorded EXSTYLE was `0x08200088` (`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST`).
 - **Pointer collection:** two standalone desktop runs yielded **33 Down / 3,446 Move / 33 Up** and **13 Down / 1,833 Move / 13 Up**, respectively. Both ended by Ctrl+C with zero active contacts, zero CaptureLost/Cancel, no logged errors, no orphan Move/Up, and no sequence gaps. The measured Move-interval medians were approximately **8.33 ms**; this is pointer-message timing, **not panel refresh frequency**.
-- **Drag outside zone:** touch starting inside remained owned until Up even after the finger moved outside the rectangle. Example pointer #6 ended at \`(460,995)\`, pointer #12 at \`(1444,298)\`, both outside the original area. The user confirmed that underlying desktop programs **did not receive those contacts**, including during drag beyond the boundary. This validates desktop touch suppression; merely receiving \`WM_POINTER\` would not have sufficed.
+- **Drag outside zone:** touch starting inside remained owned until Up even after the finger moved outside the rectangle. Example pointer #6 ended at `(460,995)`, pointer #12 at `(1444,298)`, both outside the original area. The user confirmed that underlying desktop programs **did not receive those contacts**, including during drag beyond the boundary. This validates desktop touch suppression; merely receiving `WM_POINTER` would not have sufficed.
 - **Limits:** both sessions showed at most **one concurrent active pointer**; simultaneous two-finger behavior was not demonstrated. Both ended manually (not by 90-second timeout). Desktop suppression is validated; do not generalize it to all games, exclusive-fullscreen/FSE, Overlay open/close, or game-focus preservation without their own evidence.
 
 **Primary touch logs:** [run 1 (18:17)](https://drive.google.com/file/d/19QGg4en8DPeTy86Q2e6IJTR_X3Vh3QO1/view), [run 2 (18:19)](https://drive.google.com/file/d/1pHndZb2nUroG-fZuyda0f552kSNQhfD4/view).
@@ -235,7 +235,7 @@ ClawHUD renders D3D11 displayable BGRA textures via Direct2D, DirectComposition,
 
 ### 6.1 Phase 0 Minecraft comparison — three measured conditions (2026-10-12)
 
-The user tested **Minecraft.Windows.exe** on the MSI Claw with the PoC fully stopped, the PoC armed without touching, and the PoC armed with touch/drag. All three 15-second \`ClawHUD.Diag.exe\` runs used the **same PID 2012, HWND \`0x210546\`, dominant swapchain \`0x2704DBE8020\`**, PresentMon API 3.4, nominal **120.002 Hz** display mode, and exact-match Intel Arc Sync \`EXCELLENT / ENABLED\` profile with **48–120 Hz** range.
+The user tested **Minecraft.Windows.exe** on the MSI Claw with the PoC fully stopped, the PoC armed without touching, and the PoC armed with touch/drag. All three 15-second `ClawHUD.Diag.exe` runs used the **same PID 2012, HWND `0x210546`, dominant swapchain `0x2704DBE8020`**, PresentMon API 3.4, nominal **120.002 Hz** display mode, and exact-match Intel Arc Sync `EXCELLENT / ENABLED` profile with **48–120 Hz** range.
 
 | Signal | PoC OFF, game running | PoC ON, no touch | PoC ON, touch/drag |
 | --- | ---: | ---: | ---: |
@@ -243,21 +243,21 @@ The user tested **Minecraft.Windows.exe** on the MSI Claw with the PoC fully sto
 | Mean observed frames per second (frame count / 15 s) | 77.0 | 76.4 | 63.2 |
 | Independent Flip family | **100%** | **100%** | **100%** |
 | PresentMode breakdown | 1,155 composed-independent | 1,146 composed-independent | 934 composed-independent + 14 hardware-independent |
-| \`AllowsTearing\` | 100% true | 100% true | 100% true |
+| `AllowsTearing` | 100% true | 100% true | 100% true |
 | Dropped flags | 0 | 0 | 0 |
-| \`BetweenDisplayChange\` P50 | 10.97 ms | 12.12 ms | **16.67 ms** |
-| \`BetweenDisplayChange\` P95 / P99 | 17.05 / 18.10 ms | 17.10 / 18.13 ms | 16.89 / 18.01 ms |
-| \`DisplayLatency\` P50 | 15.23 ms | 15.57 ms | 22.68 ms |
-| \`DisplayLatency\` P95 | 26.20 ms | 25.98 ms | 26.52 ms |
+| `BetweenDisplayChange` P50 | 10.97 ms | 12.12 ms | **16.67 ms** |
+| `BetweenDisplayChange` P95 / P99 | 17.05 / 18.10 ms | 17.10 / 18.13 ms | 16.89 / 18.01 ms |
+| `DisplayLatency` P50 | 15.23 ms | 15.57 ms | 22.68 ms |
+| `DisplayLatency` P95 | 26.20 ms | 25.98 ms | 26.52 ms |
 | PresentMon **display-content-change rate** | 91.14 Hz | 82.50 Hz | 60.00 Hz |
 | D3DKMT cadence samples | **0** | **0** | **0** |
 | Overall physical-VRR inference | INCONCLUSIVE / LOW | INCONCLUSIVE / LOW | INCONCLUSIVE / LOW |
 
-**What was proven:** the invisible PoC HWND by itself did **not** cause a presentation-path regression in these Minecraft captures. All frames in every run remained within the Independent Flip family, and no dropped frames were reported. The ON-idle run closely tracked the OFF baseline in 15-second frame count and upper-tail frame/latency metrics. The 14 \`HARDWARE_INDEPENDENT_FLIP\` samples in the ON-touch run are **not** composed-path failures.
+**What was proven:** the invisible PoC HWND by itself did **not** cause a presentation-path regression in these Minecraft captures. All frames in every run remained within the Independent Flip family, and no dropped frames were reported. The ON-idle run closely tracked the OFF baseline in 15-second frame count and upper-tail frame/latency metrics. The 14 `HARDWARE_INDEPENDENT_FLIP` samples in the ON-touch run are **not** composed-path failures.
 
 **Observed FPS reduction and causal control:** the ON-touch run averaged approximately 63.2 observed frames/s, with a median content-change interval of 16.67 ms, lower than the OFF and ON-idle runs. **The user subsequently confirmed that touching outside the PoC zone also caused the same visible frame-rate reduction, and—most importantly—that touching the game with the PoC completely terminated also caused the reduction.** Therefore the reduction is **not demonstrated to be a PoC-specific regression**. Ordinary physical touchscreen interaction with Minecraft/Windows is a plausible common cause, but the responsible subsystem is unknown. The PoC-OFF-with-touch comparison was a **user visual observation, not a fourth captured PresentMon/D3DKMT dataset**; do not claim a controlled, quantitative exclusion of every possible additional PoC cost.
 
-**Physical VRR cannot be concluded from this dataset.** \`D3DKMTWaitForVerticalBlankEvent2\` failed identically in all three runs with \`NTSTATUS 0xC0000022 (STATUS_ACCESS_DENIED)\`, producing **zero VBlank samples**. Each summary correctly reported \`INCONCLUSIVE / LOW\`. Intel's 48–120 Hz capability/profile is **configuration evidence**, not live panel scanout; \`Independent Flip=100%\` and \`AllowsTearing=TRUE\` are **VRR-safe presentation-path evidence**, not proof that the panel was dynamically refreshing. PresentMon's 60.00 Hz in the touch run is the **content-change rate, not physical panel refresh Hz**.
+**Physical VRR cannot be concluded from this dataset.** `D3DKMTWaitForVerticalBlankEvent2` failed identically in all three runs with `NTSTATUS 0xC0000022 (STATUS_ACCESS_DENIED)`, producing **zero VBlank samples**. Each summary correctly reported `INCONCLUSIVE / LOW`. Intel's 48–120 Hz capability/profile is **configuration evidence**, not live panel scanout; `Independent Flip=100%` and `AllowsTearing=TRUE` are **VRR-safe presentation-path evidence**, not proof that the panel was dynamically refreshing. PresentMon's 60.00 Hz in the touch run is the **content-change rate, not physical panel refresh Hz**.
 
 **Saved datasets:**
 - [PoC OFF report](https://drive.google.com/file/d/1xfX89xbVdfqz_E_LUNVlf1BDKfhqFGmE/view) / [frames](https://drive.google.com/file/d/1ENyaRIlKGNe02zxszhnD68S7m9_F4jr5/view) / [VBlank](https://drive.google.com/file/d/1ya0RDEsklD_PKv7ST479YL6TEYCmXFGs/view)
@@ -267,7 +267,6 @@ The user tested **Minecraft.Windows.exe** on the MSI Claw with the PoC fully sto
 **Next evidence boundary:** no PoC code or architecture replacement is justified by the measured Minecraft touch-induced frame reduction alone. Continue small, bounded integration/prototyping using the existing Full1902 authority and publisher. **Before claiming production VRR compatibility**, obtain an independent physical-variable-rate observation (e.g. an appropriate Special K variable-rate/LFC display or a subsequently working cadence probe), with a PoC OFF/ON comparison, and test representative real-game focus/touch isolation. Fixing D3DKMT may improve diagnosis but is **not** a precondition for merging otherwise correct code; hardware validation remains the user's post-merge role.
 
 ### 6.2 Remaining VRR acceptance and future test plan
-
 
 Compare, in the **same** game, resolution, driver, Windows refresh/VRR settings, overlay environment, and presentation path:
 
