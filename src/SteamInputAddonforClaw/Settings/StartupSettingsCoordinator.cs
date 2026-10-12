@@ -24,6 +24,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public bool ClawHudEnabled => Settings.ClawHudEnabled;
     public bool QuickSettingsCurrentPowerSourceOnly => Settings.QuickSettingsCurrentPowerSourceOnly;
+    public bool ExperimentalVirtualTouchpadEnabled => Settings.ExperimentalVirtualTouchpadEnabled;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
     public BackButtonMappingSettings BackButtonMapping => Settings.BackButtonMapping;
     public ControllerLedSettings ControllerLed => Settings.ControllerLed;
@@ -208,6 +209,15 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     {
         if (Settings.QuickSettingsCurrentPowerSourceOnly == enabled) return;
         var next = Settings with { QuickSettingsCurrentPowerSourceOnly = enabled };
+        _settingsStore.Save(next);
+        Settings = next;
+    }
+
+    /// <summary>Persists the experimental touch preference before Runtime capture is reconciled.</summary>
+    public void ChangeExperimentalVirtualTouchpadEnabled(bool enabled)
+    {
+        if (Settings.ExperimentalVirtualTouchpadEnabled == enabled) return;
+        var next = Settings with { ExperimentalVirtualTouchpadEnabled = enabled };
         _settingsStore.Save(next);
         Settings = next;
     }

@@ -125,6 +125,31 @@ public sealed class ProfileGameCatalogScannerTests : IDisposable
     }
 
     [Fact]
+    public void ResolveInstalledSteamGameDirectory_UsesExactManifestAndContainedInstallDirectory()
+    {
+        var steamRoot = CreateSteamInstall("ForegroundAssociationSteam");
+        var gameDirectory = Path.Combine(steamRoot, "steamapps", "common", "ExampleGame");
+        Directory.CreateDirectory(gameDirectory);
+        File.WriteAllText(Path.Combine(steamRoot, "steamapps", "appmanifest_1234.acf"),
+            "\"AppState\" { \"appid\" \"1234\" \"installdir\" \"ExampleGame\" }");
+
+        var resolved = ProfileGameCatalogScanner.ResolveInstalledSteamGameDirectory(1234, steamRoot);
+
+        Assert.Equal(Path.GetFullPath(gameDirectory), resolved);
+    }
+
+    [Fact]
+    public void ResolveInstalledSteamGameDirectory_RejectsManifestDirectoryTraversal()
+    {
+        var steamRoot = CreateSteamInstall("ForegroundAssociationTraversal");
+        Directory.CreateDirectory(Path.Combine(steamRoot, "steamapps"));
+        File.WriteAllText(Path.Combine(steamRoot, "steamapps", "appmanifest_1234.acf"),
+            "\"AppState\" { \"appid\" \"1234\" \"installdir\" \"..\\Outside\" }");
+
+        Assert.Null(ProfileGameCatalogScanner.ResolveInstalledSteamGameDirectory(1234, steamRoot));
+    }
+
+    [Fact]
     public async Task ScanAsync_IgnoresTruncatedShortcutFile()
     {
         var path = Path.Combine(_root, "userdata", "123", "config");

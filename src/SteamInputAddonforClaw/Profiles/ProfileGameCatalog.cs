@@ -101,6 +101,46 @@ public sealed class ProfileGameCatalogScanner
         catch (IOException) { return []; } catch (UnauthorizedAccessException) { return []; } catch (FormatException) { return []; }
     }
 
+    internal static string? ResolveInstalledSteamGameDirectory(uint appId) =>
+        ResolveInstalledSteamGameDirectory(appId, LocateSteamRoot());
+
+    internal static string? ResolveInstalledSteamGameDirectory(uint appId, string? steamRoot)
+    {
+        if (appId == 0 || string.IsNullOrWhiteSpace(steamRoot) || !Directory.Exists(steamRoot))
+            return null;
+
+        var libraries = ReadLibraries(steamRoot);
+        libraries.Add(steamRoot);
+        foreach (var library in libraries.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var manifest = Path.Combine(library, "steamapps", $"appmanifest_{appId}.acf");
+            try
+            {
+                var text = File.ReadAllText(manifest);
+                var manifestAppId = TextVdf.ReadValues(text, "appid").FirstOrDefault();
+                var installDirectory = TextVdf.ReadValues(text, "installdir").FirstOrDefault();
+                if (!string.Equals(manifestAppId, appId.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(installDirectory))
+                    continue;
+
+                var commonDirectory = Path.GetFullPath(Path.Combine(library, "steamapps", "common"));
+                var gameDirectory = Path.GetFullPath(Path.Combine(commonDirectory, installDirectory));
+                if (!gameDirectory.StartsWith(commonDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                        + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || !Directory.Exists(gameDirectory))
+                    continue;
+
+                return gameDirectory;
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (ArgumentException) { }
+            catch (NotSupportedException) { }
+        }
+
+        return null;
+    }
+
     private static string? LocateSteamRoot()
     {
         using var currentUserSteam = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam");

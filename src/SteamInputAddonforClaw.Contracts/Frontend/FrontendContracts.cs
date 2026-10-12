@@ -369,6 +369,7 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
 {
     public SteamVirtualControllerPreference SteamVirtualController { get; init; } = SteamVirtualControllerPreference.SteamDeck;
     public bool DeveloperMenuEnabled { get; init; }
+    public bool ExperimentalVirtualTouchpadEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
     public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
     public ControllerLedSettings ControllerLed { get; init; } = ControllerLedSettings.Default;
@@ -617,6 +618,9 @@ public interface IAddonFrontendControl
     Task<FrontendSettingsSnapshot> SetSteamVirtualControllerAsync(
         SteamVirtualControllerPreference preference, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Steam virtual controller selection is not supported by this frontend.");
+    Task<FrontendSettingsSnapshot> SetExperimentalVirtualTouchpadEnabledAsync(
+        bool enabled, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Experimental virtual touchpad settings are not supported by this frontend.");
     async Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken cancellationToken = default) =>
         (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
     Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default) =>

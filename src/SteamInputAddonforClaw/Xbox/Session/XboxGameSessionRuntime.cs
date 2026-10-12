@@ -35,9 +35,12 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
 
     internal ActiveXboxGame? ActiveGame => Volatile.Read(ref _activeGame);
     internal bool CanReliablyReportNoActiveGame => Volatile.Read(ref _canReliablyReportNoActiveGame) != 0;
+    internal bool IsForegroundObservationAvailable => Volatile.Read(ref _acceptWindowEvents) != 0;
+    internal uint CurrentForegroundProcessId => IsForegroundObservationAvailable ? _windowSource.GetForegroundProcessId() : 0;
 
     internal event Action<ActiveXboxGame?>? ActiveGameChanged;
     internal event Action<bool>? ObservationReadinessChanged;
+    internal event Action<uint>? ForegroundProcessChanged;
 
     internal async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -55,6 +58,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
                 Volatile.Write(ref _eventSourceFailureObserved, 0);
                 await StartWindowSourceAsync(_sessionCancellation.Token, cancellationToken).ConfigureAwait(false);
                 Volatile.Write(ref _acceptWindowEvents, Volatile.Read(ref _eventSourceFailureObserved) == 0 ? 1 : 0);
+                NotifyForegroundProcessChanged(CurrentForegroundProcessId);
                 AppLog.Info("XboxSession", "Production XBOX game-session runtime started.",
                     ("Hooks", "EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW"));
                 var reconciled = await ReconcileSafelyAsync(cancellationToken, "startup").ConfigureAwait(false);
@@ -99,6 +103,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
                 return;
 
             Volatile.Write(ref _acceptWindowEvents, 0);
+            NotifyForegroundProcessChanged(0);
             _sessionCancellation?.Cancel();
             await StopWindowSourceSafelyAsync().ConfigureAwait(false);
             await SendAndWaitAsync(new PrepareForResumeMessage(NewCompletion()), cancellationToken).ConfigureAwait(false);
@@ -110,6 +115,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
             {
                 await StartWindowSourceAsync(_sessionCancellation.Token, CancellationToken.None).ConfigureAwait(false);
                 Volatile.Write(ref _acceptWindowEvents, Volatile.Read(ref _eventSourceFailureObserved) == 0 ? 1 : 0);
+                NotifyForegroundProcessChanged(CurrentForegroundProcessId);
                 var reconciled = await ReconcileSafelyAsync(CancellationToken.None, "resume").ConfigureAwait(false);
                 SetReadinessAfterReconcile(reconciled);
             }
@@ -138,6 +144,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
         try
         {
             Volatile.Write(ref _acceptWindowEvents, 0);
+            NotifyForegroundProcessChanged(0);
             _sessionCancellation?.Cancel();
             await StopWindowSourceSafelyAsync().ConfigureAwait(false);
             await SendAndWaitAsync(new ShutdownMessage(NewCompletion()), CancellationToken.None).ConfigureAwait(false);
@@ -158,7 +165,12 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     private async Task StartWindowSourceAsync(CancellationToken sessionToken, CancellationToken startToken)
     {
         await _windowSource.StartAsync(
-            observation => TryQueue(new WindowObservationMessage(observation, sessionToken)),
+            observation =>
+            {
+                if (observation.Kind == GameWindowEventKind.Foreground)
+                    NotifyForegroundProcessChanged(observation.ProcessId);
+                TryQueue(new WindowObservationMessage(observation, sessionToken));
+            },
             exception => OnEventSourceFailure(exception, sessionToken),
             startToken).ConfigureAwait(false);
     }
@@ -193,8 +205,25 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
 
         Volatile.Write(ref _eventSourceFailureObserved, 1);
         Volatile.Write(ref _acceptWindowEvents, 0);
+        NotifyForegroundProcessChanged(0);
         SetCanReliablyReportNoActiveGame(false);
         TryQueue(new EventSourceFailureMessage(exception, sessionToken));
+    }
+
+    private void NotifyForegroundProcessChanged(uint processId)
+    {
+        var handlers = ForegroundProcessChanged;
+        if (handlers is null)
+            return;
+        foreach (Action<uint> handler in handlers.GetInvocationList())
+        {
+            try { handler(processId); }
+            catch (Exception exception)
+            {
+                AppLog.Debug("XboxSession", "A foreground-process notification handler failed.",
+                    ("Reason", exception.GetType().Name));
+            }
+        }
     }
 
     private void SetCanReliablyReportNoActiveGame(bool canReport)

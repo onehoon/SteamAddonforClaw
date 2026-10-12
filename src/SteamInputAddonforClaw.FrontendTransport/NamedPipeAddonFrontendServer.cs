@@ -226,7 +226,9 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         }
     }
 
-    private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.CaptureAppUpdate
+    private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.SetExperimentalVirtualTouchpadEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetExperimentalVirtualTouchpadEnabledAsync(FrontendWireCodec.Decode<SetExperimentalVirtualTouchpadEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureAppUpdate
         ? FrontendWireCodec.Payload(await _inner.CaptureAppUpdateAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CheckAndDownloadAppUpdate
         ? FrontendWireCodec.Payload(await _inner.CheckAndDownloadAppUpdateAsync(t).ConfigureAwait(false))

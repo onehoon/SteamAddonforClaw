@@ -11,6 +11,8 @@ public sealed partial class DeveloperPage : UserControl
     private Func<bool>? _isPrerequisiteSetupInProgress;
     private int _isGeneratingEnvironmentDiscoveryReport;
     private int _isRunningPid1902InputCadenceDiagnostic;
+    private bool _syncingExperimentalVirtualTouchpadToggle;
+    private bool _confirmedExperimentalVirtualTouchpadEnabled;
     private string _logDirectoryPath = string.Empty;
 
     public event EventHandler? BackRequested;
@@ -35,6 +37,51 @@ public sealed partial class DeveloperPage : UserControl
         _frontend = frontend;
         _logDirectoryPath = bootstrap.LogDirectoryPath;
         _isPrerequisiteSetupInProgress = isPrerequisiteSetupInProgress;
+        _confirmedExperimentalVirtualTouchpadEnabled = bootstrap.Settings.ExperimentalVirtualTouchpadEnabled;
+        _syncingExperimentalVirtualTouchpadToggle = true;
+        ExperimentalVirtualTouchpadToggle.IsOn = _confirmedExperimentalVirtualTouchpadEnabled;
+        _syncingExperimentalVirtualTouchpadToggle = false;
+    }
+
+    private async void ExperimentalVirtualTouchpadToggle_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_syncingExperimentalVirtualTouchpadToggle || _frontend is null)
+            return;
+
+        var requested = ExperimentalVirtualTouchpadToggle.IsOn;
+        var previous = _confirmedExperimentalVirtualTouchpadEnabled;
+        ExperimentalVirtualTouchpadToggle.IsEnabled = false;
+        SetExperimentalVirtualTouchpadStatus(string.Empty);
+        try
+        {
+            var settings = await _frontend.SetExperimentalVirtualTouchpadEnabledAsync(requested);
+            _confirmedExperimentalVirtualTouchpadEnabled = settings.ExperimentalVirtualTouchpadEnabled;
+            SetExperimentalVirtualTouchpadToggle(_confirmedExperimentalVirtualTouchpadEnabled);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DeveloperMenu", "Experimental virtual touchpad preference could not be applied.", exception);
+            _confirmedExperimentalVirtualTouchpadEnabled = previous;
+            SetExperimentalVirtualTouchpadToggle(previous);
+            SetExperimentalVirtualTouchpadStatus("The setting could not be applied. See the application log for details.");
+        }
+        finally
+        {
+            ExperimentalVirtualTouchpadToggle.IsEnabled = true;
+        }
+    }
+
+    private void SetExperimentalVirtualTouchpadToggle(bool enabled)
+    {
+        _syncingExperimentalVirtualTouchpadToggle = true;
+        ExperimentalVirtualTouchpadToggle.IsOn = enabled;
+        _syncingExperimentalVirtualTouchpadToggle = false;
+    }
+
+    private void SetExperimentalVirtualTouchpadStatus(string text)
+    {
+        ExperimentalVirtualTouchpadStatusText.Text = text;
+        ExperimentalVirtualTouchpadStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void BackButton_Click(object sender, RoutedEventArgs args)

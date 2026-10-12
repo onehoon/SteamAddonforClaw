@@ -25,6 +25,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Shortcuts;
 using SteamInputAddonforClaw.Processes;
 using SteamInputAddonforClaw.Xbox.Session;
+using SteamInputAddonforClaw.Touchpad;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.ControllerVibration;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
@@ -66,6 +67,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private SteamInputAddonforClaw.CenterMStartup.ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
     private NamedPipeAddonFrontendServer? _frontendServer;
     private XboxGameSessionRuntime? _xboxGameSessionRuntime;
+    private readonly TouchpadRuntimeCapture _touchpadCapture = new();
+    private readonly SteamGameForegroundAssociation _steamGameForegroundAssociation = new();
+    private readonly SemaphoreSlim _touchpadReconcileGate = new(1, 1);
+    private Task<bool> _touchpadShutdown = Task.FromResult(true);
+    private uint _touchpadAdmittedForegroundProcessId;
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly IWindowsAppRuntimePrerequisite _windowsAppRuntimePrerequisite;
     private readonly OverlayProcessController _overlayController;
@@ -673,6 +679,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _xboxGameSessionRuntime = new XboxGameSessionRuntime();
         _xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;
         _xboxGameSessionRuntime.ObservationReadinessChanged += OnXboxObservationReadinessChanged;
+        _xboxGameSessionRuntime.ForegroundProcessChanged += OnTouchpadForegroundProcessChanged;
         // No XBOX session scan has established reliable idle yet. Keep the existing
         // controller cadence conservative until the deferred observer reports readiness.
         UpdateControllerCadenceDecision("StartupObserverPending", logInitialDecision: true);
@@ -735,7 +742,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ApplyOwnedControllerVibrationSettingsAsync(settings, "UserMutation", token),
             requestControllerPresentationReconcile: trigger => RequestControllerPresentationReconcile(trigger),
             capturePresentationSnapshot: () => _runtimeHost?.CapturePresentationSnapshot()
-                ?? new SteamPresentationSnapshot(_runtimeHost?.ActualRunningAppId ?? 0, false));
+                ?? new SteamPresentationSnapshot(_runtimeHost?.ActualRunningAppId ?? 0, false),
+            reconcileExperimentalVirtualTouchpad: token => ReconcileTouchpadCaptureAsync("DeveloperPreferenceChanged", token));
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -991,7 +999,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable,
                 requires250Hz: RequiresController250Hz,
                 steamVirtualControllerPreferenceProvider: () => startupSettings.SteamVirtualController,
-                steamGameControllerPreferenceProvider: appId => _gameProfileMutations?.CaptureSteamVirtualController(appId) ?? (false, null));
+                steamGameControllerPreferenceProvider: appId => _gameProfileMutations?.CaptureSteamVirtualController(appId) ?? (false, null),
+                rightPadProvider: _touchpadCapture.RightPadProvider,
+                beforePresentationRetire: token => _touchpadCapture.SetArmedAsync(false, "PresentationRetirement", token));
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));
@@ -1581,6 +1591,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (summary.StopReason == Devices.MSI.Claw.MsiClawInputStopReason.Stopped) return;
         // 15: no new recovery may be scheduled once controlled shutdown has begun.
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        _touchpadCapture.CloseAdmission();
+        Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
+        RequestTouchpadCaptureReconcile("PhysicalInputCompletion");
 
         if (Volatile.Read(ref _developerRumbleRearmInProgress) != 0)
         {
@@ -2475,10 +2488,20 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return;
             }
 
+            if (!await _touchpadCapture.SetArmedAsync(false, "OverlayShow", CancellationToken.None).ConfigureAwait(false))
+            {
+                Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
+                AppLog.Warn("OverlayCapture", "Overlay Show blocked because touch capture could not be confirmed hidden.", null,
+                    ("Event", "TouchpadDisarmBeforeOverlayFailed"));
+                return;
+            }
+            Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
+
             var preferActiveProfile = CaptureActiveQuickSettingsProfileTarget() is not null;
             if (!await _overlayController.ShowAsync(preferActiveProfile).ConfigureAwait(false))
             {
                 AppLog.Warn("OverlayCapture", "Overlay Show did not acknowledge Visible; controller stays live.", null, ("Event", "OverlayShowFailed"));
+                await ReconcileTouchpadCaptureAsync("OverlayShowFailed", CancellationToken.None).ConfigureAwait(false);
                 return;
             }
 
@@ -2492,6 +2515,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 if (pause.Outcome is Devices.MSI.Claw.OverlayPauseOutcome.NeutralRejectedPresentationRetired
                     or Devices.MSI.Claw.OverlayPauseOutcome.NeutralRejectedRetireFailed)
                     RequestControllerPresentationReconcile("OverlayPauseFailed");
+                RequestTouchpadCaptureReconcile("OverlayPauseFailed");
                 return;
             }
             AppLog.Info("OverlayCapture", "Presentation paused neutral.", ("Event", "OverlayCapturePresentationPaused"));
@@ -2518,6 +2542,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Warn("UiSurface", "Overlay visible-surface coordination failed.", exception);
+            await ReconcileTouchpadCaptureAsync("OverlayTransitionFailed", CancellationToken.None).ConfigureAwait(false);
         }
         finally { _visibleSurfaceTransition.Release(); }
     }
@@ -2701,10 +2726,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _overlayInputRouter = null;
         _overlayCaptureActive = false;
 
-        if (!wasCapturing) return true;
+        if (!wasCapturing)
+        {
+            await ReconcileTouchpadCaptureAsync("OverlayRetiredWithoutCapture", CancellationToken.None).ConfigureAwait(false);
+            return true;
+        }
 
         var presentation = _presentationOwnership;
-        if (presentation is null) return true;
+        if (presentation is null)
+        {
+            await ReconcileTouchpadCaptureAsync("OverlayRetiredWithoutPresentation", CancellationToken.None).ConfigureAwait(false);
+            return true;
+        }
 
         var source = _physicalOwnership?.LiveInputSource;
         // Always end the presentation pause. ResumeAfterOverlayAsync clears _overlayPaused FIRST, then
@@ -2823,6 +2856,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 {
                     AppLog.Warn("XboxSession", "Production XBOX game-session observer could not start; Runtime will continue without active XBOX detection.", exception);
                 }
+                await ReconcileTouchpadCaptureAsync("ForegroundObserverStarted", cancellationToken).ConfigureAwait(false);
             }
 
             if (cancellationToken.IsCancellationRequested
@@ -3413,6 +3447,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var overlayRouter = _overlayInputRouter;
         _overlayInputRouter = null;
         _overlayCaptureActive = false;
+        _touchpadCapture.CloseAdmission();
+        Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
+        _touchpadShutdown = ReconcileTouchpadCaptureAsync("ProcessShutdown", CancellationToken.None);
         overlayRouter?.StopAcceptingNavigation();
         overlayRouter?.Dispose();
         _overlayController.BeginShutdown();
@@ -3485,6 +3522,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try { await _presentationReconcile.ConfigureAwait(false); }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
         catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Runtime presentation reconcile failed during shutdown.", exception); }
+        try { await _touchpadShutdown.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("Touchpad", "Touch capture did not disarm cleanly during shutdown.", exception); }
+        _ = await _touchpadCapture.SetArmedAsync(false, "ProcessShutdownBeforePresentationDispose", CancellationToken.None).ConfigureAwait(false);
         if (_frontButtonRuntime is not null)
         {
             // Full1902 A2 section 14: stop accepting front-button events and drop pulse callbacks into
@@ -3501,6 +3541,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Presentation teardown failed during shutdown.", exception); }
             _presentationOwnership = null;
         }
+        try { await _touchpadCapture.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("Touchpad", "Touch capture window teardown failed during shutdown.", exception); }
         await DisposeMotionSourceAsync("ProcessShutdown").ConfigureAwait(false);
         if (_physicalOwnership is not null)
         {
@@ -3611,6 +3653,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             _xboxGameSessionRuntime.ActiveGameChanged -= OnActiveXboxGameChanged;
             _xboxGameSessionRuntime.ObservationReadinessChanged -= OnXboxObservationReadinessChanged;
+            _xboxGameSessionRuntime.ForegroundProcessChanged -= OnTouchpadForegroundProcessChanged;
         }
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.BeginProcessShutdown();
@@ -3620,6 +3663,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnActualRunningAppIdChanged(uint appId)
     {
+        _touchpadCapture.CloseAdmission();
+        Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
+        RequestTouchpadCaptureReconcile("RunningAppIdChanged");
         NotifySteamSessionStatusInvalidated();
         UpdateControllerCadenceDecision("SteamRunningAppIdChanged");
         // Request the Full-1902 presentation reconcile up front, so it does not
@@ -3633,6 +3679,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnActiveXboxGameChanged(ActiveXboxGame? activeGame)
     {
+        RequestTouchpadCaptureReconcile("XboxActiveGameChanged");
         UpdateControllerCadenceDecision(activeGame is null ? "XboxGameExited" : "XboxGameStarted");
         ReconcileActiveXboxGameTransition(
             Volatile.Read(ref _processShutdownStarted) != 0,
@@ -3781,13 +3828,30 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnBigPictureStateChanged(bool active)
     {
         if (_headlessUninstallPreparation) return;
+        RequestTouchpadCaptureReconcile("BigPictureChanged");
         NotifySteamSessionStatusInvalidated();
         UpdateControllerCadenceDecision("BigPictureChanged");
         RequestControllerPresentationReconcile("BigPictureChanged");
     }
 
-    private void OnXboxObservationReadinessChanged(bool canReliablyReportNoActiveGame) =>
+    private void OnXboxObservationReadinessChanged(bool canReliablyReportNoActiveGame)
+    {
+        RequestTouchpadCaptureReconcile(canReliablyReportNoActiveGame ? "XboxObserverReady" : "XboxObserverUnavailable");
         UpdateControllerCadenceDecision(canReliablyReportNoActiveGame ? "XboxObserverReady" : "XboxObserverUnavailable");
+    }
+
+    private void OnTouchpadForegroundProcessChanged(uint processId)
+    {
+        if (_headlessUninstallPreparation || Volatile.Read(ref _processShutdownStarted) != 0)
+            return;
+
+        if (processId != Volatile.Read(ref _touchpadAdmittedForegroundProcessId))
+        {
+            _touchpadCapture.CloseAdmission();
+            Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
+        }
+        RequestTouchpadCaptureReconcile("ForegroundProcessChanged");
+    }
 
     private void UpdateControllerCadenceDecision(string trigger, bool logInitialDecision = false)
     {
@@ -3823,6 +3887,63 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         steam.WantsSteamDeck || xboxGameActive || !xboxCanReliablyReportNoActiveGame;
 
     private bool RequiresController250Hz() => Volatile.Read(ref _controllerCadenceRequires250Hz) != 0;
+
+    private void RequestTouchpadCaptureReconcile(string trigger)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0)
+        {
+            _touchpadCapture.CloseAdmission();
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await ReconcileTouchpadCaptureAsync(trigger, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Touchpad", "Touch capture reconcile failed; controller ownership remains unchanged.", exception,
+                    ("Trigger", trigger));
+            }
+        });
+    }
+
+    private async Task<bool> ReconcileTouchpadCaptureAsync(string trigger, CancellationToken cancellationToken)
+    {
+        await _touchpadReconcileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var appId = _runtimeHost?.ActualRunningAppId ?? 0;
+            var observer = _xboxGameSessionRuntime;
+            var foregroundProcessId = observer?.CurrentForegroundProcessId ?? 0;
+            var foregroundIsSteamGameplay = appId != 0
+                && observer?.IsForegroundObservationAvailable == true
+                && _steamGameForegroundAssociation.IsForegroundSteamGameplay(appId, foregroundProcessId);
+            var presentation = _presentationOwnership;
+            var facts = new TouchpadAdmissionFacts(
+                PreferenceEnabled: _runtimeStartupSettings?.ExperimentalVirtualTouchpadEnabled == true,
+                AddonOwnsController: _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled,
+                PhysicalInputLive: _physicalOwnership?.LiveInputSource is { IsRunning: true },
+                SteamGameRunning: appId != 0,
+                ForegroundIsSteamGame: foregroundIsSteamGameplay,
+                SteamDeckPresentationLive: presentation is
+                {
+                    ActivePresentation: Devices.MSI.Claw.AddonPresentationKind.SteamDeck,
+                    IsActivePresentationLive: true,
+                },
+                OverlayPausedOrVisible: _overlayCaptureActive || _overlayController.IsVisible || presentation?.IsOverlayPaused == true,
+                SuspendPaused: presentation?.IsSuspendPaused == true,
+                ShuttingDown: Volatile.Read(ref _processShutdownStarted) != 0);
+
+            var succeeded = await _touchpadCapture.SetArmedAsync(facts.ShouldArm, trigger, cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref _touchpadAdmittedForegroundProcessId,
+                succeeded && facts.ShouldArm ? foregroundProcessId : 0);
+            return succeeded;
+        }
+        finally
+        {
+            _touchpadReconcileGate.Release();
+        }
+    }
 
     /// <summary>PR7: schedule one asynchronous Full-1902 presentation reconcile. Event-driven only --
     /// no timer, no polling. The desired Xbox360/Steam-facing kind is captured fresh AFTER the presentation
@@ -3946,6 +4067,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         finally
         {
             await ReconcileMotionReadersAsync("PresentationReconcile:" + trigger).ConfigureAwait(false);
+            try { await ReconcileTouchpadCaptureAsync("PresentationReconcile:" + trigger, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Touchpad", "Touch capture reconcile after presentation transition failed.", exception,
+                    ("Trigger", trigger));
+            }
         }
     }
 
@@ -3958,6 +4085,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0)
             return true;
+
+        if (!await _touchpadCapture.SetArmedAsync(false, "Suspend", cancellationToken).ConfigureAwait(false))
+            return false;
+        Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
 
         lock (_controllerOwnershipOperationSync)
             _controllerPowerLifecycleGeneration++;
@@ -4004,6 +4135,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
 
+        _touchpadCapture.CloseAdmission();
+        Volatile.Write(ref _touchpadAdmittedForegroundProcessId, 0);
+
         lock (_controllerOwnershipOperationSync)
             _controllerPowerLifecycleGeneration++;
 
@@ -4011,7 +4145,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _ = StopMotionSourceAsync("PowerResume");
 
         if (_xboxGameSessionRuntime is { } xboxGameSessionRuntime)
-            _ = xboxGameSessionRuntime.ReconcileAfterResumeAsync();
+            _ = ReconcileXboxObserverAndTouchpadAfterResumeAsync(xboxGameSessionRuntime);
         UpdateControllerCadenceDecision("PowerResume");
 
         // Full1902 Suspend/Resume section 11: request the Full1902 controller-presentation reconcile
@@ -4034,6 +4168,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             () => _powerModeRuntime.Reconcile(),
             () => _intelGpuMinimumClockRuntime.ReconcileAfterResume(),
             () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"));
+    }
+
+    private async Task ReconcileXboxObserverAndTouchpadAfterResumeAsync(XboxGameSessionRuntime xboxGameSessionRuntime)
+    {
+        try { await xboxGameSessionRuntime.ReconcileAfterResumeAsync().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("XboxSession", "Foreground observation did not restart cleanly after resume.", exception);
+        }
+        await ReconcileTouchpadCaptureAsync("PowerResumeForegroundObserver", CancellationToken.None).ConfigureAwait(false);
     }
 
     internal static async Task ReconcilePerformanceAfterResumeAsync(
