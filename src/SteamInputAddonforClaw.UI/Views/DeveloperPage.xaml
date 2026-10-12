@@ -27,7 +27,7 @@
                     <SymbolIcon Symbol="TouchPointer" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <StackPanel Spacing="4">
-                    <ToggleSwitch x:Name="ExperimentalVirtualTouchpadToggle" OffContent="Off" OnContent="On" Toggled="ExperimentalVirtualTouchpadToggle_Toggled" />
+                    <ToggleSwitch x:Name="ExperimentalVirtualTouchpadToggle" OffContent="" OnContent="" Toggled="ExperimentalVirtualTouchpadToggle_Toggled" />
                     <TextBlock x:Name="ExperimentalVirtualTouchpadStatusText" Opacity="0.7" TextWrapping="Wrap" Visibility="Collapsed" />
                 </StackPanel>
             </ctcontrols:SettingsCard>
