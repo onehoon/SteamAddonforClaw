@@ -59,6 +59,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private readonly Func<long> _timestampProvider;
     private readonly Func<ControllerState, AuxiliaryButtonSlot, bool> _rearButtonSuppressionProvider;
     private readonly Func<MsiClawMotionState>? _motionSnapshotProvider;
+    private readonly Func<SteamDeckRightPadContact>? _rightPadProvider;
     private readonly SteamDeckSystemButtonOverlay _systemButtonOverlay;
     private CancellationTokenSource? _stop;
     private Task? _task;
@@ -122,7 +123,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
         Func<long>? timestampProvider = null,
         SteamDeckSystemButtonOverlay? systemButtonOverlay = null,
         Func<ControllerState, AuxiliaryButtonSlot, bool>? rearButtonSuppressionProvider = null,
-        Func<MsiClawMotionState>? motionSnapshotProvider = null)
+        Func<MsiClawMotionState>? motionSnapshotProvider = null,
+        Func<SteamDeckRightPadContact>? rightPadProvider = null)
     {
         _snapshot = snapshot;
         _sink = sink;
@@ -132,6 +134,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _systemButtonOverlay = systemButtonOverlay ?? new SteamDeckSystemButtonOverlay(timestampProvider: _timestampProvider);
         _rearButtonSuppressionProvider = rearButtonSuppressionProvider ?? (static (_, _) => false);
         _motionSnapshotProvider = motionSnapshotProvider;
+        _rightPadProvider = rightPadProvider;
     }
 
     internal bool IsRunning => _task is { IsCompleted: false } || _workerThread is { IsAlive: true };
@@ -493,11 +496,13 @@ internal sealed class CanonicalSteamDeckInputPublisher
     {
         var rawState = _snapshot.LatestState;
         var motion = CaptureMotionSnapshot();
+        var rightPad = CaptureRightPadContact();
         var mapped = SteamDeckDeviceStateMapper.Map(
             rawState,
             _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.RightRear),
             _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.LeftRear),
-            motion);
+            motion,
+            rightPad);
         var state = _systemButtonOverlay.Apply(mapped);
 
         var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
@@ -549,6 +554,20 @@ internal sealed class CanonicalSteamDeckInputPublisher
             // Motion is optional to ordinary gamepad publication; do not fault the publisher or
             // emit a high-rate log when its snapshot provider fails.
             return MsiClawMotionState.Unavailable;
+        }
+    }
+
+    private SteamDeckRightPadContact CaptureRightPadContact()
+    {
+        try
+        {
+            return _rightPadProvider?.Invoke() ?? SteamDeckRightPadContact.Neutral;
+        }
+        catch
+        {
+            // Touch is optional to ordinary gamepad publication; provider failures neutralize this
+            // tick only and must not fault the publisher or emit a high-rate log.
+            return SteamDeckRightPadContact.Neutral;
         }
     }
 

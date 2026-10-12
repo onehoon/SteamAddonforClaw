@@ -45,9 +45,94 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
 
         Assert.Equal((byte)1, sink.States[0].A);
         Assert.Equal((byte)1, sink.States[1].X);
+        AssertRightPadNeutral(sink.States[0]);
+        AssertRightPadNeutral(sink.States[1]);
         AssertImuNeutral(sink.States[0]);
         AssertImuNeutral(sink.States[1]);
         Assert.Equal(2, publisher.PublishedStateCount);
+    }
+
+    [Fact]
+    public async Task Optional_right_pad_provider_is_sampled_once_per_tick_and_preserves_transitions()
+    {
+        var source = new Snapshot(new ControllerState(
+            new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+            default, default, default, new([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var overlay = new SteamDeckSystemButtonOverlay(new FakeTimeProvider());
+        var samples = new[]
+        {
+            new SteamDeckRightPadContact(true, -1200, 2300),
+            new SteamDeckRightPadContact(true, 4500, -5600),
+            new SteamDeckRightPadContact(false, 7000, 8000),
+        };
+        var providerCalls = 0;
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            source,
+            sink,
+            ticks,
+            systemButtonOverlay: overlay,
+            rightPadProvider: () => samples[providerCalls++]);
+
+        publisher.Start();
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(1);
+        overlay.RequestQuickAccessPulse();
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(2);
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(3);
+        await publisher.StopAsync();
+
+        Assert.Equal(3, providerCalls);
+        Assert.Equal(3, publisher.PublishedStateCount);
+        Assert.Equal((byte)1, sink.States[0].A);
+        Assert.Equal((byte)1, sink.States[0].RPadTouch);
+        Assert.Equal((short)-1200, sink.States[0].RPadX);
+        Assert.Equal((short)2300, sink.States[0].RPadY);
+        Assert.Equal((byte)1, sink.States[1].RPadTouch);
+        Assert.Equal((short)4500, sink.States[1].RPadX);
+        Assert.Equal((short)-5600, sink.States[1].RPadY);
+        Assert.Equal((byte)1, sink.States[1].QuickAccess);
+        AssertRightPadNeutral(sink.States[2]);
+        Assert.Equal((byte)1, sink.States[2].A);
+    }
+
+    [Fact]
+    public async Task Throwing_right_pad_provider_neutralizes_only_touch_for_that_tick()
+    {
+        var source = new Snapshot(new ControllerState(
+            new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+            default, default, default, new([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var providerCalls = 0;
+        var faults = 0;
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            source,
+            sink,
+            ticks,
+            fault: _ => faults++,
+            motionSnapshotProvider: () => Motion(1, 2, 3, 0.5, 0.25, -0.5),
+            rightPadProvider: () =>
+            {
+                providerCalls++;
+                throw new InvalidOperationException("optional right-pad provider failed");
+            });
+
+        publisher.Start();
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(1);
+        await publisher.StopAsync();
+
+        Assert.Equal(1, providerCalls);
+        Assert.Equal(0, faults);
+        Assert.Equal(1, publisher.PublishedStateCount);
+        Assert.Equal((byte)1, sink.States[0].A);
+        Assert.Equal((short)16, sink.States[0].Pitch);
+        Assert.Equal((short)-48, sink.States[0].Yaw);
+        AssertRightPadNeutral(sink.States[0]);
     }
 
     [Fact]
@@ -1195,6 +1280,15 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Equal((short)0, state.Pitch);
         Assert.Equal((short)0, state.Yaw);
         Assert.Equal((short)0, state.Roll);
+    }
+
+    private static void AssertRightPadNeutral(SteamDeckDeviceState state)
+    {
+        Assert.Equal((byte)0, state.RPadTouch);
+        Assert.Equal((short)0, state.RPadX);
+        Assert.Equal((short)0, state.RPadY);
+        Assert.Equal((byte)0, state.RPadPress);
+        Assert.Equal((ushort)0, state.RPadForce);
     }
 
     private sealed class ManualTicks : IInputReportTickSource

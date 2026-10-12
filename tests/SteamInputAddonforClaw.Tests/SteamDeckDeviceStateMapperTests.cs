@@ -135,6 +135,102 @@ public sealed class SteamDeckDeviceStateMapperTests
     }
 
     [Theory]
+    [InlineData(0.0, 0.0, -32767, 32767)]
+    [InlineData(1.0, 0.0, 32767, 32767)]
+    [InlineData(0.0, 1.0, -32767, -32767)]
+    [InlineData(1.0, 1.0, 32767, -32767)]
+    [InlineData(0.5, 0.5, 0, 0)]
+    [InlineData(0.25, 0.75, -16384, -16384)]
+    [InlineData(0.75, 0.25, 16384, 16384)]
+    [InlineData(-1.0, 2.0, -32767, -32767)]
+    [InlineData(2.0, -1.0, 32767, 32767)]
+    public void Normalized_right_pad_coordinates_map_to_signed_deck_axes(
+        double normalizedX,
+        double normalizedY,
+        short expectedX,
+        short expectedY)
+    {
+        var contact = SteamDeckRightPadContact.FromNormalizedPosition(true, normalizedX, normalizedY);
+
+        Assert.True(contact.IsTouched);
+        Assert.Equal(expectedX, contact.X);
+        Assert.Equal(expectedY, contact.Y);
+    }
+
+    [Fact]
+    public void Inactive_or_nonfinite_normalized_right_pad_contact_is_neutral()
+    {
+        var invalidPositions = new[]
+        {
+            (double.NaN, 0.0),
+            (double.PositiveInfinity, 0.5),
+            (double.NegativeInfinity, 0.5),
+            (0.5, double.NaN),
+            (0.5, double.PositiveInfinity),
+            (0.5, double.NegativeInfinity),
+        };
+
+        Assert.Equal(
+            SteamDeckRightPadContact.Neutral,
+            SteamDeckRightPadContact.FromNormalizedPosition(false, 0.5, 0.5));
+
+        foreach (var (normalizedX, normalizedY) in invalidPositions)
+        {
+            Assert.Equal(
+                SteamDeckRightPadContact.Neutral,
+                SteamDeckRightPadContact.FromNormalizedPosition(true, normalizedX, normalizedY));
+        }
+    }
+
+    [Fact]
+    public void Right_pad_contact_maps_without_changing_R3_sticks_or_IMU()
+    {
+        var state = State(
+            buttons: new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false),
+            rightStick: new StickState(333, -444));
+        var motion = Motion(1, 2, 3, 0.5, 0.25, -0.5);
+        var contact = new SteamDeckRightPadContact(true, -1234, 2345);
+
+        var mapped = SteamDeckDeviceStateMapper.Map(state, motion: motion, rightPad: contact);
+
+        Assert.Equal((byte)1, mapped.RPadTouch);
+        Assert.Equal((short)-1234, mapped.RPadX);
+        Assert.Equal((short)2345, mapped.RPadY);
+        Assert.Equal((byte)0, mapped.RPadPress);
+        Assert.Equal((ushort)0, mapped.RPadForce);
+        Assert.Equal((byte)0, mapped.LPadTouch);
+        Assert.Equal((short)0, mapped.LPadX);
+        Assert.Equal((short)0, mapped.LPadY);
+        Assert.Equal((byte)0, mapped.LPadPress);
+        Assert.Equal((ushort)0, mapped.LPadForce);
+        Assert.Equal((byte)1, mapped.R3);
+        Assert.Equal((short)333, mapped.RStickX);
+        Assert.Equal((short)-444, mapped.RStickY);
+        Assert.Equal((short)16, mapped.Pitch);
+        Assert.Equal((short)-48, mapped.Yaw);
+    }
+
+    [Fact]
+    public void Released_right_pad_contact_zeros_stale_coordinates_and_legacy_calls_remain_neutral()
+    {
+        var state = State(buttons: Button("A"));
+        var motion = Motion(1, 2, 3, 0.5, 0.25, -0.5);
+
+        var released = SteamDeckDeviceStateMapper.Map(
+            state,
+            motion: motion,
+            rightPad: new SteamDeckRightPadContact(false, 1234, -2345));
+        var legacy = SteamDeckDeviceStateMapper.Map(state, false, false, motion);
+
+        AssertPadNeutral(released);
+        AssertPadNeutral(legacy);
+        Assert.Equal((byte)1, released.A);
+        Assert.Equal((short)16, released.Pitch);
+        Assert.Equal((byte)1, legacy.A);
+        Assert.Equal((short)16, legacy.Pitch);
+    }
+
+    [Theory]
     [InlineData("A")]
     [InlineData("X")]
     [InlineData("B")]
@@ -330,6 +426,20 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal((short)0, state.Pitch);
         Assert.Equal((short)0, state.Yaw);
         Assert.Equal((short)0, state.Roll);
+    }
+
+    private static void AssertPadNeutral(SteamDeckDeviceState state)
+    {
+        Assert.Equal((byte)0, state.RPadTouch);
+        Assert.Equal((short)0, state.RPadX);
+        Assert.Equal((short)0, state.RPadY);
+        Assert.Equal((byte)0, state.RPadPress);
+        Assert.Equal((ushort)0, state.RPadForce);
+        Assert.Equal((byte)0, state.LPadTouch);
+        Assert.Equal((short)0, state.LPadX);
+        Assert.Equal((short)0, state.LPadY);
+        Assert.Equal((byte)0, state.LPadPress);
+        Assert.Equal((ushort)0, state.LPadForce);
     }
 
     private static GamepadButtons Button(string name) => name switch
