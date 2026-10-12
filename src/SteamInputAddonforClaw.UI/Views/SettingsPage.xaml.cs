@@ -30,6 +30,7 @@ public sealed partial class SettingsPage : UserControl
         && Volatile.Read(ref _gamingHomeMutationInProgress) == 0;
     public event EventHandler? DeveloperMenuRequested;
     internal event Action<MainUiTheme>? AppThemeSelectionRequested;
+    internal event Action<FrontendUpdateSnapshot>? AppUpdateSnapshotRendered;
 
     public SettingsPage()
     {
@@ -108,6 +109,7 @@ public sealed partial class SettingsPage : UserControl
         UpdateCard.Description = snapshot.Message;
         UpdateButton.Content = snapshot.CanInstall ? "Install update" : "Check";
         UpdateButton.IsEnabled = snapshot.CanCheck || snapshot.CanInstall;
+        AppUpdateSnapshotRendered?.Invoke(snapshot);
     }
 
     private async Task RefreshGamingHomeAsync()
