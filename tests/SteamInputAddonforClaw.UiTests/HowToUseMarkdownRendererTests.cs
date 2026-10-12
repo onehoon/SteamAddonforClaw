@@ -51,14 +51,17 @@ public sealed class HowToUseMarkdownRendererTests
     }
 
     [Fact]
-    public void App_html_shell_embeds_rendered_body_and_uses_local_light_dark_css()
+    public void App_html_shell_embeds_rendered_body_and_keeps_the_document_light()
     {
         var source = HowToUseMarkdownRenderer.ResolveSource(CultureInfo.GetCultureInfo("ko-KR"));
         var html = HowToUseMarkdownRenderer.BuildHtml("# 지원 기기", source);
 
         Assert.Contains("<base href=\"https://raw.githubusercontent.com/onehoon/SteamAddonforClaw/main/docs/howtouse/\">", html, StringComparison.Ordinal);
         Assert.Contains("<h1 id=\"지원-기기\">지원 기기</h1>", html, StringComparison.Ordinal);
-        Assert.Contains("@media (prefers-color-scheme: dark)", html, StringComparison.Ordinal);
+        Assert.Contains("color-scheme: light", html, StringComparison.Ordinal);
+        Assert.Contains("html { color-scheme: light; background: #ffffff; }", html, StringComparison.Ordinal);
+        Assert.Contains("background: #ffffff", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("@media (prefers-color-scheme: dark)", html, StringComparison.Ordinal);
         Assert.Contains("max-width: 1100px", html, StringComparison.Ordinal);
         Assert.DoesNotContain("github.com/onehoon/SteamAddonforClaw/blob", html, StringComparison.Ordinal);
         Assert.Contains("event.preventDefault()", html, StringComparison.Ordinal);

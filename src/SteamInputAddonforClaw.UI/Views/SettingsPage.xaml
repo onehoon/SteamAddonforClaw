@@ -14,6 +14,23 @@
                 <Button x:Name="UpdateButton" Content="Check" Click="UpdateButton_Click" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard
+                x:Name="AppThemeCard"
+                Header="App theme"
+                Description="Choose the main app appearance.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="FontColor" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ComboBox
+                    x:Name="AppThemeComboBox"
+                    Width="140"
+                    SelectionChanged="AppThemeComboBox_SelectionChanged">
+                    <ComboBoxItem Content="System" Tag="System" />
+                    <ComboBoxItem Content="Light" Tag="Light" />
+                    <ComboBoxItem Content="Dark" Tag="Dark" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsExpander
                 x:Name="GamingHomeExpander"
                 Description="Choose the home app used by Windows gaming full screen experience."

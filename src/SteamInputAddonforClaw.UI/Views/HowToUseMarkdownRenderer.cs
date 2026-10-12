@@ -81,7 +81,7 @@ internal static class HowToUseMarkdownRenderer
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <base href="{{baseUrl}}">
                 <style>
-                    html { color-scheme: light dark; }
+                    html { color-scheme: light; background: #ffffff; }
                     body {
                         box-sizing: border-box;
                         max-width: 1100px;
@@ -107,14 +107,6 @@ internal static class HowToUseMarkdownRenderer
                     table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
                     th, td { padding: 8px 12px; border: 1px solid #a0a0a0; text-align: left; }
                     hr { border: 0; border-top: 1px solid #a0a0a0; }
-                    @media (prefers-color-scheme: dark) {
-                        body { color: #f3f5f7; background: #0e141b; }
-                        a { color: #7dbdff; }
-                        pre { background: #1c2631; }
-                        blockquote { border-left-color: #727e89; }
-                        th, td { border-color: #5c6874; }
-                        hr { border-top-color: #5c6874; }
-                    }
                 </style>
             </head>
             <body>

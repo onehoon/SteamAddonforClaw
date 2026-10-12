@@ -142,10 +142,11 @@ public sealed class HowToUsePageDocumentationRoutingTests
         Assert.Contains("StartDocumentationLoad();", code, StringComparison.Ordinal);
         Assert.Contains("private WebView2? _documentationWebView;", code, StringComparison.Ordinal);
         var existingViewCheck = code.IndexOf("if (_documentationWebView is not null)", StringComparison.Ordinal);
-        var createView = code.IndexOf("new WebView2()", StringComparison.Ordinal);
+        var createView = code.IndexOf("new WebView2 {", StringComparison.Ordinal);
         Assert.True(existingViewCheck >= 0 && createView > existingViewCheck);
         Assert.Contains("DocumentationWebViewHost.Children.Add(webView)", code, StringComparison.Ordinal);
         Assert.Contains("webView.Loaded += DocumentationWebView_Loaded", code, StringComparison.Ordinal);
+        Assert.Contains("DefaultBackgroundColor = Color.FromArgb(255, 255, 255, 255)", code, StringComparison.Ordinal);
     }
 
     [Fact]
