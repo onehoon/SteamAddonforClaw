@@ -9,9 +9,11 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// </summary>
 /// <remarks>
 /// Steam Deck has native right-stick and R3 fields, so this mapper writes them directly (RightStick
-/// -> RStickX/Y, R3 -> native R3) rather than substituting them into trackpad fields. Trackpad,
-/// quaternion, L5/R5, Steam, and QuickAccess fields remain neutral. Fresh PR1 motion snapshots may
-/// populate the Steam Deck IMU fields; invalid or unavailable snapshots remain neutral.
+/// -> RStickX/Y, R3 -> native R3) rather than substituting them into trackpad fields. Pad contacts
+/// are neutral by default; an optional right-pad contact populates only its Touch/X/Y fields. Pad
+/// press/force, the left pad, quaternion, L5/R5, Steam, and QuickAccess remain neutral. Fresh PR1
+/// motion snapshots may populate the Steam Deck IMU fields; invalid or unavailable snapshots remain
+/// neutral.
 /// </remarks>
 internal static class SteamDeckDeviceStateMapper
 {
@@ -26,7 +28,8 @@ internal static class SteamDeckDeviceStateMapper
         ControllerState state,
         bool suppressM1 = false,
         bool suppressM2 = false,
-        MsiClawMotionState? motion = null)
+        MsiClawMotionState? motion = null,
+        SteamDeckRightPadContact rightPad = default)
     {
         var buttons = state.Buttons;
 
@@ -71,13 +74,13 @@ internal static class SteamDeckDeviceStateMapper
             RStickX = state.RightStick.X,
             RStickY = state.RightStick.Y,
 
-            // L5/R5, Steam, QuickAccess, trackpad touch/press/axes/force, stick touch/force, and
+            // L5/R5, Steam, QuickAccess, left-pad fields, pad press/force, stick touch/force, and
             // quaternion remain neutral. IMU is filled below only from a complete valid snapshot.
             L5 = 0,
             R5 = 0,
             Steam = 0,
             QuickAccess = 0,
-            RPadTouch = 0,
+            RPadTouch = ToByte(rightPad.IsTouched),
             LPadTouch = 0,
             RPadPress = 0,
             LPadPress = 0,
@@ -85,8 +88,8 @@ internal static class SteamDeckDeviceStateMapper
             LStickTouch = 0,
             LPadX = 0,
             LPadY = 0,
-            RPadX = 0,
-            RPadY = 0,
+            RPadX = rightPad.IsTouched ? rightPad.X : (short)0,
+            RPadY = rightPad.IsTouched ? rightPad.Y : (short)0,
             LPadForce = 0,
             RPadForce = 0,
             LStickForce = 0,
