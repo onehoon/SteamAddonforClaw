@@ -911,7 +911,7 @@ public sealed partial class MainWindow : Window
     internal static string FormatWindowTitle(string version, bool updateReady = false)
     {
         var title = $"Steam Addon for Claw v{version}";
-        return updateReady ? title + " — Update ready" : title;
+        return updateReady ? title + " — Update Available" : title;
     }
 
 }
