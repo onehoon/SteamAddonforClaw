@@ -14,7 +14,7 @@ public sealed class MainWindowTests
 
     [Theory]
     [InlineData(false, "Steam Addon for Claw v0.1.20")]
-    [InlineData(true, "Steam Addon for Claw v0.1.20 — Update ready")]
+    [InlineData(true, "Steam Addon for Claw v0.1.20 — Update Available")]
     public void FormatWindowTitle_PreservesTheVersionPrefixAndOptionallyShowsUpdateReady(bool updateReady, string expected)
     {
         Assert.Equal(expected, MainWindow.FormatWindowTitle("0.1.20", updateReady));
