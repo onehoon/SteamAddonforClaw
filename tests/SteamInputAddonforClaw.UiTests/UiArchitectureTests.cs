@@ -136,9 +136,14 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("ScanProfileGamesAsync", materialize, StringComparison.Ordinal);
         Assert.DoesNotContain("ScanXboxGamesAsync", materialize, StringComparison.Ordinal);
         Assert.DoesNotContain(".Activate()", materialize, StringComparison.Ordinal);
+        Assert.Contains("case MainNavigationPage.HowToUse: _ = GetOrCreateHowToUsePage(); break;", materialize, StringComparison.Ordinal);
         Assert.Contains("TryMaterializeMainPage(page)", showPage, StringComparison.Ordinal);
         Assert.True(showPage.IndexOf("TryMaterializeMainPage(page)", StringComparison.Ordinal)
             < showPage.IndexOf("ControllerPageHost.Visibility =", StringComparison.Ordinal));
+        Assert.True(showPage.IndexOf("TryMaterializeMainPage(page)", StringComparison.Ordinal)
+            < showPage.IndexOf("_howToUseContent!.Activate()", StringComparison.Ordinal));
+        var howToFactory = ExtractMethod(mainWindow, "private HowToUsePage GetOrCreateHowToUsePage()");
+        Assert.Contains("HowToUsePageHost.Content = page", howToFactory, StringComparison.Ordinal);
 
         var warmupOrder = mainWindow[mainWindow.IndexOf("DeferredWarmupPages =", StringComparison.Ordinal)..
             mainWindow.IndexOf("private readonly IAddonFrontendControl", StringComparison.Ordinal)];

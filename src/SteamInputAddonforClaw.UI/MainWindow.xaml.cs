@@ -540,6 +540,7 @@ public sealed partial class MainWindow : Window
                 case MainNavigationPage.Tweaks: _ = GetOrCreateTweaksPage(); break;
                 case MainNavigationPage.Profile: _ = GetOrCreateProfilePage(); break;
                 case MainNavigationPage.Xbox: _ = GetOrCreateXboxPage(); break;
+                case MainNavigationPage.HowToUse: _ = GetOrCreateHowToUsePage(); break;
             }
 
             return true;
