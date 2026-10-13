@@ -62,7 +62,7 @@ public sealed class ControllerLedUiContractTests
     {
         var source = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
         var closed = source[source.IndexOf("private void OnWindowClosed(", StringComparison.Ordinal)..];
-        closed = closed[..closed.IndexOf("internal async Task CloseVibrationTestForUiShutdownAsync(", StringComparison.Ordinal)];
+        closed = closed[..closed.IndexOf("internal Task CloseVibrationTestForUiShutdownAsync(", StringComparison.Ordinal)];
         var drain = source[source.IndexOf("internal Task DrainPendingControllerMappingSavesAsync(", StringComparison.Ordinal)..];
         drain = drain[..drain.IndexOf("private void ReturnToSettings(", StringComparison.Ordinal)];
 
@@ -70,27 +70,6 @@ public sealed class ControllerLedUiContractTests
         Assert.Contains("if (_controllerLedMutationTimer?.IsRunning == true)", drain, StringComparison.Ordinal);
         Assert.Contains("_controllerLedMutationTimer.Stop();", drain, StringComparison.Ordinal);
         Assert.Contains("_controllerLedSaveChain = SaveControllerLedAfterAsync", drain, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Developer_vibration_test_page_wires_explicit_A2VM_LED_read_only_action_and_states_acceptance_boundary()
-    {
-        var xaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "VibrationTestPage.xaml"));
-        var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "VibrationTestPage.xaml.cs"));
-        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
-        var button = xaml.Descendants().Single(element =>
-            (string?)element.Attribute(x + "Name") == "ReadA2vmLedProfileProbeButton");
-
-        Assert.Equal("Read 0x024A Profile", (string?)button.Attribute("Content"));
-        Assert.Equal("ReadA2vmLedProfileProbe_Click", (string?)button.Attribute("Click"));
-        Assert.Contains("private async void ReadA2vmLedProfileProbe_Click", code, StringComparison.Ordinal);
-        Assert.Contains("RunControllerLedProfileReadProbeAsync()", code, StringComparison.Ordinal);
-        Assert.Contains("Stop the Xbox360 terminal STOP loop before running a controller profile probe.", code, StringComparison.Ordinal);
-        Assert.Contains("This diagnostic sends no LED write or SyncToROM command", xaml.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("RunControllerLedProfileReadProbeAsync", code[..code.IndexOf("private async Task RunA2vmLedProfileReadProbeAsync", StringComparison.Ordinal)], StringComparison.Ordinal);
-        Assert.Contains("Restore Addon default 50 / 50", xaml.ToString(), StringComparison.Ordinal);
-        Assert.Contains("0% / 100% motor asymmetry was physically observed on A2VM 8", File.ReadAllText(Source("src", "SteamInputAddonforClaw", "Frontend", "InProcessAddonFrontendControl.cs")), StringComparison.Ordinal);
-        Assert.Contains("physical LED behavior remains unverified", xaml.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Source(params string[] parts)

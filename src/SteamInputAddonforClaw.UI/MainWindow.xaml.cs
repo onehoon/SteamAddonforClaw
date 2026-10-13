@@ -47,8 +47,6 @@ public sealed partial class MainWindow : Window
     private VibrationTestPage? _vibrationTestContent;
     private ClawSensorProbePage? _clawSensorProbeContent;
     private FanHardwareProbePage? _fanHardwareProbeContent;
-    private BatteryChargeLimitTestPage? _batteryChargeLimitTestContent;
-    private GameInputSystemButtonProbePage? _gameInputSystemButtonProbeContent;
 
     // App UI PR-C: the single ordered mutation path for the WHOLE front-button mapping. The
     // cross-button same-domain uniqueness rule belongs to one whole mapping, so there is one save
@@ -289,17 +287,10 @@ public sealed partial class MainWindow : Window
         _ = RefreshSystemStatusAsync();
     }
 
-    internal async Task CloseVibrationTestForUiShutdownAsync()
+    internal Task CloseVibrationTestForUiShutdownAsync()
     {
-        if (_vibrationTestContent is not null)
-            await _vibrationTestContent.DeactivateAsync().ConfigureAwait(true);
         _fanHardwareProbeContent?.Deactivate();
-    }
-
-    internal async Task CloseGameInputSystemButtonProbeForUiShutdownAsync()
-    {
-        if (_gameInputSystemButtonProbeContent is not null)
-            await _gameInputSystemButtonProbeContent.DeactivateAsync().ConfigureAwait(true);
+        return Task.CompletedTask;
     }
 
     internal async Task CloseClawSensorProbeForUiShutdownAsync()
@@ -348,8 +339,6 @@ public sealed partial class MainWindow : Window
         page.VibrationTestRequested += (_, _) => ShowPage(_navigationState.OpenVibrationTest());
         page.SensorProbeRequested += (_, _) => ShowPage(_navigationState.OpenClawSensorProbe());
         page.FanHardwareProbeRequested += (_, _) => ShowPage(_navigationState.OpenFanHardwareProbe());
-        page.BatteryChargeLimitTestRequested += (_, _) => ShowPage(_navigationState.OpenBatteryChargeLimitTest());
-        page.GameInputSystemButtonProbeRequested += (_, _) => ShowPage(_navigationState.OpenGameInputSystemButtonProbe());
         return _developerMenuContent = page;
     }
 
@@ -358,7 +347,7 @@ public sealed partial class MainWindow : Window
         if (_vibrationTestContent is not null) return _vibrationTestContent;
 
         var page = new VibrationTestPage();
-        page.Initialize(_frontend, _bootstrap);
+        page.Initialize(_frontend);
         page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         return _vibrationTestContent = page;
     }
@@ -381,26 +370,6 @@ public sealed partial class MainWindow : Window
         page.Initialize(_frontend);
         page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         return _fanHardwareProbeContent = page;
-    }
-
-    private BatteryChargeLimitTestPage GetOrCreateBatteryChargeLimitTestPage()
-    {
-        if (_batteryChargeLimitTestContent is not null) return _batteryChargeLimitTestContent;
-
-        var page = new BatteryChargeLimitTestPage();
-        page.Initialize(_frontend);
-        page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        return _batteryChargeLimitTestContent = page;
-    }
-
-    private GameInputSystemButtonProbePage GetOrCreateGameInputSystemButtonProbePage()
-    {
-        if (_gameInputSystemButtonProbeContent is not null) return _gameInputSystemButtonProbeContent;
-
-        var page = new GameInputSystemButtonProbePage();
-        page.Initialize(_frontend);
-        page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        return _gameInputSystemButtonProbeContent = page;
     }
 
     private async void OnDeveloperMenuRequested(object? sender, EventArgs args)
@@ -456,27 +425,12 @@ public sealed partial class MainWindow : Window
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (IsBatteryValidationBlockingNavigation())
-        {
-            if (!args.IsSettingsSelected)
-                sender.SelectedItem = sender.SettingsItem;
-            return;
-        }
-
         var selectedTag = (args.SelectedItem as NavigationViewItem)?.Tag as string;
         ShowPage(_navigationState.SelectNavigationItem(args.IsSettingsSelected, selectedTag));
     }
 
-    private bool IsBatteryValidationBlockingNavigation()
-    {
-        return _batteryChargeLimitTestContent is { IsValidationRunning: true } &&
-            ReferenceEquals(DeveloperContentHost.Content, _batteryChargeLimitTestContent);
-    }
-
     private void ShowPage(MainNavigationPage page)
     {
-        var wasVibrationTest = _vibrationTestContent is not null &&
-            ReferenceEquals(DeveloperContentHost.Content, _vibrationTestContent);
         var wasController = ControllerContent.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
         var wasProfile = ProfileContent.Visibility == Visibility.Visible;
@@ -486,18 +440,12 @@ public sealed partial class MainWindow : Window
             ReferenceEquals(DeveloperContentHost.Content, _clawSensorProbeContent);
         var wasFanHardwareProbe = _fanHardwareProbeContent is not null &&
             ReferenceEquals(DeveloperContentHost.Content, _fanHardwareProbeContent);
-        var wasBatteryChargeLimitTest = _batteryChargeLimitTestContent is not null &&
-            ReferenceEquals(DeveloperContentHost.Content, _batteryChargeLimitTestContent);
-        var wasGameInputSystemButtonProbe = _gameInputSystemButtonProbeContent is not null &&
-            ReferenceEquals(DeveloperContentHost.Content, _gameInputSystemButtonProbeContent);
         DeveloperContentHost.Content = page switch
         {
             MainNavigationPage.DeveloperMenu => GetOrCreateDeveloperMenu(),
             MainNavigationPage.VibrationTest => GetOrCreateVibrationTestPage(),
             MainNavigationPage.ClawSensorProbe => GetOrCreateClawSensorProbePage(),
             MainNavigationPage.FanHardwareProbe => GetOrCreateFanHardwareProbePage(),
-            MainNavigationPage.BatteryChargeLimitTest => GetOrCreateBatteryChargeLimitTestPage(),
-            MainNavigationPage.GameInputSystemButtonProbe => GetOrCreateGameInputSystemButtonProbePage(),
             _ => null
         };
         DeveloperContentHost.Visibility = DeveloperContentHost.Content is null ? Visibility.Collapsed : Visibility.Visible;
@@ -518,11 +466,6 @@ public sealed partial class MainWindow : Window
             _ = RefreshSystemStatusAsync();
         }
         else if (wasController) ControllerContent.Deactivate();
-        // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
-        // other route), not just the page's own Back button -- the session must close no matter how
-        // the user leaves.
-        if (page == MainNavigationPage.VibrationTest) _vibrationTestContent!.Activate();
-        else if (wasVibrationTest) _vibrationTestContent?.Deactivate();
         if (page == MainNavigationPage.Device) DeviceContent.Activate();
         else if (wasDevice) DeviceContent.Deactivate();
         if (page == MainNavigationPage.Profile)
@@ -542,10 +485,6 @@ public sealed partial class MainWindow : Window
         else if (wasClawSensorProbe) _clawSensorProbeContent?.Deactivate();
         if (page == MainNavigationPage.FanHardwareProbe) _fanHardwareProbeContent!.Activate();
         else if (wasFanHardwareProbe) _fanHardwareProbeContent?.Deactivate();
-        if (page == MainNavigationPage.BatteryChargeLimitTest) _batteryChargeLimitTestContent!.Activate();
-        else if (wasBatteryChargeLimitTest) _batteryChargeLimitTestContent?.Deactivate();
-        if (page == MainNavigationPage.GameInputSystemButtonProbe) _gameInputSystemButtonProbeContent!.Activate();
-        else if (wasGameInputSystemButtonProbe) _gameInputSystemButtonProbeContent?.Deactivate();
     }
 
     private async Task RefreshSystemStatusAsync()
@@ -684,13 +623,6 @@ public sealed partial class MainWindow : Window
 
     private async void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
     {
-        if (IsBatteryValidationBlockingNavigation())
-        {
-            if (args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed)
-                args.Handled = true;
-            return;
-        }
-
         if (!args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed ||
             _navigationState.GetMouseBackDestination() is not { } destination)
         {

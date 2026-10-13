@@ -1,5 +1,4 @@
 using SteamInputAddonforClaw.Diagnostics;
-using System.Collections.Concurrent;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
@@ -9,7 +8,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class Xbox360RumbleFeedbackBridgeTests
 {
     [Fact]
-    public void Production_deadman_remains_five_seconds_for_diagnostic_runs()
+    public void Production_deadman_remains_five_seconds()
         => Assert.Equal(TimeSpan.FromSeconds(5), Xbox360RumbleFeedbackBridge.DefaultSafetyStop);
 
     [Fact]
@@ -155,42 +154,6 @@ public sealed class Xbox360RumbleFeedbackBridgeTests
         }
     }
 
-    [Fact]
-    public async Task Diagnostic_physical_stop_waits_for_an_admitted_callback_write_and_is_the_next_sink_write()
-    {
-        var sink = new BlockingCallbackSink();
-        Xbox360RumbleCallback? captured = null;
-        using var bridge = Xbox360RumbleFeedbackBridge.TryArm(
-            sink,
-            callback => { captured = callback; return true; },
-            TimeSpan.FromMinutes(1));
-        Assert.NotNull(bridge);
-
-        var callbackWrite = Task.Run(() => captured!(0, 200, 100));
-        await sink.CallbackWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var cleanup = Task.Run(() =>
-        {
-            cleanupStarted.TrySetResult();
-            return bridge!.WriteDiagnosticPhysicalStop();
-        });
-        await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        var stopEnteredWhileCallbackHeld = await Task.WhenAny(
-            sink.DiagnosticStopEntered.Task,
-            Task.Delay(TimeSpan.FromMilliseconds(75)));
-        Assert.NotSame(sink.DiagnosticStopEntered.Task, stopEnteredWhileCallbackHeld);
-
-        sink.ReleaseCallbackWrite.Set();
-        await callbackWrite.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, (await cleanup.WaitAsync(TimeSpan.FromSeconds(5))).Status);
-
-        Assert.Equal(
-            [new TwoMotorRumble(Expand(200), Expand(100)), TwoMotorRumble.Stopped],
-            sink.Writes.ToArray());
-    }
-
     private static (Xbox360RumbleFeedbackBridge Bridge, Action<byte, byte> Drive) Arm(
         RecordingSink sink, TimeSpan safetyStop)
     {
@@ -234,28 +197,4 @@ public sealed class Xbox360RumbleFeedbackBridgeTests
         }
     }
 
-    private sealed class BlockingCallbackSink : IPhysicalRumbleSink
-    {
-        private readonly ConcurrentQueue<TwoMotorRumble> _writes = new();
-        internal TaskCompletionSource CallbackWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal TaskCompletionSource DiagnosticStopEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal ManualResetEventSlim ReleaseCallbackWrite { get; } = new(false);
-        internal TwoMotorRumble[] Writes => _writes.ToArray();
-
-        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
-        {
-            if (rumble.Equals(TwoMotorRumble.Stopped))
-                DiagnosticStopEntered.TrySetResult();
-            else
-            {
-                CallbackWriteEntered.TrySetResult();
-                ReleaseCallbackWrite.Wait();
-            }
-
-            _writes.Enqueue(rumble);
-            return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
-        }
-    }
-
-    private static ushort Expand(byte value) => Xbox360RumbleFeedbackBridge.Expand(value);
 }

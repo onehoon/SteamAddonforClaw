@@ -93,7 +93,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _overlayQuickSettingsMutationInFlight;
     private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
     private GameBarStateDiagnosticObserver? _gameBarStateDiagnosticObserver;
-    private GameInputSystemButtonProbe? _gameInputSystemButtonProbe;
 
     // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
     // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
@@ -716,12 +715,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             setClawHudEnabled: SetClawHudFrontendAsync,
             mutateClawHudSetting: MutateClawHudFrontendAsync,
             shortcutRuntime: _shortcutRuntime,
-            captureXbox360RumbleLoopDiagnostic: CaptureXbox360RumbleLoopDiagnosticAsync,
-            startXbox360RumbleLoopDiagnostic: StartXbox360RumbleLoopDiagnosticAsync,
-            stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync,
-            captureGameInputSystemButtonProbe: CaptureGameInputSystemButtonProbeAsync,
-            startGameInputSystemButtonProbe: StartGameInputSystemButtonProbeAsync,
-            stopGameInputSystemButtonProbe: StopGameInputSystemButtonProbeAsync,
             controllerVibrationStrengthClient: _controllerVibrationStrengthClient,
             controllerVibrationTestAvailable: () => _presentationOwnership?.IsVibrationTestAvailable == true,
             controllerVibrationProbeIdentitySource: CaptureLiveOwnedPhysicalIdentityForDeveloperProbe,
@@ -730,8 +723,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 : Task.FromResult(new SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestResult(
                     SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable,
                     "The live Full1902 physical rumble path is unavailable.")),
-            controllerLedProfileReadProbe: token => RunA2vmLedProfileReadProbeAsync(
-                startupResult.HardwareDeviceModel is { } ledModel ? ledModel.Value : "unknown", token),
             runDeveloperRumbleRearm: RunDeveloperRumbleRearmAsync,
             // This is a presentation capability derived from the existing supported-hardware and
             // startup authority facts. The apply callback re-checks live authority and ownership.
@@ -995,9 +986,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 rumbleSink,
                 backButtonMappingProvider: () =>
                     Volatile.Read(ref _activeNonSteamBackButtonMappingOverride) ?? startupSettings.BackButtonMapping,
-                rumbleLoopUsbTraceCaptureFactory: () => new SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture(
-                    new SteamInputAddonforClaw.Processes.ChildProcessRunner(
-                        SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture.CommandTimeout)),
                 physicalRumbleTestAvailabilityProvider: () =>
                     owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null,
                 motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable,
@@ -1932,22 +1920,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
-    private Task<SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawLedProfileReadProbeResult> RunA2vmLedProfileReadProbeAsync(
-        string modelId,
-        CancellationToken cancellationToken)
-    {
-        _controllerLedController ??= new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawLedController(
-            GetMsiControllerDevices(),
-            new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
-            new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawHidDeviceInformationLookup(),
-            new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawRawHidTransport());
-        return _controllerLedController.ReadA2vm230CandidateProfileAsync(
-            modelId,
-            CaptureLiveOwnedPhysicalIdentityForDeveloperProbe,
-            () => _centerMStartupControl?.Capture().State == FrontendCenterMStartupState.Disabled,
-            cancellationToken);
-    }
-
     private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawPhysicalIdentity? CaptureLiveOwnedPhysicalIdentityForDeveloperProbe()
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0
@@ -2069,21 +2041,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         return _presentationOwnership?.TryRequestQuickAccessPulse() == true;
     }
 
-    private Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken) =>
-        _presentationOwnership is { } presentation
-            ? presentation.CaptureXbox360RumbleLoopDiagnosticAsync(_runtimeHost?.ActualRunningAppId ?? 0, cancellationToken)
-            : Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-
-    private Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken) =>
-        _presentationOwnership is { } presentation
-            ? presentation.StartXbox360RumbleLoopDiagnosticAsync(_runtimeHost?.ActualRunningAppId ?? 0, cancellationToken)
-            : Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-
-    private Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken) =>
-        _presentationOwnership is { } presentation
-            ? presentation.StopXbox360RumbleLoopDiagnosticAsync(cancellationToken)
-            : Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-
     internal Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -2153,17 +2110,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             var physical = _physicalOwnership!;
             var presentation = _presentationOwnership!;
-            var rumbleLoop = await presentation.CaptureXbox360RumbleLoopDiagnosticAsync(
-                _runtimeHost?.ActualRunningAppId ?? 0, CancellationToken.None).ConfigureAwait(false);
-            if (rumbleLoop.State == FrontendXbox360RumbleLoopState.Running)
-            {
-                AppLog.Info("ControllerOwnership", "Controller rumble recovery was rejected while the Xbox360 terminal STOP diagnostic is running.",
-                    ("Event", "ControllerRumbleRecoveryUnavailable"),
-                    ("Reason", "Xbox360RumbleDiagnosticRunning"));
-                return FrontendDeveloperRumbleRearmResult.Unavailable(
-                    "Stop the Xbox360 terminal STOP diagnostic before restoring vibration.");
-            }
-
             var physicalAdmissionFailure = await physical.CheckDeveloperRumbleRearmAdmissionAsync().ConfigureAwait(false);
             if (physicalAdmissionFailure is not null)
             {
@@ -2310,27 +2256,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             || physical.CurrentSessionGeneration <= 0)
             return "ExactPrimaryPid1902TargetUnavailable";
         return null;
-    }
-
-    private Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult((_gameInputSystemButtonProbe ??= new GameInputSystemButtonProbe()).Capture());
-    }
-
-    private Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Volatile.Read(ref _processShutdownStarted) == 0
-            ? Task.FromResult((_gameInputSystemButtonProbe ??= new GameInputSystemButtonProbe()).Start())
-            : Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable("The Runtime is shutting down."));
-    }
-
-    private Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_gameInputSystemButtonProbe?.Stop()
-            ?? FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     }
 
     private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync(
@@ -3560,15 +3485,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
             _frontendServer = null;
-        }
-        if (_gameInputSystemButtonProbe is not null)
-        {
-            try { _gameInputSystemButtonProbe.Dispose(); }
-            catch (Exception exception)
-            {
-                AppLog.Warn("GameInput.SystemButton", "Probe shutdown cleanup failed; Runtime shutdown will continue.",
-                    exception, ("Reason", exception.GetType().Name));
-            }
         }
         PrepareRuntimeForShutdown();
         _systemTrayIcon?.Dispose();

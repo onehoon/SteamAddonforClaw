@@ -16,8 +16,6 @@ internal enum MainNavigationPage
     CenterMButton,
     VibrationTest,
     FanHardwareProbe,
-    BatteryChargeLimitTest,
-    GameInputSystemButtonProbe,
 }
 
 internal sealed class MainNavigationState
@@ -68,8 +66,6 @@ internal sealed class MainNavigationState
     internal MainNavigationPage OpenClawSensorProbe() => CurrentPage = MainNavigationPage.ClawSensorProbe;
     internal MainNavigationPage OpenVibrationTest() => CurrentPage = MainNavigationPage.VibrationTest;
     internal MainNavigationPage OpenFanHardwareProbe() => CurrentPage = MainNavigationPage.FanHardwareProbe;
-    internal MainNavigationPage OpenBatteryChargeLimitTest() => CurrentPage = MainNavigationPage.BatteryChargeLimitTest;
-    internal MainNavigationPage OpenGameInputSystemButtonProbe() => CurrentPage = MainNavigationPage.GameInputSystemButtonProbe;
 
     internal MainNavigationPage? GetMouseBackDestination() => CurrentPage switch
     {
@@ -78,8 +74,6 @@ internal sealed class MainNavigationState
         MainNavigationPage.CenterMButton => MainNavigationPage.Controller,
         MainNavigationPage.VibrationTest => MainNavigationPage.DeveloperMenu,
         MainNavigationPage.FanHardwareProbe => MainNavigationPage.DeveloperMenu,
-        MainNavigationPage.BatteryChargeLimitTest => MainNavigationPage.DeveloperMenu,
-        MainNavigationPage.GameInputSystemButtonProbe => MainNavigationPage.DeveloperMenu,
         _ => null
     };
 }

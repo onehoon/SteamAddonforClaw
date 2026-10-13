@@ -49,7 +49,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly MsiClawVibrationStrengthClient? _controllerVibrationStrengthClient;
     private readonly Func<bool>? _controllerVibrationTestAvailable;
     private readonly Func<MsiClawPhysicalIdentity?>? _controllerVibrationProbeIdentitySource;
-    private readonly Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? _controllerLedProfileReadProbe;
     private readonly Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? _testControllerVibrationMotor;
     private readonly Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? _runDeveloperRumbleRearm;
     private readonly Func<CancellationToken, Task<bool>>? _reconcileExperimentalVirtualTouchpad;
@@ -105,12 +104,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
     private readonly Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
     private readonly ShortcutRuntime? _shortcutRuntime;
-    private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _captureXbox360RumbleLoopDiagnostic;
-    private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _startXbox360RumbleLoopDiagnostic;
-    private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _stopXbox360RumbleLoopDiagnostic;
-    private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _captureGameInputSystemButtonProbe;
-    private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _startGameInputSystemButtonProbe;
-    private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _stopGameInputSystemButtonProbe;
     private readonly Action<string>? _requestControllerPresentationReconcile;
     private readonly WindowsTweaksRuntime? _windowsTweaksRuntime;
 
@@ -151,25 +144,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null,
         Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null,
         ShortcutRuntime? shortcutRuntime = null,
-        Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? captureXbox360RumbleLoopDiagnostic = null,
-        Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? startXbox360RumbleLoopDiagnostic = null,
-        Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? stopXbox360RumbleLoopDiagnostic = null,
         MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null,
         Func<bool>? controllerVibrationTestAvailable = null,
         Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? testControllerVibrationMotor = null,
         bool controllerLedAvailable = false,
         Func<ControllerLedSettings, CancellationToken, Task>? applyControllerLedSettings = null,
         Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? applyControllerVibrationSettings = null,
-        Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? captureGameInputSystemButtonProbe = null,
-        Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? startGameInputSystemButtonProbe = null,
-        Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? stopGameInputSystemButtonProbe = null,
         Func<CancellationToken, Task<XboxInstalledGameCatalogResult>>? scanXboxGames = null,
         XboxGameProfileMutations? xboxGameProfileMutations = null,
         Func<ActiveProfileTarget>? activeProfileTargetSource = null,
         Func<string, bool>? reconcileXboxBackButtonMapping = null,
         Func<string, string?>? activeXboxDisplayNameSource = null,
         Func<MsiClawPhysicalIdentity?>? controllerVibrationProbeIdentitySource = null,
-        Func<CancellationToken, Task<MsiClawLedProfileReadProbeResult>>? controllerLedProfileReadProbe = null,
         Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null,
         Action<string>? requestControllerPresentationReconcile = null,
         Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null,
@@ -207,18 +193,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _setClawHudEnabled = setClawHudEnabled;
         _mutateClawHudSetting = mutateClawHudSetting;
         _shortcutRuntime = shortcutRuntime;
-        _captureXbox360RumbleLoopDiagnostic = captureXbox360RumbleLoopDiagnostic;
-        _startXbox360RumbleLoopDiagnostic = startXbox360RumbleLoopDiagnostic;
-        _stopXbox360RumbleLoopDiagnostic = stopXbox360RumbleLoopDiagnostic;
-        _captureGameInputSystemButtonProbe = captureGameInputSystemButtonProbe;
-        _startGameInputSystemButtonProbe = startGameInputSystemButtonProbe;
-        _stopGameInputSystemButtonProbe = stopGameInputSystemButtonProbe;
         _controllerVibrationStrengthClient = controllerVibrationStrengthClient;
         _applyControllerVibrationSettings = applyControllerVibrationSettings;
         _controllerVibrationTestAvailable = controllerVibrationTestAvailable;
         _controllerVibrationProbeIdentitySource = controllerVibrationProbeIdentitySource;
         _testControllerVibrationMotor = testControllerVibrationMotor;
-        _controllerLedProfileReadProbe = controllerLedProfileReadProbe;
         _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
         _requestControllerPresentationReconcile = requestControllerPresentationReconcile;
         _reconcileExperimentalVirtualTouchpad = reconcileExperimentalVirtualTouchpad;
@@ -1291,117 +1270,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return new(true, state, status, session.Manufacturer, session.Model, session.Board, FanProbeModelMap.Resolve(session.Board).ToString(), path, !string.IsNullOrWhiteSpace(path), state == FrontendFanProbeState.Failed ? status : null);
     }
 
-    // ---- MSI Battery Charge-Limit Test (developer-only, no persistence or lifecycle reconcile) ----
-    public async Task<FrontendBatteryChargeLimitTestSnapshot> CaptureBatteryChargeLimitTestAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        var status = await CaptureStatusAsync(cancellationToken).ConfigureAwait(false);
-        if (!IsSupportedBatteryHardware(status))
-            return UnavailableBatterySnapshot(status, "The authoritative hardware assessment is not a supported MSI Claw.");
-        if (_batteryChargeLimitHardware is null)
-            return UnavailableBatterySnapshot(status, "The shared MSI helper transport is unavailable.");
-
-        var result = await Task.Run(() => _batteryChargeLimitHardware.Read(), CancellationToken.None).ConfigureAwait(false);
-        return MapBatterySnapshot(status, result.State, result.FailureMessage, result.Succeeded);
-    }
-
-    public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
-        SetBatteryChargeLimitTestAsync(() => _batteryChargeLimitHardware!.SetEnabled(enabled), cancellationToken);
-
-    public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestPercentAsync(int percent, CancellationToken cancellationToken = default) =>
-        SetBatteryChargeLimitTestAsync(() => _batteryChargeLimitHardware!.SetPercent(percent), cancellationToken);
-
-    public Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return _captureXbox360RumbleLoopDiagnostic?.Invoke(cancellationToken)
-            ?? Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-    }
-
-    public Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return RunExclusiveControllerOperationAsync(
-            () => _startXbox360RumbleLoopDiagnostic?.Invoke(cancellationToken)
-                ?? Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable()),
-            () => FrontendXbox360RumbleLoopSnapshot.Unavailable("Another controller diagnostic is already running."));
-    }
-
-    public Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        _stopXbox360RumbleLoopDiagnostic?.Invoke(cancellationToken)
-        ?? Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-
-    public Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return _captureGameInputSystemButtonProbe?.Invoke(cancellationToken)
-            ?? Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
-    }
-
-    public Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return _startGameInputSystemButtonProbe?.Invoke(cancellationToken)
-            ?? Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
-    }
-
-    public Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
-        _stopGameInputSystemButtonProbe?.Invoke(cancellationToken)
-        ?? Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
-
-    private async Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestAsync(
-        Func<MsiBatteryChargeLimitMutationResult> mutation,
-        CancellationToken cancellationToken)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        var status = await CaptureStatusAsync(cancellationToken).ConfigureAwait(false);
-        if (!IsSupportedBatteryHardware(status))
-            return new(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
-                "The authoritative hardware assessment is not a supported MSI Claw.",
-                UnavailableBatterySnapshot(status, "The authoritative hardware assessment is not a supported MSI Claw."));
-        if (_batteryChargeLimitHardware is null)
-            return new(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
-                "The shared MSI helper transport is unavailable.", UnavailableBatterySnapshot(status, "The shared MSI helper transport is unavailable."));
-
-        var result = await Task.Run(mutation, CancellationToken.None).ConfigureAwait(false);
-        // The transport/backend is available even when a mutation fails before a fresh state can be
-        // returned. Keep that distinction visible from the error text instead of presenting it as an
-        // unavailable hardware path.
-        var snapshot = MapBatterySnapshot(status, result.State, result.FailureMessage, true);
-        return new(MapBatteryMutationOutcome(result.Outcome), result.FailureMessage, snapshot);
-    }
-
-    private static bool IsSupportedBatteryHardware(FrontendStatusSnapshot status) =>
-        status.Hardware.Status == FrontendHardwareStatus.Supported &&
-        MsiClawDeviceModels.All.Any(model => string.Equals(model.HardwareModelId, status.Device.BaseBoard, StringComparison.OrdinalIgnoreCase));
-
-    private static FrontendBatteryChargeLimitTestSnapshot UnavailableBatterySnapshot(FrontendStatusSnapshot status, string message) =>
-        new(false, status.Device.Manufacturer, status.Device.Model, status.Device.BaseBoard, null, null, null, false, message);
-
-    private static FrontendBatteryChargeLimitTestSnapshot MapBatterySnapshot(
-        FrontendStatusSnapshot status,
-        MsiBatteryChargeLimitState? state,
-        string? failureMessage,
-        bool available) =>
-        new(available, status.Device.Manufacturer, status.Device.Model, status.Device.BaseBoard,
-            state?.Enabled, state?.LimitPercent, state?.RawValue, state?.IsProductValue == true, failureMessage);
-
-    private static FrontendBatteryChargeLimitTestMutationOutcome MapBatteryMutationOutcome(MsiBatteryChargeLimitMutationOutcome outcome) => outcome switch
-    {
-        MsiBatteryChargeLimitMutationOutcome.Succeeded => FrontendBatteryChargeLimitTestMutationOutcome.Succeeded,
-        MsiBatteryChargeLimitMutationOutcome.InvalidTarget => FrontendBatteryChargeLimitTestMutationOutcome.InvalidTarget,
-        MsiBatteryChargeLimitMutationOutcome.ReadFailed => FrontendBatteryChargeLimitTestMutationOutcome.ReadFailed,
-        MsiBatteryChargeLimitMutationOutcome.WriteFailed => FrontendBatteryChargeLimitTestMutationOutcome.WriteFailed,
-        MsiBatteryChargeLimitMutationOutcome.VerificationFailed => FrontendBatteryChargeLimitTestMutationOutcome.VerificationFailed,
-        _ => FrontendBatteryChargeLimitTestMutationOutcome.Unavailable
-    };
-
     // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
 
     public async Task<FrontendClawSensorProbeSnapshot> OpenClawSensorProbeAsync(CancellationToken cancellationToken = default)
@@ -2061,51 +1929,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         };
         return new(mode, outcome, status);
     }
-
-    public Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(
-        CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return RunExclusiveControllerOperationAsync(
-            () => RunControllerLedProfileReadProbeCoreAsync(cancellationToken),
-            () => CreateLedProfileReadProbeResult(
-                FrontendControllerLedProfileReadProbeOutcome.Unavailable, null,
-                "Another controller diagnostic or re-arm is already running."));
-    }
-
-    private async Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeCoreAsync(
-        CancellationToken cancellationToken)
-    {
-        if (_controllerLedProfileReadProbe is null)
-            return CreateLedProfileReadProbeResult(
-                FrontendControllerLedProfileReadProbeOutcome.Unavailable, null,
-                "The developer-only A2VM LED profile read probe is unavailable.");
-
-        var result = await _controllerLedProfileReadProbe(cancellationToken).ConfigureAwait(false);
-        var outcome = result.Outcome switch
-        {
-            MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed => FrontendControllerLedProfileReadProbeOutcome.CandidateReadbackParsed,
-            MsiClawLedProfileReadProbeOutcome.TransportWriteFailed => FrontendControllerLedProfileReadProbeOutcome.TransportWriteFailed,
-            MsiClawLedProfileReadProbeOutcome.NoReplyOrTimeout => FrontendControllerLedProfileReadProbeOutcome.NoReplyOrTimeout,
-            MsiClawLedProfileReadProbeOutcome.UnexpectedReport => FrontendControllerLedProfileReadProbeOutcome.UnexpectedReport,
-            MsiClawLedProfileReadProbeOutcome.WrongAddressOrIndex => FrontendControllerLedProfileReadProbeOutcome.WrongAddressOrIndex,
-            MsiClawLedProfileReadProbeOutcome.Unavailable => FrontendControllerLedProfileReadProbeOutcome.Unavailable,
-            _ => FrontendControllerLedProfileReadProbeOutcome.Failed
-        };
-        var firmware = result.FirmwareVersion is ushort version ? $"0x{version:X4}" : "unavailable";
-        var responseValidity = result.ReadResponseValid ? "yes" : "no";
-        var interpretation = result.ReadResponseValid
-            ? "The profile block was structurally read; physical Static LED output from production writes remains unverified."
-            : $"No valid candidate read response was confirmed ({result.Reason}).";
-        return CreateLedProfileReadProbeResult(outcome, result.FirmwareVersion,
-            $"{outcome}. Firmware {firmware}; candidate 0x{MsiClawLedProtocol.A2vm230CandidateRgbAddress:X4}; valid read response: {responseValidity}. {interpretation}");
-    }
-
-    private static FrontendControllerLedProfileReadProbeResult CreateLedProfileReadProbeResult(
-        FrontendControllerLedProfileReadProbeOutcome outcome,
-        ushort? firmwareVersion,
-        string status) => new(outcome, firmwareVersion, MsiClawLedProtocol.A2vm230CandidateRgbAddress, status);
 
     private FrontendControllerVibrationStrengthSnapshot CaptureControllerVibrationSnapshot()
     {

@@ -1,17 +1,7 @@
 <UserControl x:Class="SteamInputAddonforClaw.Views.VibrationTestPage" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <ScrollViewer Padding="32"><StackPanel Spacing="12">
     <Button Content="Back to Developer Menu" Click="Back_Click" HorizontalAlignment="Left" />
-    <TextBlock Text="Vibration Test" FontSize="24" FontWeight="SemiBold" />
-    <TextBlock Text="Xbox360 Terminal STOP Loop" FontSize="18" FontWeight="SemiBold" />
-    <TextBlock Text="Replays captured Lies of P-style Xbox360 rumble bursts and stops automatically if the terminal 0/0 callback is not observed." TextWrapping="Wrap" Opacity="0.75" />
-    <TextBlock x:Name="StatusText" TextWrapping="Wrap" />
-    <TextBlock x:Name="RunDetailsText" TextWrapping="Wrap" FontFamily="Consolas" />
-    <TextBlock x:Name="FailureText" TextWrapping="Wrap" Foreground="OrangeRed" />
-    <StackPanel Orientation="Horizontal" Spacing="8">
-      <Button x:Name="StartButton" Content="Start Validation" Click="Start_Click" IsEnabled="False" />
-      <Button x:Name="StopButton" Content="Stop" Click="Stop_Click" IsEnabled="False" />
-    </StackPanel>
-    <TextBlock Text="Vibration Profile 0/100 Probe" FontSize="18" FontWeight="SemiBold" Margin="0,16,0,0" />
+    <TextBlock Text="Vibration Profile 0/100 Probe" FontSize="24" FontWeight="SemiBold" />
     <TextBlock Text="Developer-only physical hardware mutation. No SyncToROM is sent." TextWrapping="Wrap" Foreground="OrangeRed" />
     <TextBlock Text="After Apply succeeds, open Controller &gt; Vibration Strength and press Left Test once, then Right Test once if you want to retest. The 0% / 100% motor asymmetry was physically observed on A2VM 8 firmware 0x0230; this probe only reports HID transport for the current command. Return here and press Restore Addon default 50/50 when finished." TextWrapping="Wrap" Opacity="0.75" />
     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -19,9 +9,5 @@
       <Button x:Name="RestoreVibrationProfileProbeButton" Content="Restore Addon default 50 / 50" Click="RestoreVibrationProfileProbe_Click" />
     </StackPanel>
     <TextBlock x:Name="VibrationProfileProbeStatusText" TextWrapping="Wrap" Foreground="OrangeRed" />
-    <TextBlock Text="A2VM LED Profile Read-Only Probe" FontSize="18" FontWeight="SemiBold" Margin="0,16,0,0" />
-    <TextBlock Text="Reads only the 0x024A profile block on A2VM 8 firmware 0x0230. This diagnostic sends no LED write or SyncToROM command. The matching readback enables the scoped Static production path, but physical LED behavior remains unverified." TextWrapping="Wrap" Foreground="OrangeRed" />
-    <Button x:Name="ReadA2vmLedProfileProbeButton" Content="Read 0x024A Profile" Click="ReadA2vmLedProfileProbe_Click" HorizontalAlignment="Left" />
-    <TextBlock x:Name="A2vmLedProfileProbeStatusText" TextWrapping="Wrap" />
   </StackPanel></ScrollViewer>
 </UserControl>
