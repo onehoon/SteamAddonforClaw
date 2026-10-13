@@ -21,6 +21,7 @@ using SteamInputAddonforClaw.Shortcuts;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Updates;
 using SteamInputAddonforClaw.WindowsGaming;
+using SteamInputAddonforClaw.WindowsTweaks;
 using SteamInputAddonforClaw.Xbox;
 using System.Diagnostics;
 using Microsoft.Win32;
@@ -112,6 +113,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _startGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _stopGameInputSystemButtonProbe;
     private readonly Action<string>? _requestControllerPresentationReconcile;
+    private readonly WindowsTweaksRuntime? _windowsTweaksRuntime;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -173,7 +175,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null,
         Action<string>? requestControllerPresentationReconcile = null,
         Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null,
-        Func<CancellationToken, Task<bool>>? reconcileExperimentalVirtualTouchpad = null)
+        Func<CancellationToken, Task<bool>>? reconcileExperimentalVirtualTouchpad = null,
+        WindowsTweaksRuntime? windowsTweaksRuntime = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -222,6 +225,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
         _requestControllerPresentationReconcile = requestControllerPresentationReconcile;
         _reconcileExperimentalVirtualTouchpad = reconcileExperimentalVirtualTouchpad;
+        _windowsTweaksRuntime = windowsTweaksRuntime;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -901,6 +905,60 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var result = await _gamingHome.SetStartupEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
         if (result.Succeeded) StateInvalidated?.Invoke(this, EventArgs.Empty);
         return result;
+    }
+
+    public async Task<FrontendWindowsTweaksSnapshot> CaptureWindowsTweaksAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        if (_windowsTweaksRuntime is null)
+            return FrontendWindowsTweaksSnapshot.Unavailable with
+            {
+                WarningAcknowledgedLocalDate = _settings.WindowsTweaksWarningAcknowledgedLocalDate
+            };
+
+        var snapshot = await _windowsTweaksRuntime.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        return snapshot with { WarningAcknowledgedLocalDate = _settings.WindowsTweaksWarningAcknowledgedLocalDate };
+    }
+
+    public async Task<FrontendWindowsTweakMutationResult> SetWindowsTweakAsync(
+        FrontendWindowsTweakId id,
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        if (_windowsTweaksRuntime is null)
+            return new(false, "Windows Tweaks are unavailable.", FrontendWindowsTweaksSnapshot.Unavailable);
+
+        var result = await _windowsTweaksRuntime.SetAsync(id, enabled, cancellationToken).ConfigureAwait(false);
+        AppLog.Info("WindowsTweaks", "Windows tweak operation completed.",
+            ("Id", id), ("Enabled", enabled), ("Succeeded", result.Succeeded),
+            ("State", result.Snapshot.Tweaks.SingleOrDefault(row => row.Id == id)?.State ?? FrontendWindowsTweakState.Unknown));
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return result with
+        {
+            Snapshot = result.Snapshot with { WarningAcknowledgedLocalDate = _settings.WindowsTweaksWarningAcknowledgedLocalDate }
+        };
+    }
+
+    public Task<bool> AcknowledgeWindowsTweaksWarningAsync(DateOnly localDate, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (localDate != DateOnly.FromDateTime(DateTime.Now))
+            return Task.FromResult(false);
+
+        try
+        {
+            var saved = _settings.TryAcknowledgeWindowsTweaksWarning(localDate);
+            if (saved) StateInvalidated?.Invoke(this, EventArgs.Empty);
+            return Task.FromResult(saved);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            AppLog.Warn("WindowsTweaks", "The warning acknowledgement date could not be saved.", exception,
+                ("Event", "WindowsTweaksWarningSaveFailed"));
+            return Task.FromResult(false);
+        }
     }
 
     public async Task<FrontendClawHudSnapshot> CaptureClawHudAsync(CancellationToken cancellationToken = default)

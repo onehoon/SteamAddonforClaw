@@ -1,0 +1,47 @@
+<UserControl
+    x:Class="SteamInputAddonforClaw.Views.WindowsTweaksPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
+    <ScrollViewer Padding="32">
+        <StackPanel Spacing="16">
+            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Tweaks" />
+            <TextBlock x:Name="EntryPromptText" Text="Review the safety notice to open these controls." TextWrapping="Wrap" Visibility="Collapsed" />
+            <TextBlock x:Name="OperationMessageText" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
+            <StackPanel x:Name="TweaksPanel" Spacing="12" Visibility="Collapsed">
+                <TextBlock Text="Gaming Performance" FontWeight="SemiBold" Margin="0,8,0,0" />
+                <ctcontrols:SettingsCard x:Name="MemoryIntegrityCard" Header="Memory Integrity" Description="Configure Windows kernel memory protection.">
+                    <StackPanel Width="250" Spacing="4">
+                        <ToggleSwitch x:Name="MemoryIntegritySwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
+                        <TextBlock x:Name="MemoryIntegrityState" Text="State unavailable" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ctcontrols:SettingsCard>
+                <ctcontrols:SettingsCard x:Name="VirtualMachinePlatformCard" Header="Virtual Machine Platform" Description="Enable or disable the Windows virtualization platform feature.">
+                    <StackPanel Width="250" Spacing="4">
+                        <ToggleSwitch x:Name="VirtualMachinePlatformSwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
+                        <TextBlock x:Name="VirtualMachinePlatformState" Text="State unavailable" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ctcontrols:SettingsCard>
+                <TextBlock Text="Registry Tweaks" FontWeight="SemiBold" Margin="0,12,0,0" />
+                <ctcontrols:SettingsCard x:Name="InstantContextMenusCard" Header="Instant Context Menus" Description="Turn off menu animation so menus appear immediately.">
+                    <StackPanel Width="250" Spacing="4">
+                        <ToggleSwitch x:Name="InstantContextMenusSwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
+                        <TextBlock x:Name="InstantContextMenusState" Text="State unavailable" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ctcontrols:SettingsCard>
+                <ctcontrols:SettingsCard x:Name="ClassicContextMenuCard" Header="Classic Context Menu" Description="Use the classic Windows 11 context menu for this user.">
+                    <StackPanel Width="250" Spacing="4">
+                        <ToggleSwitch x:Name="ClassicContextMenuSwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
+                        <TextBlock x:Name="ClassicContextMenuState" Text="State unavailable" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ctcontrols:SettingsCard>
+                <ctcontrols:SettingsCard x:Name="DisablePasswordOnWakeCard" Header="Disable Password on Wake" Description="Return from sleep without requiring sign-in.">
+                    <StackPanel Width="250" Spacing="4">
+                        <ToggleSwitch x:Name="DisablePasswordOnWakeSwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
+                        <TextBlock x:Name="DisablePasswordOnWakeState" Text="State unavailable" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ctcontrols:SettingsCard>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

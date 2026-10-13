@@ -24,6 +24,7 @@ using SteamInputAddonforClaw.ClawHud;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Shortcuts;
 using SteamInputAddonforClaw.Processes;
+using SteamInputAddonforClaw.WindowsTweaks;
 using SteamInputAddonforClaw.Xbox.Session;
 using SteamInputAddonforClaw.Touchpad;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
@@ -743,7 +744,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             requestControllerPresentationReconcile: trigger => RequestControllerPresentationReconcile(trigger),
             capturePresentationSnapshot: () => _runtimeHost?.CapturePresentationSnapshot()
                 ?? new SteamPresentationSnapshot(_runtimeHost?.ActualRunningAppId ?? 0, false),
-            reconcileExperimentalVirtualTouchpad: token => ReconcileTouchpadCaptureAsync("DeveloperPreferenceChanged", token));
+            reconcileExperimentalVirtualTouchpad: token => ReconcileTouchpadCaptureAsync("DeveloperPreferenceChanged", token),
+            windowsTweaksRuntime: new WindowsTweaksRuntime(
+                new WindowsTweaksOperatingSystem(),
+                startupResult.HardwareDeviceModel is { } tweaksModel
+                    && (tweaksModel.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8")));
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);

@@ -22,6 +22,7 @@ public sealed class MainNavigationIconContractTests
             (Tag: "Xbox", Content: "XBOX", Icon: "FontIcon:E990"),
             (Tag: "Overlay", Content: "ClawHUD", Icon: "FontIcon:E7F4"),
             (Tag: "Shortcut", Content: "Shortcut", Icon: "FontIcon:E71B"),
+            (Tag: "Tweaks", Content: "Tweaks", Icon: "SymbolIcon:Repair"),
             (Tag: "HowToUse", Content: "How to Use", Icon: "SymbolIcon:Help"),
         };
 
