@@ -135,6 +135,107 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         Assert.False(disabled.IsMixed);
     }
 
+    [Fact]
+    public void Widgets_policy_support_fails_closed_by_windows_edition()
+    {
+        Assert.True(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("Professional"));
+        Assert.True(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("Enterprise"));
+        Assert.True(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("Education"));
+        Assert.True(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("IoTEnterpriseS"));
+        Assert.False(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("CoreSingleLanguage"));
+        Assert.False(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("IoTCore"));
+        Assert.Null(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("FutureEdition"));
+        Assert.Null(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport(null));
+
+        var capture = Method("CaptureDisableWindowsWidgets");
+        var mutation = Method("SetDisableWindowsWidgets");
+        var editionRead = Method("ReadWidgetsPolicyEditionSupport");
+        Assert.Contains("WindowsTweakRegistry.Read(Registry.LocalMachine, WindowsCurrentVersionPath, \"EditionID\")", editionRead, StringComparison.Ordinal);
+        Assert.Contains("ReadWidgetsPolicyEditionSupport()", capture, StringComparison.Ordinal);
+        Assert.Contains("if (!editionSupport.Value)", capture, StringComparison.Ordinal);
+        Assert.Contains("ReadWidgetsPolicyEditionSupport()", mutation, StringComparison.Ordinal);
+        Assert.Contains("if (!editionSupport.Value)", mutation, StringComparison.Ordinal);
+        Assert.True(mutation.IndexOf("if (!editionSupport.Value)", StringComparison.Ordinal)
+            < mutation.IndexOf("WindowsTweakRegistry.Write", StringComparison.Ordinal));
+        Assert.Contains("WindowsTweakRegistry.Read(Registry.LocalMachine, WidgetsPolicyPath, \"AllowNewsAndInterests\")", capture, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, WidgetsPolicyPath, \"AllowNewsAndInterests\", 0, RegistryValueKind.DWord)", mutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.DeleteValue(Registry.LocalMachine, WidgetsPolicyPath, \"AllowNewsAndInterests\")", mutation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Registry_tweak_mapping_requires_all_exact_zero_dwords_or_all_values_absent()
+    {
+        var widgetsAbsent = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+            new WindowsTweakRegistryValueRead(false, false, null, null));
+        var widgetsZero = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+            new WindowsTweakRegistryValueRead(true, true, 0, RegistryValueKind.DWord));
+        var widgetsOne = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+            new WindowsTweakRegistryValueRead(true, true, 1, RegistryValueKind.DWord));
+        var widgetsWrongKind = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+            new WindowsTweakRegistryValueRead(true, true, "0", RegistryValueKind.String));
+        var absent = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+            new(false, false, null, null),
+            new(true, false, null, null));
+        var zero = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+            new(true, true, 0, RegistryValueKind.DWord),
+            new(true, true, 0, RegistryValueKind.DWord));
+        var nonzero = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+            new(true, true, 0, RegistryValueKind.DWord),
+            new(true, true, 1, RegistryValueKind.DWord));
+        var wrongKind = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+            new(true, true, 0, RegistryValueKind.DWord),
+            new(true, true, "0", RegistryValueKind.String));
+
+        Assert.False(widgetsAbsent.ConfiguredEnabled);
+        Assert.False(widgetsAbsent.IsMixed);
+        Assert.True(widgetsZero.ConfiguredEnabled);
+        Assert.False(widgetsZero.IsMixed);
+        Assert.True(widgetsOne.IsMixed);
+        Assert.True(widgetsWrongKind.IsMixed);
+        Assert.False(absent.ConfiguredEnabled);
+        Assert.False(absent.IsMixed);
+        Assert.True(zero.ConfiguredEnabled);
+        Assert.False(zero.IsMixed);
+        Assert.True(nonzero.IsMixed);
+        Assert.True(wrongKind.IsMixed);
+
+        foreach (var observation in new[] { nonzero, wrongKind })
+        {
+            var snapshot = WindowsTweaksStateMapper.Map(FrontendWindowsTweakId.DisableEdgeBackground, observation);
+            Assert.Equal(FrontendWindowsTweakState.Mixed, snapshot.State);
+            Assert.False(snapshot.ConfiguredEnabled);
+            Assert.Null(snapshot.EffectiveEnabled);
+            Assert.True(snapshot.CanChange);
+        }
+    }
+
+    [Fact]
+    public void Edge_and_startup_delay_touch_only_the_approved_exact_registry_values()
+    {
+        var edgeCapture = Method("CaptureDisableEdgeBackground");
+        var edgeMutation = Method("SetDisableEdgeBackground");
+        Assert.Contains("Registry.LocalMachine, EdgePolicyPath, \"StartupBoostEnabled\"", edgeCapture, StringComparison.Ordinal);
+        Assert.Contains("Registry.LocalMachine, EdgePolicyPath, \"BackgroundModeEnabled\"", edgeCapture, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, EdgePolicyPath, \"StartupBoostEnabled\", 0, RegistryValueKind.DWord)", edgeMutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, EdgePolicyPath, \"BackgroundModeEnabled\", 0, RegistryValueKind.DWord)", edgeMutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.DeleteValue(Registry.LocalMachine, EdgePolicyPath, \"StartupBoostEnabled\")", edgeMutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.DeleteValue(Registry.LocalMachine, EdgePolicyPath, \"BackgroundModeEnabled\")", edgeMutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Recommended", edgeMutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Process.Start", edgeMutation, StringComparison.Ordinal);
+
+        var startupCapture = Method("CaptureDisableStartupAppDelay");
+        var startupMutation = Method("SetDisableStartupAppDelay");
+        Assert.Contains("Registry.CurrentUser, ExplorerSerializePath, \"StartupDelayInMSec\"", startupCapture, StringComparison.Ordinal);
+        Assert.Contains("Registry.CurrentUser, ExplorerSerializePath, \"WaitForIdleState\"", startupCapture, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Write(Registry.CurrentUser, ExplorerSerializePath, \"StartupDelayInMSec\", 0, RegistryValueKind.DWord)", startupMutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Write(Registry.CurrentUser, ExplorerSerializePath, \"WaitForIdleState\", 0, RegistryValueKind.DWord)", startupMutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.DeleteValue(Registry.CurrentUser, ExplorerSerializePath, \"StartupDelayInMSec\")", startupMutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.DeleteValue(Registry.CurrentUser, ExplorerSerializePath, \"WaitForIdleState\")", startupMutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoStartDelay", Source, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeleteSubKey", startupMutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Process.Start", startupMutation, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false, 400)]
     [InlineData(true, 10)]

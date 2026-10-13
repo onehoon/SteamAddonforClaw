@@ -184,7 +184,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 78: add the Main UI Windows Tweaks snapshot, mutation, and daily-warning acknowledgement RPCs.
 // Version 79: retire the Developer-only PID1902 input cadence diagnostic RPC and result contract.
 // Version 80: append the explicit Mixed state to the existing Windows Tweaks snapshot contract.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 80; }
+// Version 81: append Windows Widgets, Edge Background, and Startup App Delay tweak IDs and catalog entries.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 81; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

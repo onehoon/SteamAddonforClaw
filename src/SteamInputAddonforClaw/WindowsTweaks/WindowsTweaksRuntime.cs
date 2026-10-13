@@ -21,7 +21,11 @@ internal static class WindowsTweaksStateMapper
 {
     internal static FrontendWindowsTweakSnapshot Map(FrontendWindowsTweakId id, WindowsTweakObservation observation)
     {
-        var isMixed = id == FrontendWindowsTweakId.InstantContextMenus && observation.IsMixed;
+        var supportsMixed = id is FrontendWindowsTweakId.InstantContextMenus
+            or FrontendWindowsTweakId.DisableWindowsWidgets
+            or FrontendWindowsTweakId.DisableEdgeBackground
+            or FrontendWindowsTweakId.DisableStartupAppDelay;
+        var isMixed = supportsMixed && observation.IsMixed;
         var state = !observation.Supported
             ? FrontendWindowsTweakState.Unsupported
             : observation.Managed

@@ -41,6 +41,24 @@
                         <TextBlock x:Name="DisablePasswordOnWakeState" Text="State unavailable" TextWrapping="Wrap" />
                     </StackPanel>
                 </ctcontrols:SettingsCard>
+                <ctcontrols:SettingsCard x:Name="DisableWindowsWidgetsCard" Header="Disable Windows Widgets" Description="Block the Windows Widgets experience where supported by Windows policy.">
+                    <StackPanel Width="250" Spacing="4">
+                        <ToggleSwitch x:Name="DisableWindowsWidgetsSwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
+                        <TextBlock x:Name="DisableWindowsWidgetsState" Text="State unavailable" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ctcontrols:SettingsCard>
+                <ctcontrols:SettingsCard x:Name="DisableEdgeBackgroundCard" Header="Disable Edge Background" Description="Disable Edge Startup Boost and background mode; existing processes may continue until closed.">
+                    <StackPanel Width="250" Spacing="4">
+                        <ToggleSwitch x:Name="DisableEdgeBackgroundSwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
+                        <TextBlock x:Name="DisableEdgeBackgroundState" Text="State unavailable" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ctcontrols:SettingsCard>
+                <ctcontrols:SettingsCard x:Name="DisableStartupAppDelayCard" Header="Disable Startup App Delay" Description="Remove configured Explorer startup-app launch delays; actual startup gains may vary.">
+                    <StackPanel Width="250" Spacing="4">
+                        <ToggleSwitch x:Name="DisableStartupAppDelaySwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
+                        <TextBlock x:Name="DisableStartupAppDelayState" Text="State unavailable" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ctcontrols:SettingsCard>
             </StackPanel>
         </StackPanel>
     </ScrollViewer>

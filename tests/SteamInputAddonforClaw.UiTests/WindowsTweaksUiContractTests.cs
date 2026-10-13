@@ -24,7 +24,7 @@ public sealed class WindowsTweaksUiContractTests
     }
 
     [Fact]
-    public void Page_contains_exactly_the_five_approved_switches_with_no_markup_default()
+    public void Page_contains_exactly_the_eight_approved_switches_with_no_markup_default()
     {
         var root = FindRepositoryRoot();
         var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml"));
@@ -38,6 +38,9 @@ public sealed class WindowsTweaksUiContractTests
             "Faster Menus",
             "Classic Context Menu",
             "Disable Password on Wake",
+            "Disable Windows Widgets",
+            "Disable Edge Background",
+            "Disable Startup App Delay",
         }, names);
         foreach (var card in cards)
         {
@@ -76,10 +79,20 @@ public sealed class WindowsTweaksUiContractTests
             "Faster Menus",
             "Classic Context Menu",
             "Disable Password on Wake",
+            "Disable Windows Widgets",
+            "Disable Edge Background",
+            "Disable Startup App Delay",
         }, items);
         var fasterMenus = panel.Descendants().Single(element =>
             element.Name.LocalName == "SettingsCard" && (string?)element.Attribute("Header") == "Faster Menus");
         Assert.Equal("Disable menu animation and reduce submenu delay to 10 ms.", (string?)fasterMenus.Attribute("Description"));
+
+        Assert.Equal("Block the Windows Widgets experience where supported by Windows policy.",
+            (string?)panel.Descendants().Single(element => (string?)element.Attribute("Header") == "Disable Windows Widgets").Attribute("Description"));
+        Assert.Equal("Disable Edge Startup Boost and background mode; existing processes may continue until closed.",
+            (string?)panel.Descendants().Single(element => (string?)element.Attribute("Header") == "Disable Edge Background").Attribute("Description"));
+        Assert.Equal("Remove configured Explorer startup-app launch delays; actual startup gains may vary.",
+            (string?)panel.Descendants().Single(element => (string?)element.Attribute("Header") == "Disable Startup App Delay").Attribute("Description"));
     }
 
     [Fact]
@@ -116,12 +129,12 @@ public sealed class WindowsTweaksUiContractTests
     }
 
     [Fact]
-    public void Mixed_menu_state_has_an_explicit_actionable_label()
+    public void Mixed_state_has_a_generic_actionable_label()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml.cs"));
 
-        Assert.Contains("FrontendWindowsTweakState.Mixed => \"Mixed — turn On to apply both Faster Menus values\"", page, StringComparison.Ordinal);
+        Assert.Contains("FrontendWindowsTweakState.Mixed => \"Mixed — turn On to apply the tweak's values\"", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,6 +155,8 @@ public sealed class WindowsTweaksUiContractTests
         Assert.Contains("HashSet<FrontendWindowsTweakId> _mutatingIds", page, StringComparison.Ordinal);
         Assert.Contains("!_mutatingIds.Contains(definition.Id)", page, StringComparison.Ordinal);
         Assert.Contains("_mutatingIds.Count > 0", page, StringComparison.Ordinal);
+        Assert.Contains("Registry policy controls may be restricted", page, StringComparison.Ordinal);
+        Assert.Contains("startup apps launch closer together", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Process.Start", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Restart-Computer", page, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Apply changes", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml")), StringComparison.OrdinalIgnoreCase);

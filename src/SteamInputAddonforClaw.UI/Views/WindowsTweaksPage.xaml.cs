@@ -96,7 +96,7 @@ public sealed partial class WindowsTweaksPage : UserControl
             + "Memory Integrity strengthens kernel protection. Disabling it reduces protection. Enabling it can make incompatible drivers or apps malfunction and, rarely, prevent normal boot.\n\n"
             + "Virtual Machine Platform may be required by virtualization-dependent software; disabling it can stop that software from working.\n\n"
             + "Disabling password/sign-in on wake lets someone with physical access resume directly to the desktop.\n\n"
-            + "These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change.";
+            + "These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change. Registry policy controls may be restricted, and removing startup delay can make startup apps launch closer together.";
         var dialog = new ContentDialog
         {
             Title = "Windows Tweaks safety notice",
@@ -232,7 +232,7 @@ public sealed partial class WindowsTweaksPage : UserControl
                 : "Disabled — Explorer restart required",
             FrontendWindowsTweakState.Unsupported => "Unsupported",
             FrontendWindowsTweakState.Managed => "Managed by Windows",
-            FrontendWindowsTweakState.Mixed => "Mixed — turn On to apply both Faster Menus values",
+            FrontendWindowsTweakState.Mixed => "Mixed — turn On to apply the tweak's values",
             _ => "State unavailable",
         };
         return string.IsNullOrWhiteSpace(row.Detail)
@@ -254,6 +254,9 @@ public sealed partial class WindowsTweaksPage : UserControl
         FrontendWindowsTweakId.InstantContextMenus => (InstantContextMenusCard, InstantContextMenusSwitch, InstantContextMenusState),
         FrontendWindowsTweakId.ClassicContextMenu => (ClassicContextMenuCard, ClassicContextMenuSwitch, ClassicContextMenuState),
         FrontendWindowsTweakId.DisablePasswordOnWake => (DisablePasswordOnWakeCard, DisablePasswordOnWakeSwitch, DisablePasswordOnWakeState),
+        FrontendWindowsTweakId.DisableWindowsWidgets => (DisableWindowsWidgetsCard, DisableWindowsWidgetsSwitch, DisableWindowsWidgetsState),
+        FrontendWindowsTweakId.DisableEdgeBackground => (DisableEdgeBackgroundCard, DisableEdgeBackgroundSwitch, DisableEdgeBackgroundState),
+        FrontendWindowsTweakId.DisableStartupAppDelay => (DisableStartupAppDelayCard, DisableStartupAppDelaySwitch, DisableStartupAppDelayState),
         _ => throw new ArgumentOutOfRangeException(nameof(id)),
     };
 
@@ -264,6 +267,9 @@ public sealed partial class WindowsTweaksPage : UserControl
         var value when ReferenceEquals(value, InstantContextMenusSwitch) => FrontendWindowsTweakId.InstantContextMenus,
         var value when ReferenceEquals(value, ClassicContextMenuSwitch) => FrontendWindowsTweakId.ClassicContextMenu,
         var value when ReferenceEquals(value, DisablePasswordOnWakeSwitch) => FrontendWindowsTweakId.DisablePasswordOnWake,
+        var value when ReferenceEquals(value, DisableWindowsWidgetsSwitch) => FrontendWindowsTweakId.DisableWindowsWidgets,
+        var value when ReferenceEquals(value, DisableEdgeBackgroundSwitch) => FrontendWindowsTweakId.DisableEdgeBackground,
+        var value when ReferenceEquals(value, DisableStartupAppDelaySwitch) => FrontendWindowsTweakId.DisableStartupAppDelay,
         _ => throw new ArgumentOutOfRangeException(nameof(toggle)),
     };
 }
