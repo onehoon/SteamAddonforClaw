@@ -187,6 +187,8 @@ public sealed class WindowsTweaksUiContractTests
         Assert.Contains("toggle.IsOn = current.ConfiguredEnabled.Value", page, StringComparison.Ordinal);
         Assert.Contains("ReplaceTweak(_snapshot, result.UpdatedTweak)", page, StringComparison.Ordinal);
         Assert.Contains("ApplyTweakRow(result.UpdatedTweak)", page, StringComparison.Ordinal);
+        Assert.Contains("SetOperationMessage(result.Succeeded ? null : result.FailureMessage)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Exception.Message", page, StringComparison.Ordinal);
         Assert.DoesNotContain("TryCaptureAfterMutationFailureAsync", page, StringComparison.Ordinal);
         Assert.Contains("Reopen the Tweaks tab to refresh Windows state", page, StringComparison.Ordinal);
         var handlerStart = page.IndexOf("private async void TweakSwitch_Toggled", StringComparison.Ordinal);

@@ -16,12 +16,14 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         var capture = Method("CaptureMemoryIntegrity");
         var mutation = Method("SetMemoryIntegrity");
 
+        Assert.Contains("private const string HvciRegistryPath = @\"SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity\"", Source, StringComparison.Ordinal);
         Assert.Contains("WindowsTweakRegistry.Read(Registry.LocalMachine, HvciRegistryPath, \"Enabled\")", capture, StringComparison.Ordinal);
         Assert.Contains("deviceGuard.ConfiguredServices.Contains(2)", capture, StringComparison.Ordinal);
         Assert.Contains("deviceGuard.RunningServices.Contains(2)", capture, StringComparison.Ordinal);
         Assert.Contains("var managed = IsMemoryIntegrityPolicyManaged()", capture, StringComparison.Ordinal);
         Assert.DoesNotContain("CodeIntegrityPolicyEnforcementStatus", capture, StringComparison.Ordinal);
         Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, \"Enabled\"", mutation, StringComparison.Ordinal);
+        Assert.Contains("enabled ? 1 : 0, RegistryValueKind.DWord", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureMemoryIntegrity", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("ReadDeviceGuard", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, \"Locked\"", mutation, StringComparison.Ordinal);
@@ -81,31 +83,96 @@ public sealed class WindowsTweaksOperatingSystemContractTests
     }
 
     [Fact]
-    public void Virtual_machine_platform_changes_only_the_named_feature_without_reboot_or_dependency_install()
+    public void Virtual_machine_platform_uses_windows_optional_feature_commands_without_reboot()
     {
-        var mutation = Method("SetVirtualMachinePlatform");
-        Assert.Contains("private const string DismFeatureName = \"VirtualMachinePlatform\"", Source, StringComparison.Ordinal);
-        Assert.Contains("/NoRestart", mutation, StringComparison.Ordinal);
-        var enableArguments = WindowsTweaksOperatingSystem.BuildDismFeatureMutationArguments(enabled: true);
-        var disableArguments = WindowsTweaksOperatingSystem.BuildDismFeatureMutationArguments(enabled: false);
-        Assert.Contains("/NoRestart", enableArguments);
-        Assert.Contains("/NoRestart", disableArguments);
-        Assert.Contains("/FeatureName:VirtualMachinePlatform", enableArguments);
-        Assert.DoesNotContain("/All", enableArguments);
-        Assert.DoesNotContain("/All", disableArguments);
-        Assert.Contains("/LimitAccess", enableArguments);
-        Assert.DoesNotContain("/LimitAccess", disableArguments);
-        Assert.Contains("/Disable-Feature", disableArguments);
-        Assert.Contains("/Enable-Feature", enableArguments);
-        Assert.Contains("BuildDismFeatureMutationArguments(enabled)", mutation, StringComparison.Ordinal);
-        Assert.DoesNotContain("CaptureVirtualMachinePlatform", mutation, StringComparison.Ordinal);
-        Assert.Contains("IsDismFeatureMutationSuccessful(result.ExitCode)", mutation, StringComparison.Ordinal);
-        Assert.True(WindowsTweaksOperatingSystem.IsDismFeatureMutationSuccessful(0));
-        Assert.True(WindowsTweaksOperatingSystem.IsDismFeatureMutationSuccessful(3010));
-        Assert.False(WindowsTweaksOperatingSystem.IsDismFeatureMutationSuccessful(1));
-        Assert.False(WindowsTweaksOperatingSystem.IsDismFeatureMutationSuccessful(unchecked((int)0x800F081F)));
-        Assert.Contains("\"Enable Pending\"", Method("CaptureVirtualMachinePlatform"), StringComparison.Ordinal);
-        Assert.Contains("\"Disable Pending\"", Method("CaptureVirtualMachinePlatform"), StringComparison.Ordinal);
+        var capture = WindowsTweaksOperatingSystem.BuildVmpCaptureScript();
+        var enable = WindowsTweaksOperatingSystem.BuildVmpMutationScript(enabled: true);
+        var disable = WindowsTweaksOperatingSystem.BuildVmpMutationScript(enabled: false);
+
+        Assert.Contains("Get-WindowsOptionalFeature -Online -FeatureName 'VirtualMachinePlatform' -ErrorAction Stop", capture, StringComparison.Ordinal);
+        Assert.Contains("Enable-WindowsOptionalFeature -Online -FeatureName 'VirtualMachinePlatform' -All -NoRestart -ErrorAction Stop", enable, StringComparison.Ordinal);
+        Assert.Contains("Disable-WindowsOptionalFeature -Online -FeatureName 'VirtualMachinePlatform' -NoRestart -ErrorAction Stop", disable, StringComparison.Ordinal);
+        Assert.Contains("VMP_STATE=", capture, StringComparison.Ordinal);
+        Assert.Contains("VMP_RESTART=", enable, StringComparison.Ordinal);
+        Assert.Contains("VMP_RESTART=", disable, StringComparison.Ordinal);
+        Assert.DoesNotContain("-LimitAccess", Source, StringComparison.Ordinal);
+        Assert.DoesNotContain("-Remove", Source, StringComparison.Ordinal);
+        Assert.DoesNotContain("dism.exe", Source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("-ExecutionPolicy", Source, StringComparison.OrdinalIgnoreCase);
+
+        var runner = Method("RunVmpPowerShell");
+        Assert.Contains("WindowsPowerShell", runner, StringComparison.Ordinal);
+        Assert.Contains("Environment.Is64BitOperatingSystem", runner, StringComparison.Ordinal);
+        Assert.Contains("Environment.Is64BitProcess", runner, StringComparison.Ordinal);
+        Assert.Contains("Sysnative", runner, StringComparison.Ordinal);
+        Assert.Contains("ArgumentList.Add(\"-NoLogo\")", runner, StringComparison.Ordinal);
+        Assert.Contains("ArgumentList.Add(\"-NoProfile\")", runner, StringComparison.Ordinal);
+        Assert.Contains("ArgumentList.Add(\"-NonInteractive\")", runner, StringComparison.Ordinal);
+        Assert.Contains("WaitForExitAsync(timeout.Token)", runner, StringComparison.Ordinal);
+        Assert.Contains("CancelAfter(VirtualMachinePlatformCommandTimeout)", runner, StringComparison.Ordinal);
+        Assert.Contains("CreateLinkedTokenSource(cancellationToken)", runner, StringComparison.Ordinal);
+        Assert.Contains("if (cancellationToken.IsCancellationRequested)", runner, StringComparison.Ordinal);
+        Assert.Contains("Kill(entireProcessTree: true)", runner, StringComparison.Ordinal);
+        Assert.Contains("ReadBoundedOutputAsync(process.StandardOutput)", runner, StringComparison.Ordinal);
+        Assert.Contains("ReadBoundedOutputAsync(process.StandardError)", runner, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Enabled", FrontendWindowsTweakState.Enabled, true, true)]
+    [InlineData("Disabled", FrontendWindowsTweakState.Disabled, false, false)]
+    [InlineData("EnablePending", FrontendWindowsTweakState.EnablePendingRestart, true, false)]
+    [InlineData("DisablePending", FrontendWindowsTweakState.DisablePendingRestart, false, true)]
+    [InlineData("DisabledWithPayloadRemoved", FrontendWindowsTweakState.Unsupported, null, null)]
+    [InlineData("Unexpected", FrontendWindowsTweakState.Unknown, null, null)]
+    public void Virtual_machine_platform_state_mapping_does_not_treat_pending_or_unknown_as_off(
+        string state,
+        FrontendWindowsTweakState expected,
+        bool? configured,
+        bool? effective)
+    {
+        var observation = WindowsTweaksOperatingSystem.ResolveVirtualMachinePlatformState(state);
+        var snapshot = WindowsTweaksStateMapper.Map(FrontendWindowsTweakId.VirtualMachinePlatform, observation);
+
+        Assert.Equal(expected, snapshot.State);
+        Assert.Equal(configured, snapshot.ConfiguredEnabled);
+        Assert.Equal(effective, snapshot.EffectiveEnabled);
+        Assert.Equal(expected != FrontendWindowsTweakState.Unsupported && expected != FrontendWindowsTweakState.Unknown,
+            snapshot.CanChange);
+    }
+
+    [Fact]
+    public void Virtual_machine_platform_process_result_seam_requires_success_and_typed_markers()
+    {
+        var captureRunner = new WindowsTweaksOperatingSystem((operation, script, _) =>
+        {
+            Assert.Equal(VmpOperation.Read, operation);
+            Assert.Contains("Get-WindowsOptionalFeature", script, StringComparison.Ordinal);
+            return new(0, "VMP_STATE=EnablePending\r\n", string.Empty);
+        });
+        var pending = captureRunner.CaptureVirtualMachinePlatform(CancellationToken.None);
+        Assert.True(pending.ConfiguredEnabled);
+        Assert.False(pending.EffectiveEnabled);
+
+        var mutationRunner = new WindowsTweaksOperatingSystem((operation, script, _) =>
+        {
+            Assert.Equal(VmpOperation.Enable, operation);
+            Assert.Contains("-All -NoRestart", script, StringComparison.Ordinal);
+            return new(0, "VMP_RESTART=True\r\n", string.Empty);
+        });
+        Assert.True(mutationRunner.SetVirtualMachinePlatform(true, CancellationToken.None).RestartRequired);
+
+        var failedRunner = new WindowsTweaksOperatingSystem((_, _, _) =>
+            new(1, "VMP_STATE=Enabled\r\n",
+                "VMP_ERROR_HRESULT=0x800F081F\r\nVMP_ERROR_ID=SourceUnavailable\r\nVMP_ERROR_CATEGORY=InvalidOperation\r\nVMP_ERROR_DETAIL=Feature source unavailable.\r\n"));
+        var failure = Assert.Throws<VmpCommandException>(() => failedRunner.CaptureVirtualMachinePlatform(CancellationToken.None));
+        Assert.Equal("Exited", failure.Completion);
+        Assert.Equal(1, failure.ProcessExitCode);
+        Assert.Equal((uint?)0x800F081F, failure.WindowsErrorCode);
+        Assert.Equal("SourceUnavailable", failure.WindowsErrorId);
+        Assert.Throws<VmpCommandException>(() => failedRunner.SetVirtualMachinePlatform(true, CancellationToken.None));
+
+        var markerlessRunner = new WindowsTweaksOperatingSystem((_, _, _) => new(0, "", string.Empty));
+        Assert.Throws<VmpCommandException>(() => markerlessRunner.CaptureVirtualMachinePlatform(CancellationToken.None));
     }
 
     [Fact]
