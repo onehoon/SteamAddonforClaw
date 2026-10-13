@@ -244,7 +244,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
             "Windows returned an unrecognized Virtual Machine Platform feature state.");
     }
 
-    private static string BuildVmpScript(string command, string resultMarker)
+    internal static string BuildVmpScript(string command, string resultMarker)
     {
         var script = new StringBuilder();
         script.AppendLine("$ErrorActionPreference = 'Stop'");
@@ -261,7 +261,8 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         script.AppendLine("    $errorId = [string]$failure.FullyQualifiedErrorId");
         script.AppendLine("    if ($errorId.Length -gt 128) { $errorId = $errorId.Substring(0, 128) }");
         script.AppendLine("    $category = ([string]$failure.CategoryInfo.Category) -replace '[^A-Za-z0-9_.-]', '_'");
-        script.AppendLine("    [Console]::Error.WriteLine(('VMP_ERROR_HRESULT=0x{0:X8}' -f [uint32]$failure.Exception.HResult))");
+        script.AppendLine("    $hr = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int32]$failure.Exception.HResult), 0)");
+        script.AppendLine("    [Console]::Error.WriteLine(('VMP_ERROR_HRESULT=0x{0:X8}' -f $hr))");
         script.AppendLine("    [Console]::Error.WriteLine('VMP_ERROR_ID=' + $errorId)");
         script.AppendLine("    [Console]::Error.WriteLine('VMP_ERROR_CATEGORY=' + $category)");
         script.AppendLine("    [Console]::Error.WriteLine('VMP_ERROR_DETAIL=' + $message)");
@@ -326,7 +327,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         return cleaned.Length <= 256 ? cleaned : cleaned[..256];
     }
 
-    private static VmpPowerShellResult RunVmpPowerShell(
+    internal static VmpPowerShellResult RunVmpPowerShell(
         VmpOperation operation,
         string script,
         CancellationToken cancellationToken)

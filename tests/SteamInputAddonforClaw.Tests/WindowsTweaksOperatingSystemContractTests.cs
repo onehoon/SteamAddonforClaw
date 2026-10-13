@@ -95,6 +95,8 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         Assert.Contains("VMP_STATE=", capture, StringComparison.Ordinal);
         Assert.Contains("VMP_RESTART=", enable, StringComparison.Ordinal);
         Assert.Contains("VMP_RESTART=", disable, StringComparison.Ordinal);
+        Assert.Contains("[BitConverter]::ToUInt32([BitConverter]::GetBytes([int32]$failure.Exception.HResult), 0)", capture, StringComparison.Ordinal);
+        Assert.Contains("VMP_ERROR_HRESULT=0x{0:X8}' -f $hr", capture, StringComparison.Ordinal);
         Assert.DoesNotContain("-LimitAccess", Source, StringComparison.Ordinal);
         Assert.DoesNotContain("-Remove", Source, StringComparison.Ordinal);
         Assert.DoesNotContain("dism.exe", Source, StringComparison.OrdinalIgnoreCase);
@@ -173,6 +175,27 @@ public sealed class WindowsTweaksOperatingSystemContractTests
 
         var markerlessRunner = new WindowsTweaksOperatingSystem((_, _, _) => new(0, "", string.Empty));
         Assert.Throws<VmpCommandException>(() => markerlessRunner.CaptureVirtualMachinePlatform(CancellationToken.None));
+    }
+
+    [Fact]
+    public void Vmp_catch_script_preserves_negative_hresult_bits_in_windows_powershell()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var script = WindowsTweaksOperatingSystem.BuildVmpScript(
+            "throw [System.Runtime.InteropServices.COMException]::new('Synthetic VMP failure', -2146233088)",
+            "[Console]::Out.WriteLine('UNEXPECTED_SUCCESS')");
+        var result = WindowsTweaksOperatingSystem.RunVmpPowerShell(
+            VmpOperation.Read, script, CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("VMP_ERROR_HRESULT=0x80131500", result.StandardError, StringComparison.Ordinal);
+
+        var operatingSystem = new WindowsTweaksOperatingSystem((_, _, _) => result);
+        var failure = Assert.Throws<VmpCommandException>(
+            () => operatingSystem.CaptureVirtualMachinePlatform(CancellationToken.None));
+        Assert.Equal((uint?)0x80131500, failure.WindowsErrorCode);
     }
 
     [Fact]
