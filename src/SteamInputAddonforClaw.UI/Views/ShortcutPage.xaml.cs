@@ -291,7 +291,7 @@ public sealed partial class ShortcutPage : UserControl
         AddActionChoice(actionPicker, "Website (URL)", FrontendShortcutEditorActionKind.Url);
         AddActionChoice(actionPicker, "Steam Big Picture", FrontendShortcutEditorActionKind.SteamBigPicture);
         AddActionChoice(actionPicker, "Steam", FrontendShortcutEditorActionKind.SteamClient);
-        AddActionChoice(actionPicker, "Xbox", FrontendShortcutEditorActionKind.XboxApp);
+        AddActionChoice(actionPicker, "XBOX", FrontendShortcutEditorActionKind.XboxApp);
         var existingScreenshot = existing?.Action.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen;
         var screenshotAlreadyExists = authoritativeSnapshot.Tiles.Any(tile =>
             tile.Action.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen
@@ -425,7 +425,7 @@ public sealed partial class ShortcutPage : UserControl
         };
         var steamBigPicturePanel = CreateBuiltInActionPanel("Opens Steam Big Picture.");
         var steamClientPanel = CreateBuiltInActionPanel("Opens the Steam client.");
-        var xboxAppPanel = CreateBuiltInActionPanel("Opens the Xbox app.");
+        var xboxAppPanel = CreateBuiltInActionPanel("Opens the XBOX app.");
 
         var panels = new Dictionary<FrontendShortcutEditorActionKind, UIElement>
         {
@@ -549,7 +549,7 @@ public sealed partial class ShortcutPage : UserControl
     {
         FrontendShortcutEditorActionKind.SteamBigPicture => "Steam Big Picture",
         FrontendShortcutEditorActionKind.SteamClient => "Steam",
-        FrontendShortcutEditorActionKind.XboxApp => "Xbox",
+        FrontendShortcutEditorActionKind.XboxApp => "XBOX",
         FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Screenshot",
         _ => null
     };

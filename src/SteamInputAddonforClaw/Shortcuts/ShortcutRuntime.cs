@@ -123,7 +123,7 @@ internal sealed class ShortcutRuntime
                 Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, false),
                 Tile("Steam", ShortcutActionTypeIds.SteamClient, true),
                 Tile("Steam Big Picture", ShortcutActionTypeIds.SteamBigPicture, true),
-                Tile("Xbox", ShortcutActionTypeIds.XboxApp, true),
+                Tile("XBOX", ShortcutActionTypeIds.XboxApp, true),
             ])
         };
     }
@@ -413,7 +413,7 @@ internal sealed class ShortcutRuntime
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Fullscreen screenshot",
             FrontendShortcutEditorActionKind.SteamBigPicture => "Steam Big Picture",
             FrontendShortcutEditorActionKind.SteamClient => "Steam client",
-            FrontendShortcutEditorActionKind.XboxApp => "Xbox app",
+            FrontendShortcutEditorActionKind.XboxApp => "XBOX app",
             _ => "Unsupported in this version"
         };
     }
