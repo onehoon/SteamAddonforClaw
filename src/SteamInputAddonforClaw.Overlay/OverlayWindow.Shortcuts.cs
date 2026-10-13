@@ -84,6 +84,7 @@ public sealed partial class OverlayWindow
             var tilePadding = OverlayQamResources.Get("QamTilePadding", new Thickness(12));
             var tileSize = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333);
             var contentWidth = Math.Max(1, tileSize - tilePadding.Left - tilePadding.Right);
+            var hasStatus = !string.IsNullOrWhiteSpace(tile.StatusText);
             var title = new TextBlock
             {
                 Text = tile.Title,
@@ -92,7 +93,7 @@ public sealed partial class OverlayWindow
                 TextAlignment = TextAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 MaxWidth = contentWidth,
-                MaxLines = 2,
+                MaxLines = hasStatus ? 1 : 2,
             };
             OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
 
@@ -102,7 +103,7 @@ public sealed partial class OverlayWindow
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 MaxWidth = contentWidth,
-                Spacing = 6,
+                Spacing = hasStatus ? 4 : 6,
             };
             header.Children.Add(new FontIcon
             {
@@ -117,18 +118,20 @@ public sealed partial class OverlayWindow
             {
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Spacing = string.IsNullOrWhiteSpace(tile.StatusText) ? 0 : 4,
+                Spacing = hasStatus ? 4 : 0,
             };
             content.Children.Add(header);
-            if (!string.IsNullOrWhiteSpace(tile.StatusText))
+            if (hasStatus)
             {
                 var status = new TextBlock
                 {
                     Text = tile.StatusText,
                     TextWrapping = TextWrapping.Wrap,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
                     TextAlignment = TextAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Center,
                     MaxWidth = contentWidth,
+                    MaxLines = 2,
                 };
                 OverlayQamResources.ApplyTextStyle(status, "QamCaptionTextStyle");
                 content.Children.Add(status);
