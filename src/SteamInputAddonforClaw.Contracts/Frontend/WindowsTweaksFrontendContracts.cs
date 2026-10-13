@@ -19,6 +19,7 @@ public enum FrontendWindowsTweakState
     Unsupported,
     Managed,
     Unknown,
+    Mixed,
 }
 
 public enum FrontendWindowsTweakApplicability
@@ -39,7 +40,7 @@ public static class FrontendWindowsTweakCatalog
     [
         new(FrontendWindowsTweakId.MemoryIntegrity, "Memory Integrity", "Configure Windows kernel memory protection.", FrontendWindowsTweakApplicability.AllSupportedWindows),
         new(FrontendWindowsTweakId.VirtualMachinePlatform, "Virtual Machine Platform", "Enable or disable the Windows virtualization platform feature.", FrontendWindowsTweakApplicability.AllSupportedWindows),
-        new(FrontendWindowsTweakId.InstantContextMenus, "Instant Context Menus", "Turn off menu animation so menus appear immediately.", FrontendWindowsTweakApplicability.AllSupportedWindows),
+        new(FrontendWindowsTweakId.InstantContextMenus, "Faster Menus", "Disable menu animation and reduce submenu delay to 10 ms.", FrontendWindowsTweakApplicability.AllSupportedWindows),
         new(FrontendWindowsTweakId.ClassicContextMenu, "Classic Context Menu", "Use the classic Windows 11 context menu for this user.", FrontendWindowsTweakApplicability.AllSupportedWindows),
         new(FrontendWindowsTweakId.DisablePasswordOnWake, "Disable Password on Wake", "Return from sleep without requiring sign-in.", FrontendWindowsTweakApplicability.AllSupportedWindows),
     ];

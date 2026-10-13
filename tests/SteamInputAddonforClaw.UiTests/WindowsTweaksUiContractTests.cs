@@ -35,7 +35,7 @@ public sealed class WindowsTweaksUiContractTests
         {
             "Memory Integrity",
             "Virtual Machine Platform",
-            "Instant Context Menus",
+            "Faster Menus",
             "Classic Context Menu",
             "Disable Password on Wake",
         }, names);
@@ -73,10 +73,13 @@ public sealed class WindowsTweaksUiContractTests
             "Memory Integrity",
             "Virtual Machine Platform",
             "Registry Tweaks",
-            "Instant Context Menus",
+            "Faster Menus",
             "Classic Context Menu",
             "Disable Password on Wake",
         }, items);
+        var fasterMenus = panel.Descendants().Single(element =>
+            element.Name.LocalName == "SettingsCard" && (string?)element.Attribute("Header") == "Faster Menus");
+        Assert.Equal("Disable menu animation and reduce submenu delay to 10 ms.", (string?)fasterMenus.Attribute("Description"));
     }
 
     [Fact]
@@ -110,6 +113,15 @@ public sealed class WindowsTweaksUiContractTests
         Assert.False(WindowsTweaksPage.ShouldShowWarning(day, day, acceptedThisProcess: null));
         Assert.False(WindowsTweaksPage.ShouldShowWarning(day, persistedDate: null, acceptedThisProcess: day));
         Assert.True(WindowsTweaksPage.ShouldShowWarning(day, persistedDate: null, acceptedThisProcess: new DateOnly(2026, 10, 12)));
+    }
+
+    [Fact]
+    public void Mixed_menu_state_has_an_explicit_actionable_label()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml.cs"));
+
+        Assert.Contains("FrontendWindowsTweakState.Mixed => \"Mixed — turn On to apply both Faster Menus values\"", page, StringComparison.Ordinal);
     }
 
     [Fact]

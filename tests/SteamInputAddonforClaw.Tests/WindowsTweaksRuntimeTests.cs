@@ -23,6 +23,11 @@ public sealed class WindowsTweaksRuntimeTests
             Assert.False(string.IsNullOrWhiteSpace(item.Description));
             Assert.Equal(FrontendWindowsTweakApplicability.AllSupportedWindows, item.Applicability);
         });
+        var fasterMenus = Assert.Single(FrontendWindowsTweakCatalog.All, item => item.Id == FrontendWindowsTweakId.InstantContextMenus);
+        Assert.Equal("Faster Menus", fasterMenus.Title);
+        Assert.Equal("Disable menu animation and reduce submenu delay to 10 ms.", fasterMenus.Description);
+        Assert.Equal(7, (int)FrontendWindowsTweakState.Unknown);
+        Assert.Equal(8, (int)FrontendWindowsTweakState.Mixed);
     }
 
     [Theory]
@@ -98,6 +103,25 @@ public sealed class WindowsTweaksRuntimeTests
     }
 
     [Fact]
+    public async Task Faster_menus_read_failure_is_unknown_and_not_changeable()
+    {
+        var platform = new FakePlatform
+        {
+            Read = id => id == FrontendWindowsTweakId.InstantContextMenus
+                ? throw new InvalidOperationException("synthetic SPI read failure")
+                : new(true, false, false, false),
+        };
+        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
+
+        var snapshot = await runtime.CaptureAsync();
+        var row = Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.InstantContextMenus);
+
+        Assert.Equal(FrontendWindowsTweakState.Unknown, row.State);
+        Assert.False(row.CanChange);
+        Assert.Null(row.ConfiguredEnabled);
+    }
+
+    [Fact]
     public async Task Mutation_revalidates_before_writing_and_returns_readback()
     {
         var reads = 0;
@@ -131,6 +155,60 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.Empty(platform.Writes);
         Assert.Equal(FrontendWindowsTweakState.Managed,
             Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.MemoryIntegrity).State);
+    }
+
+    [Fact]
+    public async Task Mixed_menu_state_can_be_reconciled_by_an_off_request_even_when_switch_is_visually_off()
+    {
+        var animationWriteApplied = false;
+        var mixed = new WindowsTweakObservation(
+            true, false, false, null,
+            "Menu animation and submenu delay do not match either Faster Menus setting.",
+            IsMixed: true);
+        var platform = new FakePlatform
+        {
+            Read = _ => mixed,
+            Write = (_, _) =>
+            {
+                animationWriteApplied = true;
+                throw new InvalidOperationException("Synthetic submenu-delay write failure.");
+            },
+        };
+        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
+
+        var result = await runtime.SetAsync(FrontendWindowsTweakId.InstantContextMenus, enabled: false);
+
+        Assert.False(result.Succeeded);
+        Assert.True(animationWriteApplied);
+        Assert.Equal([(FrontendWindowsTweakId.InstantContextMenus, false)], platform.Writes);
+        var row = Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.InstantContextMenus);
+        Assert.Equal(FrontendWindowsTweakState.Mixed, row.State);
+        Assert.False(row.ConfiguredEnabled);
+        Assert.True(row.CanChange);
+        Assert.Contains("InvalidOperationException", row.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Mixed_menu_state_on_request_runs_both_platform_actions_and_verifies_the_pair()
+    {
+        var mixed = new WindowsTweakObservation(true, false, false, null, IsMixed: true);
+        var platform = new FakePlatform
+        {
+            Read = id => id == FrontendWindowsTweakId.InstantContextMenus ? mixed : new(true, false, false, false),
+            Write = (id, enabled) =>
+            {
+                if (id == FrontendWindowsTweakId.InstantContextMenus && enabled)
+                    mixed = new(true, false, true, true);
+            },
+        };
+        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
+
+        var result = await runtime.SetAsync(FrontendWindowsTweakId.InstantContextMenus, enabled: true);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal([(FrontendWindowsTweakId.InstantContextMenus, true)], platform.Writes);
+        Assert.Equal(FrontendWindowsTweakState.Enabled,
+            Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.InstantContextMenus).State);
     }
 
     [Fact]

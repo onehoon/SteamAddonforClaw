@@ -99,14 +99,58 @@ public sealed class WindowsTweaksOperatingSystemContractTests
     }
 
     [Fact]
-    public void Instant_context_menu_tweak_uses_only_menu_animation_system_parameters()
+    public void Faster_menus_tweak_reads_and_writes_animation_and_submenu_delay()
     {
         var capture = Method("CaptureInstantContextMenus");
         var mutation = Method("SetInstantContextMenus");
         Assert.Contains("SpiGetMenuAnimation", capture, StringComparison.Ordinal);
+        Assert.Contains("SpiGetMenuShowDelay", capture, StringComparison.Ordinal);
+        Assert.Contains("SystemParametersInfoW(SpiGetMenuShowDelay, 0, ref delayMs, 0)", capture, StringComparison.Ordinal);
         Assert.Contains("SpiSetMenuAnimation", mutation, StringComparison.Ordinal);
+        Assert.Contains("SpiSetMenuShowDelay", mutation, StringComparison.Ordinal);
+        Assert.Contains("SystemParametersInfoW(SpiSetMenuShowDelay, targetDelay, IntPtr.Zero, SpifUpdateIniFile | SpifSendChange)", mutation, StringComparison.Ordinal);
+        Assert.Contains("SystemParametersInfoW(uint action, uint parameter, IntPtr value, uint flags)", Source, StringComparison.Ordinal);
+        Assert.Contains("0x006A", Source, StringComparison.Ordinal);
+        Assert.Contains("0x006B", Source, StringComparison.Ordinal);
+        Assert.Contains("enabled ? 0 : 1", mutation, StringComparison.Ordinal);
+        Assert.Contains("enabled ? 10u : 400u", mutation, StringComparison.Ordinal);
         Assert.Contains("SpifUpdateIniFile | SpifSendChange", mutation, StringComparison.Ordinal);
-        Assert.DoesNotContain("MenuShowDelay", Source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("WindowsTweakRegistry.Write", mutation, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(capture, "throw new Win32Exception\\(Marshal.GetLastWin32Error\\(\\)\\)").Count);
+        Assert.True(mutation.IndexOf("SpiSetMenuAnimation", StringComparison.Ordinal)
+            < mutation.IndexOf("SpiSetMenuShowDelay", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Faster_menus_capture_maps_only_the_exact_on_and_off_pairs()
+    {
+        var enabled = WindowsTweaksOperatingSystem.ResolveInstantContextMenus(animationEnabled: false, delayMs: 10);
+        var disabled = WindowsTweaksOperatingSystem.ResolveInstantContextMenus(animationEnabled: true, delayMs: 400);
+
+        Assert.True(enabled.ConfiguredEnabled);
+        Assert.True(enabled.EffectiveEnabled);
+        Assert.False(enabled.IsMixed);
+        Assert.False(disabled.ConfiguredEnabled);
+        Assert.False(disabled.EffectiveEnabled);
+        Assert.False(disabled.IsMixed);
+    }
+
+    [Theory]
+    [InlineData(false, 400)]
+    [InlineData(true, 10)]
+    [InlineData(false, 200)]
+    [InlineData(true, 200)]
+    public void Faster_menus_custom_pairs_are_explicitly_mixed_and_remain_changeable(bool animationEnabled, int delayMs)
+    {
+        var observation = WindowsTweaksOperatingSystem.ResolveInstantContextMenus(animationEnabled, delayMs);
+        var snapshot = WindowsTweaksStateMapper.Map(FrontendWindowsTweakId.InstantContextMenus, observation);
+
+        Assert.True(observation.IsMixed);
+        Assert.Equal(FrontendWindowsTweakState.Mixed, snapshot.State);
+        Assert.False(snapshot.ConfiguredEnabled);
+        Assert.Null(snapshot.EffectiveEnabled);
+        Assert.True(snapshot.CanChange);
+        Assert.Contains("do not match", snapshot.Detail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
