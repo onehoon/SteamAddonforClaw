@@ -23,7 +23,7 @@
 
             <ctcontrols:SettingsCard x:Name="ClawHudEnabledCard" Header="Enable HUD">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Setting" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ctcontrols:SettingsCard.Description>
                     <TextBlock x:Name="ClawHudStatusText" TextWrapping="Wrap" />
@@ -74,7 +74,7 @@
 
             <ctcontrols:SettingsCard Header="Background width" Description="Choose how far the HUD background extends.">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="FullScreen" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE745;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ComboBox x:Name="ClawHudBackgroundComboBox" MinWidth="220" SelectionChanged="ClawHudBackgroundComboBox_SelectionChanged">
                     <ComboBoxItem Content="Full width" />
@@ -83,7 +83,7 @@
             </ctcontrols:SettingsCard>
             <ctcontrols:SettingsCard x:Name="ClawHudOpacityCard" Header="HUD opacity">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="FontColor" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE794;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ctcontrols:SettingsCard.Description>
                     <TextBlock x:Name="ClawHudOpacityValueText" Text="—" />

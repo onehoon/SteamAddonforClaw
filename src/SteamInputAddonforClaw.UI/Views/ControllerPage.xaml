@@ -11,7 +11,7 @@
 
             <ctcontrols:SettingsCard x:Name="SteamVirtualControllerCard" Header="Steam Virtual Controller">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Contact" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ctcontrols:SettingsCard.Description>
                     <StackPanel Spacing="2">
@@ -33,7 +33,7 @@
 
                 <StackPanel x:Name="FrontButtonMappingContent" Spacing="12">
                 <ctcontrols:SettingsExpander Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="False">
-                    <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Contact" /></ctcontrols:SettingsExpander.HeaderIcon>
+                    <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE990;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Normal">
                             <ComboBox x:Name="GamebarNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
@@ -51,7 +51,7 @@
                 </ctcontrols:SettingsExpander>
 
                 <ctcontrols:SettingsExpander Header="Center M Button" Description="The action for the Center M button, per runtime presentation domain." IsExpanded="False">
-                    <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Help" /></ctcontrols:SettingsExpander.HeaderIcon>
+                    <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8B0;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Normal">
                             <ComboBox x:Name="CenterMNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
@@ -74,7 +74,7 @@
                     Header="M1 / M2"
                     Description="Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4."
                     IsExpanded="False">
-                    <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Rotate" /></ctcontrols:SettingsExpander.HeaderIcon>
+                    <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8AB;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="M1">
                             <ComboBox
@@ -98,7 +98,7 @@
                     Description="Set one static color and global brightness for all controller LEDs."
                     IsExpanded="False"
                     Visibility="Collapsed">
-                    <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Setting" /></ctcontrols:SettingsExpander.HeaderIcon>
+                    <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE781;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ToggleSwitch x:Name="ControllerLedEnabledToggle" OffContent="" OnContent="" Toggled="ControllerLedEnabled_Toggled" />
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Brightness">
@@ -132,7 +132,7 @@
                 Description="Set the vibration strength applied while the Addon owns the controller."
                 IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
-                    <SymbolIcon Symbol="Volume" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE877;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard Header="Left Motor">

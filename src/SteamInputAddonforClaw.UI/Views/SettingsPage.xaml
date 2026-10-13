@@ -9,7 +9,7 @@
 
             <ctcontrols:SettingsCard x:Name="UpdateCard" Header="Application updates">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Rotate" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE777;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <Button x:Name="UpdateButton" Content="Check" Click="UpdateButton_Click" />
             </ctcontrols:SettingsCard>
@@ -19,7 +19,7 @@
                 Header="App theme"
                 Description="Choose the main app appearance.">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="FontColor" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7A1;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ComboBox
                     x:Name="AppThemeComboBox"
