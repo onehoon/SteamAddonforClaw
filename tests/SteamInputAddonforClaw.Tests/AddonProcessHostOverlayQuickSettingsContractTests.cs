@@ -269,12 +269,12 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         var opening = ExtractMethod(source, "private async Task CoordinateOverlayToggleAsync()");
         var pauseIndex = opening.IndexOf("PauseForOverlayAsync", StringComparison.Ordinal);
         var committedIndex = opening.IndexOf("AppLog.Info(\"OverlayCapture\", \"Capture committed.\"", StringComparison.Ordinal);
-        var stopIndex = opening.IndexOf("_ = ReconcileMotionReadersAsync(\"OverlayCaptureCommitted\");", StringComparison.Ordinal);
+        var stopIndex = opening.IndexOf("_ = StopMotionSourceAsync(\"OverlayCaptureCommitted\");", StringComparison.Ordinal);
         var refreshIndex = opening.IndexOf("_overlayController.RefreshQuickSettingsAsync(preferActiveProfile)", StringComparison.Ordinal);
 
         Assert.True(pauseIndex >= 0 && pauseIndex < committedIndex);
         Assert.True(committedIndex < stopIndex && stopIndex < refreshIndex);
-        Assert.DoesNotContain("await ReconcileMotionReadersAsync(\"OverlayCaptureCommitted\")", opening);
+        Assert.DoesNotContain("_ = ReconcileMotionReadersAsync(\"OverlayCaptureCommitted\");", opening);
         Assert.DoesNotContain("await StopMotionSourceAsync", opening);
         Assert.DoesNotContain("StopAsync(", opening);
 
