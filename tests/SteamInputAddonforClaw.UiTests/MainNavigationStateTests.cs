@@ -100,17 +100,6 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
-    public void DeveloperMenu_opens_the_retained_vibration_profile_probe()
-    {
-        var navigation = new MainNavigationState();
-
-        navigation.OpenDeveloperMenu();
-
-        Assert.Equal(MainNavigationPage.VibrationTest, navigation.OpenVibrationTest());
-        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
-    }
-
-    [Fact]
     public void MouseBack_destinations_match_developer_page_hierarchy()
     {
         var navigation = new MainNavigationState();

@@ -69,13 +69,10 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("RestoreVibrationButton.IsEnabled = _frontend is not null && CanStartVibrationRearm(", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("_vibrationSnapshot.Writable", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("CanShowRumbleRearmMessage(", pageCode, StringComparison.Ordinal);
-        var developerPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml"));
-        var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
-        Assert.DoesNotContain("Rearm A2VM 8", developerPage, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("RearmRumble_Click", developerCode, StringComparison.Ordinal);
-        Assert.Contains("Vibration Profile 0/100 Probe", developerPage, StringComparison.Ordinal);
-        Assert.DoesNotContain("Xbox360 Terminal STOP Loop", developerPage, StringComparison.Ordinal);
-        Assert.DoesNotContain("A2VM LED Profile Read-Only Probe", developerPage, StringComparison.Ordinal);
+        var developerPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
+        Assert.DoesNotContain("Vibration Profile 0/100 Probe", developerPage, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs")));
     }
 
     [Theory]

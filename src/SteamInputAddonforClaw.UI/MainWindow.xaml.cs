@@ -44,7 +44,6 @@ public sealed partial class MainWindow : Window
     private bool _prerequisiteSetupInProgress;
     private bool _prerequisiteSetupAttemptedForCurrentProcess;
     private DeveloperPage? _developerMenuContent;
-    private VibrationTestPage? _vibrationTestContent;
     private ClawSensorProbePage? _clawSensorProbeContent;
     private FanHardwareProbePage? _fanHardwareProbeContent;
 
@@ -287,11 +286,7 @@ public sealed partial class MainWindow : Window
         _ = RefreshSystemStatusAsync();
     }
 
-    internal Task CloseVibrationTestForUiShutdownAsync()
-    {
-        _fanHardwareProbeContent?.Deactivate();
-        return Task.CompletedTask;
-    }
+    internal void DeactivateFanHardwareProbeForUiShutdown() => _fanHardwareProbeContent?.Deactivate();
 
     internal async Task CloseClawSensorProbeForUiShutdownAsync()
     {
@@ -336,20 +331,9 @@ public sealed partial class MainWindow : Window
         var page = new DeveloperPage();
         page.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         page.BackRequested += (_, _) => ReturnToSettings("BackButton");
-        page.VibrationTestRequested += (_, _) => ShowPage(_navigationState.OpenVibrationTest());
         page.SensorProbeRequested += (_, _) => ShowPage(_navigationState.OpenClawSensorProbe());
         page.FanHardwareProbeRequested += (_, _) => ShowPage(_navigationState.OpenFanHardwareProbe());
         return _developerMenuContent = page;
-    }
-
-    private VibrationTestPage GetOrCreateVibrationTestPage()
-    {
-        if (_vibrationTestContent is not null) return _vibrationTestContent;
-
-        var page = new VibrationTestPage();
-        page.Initialize(_frontend);
-        page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        return _vibrationTestContent = page;
     }
 
     private ClawSensorProbePage GetOrCreateClawSensorProbePage()
@@ -443,7 +427,6 @@ public sealed partial class MainWindow : Window
         DeveloperContentHost.Content = page switch
         {
             MainNavigationPage.DeveloperMenu => GetOrCreateDeveloperMenu(),
-            MainNavigationPage.VibrationTest => GetOrCreateVibrationTestPage(),
             MainNavigationPage.ClawSensorProbe => GetOrCreateClawSensorProbePage(),
             MainNavigationPage.FanHardwareProbe => GetOrCreateFanHardwareProbePage(),
             _ => null

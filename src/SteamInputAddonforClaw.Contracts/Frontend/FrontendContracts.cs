@@ -202,8 +202,6 @@ public enum FrontendControllerVibrationMotor { Left, Right }
 public enum FrontendControllerVibrationStrengthMutationOutcome { Succeeded, Unavailable, Failed }
 public enum FrontendControllerVibrationTestOutcome { Succeeded, Unavailable, Failed }
 public enum FrontendDeveloperRumbleRearmOutcome { Completed, Unavailable, Failed }
-public enum FrontendControllerVibrationProfileWriteProbeMode { ApplyZeroHundred, RestoreFiftyFifty }
-public enum FrontendControllerVibrationProfileWriteProbeOutcome { Succeeded, Unavailable, Failed }
 
 /// <summary>The persisted desired Left/Right pair and the current production-write capability projection.</summary>
 public sealed record FrontendControllerVibrationStrengthSnapshot(
@@ -248,14 +246,6 @@ public sealed record FrontendDeveloperRumbleRearmResult(
 
     public static FrontendDeveloperRumbleRearmResult Unavailable(string status) =>
         new(FrontendDeveloperRumbleRearmOutcome.Unavailable, status, false, false, false, false, false);
-}
-
-public sealed record FrontendControllerVibrationProfileWriteProbeResult(
-    FrontendControllerVibrationProfileWriteProbeMode Mode,
-    FrontendControllerVibrationProfileWriteProbeOutcome Outcome,
-    string Status)
-{
-    public bool Succeeded => Outcome == FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded;
 }
 
 public enum SteamVirtualControllerPreference
@@ -681,11 +671,6 @@ public interface IAddonFrontendControl
     Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable(
             "Controller rumble recovery is unavailable in this Runtime."));
-    Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
-        FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendControllerVibrationProfileWriteProbeResult(
-            mode, FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
-            "The developer-only vibration profile write probe is unavailable."));
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendXboxGameCatalogSnapshot> ScanXboxGamesAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXboxGameCatalogSnapshot.Unavailable("XBOX game catalog is unavailable."));

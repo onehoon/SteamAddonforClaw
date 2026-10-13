@@ -90,11 +90,12 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
-    public void Developer_four_probe_methods_types_and_wire_names_are_absent_while_product_controls_remain()
+    public void Retired_developer_diagnostic_contracts_are_absent_while_product_controls_remain()
     {
         var retiredMethods = new[]
         {
             "RunControllerLedProfileReadProbe",
+            "RunControllerVibrationProfileWriteProbe",
             "CaptureBatteryChargeLimitTest", "SetBatteryChargeLimitTestEnabled", "SetBatteryChargeLimitTestPercent",
             "CaptureXbox360RumbleLoopDiagnostic", "StartXbox360RumbleLoopDiagnostic", "StopXbox360RumbleLoopDiagnostic",
             "CaptureGameInputSystemButtonProbe", "StartGameInputSystemButtonProbe", "StopGameInputSystemButtonProbe",
@@ -113,13 +114,18 @@ public sealed class FrontendContractTests
         Assert.DoesNotContain(contractNames, name => name.Contains("Xbox360RumbleLoop", StringComparison.Ordinal));
         Assert.DoesNotContain(contractNames, name => name.Contains("GameInputSystemButtonProbe", StringComparison.Ordinal));
         Assert.DoesNotContain(contractNames, name => name.Contains("ControllerLedProfileReadProbe", StringComparison.Ordinal));
+        Assert.DoesNotContain(contractNames, name => name.Contains("VibrationProfileWriteProbe", StringComparison.Ordinal));
         Assert.DoesNotContain("SetBatteryChargeLimitTestEnabledRequest", wireTypeNames);
         Assert.DoesNotContain("SetBatteryChargeLimitTestPercentRequest", wireTypeNames);
+        Assert.DoesNotContain("RunControllerVibrationProfileWriteProbeRequest", wireTypeNames);
 
         Assert.Contains(nameof(IAddonFrontendControl.CaptureBatteryChargeLimitAsync), controlMethods);
         Assert.Contains(nameof(IAddonFrontendControl.SetDeviceBatteryChargeLimitEnabledAsync), controlMethods);
         Assert.Contains(nameof(IAddonFrontendControl.SetControllerLedSettingsAsync), controlMethods);
-        Assert.Contains(nameof(IAddonFrontendControl.RunControllerVibrationProfileWriteProbeAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.CaptureControllerVibrationStrengthAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.SetControllerVibrationStrengthAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.TestControllerVibrationMotorAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.RunDeveloperRumbleRearmAsync), controlMethods);
     }
 
     private sealed class MinimalFrontendControl : IAddonFrontendControl

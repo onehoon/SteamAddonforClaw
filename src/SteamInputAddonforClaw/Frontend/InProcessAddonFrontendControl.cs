@@ -48,7 +48,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly MsiClawBatteryChargeLimitRuntime? _batteryChargeLimitRuntime;
     private readonly MsiClawVibrationStrengthClient? _controllerVibrationStrengthClient;
     private readonly Func<bool>? _controllerVibrationTestAvailable;
-    private readonly Func<MsiClawPhysicalIdentity?>? _controllerVibrationProbeIdentitySource;
     private readonly Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? _testControllerVibrationMotor;
     private readonly Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? _runDeveloperRumbleRearm;
     private readonly Func<CancellationToken, Task<bool>>? _reconcileExperimentalVirtualTouchpad;
@@ -155,7 +154,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<ActiveProfileTarget>? activeProfileTargetSource = null,
         Func<string, bool>? reconcileXboxBackButtonMapping = null,
         Func<string, string?>? activeXboxDisplayNameSource = null,
-        Func<MsiClawPhysicalIdentity?>? controllerVibrationProbeIdentitySource = null,
         Func<CancellationToken, Task<FrontendDeveloperRumbleRearmResult>>? runDeveloperRumbleRearm = null,
         Action<string>? requestControllerPresentationReconcile = null,
         Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null,
@@ -196,7 +194,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _controllerVibrationStrengthClient = controllerVibrationStrengthClient;
         _applyControllerVibrationSettings = applyControllerVibrationSettings;
         _controllerVibrationTestAvailable = controllerVibrationTestAvailable;
-        _controllerVibrationProbeIdentitySource = controllerVibrationProbeIdentitySource;
         _testControllerVibrationMotor = testControllerVibrationMotor;
         _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
         _requestControllerPresentationReconcile = requestControllerPresentationReconcile;
@@ -1871,65 +1868,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    public Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
-        FrontendControllerVibrationProfileWriteProbeMode mode,
-        CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return RunExclusiveControllerOperationAsync(
-            () => RunControllerVibrationProfileWriteProbeCoreAsync(mode, cancellationToken),
-            () => new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
-                "Another controller diagnostic or re-arm is already running."));
-    }
-
-    private async Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeCoreAsync(
-        FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken cancellationToken)
-    {
-        if (!Enum.IsDefined(mode))
-            return new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Failed,
-                "The selected developer probe operation is invalid.");
-        if (_controllerVibrationStrengthClient is null)
-            return new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
-                "The developer-only vibration profile write probe is unavailable.");
-
-        var clientMode = mode switch
-        {
-            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred => MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred,
-            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty => MsiClawVibrationProfileWriteProbeMode.RestoreFiftyFifty,
-            _ => throw new InvalidOperationException("The developer probe operation is invalid.")
-        };
-        var result = await _controllerVibrationStrengthClient.RunDiagnosticMotorPairWriteAsync(
-            clientMode, _controllerVibrationProbeIdentitySource ?? (() => null), IsCenterMExactlyDisabled, cancellationToken).ConfigureAwait(false);
-        var outcome = result.Outcome switch
-        {
-            MsiClawVibrationProfileWriteProbeOutcome.Succeeded => FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded,
-            MsiClawVibrationProfileWriteProbeOutcome.Unavailable => FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
-            _ => FrontendControllerVibrationProfileWriteProbeOutcome.Failed,
-        };
-        var status = outcome switch
-        {
-            FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded
-                when _controllerVibrationStrengthClient.ModelId == "msi.claw.a2vm.8"
-                    && mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred =>
-                "HID write accepted. The 0% / 100% motor asymmetry was physically observed on A2VM 8; this probe result confirms HID transport only. Explicitly restore the Addon default 50/50 when finished.",
-            FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded
-                when _controllerVibrationStrengthClient.ModelId == "msi.claw.a2vm.8" =>
-                "Restore Addon default 50/50 HID write accepted. This is not a readback of the firmware's original value or proof of device-side persistence.",
-            FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded when mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred =>
-                "HID transport write succeeded. This pair was physically validated on CG3EM firmware 0x0419. Press Left Test once, then Right Test once.",
-            FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded =>
-                "Restore 50/50 HID transport write succeeded. The pair was physically validated on CG3EM firmware 0x0419.",
-            FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable when mode == FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty =>
-                "Restore was unavailable and no restore write was sent; the motors may remain at test values. " + DescribeVibrationProfileProbeUnavailable(result.Reason) + " Retry only after the stated condition is resolved.",
-            FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable => DescribeVibrationProfileProbeUnavailable(result.Reason),
-            _ when mode == FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty =>
-                "Restore failed; the motors may remain at test values. Press Restore 50 / 50 again manually.",
-            _ => "The profile write failed. See the application log; physical effect is unknown."
-        };
-        return new(mode, outcome, status);
-    }
-
     private FrontendControllerVibrationStrengthSnapshot CaptureControllerVibrationSnapshot()
     {
         var settings = _settings.ControllerVibration;
@@ -1954,15 +1892,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         try { return _controllerVibrationTestAvailable?.Invoke() == true; }
         catch { return false; }
     }
-
-    private static string DescribeVibrationProfileProbeUnavailable(string reason) => reason switch
-    {
-        "UnsupportedModel" => "Unavailable: this developer probe is restricted to MSI Claw 8 EX AI+ CG3EM and MSI Claw 8 AI+ A2VM.",
-        "CenterMIsNotExactlyDisabled" => "Unavailable: MSI Center M startup authority is not exactly Disabled.",
-        "OwnedPhysicalSessionUnavailable" => "Unavailable: a healthy Addon-owned PID1902 physical session is not available.",
-        "Pid1902ControlHidNotUniquelyResolved" => "Unavailable: a unique, strongly identified PID1902 control HID was not found.",
-        _ => "Unavailable: the developer-only vibration profile write probe could not run."
-    };
 
     private FrontendCpuBoostMutationResult MutateCpuBoost(bool ac, CpuBoostMode mode)
     {

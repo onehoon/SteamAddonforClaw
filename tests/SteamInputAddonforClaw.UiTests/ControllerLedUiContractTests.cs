@@ -62,7 +62,7 @@ public sealed class ControllerLedUiContractTests
     {
         var source = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
         var closed = source[source.IndexOf("private void OnWindowClosed(", StringComparison.Ordinal)..];
-        closed = closed[..closed.IndexOf("internal Task CloseVibrationTestForUiShutdownAsync(", StringComparison.Ordinal)];
+        closed = closed[..closed.IndexOf("internal void DeactivateFanHardwareProbeForUiShutdown()", StringComparison.Ordinal)];
         var drain = source[source.IndexOf("internal Task DrainPendingControllerMappingSavesAsync(", StringComparison.Ordinal)..];
         drain = drain[..drain.IndexOf("private void ReturnToSettings(", StringComparison.Ordinal)];
 

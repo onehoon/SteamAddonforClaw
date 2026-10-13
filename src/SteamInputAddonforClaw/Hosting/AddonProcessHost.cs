@@ -717,7 +717,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             shortcutRuntime: _shortcutRuntime,
             controllerVibrationStrengthClient: _controllerVibrationStrengthClient,
             controllerVibrationTestAvailable: () => _presentationOwnership?.IsVibrationTestAvailable == true,
-            controllerVibrationProbeIdentitySource: CaptureLiveOwnedPhysicalIdentityForDeveloperProbe,
             testControllerVibrationMotor: (motor, token) => _presentationOwnership is { } presentation
                 ? presentation.TestVibrationMotorAsync(motor, token)
                 : Task.FromResult(new SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestResult(
@@ -1918,25 +1917,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Warn("ControllerLed", "Static LED apply failed; Full1902 controller ownership remains active.", exception,
                 ("Event", "ControllerLedApplyFailed"));
         }
-    }
-
-    private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawPhysicalIdentity? CaptureLiveOwnedPhysicalIdentityForDeveloperProbe()
-    {
-        if (Volatile.Read(ref _processShutdownStarted) != 0
-            || !_ownedControllerRecovery.IsCompleted
-            || Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0
-            || _presentationOwnership?.IsSuspendPaused == true)
-            return null;
-
-        var physical = _physicalOwnership;
-        if (physical?.LiveInputSource is not { IsRunning: true }
-            || physical.OwnedPhysicalIdentity is not { } identity
-            || identity.Confidence != SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawIdentityConfidence.Strong
-            || identity.VendorId != SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.VendorId
-            || identity.ProductId != SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.DirectInputProductId)
-            return null;
-
-        return identity;
     }
 
     private async Task<bool> ApplyOwnedControllerVibrationSettingsAsync(

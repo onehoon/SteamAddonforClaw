@@ -169,7 +169,7 @@ public partial class App : Application
     {
         if (_mainWindow is not null)
         {
-            await _mainWindow.CloseVibrationTestForUiShutdownAsync().ConfigureAwait(true);
+            _mainWindow.DeactivateFanHardwareProbeForUiShutdown();
             await _mainWindow.CloseClawSensorProbeForUiShutdownAsync().ConfigureAwait(true);
         }
         await ShutdownAndExitAsync("WindowClosed").ConfigureAwait(true);

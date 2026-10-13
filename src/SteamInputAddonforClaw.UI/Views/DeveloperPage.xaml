@@ -47,13 +47,6 @@
                 </Grid>
             </Border>
 
-            <ctcontrols:SettingsCard Header="Vibration Profile 0/100 Probe" Description="Developer-only physical hardware mutation. Apply the explicit 0/100 profile, then restore the Addon default 50/50 when finished.">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE1D9;" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <Button Content="Open" Click="OpenVibrationTestButton_Click" />
-            </ctcontrols:SettingsCard>
-
             <ctcontrols:SettingsCard Header="Gyro / Sensor Test" Description="Read-only diagnostic for MSI Claw gyroscope and accelerometer discovery and motion capture.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="Rotate" />

@@ -92,13 +92,13 @@ public sealed class SettingsPageLoggingTests
         foreach (var diagnostic in new[]
         {
             "Text=\"Environment Discovery\"",
-            "Header=\"Vibration Profile 0/100 Probe\"",
             "Header=\"Gyro / Sensor Test\"",
             "Header=\"Fan Hardware Probe\"",
         })
         {
             Assert.Contains(diagnostic, xaml, StringComparison.Ordinal);
         }
+        Assert.DoesNotContain("Header=\"Vibration Profile 0/100 Probe\"", xaml, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

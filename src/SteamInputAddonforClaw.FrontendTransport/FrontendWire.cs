@@ -184,7 +184,7 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 78: add the Main UI Windows Tweaks snapshot, mutation, and daily-warning acknowledgement RPCs.
 // Version 79: retire the Developer-only PID1902 input cadence diagnostic RPC and result contract.
 // Version 80: append the explicit Mixed state to the existing Windows Tweaks snapshot contract.
-// Version 81: retire four Developer diagnostics and their frontend RPC/result contracts.
+// Version 81: retire Developer diagnostics, including the vibration profile write probe and its frontend RPC/result contract.
 public static class FrontendTransportProtocol { public const int CurrentVersion = 81; }
 public static class FrontendPipeEndpoint
 {
@@ -228,7 +228,7 @@ internal enum FrontendRpcMethod
     SetDeviceBatteryChargeLimitPercent, SetQuickSettingsCurrentPowerSourceOnly, CaptureGamingHome, SetGamingHomeSelection,
     SetGamingHomeStartup, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting, CaptureShortcutEditor, MutateShortcut,
     CaptureControllerVibrationStrength, SetControllerVibrationStrength,
-    TestControllerVibrationMotor, RunControllerVibrationProfileWriteProbe, ScanXboxGames, CaptureXboxGameProfile,
+    TestControllerVibrationMotor, ScanXboxGames, CaptureXboxGameProfile,
     SetXboxGameProfileFavorite, SetXboxGameProfileEnabled, SetXboxGameProfileCpuBoostEnabled, SetXboxGameProfileCpuBoostAc,
     SetXboxGameProfileCpuBoostDc, SetXboxGameProfileTdpEnabled, SetXboxGameProfileTdp, SetXboxGameProfilePowerModeEnabled,
     SetXboxGameProfilePowerModeAc, SetXboxGameProfilePowerModeDc, SetXboxGameProfileFpsLimitEnabled,
@@ -266,7 +266,6 @@ internal sealed record SetXboxGameProfileGpuMinimumClockEnabledRequest(string Ke
 internal sealed record SetXboxGameProfileGpuMinimumClockIndexRequest(string Key, int SelectableClockIndex);
 internal sealed record SetControllerVibrationStrengthRequest(int LeftPercent, int RightPercent);
 internal sealed record TestControllerVibrationMotorRequest(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor Motor);
-internal sealed record RunControllerVibrationProfileWriteProbeRequest(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationProfileWriteProbeMode Mode);
 internal sealed record SetDeviceCpuBoostAcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetDeviceCpuBoostDcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetDeviceCpuBoostEnabledRequest(bool Enabled);

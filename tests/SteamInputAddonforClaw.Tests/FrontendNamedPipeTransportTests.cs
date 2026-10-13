@@ -373,27 +373,6 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task Developer_vibration_profile_probe_round_trips_only_apply_and_restore_modes()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-
-        Assert.Equal(81, FrontendTransportProtocol.CurrentVersion);
-        var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
-        var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty);
-
-        Assert.Equal(fake.ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred), applied);
-        Assert.Equal(fake.ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty), restored);
-        Assert.Equal([
-            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred,
-            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty], fake.ProfileWriteProbeModes);
-    }
-
-    [Fact]
     public async Task Developer_rumble_rearm_round_trips_typed_software_restoration_evidence()
     {
         var fake = new RecordingFrontendControl();
@@ -415,10 +394,6 @@ public sealed class FrontendNamedPipeTransportTests
     [Theory]
     [InlineData("SetControllerVibrationStrength", "{\"LeftPercent\":101,\"RightPercent\":50}")]
     [InlineData("TestControllerVibrationMotor", "{\"Motor\":99}")]
-    [InlineData("RunControllerVibrationProfileWriteProbe", "{}")]
-    [InlineData("RunControllerVibrationProfileWriteProbe", "null")]
-    [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":\"Unknown\"}")]
-    [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":99}")]
     [InlineData("RunDeveloperRumbleRearm", "{}")]
     public async Task Invalid_controller_vibration_payload_fails_closed_before_frontend_dispatch(string method, string payload)
     {
@@ -442,7 +417,6 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
         Assert.Equal(0, fake.ControllerVibrationMutationCount);
         Assert.Empty(fake.ControllerVibrationTestMotors);
-        Assert.Empty(fake.ProfileWriteProbeModes);
         Assert.Equal(0, fake.DeveloperRumbleRearmCount);
     }
 
@@ -1644,6 +1618,7 @@ public sealed class FrontendNamedPipeTransportTests
     [InlineData("CaptureGameInputSystemButtonProbe")]
     [InlineData("StartGameInputSystemButtonProbe")]
     [InlineData("StopGameInputSystemButtonProbe")]
+    [InlineData("RunControllerVibrationProfileWriteProbe")]
     public async Task Retired_or_unknown_string_methods_return_unsupported_without_invoking_frontend(string method)
     {
         var fake = new RecordingFrontendControl();
@@ -2249,7 +2224,6 @@ public sealed class FrontendNamedPipeTransportTests
         public (int Left, int Right)? LastControllerVibrationPair { get; private set; }
         public int ControllerVibrationMutationCount { get; private set; }
         public List<FrontendControllerVibrationMotor> ControllerVibrationTestMotors { get; } = [];
-        public List<FrontendControllerVibrationProfileWriteProbeMode> ProfileWriteProbeModes { get; } = [];
         public FrontendDeveloperRumbleRearmResult DeveloperRumbleRearmResult { get; } = new(
             FrontendDeveloperRumbleRearmOutcome.Completed,
             "Mode cycle and controller restoration completed. Physical motor vibration is NOT verified: go to Controller > Vibration Strength and run Left Test / Right Test.",
@@ -2261,11 +2235,6 @@ public sealed class FrontendNamedPipeTransportTests
         { TotalCalls++; ControllerVibrationMutationCount++; LastControllerVibrationPair = (left, right); return Task.FromResult(ControllerVibrationMutationResult); }
         public Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor motor, CancellationToken t = default)
         { TotalCalls++; ControllerVibrationTestMotors.Add(motor); return Task.FromResult(new FrontendControllerVibrationTestResult(FrontendControllerVibrationTestOutcome.Succeeded, null)); }
-        public FrontendControllerVibrationProfileWriteProbeResult ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode mode) =>
-            new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded, "HID transport write succeeded. This pair was physically validated on CG3EM firmware 0x0419.");
-        public Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken t = default)
-        { TotalCalls++; ProfileWriteProbeModes.Add(mode); return Task.FromResult(ProfileWriteProbeResult(mode)); }
         public Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken t = default)
         { TotalCalls++; DeveloperRumbleRearmCount++; return Task.FromResult(DeveloperRumbleRearmResult); }
     }

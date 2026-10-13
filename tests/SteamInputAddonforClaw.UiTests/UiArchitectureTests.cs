@@ -58,7 +58,6 @@ public sealed class UiArchitectureTests
         var developerPageTypes = new[]
         {
             "DeveloperPage",
-            "VibrationTestPage",
             "ClawSensorProbePage",
             "FanHardwareProbePage"
         };
@@ -77,7 +76,6 @@ public sealed class UiArchitectureTests
         foreach (var page in new[]
         {
             (Navigation: "DeveloperMenu", Type: "DeveloperPage"),
-            (Navigation: "VibrationTest", Type: "VibrationTestPage"),
             (Navigation: "ClawSensorProbe", Type: "ClawSensorProbePage"),
             (Navigation: "FanHardwareProbe", Type: "FanHardwareProbePage")
         })
@@ -92,17 +90,17 @@ public sealed class UiArchitectureTests
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
         var invalidation = ExtractMethod(mainWindow, "private void RefreshInvalidatedFrontendStateOnUiThread()");
-        var vibrationShutdown = ExtractMethod(mainWindow, "internal Task CloseVibrationTestForUiShutdownAsync()");
+        var fanShutdown = ExtractMethod(mainWindow, "internal void DeactivateFanHardwareProbeForUiShutdown()");
         var sensorShutdown = ExtractMethod(mainWindow, "internal async Task CloseClawSensorProbeForUiShutdownAsync()");
 
         Assert.DoesNotContain("GetOrCreate", invalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("DeveloperContentHost", invalidation, StringComparison.Ordinal);
-        Assert.Contains("_fanHardwareProbeContent?.Deactivate()", vibrationShutdown, StringComparison.Ordinal);
+        Assert.Contains("_fanHardwareProbeContent?.Deactivate()", fanShutdown, StringComparison.Ordinal);
         Assert.Contains("if (_clawSensorProbeContent is not null)", sensorShutdown, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Developer_diagnostic_leave_paths_preserve_stop_and_sensor_session_cleanup()
+    public void Developer_page_leave_path_preserves_sensor_session_cleanup()
     {
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
@@ -192,33 +190,24 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Vibration_test_page_keeps_only_the_explicit_profile_apply_and_restore_probe()
+    public void Developer_vibration_profile_probe_page_and_route_are_absent()
     {
         var root = FindRepositoryRoot();
-        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
-        var pageXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml"));
-        var mainWindowXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
+        var developerXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
+        var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
+        var navigation = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainNavigationState.cs"));
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
-        Assert.DoesNotContain("<views:VibrationTestPage", mainWindowXaml, StringComparison.Ordinal);
-        Assert.Contains("Vibration Profile 0/100 Probe", pageXaml, StringComparison.Ordinal);
-        Assert.Contains("Apply Left 0 / Right 100", pageXaml, StringComparison.Ordinal);
-        Assert.Contains("Restore Addon default 50 / 50", pageXaml, StringComparison.Ordinal);
-        Assert.Contains("No SyncToROM is sent", pageXaml, StringComparison.Ordinal);
-        Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred", page, StringComparison.Ordinal);
-        Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty", page, StringComparison.Ordinal);
-        Assert.Contains("private bool _busy", page, StringComparison.Ordinal);
-        Assert.Contains("if (_frontend is null || _busy)", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Xbox360 Terminal STOP Loop", pageXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("RunControllerLedProfileReadProbe", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("A2VM LED", pageXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("unavailable in this build", page, StringComparison.Ordinal);
-        foreach (var forbidden in new[] { "RunVibrationTestAsync", "OpenVibrationTestSessionAsync", "CloseVibrationTestSessionAsync" })
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs")));
+        foreach (var source in new[] { developerXaml, developerCode, navigation, mainWindow })
         {
-            Assert.DoesNotContain(forbidden, page, StringComparison.Ordinal);
-            Assert.DoesNotContain(forbidden, mainWindow, StringComparison.Ordinal);
+            Assert.DoesNotContain("Vibration Profile 0/100 Probe", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("VibrationTestPage", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("VibrationTestRequested", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("OpenVibrationTest", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("RunControllerVibrationProfileWriteProbe", source, StringComparison.Ordinal);
         }
-        Assert.DoesNotContain("Haptic Test", pageXaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1375,10 +1364,10 @@ public sealed class UiArchitectureTests
 
         Assert.Equal(1, page.Split("Symbol=\"Rotate\"", StringSplitOptions.None).Length - 1);
         Assert.DoesNotContain("Header=\"Test Mode\"", page, StringComparison.Ordinal);
-        Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Profile 0/100 Probe\"", StringComparison.Ordinal));
+        Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
         Assert.DoesNotContain("Header=\"PID1902 Input Cadence\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("RunPid1902InputCadenceButton", page, StringComparison.Ordinal);
-        Assert.True(page.IndexOf("Header=\"Vibration Profile 0/100 Probe\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("Header=\"Vibration Profile 0/100 Probe\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Header=\"Logging\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("LogLevelComboBox", page, StringComparison.Ordinal);
         Assert.Contains("Content=\"Log Folder\"", page, StringComparison.Ordinal);
@@ -1399,48 +1388,29 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("MsiBackButton", developerCode, StringComparison.Ordinal);
         Assert.DoesNotContain("RawDirectInputButton", developerCode, StringComparison.Ordinal);
         Assert.DoesNotContain("Header=\"PID1902 Input Cadence\"", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"Vibration Profile 0/100 Probe\"", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"Vibration Profile 0/100 Probe\"", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("VibrationTestRequested", developerCode, StringComparison.Ordinal);
         Assert.Contains("Header=\"Gyro / Sensor Test\"", developerXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OpenLogFolderButton_Click\"", developerXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("M1 / M2 Physical Input &amp; Firmware Profile", mainUi, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Vibration_test_card_describes_the_retained_profile_probe_and_four_retired_tools_are_absent()
+    public void Developer_vibration_profile_probe_is_removed_and_other_diagnostics_remain()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
-        var cardStart = page.IndexOf("Header=\"Vibration Profile 0/100 Probe\"", StringComparison.Ordinal);
-        Assert.True(cardStart >= 0);
-        var nextCardStart = page.IndexOf("<ctcontrols:SettingsCard", cardStart + 1, StringComparison.Ordinal);
-        var card = page[cardStart..(nextCardStart >= 0 ? nextCardStart : page.Length)];
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
-        Assert.Contains("physical hardware mutation", card, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("restore the Addon default 50/50", card, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Vibration Profile 0/100 Probe", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenVibrationTestButton_Click", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("VibrationTestRequested", mainWindow, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs")));
         Assert.DoesNotContain("Battery Charge Limit Test", page, StringComparison.Ordinal);
         Assert.DoesNotContain("GameInput System Button Probe", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Xbox360 Terminal STOP Loop", page, StringComparison.Ordinal);
         Assert.DoesNotContain("A2VM LED Read", page, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Vibration_test_page_keeps_only_explicit_profile_apply_and_restore_actions()
-    {
-        var root = FindRepositoryRoot();
-        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml"));
-        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
-
-        Assert.Contains("Vibration Profile 0/100 Probe", page, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Apply Left 0 / Right 100\"", page, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Restore Addon default 50 / 50\"", page, StringComparison.Ordinal);
-        Assert.Contains("No SyncToROM is sent", page, StringComparison.Ordinal);
-        Assert.Contains("motors may remain at test values", code, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred", code, StringComparison.Ordinal);
-        Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty", code, StringComparison.Ordinal);
-        Assert.Contains("private bool _busy", code, StringComparison.Ordinal);
-        Assert.Contains("if (_frontend is null || _busy)", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("RunControllerLedProfileReadProbe", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("Xbox360RumbleLoop", code, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1452,7 +1422,8 @@ public sealed class UiArchitectureTests
         foreach (var retired in new[]
         {
             "BatteryChargeLimitTestPage", "BatteryChargeLimitValidationRunner", "GameInputSystemButtonProbePage",
-            "OpenBatteryChargeLimitTest", "OpenGameInputSystemButtonProbe", "IsBatteryValidationBlockingNavigation"
+            "OpenBatteryChargeLimitTest", "OpenGameInputSystemButtonProbe", "IsBatteryValidationBlockingNavigation",
+            "VibrationTestPage", "OpenVibrationTest", "VibrationTestRequested", "RunControllerVibrationProfileWriteProbe"
         })
         {
             Assert.DoesNotContain(retired, navigation, StringComparison.Ordinal);
@@ -1460,6 +1431,8 @@ public sealed class UiArchitectureTests
         }
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/BatteryChargeLimitTestPage.xaml")));
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/GameInputSystemButtonProbePage.xaml")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs")));
         var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
         Assert.Contains("RenderBatteryChargeLimit", devicePage, StringComparison.Ordinal);
         Assert.Contains("SetDeviceBatteryChargeLimitEnabledAsync", devicePage, StringComparison.Ordinal);
