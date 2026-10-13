@@ -182,7 +182,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // must fail the handshake before invoking methods no longer exposed by the product.
 // Version 77: add the Developer-only experimental virtual-touchpad preference RPC.
 // Version 78: add the Main UI Windows Tweaks snapshot, mutation, and daily-warning acknowledgement RPCs.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 78; }
+// Version 79: retire the Developer-only PID1902 input cadence diagnostic RPC and result contract.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 79; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -226,7 +227,7 @@ internal enum FrontendRpcMethod
     SetDeviceBatteryChargeLimitPercent, SetQuickSettingsCurrentPowerSourceOnly, CaptureGamingHome, SetGamingHomeSelection,
     SetGamingHomeStartup, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting, CaptureShortcutEditor, MutateShortcut,
     CaptureXbox360RumbleLoopDiagnostic, StartXbox360RumbleLoopDiagnostic, StopXbox360RumbleLoopDiagnostic,
-    RunPid1902InputCadenceDiagnostic, CaptureControllerVibrationStrength, SetControllerVibrationStrength,
+    CaptureControllerVibrationStrength, SetControllerVibrationStrength,
     TestControllerVibrationMotor, RunControllerVibrationProfileWriteProbe, CaptureGameInputSystemButtonProbe,
     StartGameInputSystemButtonProbe, StopGameInputSystemButtonProbe, ScanXboxGames, CaptureXboxGameProfile,
     SetXboxGameProfileFavorite, SetXboxGameProfileEnabled, SetXboxGameProfileCpuBoostEnabled, SetXboxGameProfileCpuBoostAc,

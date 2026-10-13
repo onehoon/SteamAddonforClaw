@@ -331,29 +331,6 @@ public sealed record FrontendXbox360RumbleLoopSnapshot(
         new(false, FrontendXbox360RumbleLoopState.Unavailable, status, null, null, 0, 0, 0, null, null, null, null, null);
 }
 
-public enum FrontendPid1902InputCadenceOutcome { Unavailable, Completed, AlreadyRunning, Cancelled, Failed }
-
-public sealed record FrontendPid1902InputCadenceResult(
-    FrontendPid1902InputCadenceOutcome Outcome,
-    string Status,
-    long RequestedDurationMs,
-    long ActualDurationMs,
-    int SuccessfulReadCount,
-    double? ObservedReadHz,
-    int DistinctStateCount,
-    int DuplicateReadCount,
-    double? DuplicatePercent,
-    double? DistinctStateHz,
-    double? MinDistinctIntervalMs,
-    double? MeanDistinctIntervalMs,
-    double? MedianDistinctIntervalMs,
-    double? P95DistinctIntervalMs,
-    double? MaxDistinctIntervalMs)
-{
-    public static FrontendPid1902InputCadenceResult Unavailable(string status = "PID1902 input cadence diagnostic is unavailable.") =>
-        new(FrontendPid1902InputCadenceOutcome.Unavailable, status, 0, 0, 0, null, 0, 0, null, null, null, null, null, null, null);
-}
-
 public enum SteamVirtualControllerPreference
 {
     SteamDeck = 0,
@@ -800,8 +777,6 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
     Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-    Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
     Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>

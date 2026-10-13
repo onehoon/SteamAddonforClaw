@@ -108,7 +108,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _captureXbox360RumbleLoopDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _startXbox360RumbleLoopDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _stopXbox360RumbleLoopDiagnostic;
-    private readonly Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? _runPid1902InputCadenceDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _captureGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _startGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _stopGameInputSystemButtonProbe;
@@ -155,7 +154,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? captureXbox360RumbleLoopDiagnostic = null,
         Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? startXbox360RumbleLoopDiagnostic = null,
         Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? stopXbox360RumbleLoopDiagnostic = null,
-        Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? runPid1902InputCadenceDiagnostic = null,
         MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null,
         Func<bool>? controllerVibrationTestAvailable = null,
         Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? testControllerVibrationMotor = null,
@@ -212,7 +210,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _captureXbox360RumbleLoopDiagnostic = captureXbox360RumbleLoopDiagnostic;
         _startXbox360RumbleLoopDiagnostic = startXbox360RumbleLoopDiagnostic;
         _stopXbox360RumbleLoopDiagnostic = stopXbox360RumbleLoopDiagnostic;
-        _runPid1902InputCadenceDiagnostic = runPid1902InputCadenceDiagnostic;
         _captureGameInputSystemButtonProbe = captureGameInputSystemButtonProbe;
         _startGameInputSystemButtonProbe = startGameInputSystemButtonProbe;
         _stopGameInputSystemButtonProbe = stopGameInputSystemButtonProbe;
@@ -1336,16 +1333,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
         _stopXbox360RumbleLoopDiagnostic?.Invoke(cancellationToken)
         ?? Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-
-    public Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return RunExclusiveControllerOperationAsync(
-            () => _runPid1902InputCadenceDiagnostic?.Invoke(cancellationToken)
-                ?? Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable()),
-            () => FrontendPid1902InputCadenceResult.Unavailable("Another controller diagnostic is already running."));
-    }
 
     public Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default)
     {

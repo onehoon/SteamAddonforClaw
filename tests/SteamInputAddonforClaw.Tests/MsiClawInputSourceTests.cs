@@ -18,6 +18,14 @@ public sealed class MsiClawInputSourceTests
     // unaffected.
     private static readonly TimeSpan AwaitTimeout = TimeSpan.FromSeconds(30);
 
+    [Theory]
+    [InlineData(true, 4)]
+    [InlineData(false, 8)]
+    public void Production_period_remains_4ms_active_and_8ms_idle(bool requires250Hz, int expectedMilliseconds)
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(expectedMilliseconds), MsiClawInputSource.ResolveProductionPeriod(requires250Hz));
+    }
+
     [Fact]
     public async Task StartPrepared_UsesExactDescriptorWithoutEnumeration()
     {
@@ -608,7 +616,6 @@ public sealed class MsiClawInputSourceTests
         Func<bool>? requires250Hz = null) =>
         new(
             () => enumerator,
-            static () => throw new InvalidOperationException("The cadence diagnostic timer is not used by this test."),
             () => new WindowsHighResolutionOneShotTimer(productionTimerApi),
             timestampProvider,
             requires250Hz);

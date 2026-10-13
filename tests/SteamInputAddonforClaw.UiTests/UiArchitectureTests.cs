@@ -1436,9 +1436,8 @@ public sealed class UiArchitectureTests
         Assert.Equal(1, page.Split("Symbol=\"Rotate\"", StringSplitOptions.None).Length - 1);
         Assert.DoesNotContain("Header=\"Test Mode\"", page, StringComparison.Ordinal);
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
-        Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal));
-        Assert.True(page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
-        Assert.Contains("Content=\"Run 10s Test\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"PID1902 Input Cadence\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("RunPid1902InputCadenceButton", page, StringComparison.Ordinal);
         Assert.True(page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
         Assert.DoesNotContain("Header=\"Logging\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("LogLevelComboBox", page, StringComparison.Ordinal);
@@ -1459,7 +1458,7 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("Restore M1/M2 DirectInput", developerXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("MsiBackButton", developerCode, StringComparison.Ordinal);
         Assert.DoesNotContain("RawDirectInputButton", developerCode, StringComparison.Ordinal);
-        Assert.Contains("Header=\"PID1902 Input Cadence\"", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"PID1902 Input Cadence\"", developerXaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"Vibration Test\"", developerXaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"Gyro / Sensor Test\"", developerXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OpenLogFolderButton_Click\"", developerXaml, StringComparison.Ordinal);
