@@ -343,7 +343,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
     [Theory]
     [InlineData(FrontendShortcutEditorActionKind.SteamBigPicture, "system.steam-big-picture", "Steam Big Picture")]
     [InlineData(FrontendShortcutEditorActionKind.SteamClient, "system.steam-client", "Steam client")]
-    [InlineData(FrontendShortcutEditorActionKind.XboxApp, "system.xbox-app", "Xbox app")]
+    [InlineData(FrontendShortcutEditorActionKind.XboxApp, "system.xbox-app", "XBOX app")]
     public void Invalid_parameterless_builtin_stays_editable_for_canonical_repair(
         FrontendShortcutEditorActionKind kind,
         string typeId,

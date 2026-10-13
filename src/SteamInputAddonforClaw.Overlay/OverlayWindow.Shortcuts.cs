@@ -88,15 +88,17 @@ public sealed partial class OverlayWindow
             {
                 Text = tile.Title,
                 TextWrapping = TextWrapping.Wrap,
+                TextTrimming = TextTrimming.CharacterEllipsis,
                 TextAlignment = TextAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                MaxWidth = Math.Max(1, contentWidth - 22),
+                MaxWidth = contentWidth,
+                MaxLines = 2,
             };
             OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
 
             var header = new StackPanel
             {
-                Orientation = Orientation.Horizontal,
+                Orientation = Orientation.Vertical,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 MaxWidth = contentWidth,
@@ -106,8 +108,8 @@ public sealed partial class OverlayWindow
             {
                 FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons"),
                 Glyph = tile.IconGlyph,
-                FontSize = 16,
-                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 24,
+                HorizontalAlignment = HorizontalAlignment.Center,
             });
             header.Children.Add(title);
 

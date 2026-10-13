@@ -953,7 +953,9 @@ public sealed class UiArchitectureTests
 
         Assert.Contains("AddActionChoice(actionPicker, \"Steam Big Picture\"", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("AddActionChoice(actionPicker, \"Steam\"", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("AddActionChoice(actionPicker, \"Xbox\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("AddActionChoice(actionPicker, \"XBOX\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("CreateBuiltInActionPanel(\"Opens the XBOX app.\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("Text = existing?.Title ?? string.Empty", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("AddActionChoice(actionPicker, \"Screenshot\"", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("[FrontendShortcutEditorActionKind.SteamBigPicture] = steamBigPicturePanel", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("[FrontendShortcutEditorActionKind.SteamClient] = steamClientPanel", shortcutCode, StringComparison.Ordinal);
@@ -966,11 +968,13 @@ public sealed class UiArchitectureTests
 
         Assert.Equal("Steam Big Picture", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamBigPicture));
         Assert.Equal("Steam", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamClient));
-        Assert.Equal("Xbox", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.XboxApp));
+        Assert.Equal("XBOX", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.XboxApp));
         Assert.Equal("Screenshot", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ScreenshotFullscreen));
         Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, string.Empty, null));
         Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, "Screenshot", "Screenshot"));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(true, "My Capture", "Screenshot"));
+        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "Xbox", "XBOX"));
+        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "My XbOx", "XBOX"));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "Persisted title", null));
     }
 

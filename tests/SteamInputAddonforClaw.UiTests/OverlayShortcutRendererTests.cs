@@ -38,15 +38,27 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("Text = tile.Title", renderer, StringComparison.Ordinal);
         Assert.Contains("new FontIcon", renderer, StringComparison.Ordinal);
         Assert.Contains("Glyph = tile.IconGlyph", renderer, StringComparison.Ordinal);
-        Assert.Contains("header.Children.Add(title)", renderer, StringComparison.Ordinal);
+        Assert.Contains("FontSize = 24", renderer, StringComparison.Ordinal);
+        Assert.Contains("FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(\"Segoe Fluent Icons\")", renderer, StringComparison.Ordinal);
+        Assert.Contains("Orientation = Orientation.Vertical", renderer, StringComparison.Ordinal);
         Assert.Contains("header.Children.Add(new FontIcon", renderer, StringComparison.Ordinal);
+        Assert.Contains("header.Children.Add(title)", renderer, StringComparison.Ordinal);
+        Assert.True(
+            renderer.IndexOf("header.Children.Add(new FontIcon", StringComparison.Ordinal)
+            < renderer.IndexOf("header.Children.Add(title)", StringComparison.Ordinal));
         Assert.Contains("MaxWidth = contentWidth", renderer, StringComparison.Ordinal);
+        Assert.Contains("MaxLines = 2", renderer, StringComparison.Ordinal);
+        Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", renderer, StringComparison.Ordinal);
         Assert.Contains("tile.StatusText", renderer, StringComparison.Ordinal);
         Assert.Contains("Text = tile.StatusText", renderer, StringComparison.Ordinal);
         Assert.Contains("ApplyTextStyle(status, \"QamCaptionTextStyle\")", renderer, StringComparison.Ordinal);
         Assert.Contains("Spacing = string.IsNullOrWhiteSpace(tile.StatusText) ? 0 : 4", renderer, StringComparison.Ordinal);
         Assert.Contains("TextAlignment = TextAlignment.Center", renderer, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", renderer, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment = VerticalAlignment.Center", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("contentWidth - 22", renderer, StringComparison.Ordinal);
+        Assert.Contains("<Style x:Key=\"QamTileTitleTextStyle\" TargetType=\"TextBlock\" BasedOn=\"{StaticResource QamBodyStrongTextStyle}\" />", resources, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"FontSize\" Value=\"16\" />", resources, StringComparison.Ordinal);
         Assert.Contains("<x:Double x:Key=\"QamShortcutTileSize\">117.33333333333333</x:Double>", resources, StringComparison.Ordinal);
         Assert.Contains("Width = tileSize", renderer, StringComparison.Ordinal);
         Assert.Contains("Height = tileSize", renderer, StringComparison.Ordinal);

@@ -40,7 +40,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
                 ("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, false),
                 ("Steam", ShortcutActionTypeIds.SteamClient, true),
                 ("Steam Big Picture", ShortcutActionTypeIds.SteamBigPicture, true),
-                ("Xbox", ShortcutActionTypeIds.XboxApp, true),
+                ("XBOX", ShortcutActionTypeIds.XboxApp, true),
             },
             tiles.Select(tile => (tile.Title, tile.Action.TypeId, tile.CloseOverlayAfterLaunch)));
         Assert.All(tiles, tile =>
@@ -98,6 +98,32 @@ public sealed class ShortcutRuntimeTests : IDisposable
 
         Assert.Equal(existing.TileId, Assert.Single(runtime.Capture().Tiles).TileId);
         Assert.Equal(existing.TileId, Assert.Single(runtime.CaptureEditor().Tiles).TileId);
+        Assert.Equal(existingBytes, File.ReadAllBytes(ShortcutsPath));
+    }
+
+    [Fact]
+    public void Existing_Xbox_shortcut_titles_are_preserved_verbatim_without_rewriting_the_document()
+    {
+        var existingXbox = Tile("Xbox", ShortcutActionTypeIds.XboxApp, Parameters("{}"), closeOverlayAfterLaunch: true);
+        var customXbox = Tile("My XbOx", ShortcutActionTypeIds.XboxApp, Parameters("{}"), closeOverlayAfterLaunch: true);
+        Save([existingXbox, customXbox]);
+        var existingBytes = File.ReadAllBytes(ShortcutsPath);
+
+        var runtime = new ShortcutRuntime(new ShortcutStore(ShortcutsPath));
+        Assert.Equal(
+            new[] { (existingXbox.TileId, "Xbox"), (customXbox.TileId, "My XbOx") },
+            runtime.Capture().Tiles.Select(tile => (tile.TileId, tile.Title)));
+        Assert.Equal(
+            new[] { (existingXbox.TileId, "Xbox"), (customXbox.TileId, "My XbOx") },
+            runtime.CaptureEditor().Tiles.Select(tile => (tile.TileId, tile.Title)));
+
+        var restartedRuntime = new ShortcutRuntime(new ShortcutStore(ShortcutsPath));
+        Assert.Equal(
+            new[] { (existingXbox.TileId, "Xbox"), (customXbox.TileId, "My XbOx") },
+            restartedRuntime.Capture().Tiles.Select(tile => (tile.TileId, tile.Title)));
+        Assert.Equal(
+            new[] { (existingXbox.TileId, "Xbox"), (customXbox.TileId, "My XbOx") },
+            restartedRuntime.CaptureEditor().Tiles.Select(tile => (tile.TileId, tile.Title)));
         Assert.Equal(existingBytes, File.ReadAllBytes(ShortcutsPath));
     }
 
