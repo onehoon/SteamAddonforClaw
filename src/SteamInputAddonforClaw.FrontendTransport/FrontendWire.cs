@@ -184,7 +184,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 78: add the Main UI Windows Tweaks snapshot, mutation, and daily-warning acknowledgement RPCs.
 // Version 79: retire the Developer-only PID1902 input cadence diagnostic RPC and result contract.
 // Version 80: append the explicit Mixed state to the existing Windows Tweaks snapshot contract.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 80; }
+// Version 81: retire Developer diagnostics, including the vibration profile write probe and its frontend RPC/result contract.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 81; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -223,21 +224,18 @@ internal enum FrontendRpcMethod
     SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc,
     SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition,
     CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder,
-    MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled,
-    SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled,
+    MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled,
     SetDeviceBatteryChargeLimitPercent, SetQuickSettingsCurrentPowerSourceOnly, CaptureGamingHome, SetGamingHomeSelection,
     SetGamingHomeStartup, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting, CaptureShortcutEditor, MutateShortcut,
-    CaptureXbox360RumbleLoopDiagnostic, StartXbox360RumbleLoopDiagnostic, StopXbox360RumbleLoopDiagnostic,
     CaptureControllerVibrationStrength, SetControllerVibrationStrength,
-    TestControllerVibrationMotor, RunControllerVibrationProfileWriteProbe, CaptureGameInputSystemButtonProbe,
-    StartGameInputSystemButtonProbe, StopGameInputSystemButtonProbe, ScanXboxGames, CaptureXboxGameProfile,
+    TestControllerVibrationMotor, ScanXboxGames, CaptureXboxGameProfile,
     SetXboxGameProfileFavorite, SetXboxGameProfileEnabled, SetXboxGameProfileCpuBoostEnabled, SetXboxGameProfileCpuBoostAc,
     SetXboxGameProfileCpuBoostDc, SetXboxGameProfileTdpEnabled, SetXboxGameProfileTdp, SetXboxGameProfilePowerModeEnabled,
     SetXboxGameProfilePowerModeAc, SetXboxGameProfilePowerModeDc, SetXboxGameProfileFpsLimitEnabled,
     SetXboxGameProfileFpsLimitAc, SetXboxGameProfileFpsLimitDc, SetXboxGameProfileResolution,
     SetXboxGameProfileBackButtonMapping, SetGameProfileGpuMinimumClockEnabled, SetGameProfileGpuMinimumClockAc,
     SetGameProfileGpuMinimumClockDc, SetXboxGameProfileGpuMinimumClockEnabled, SetXboxGameProfileGpuMinimumClockAc,
-    SetXboxGameProfileGpuMinimumClockDc, RunControllerLedProfileReadProbe, RunDeveloperRumbleRearm,
+    SetXboxGameProfileGpuMinimumClockDc, RunDeveloperRumbleRearm,
     SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled,
     CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning
 }
@@ -260,8 +258,6 @@ internal sealed record SetXboxGameProfileBackButtonMappingRequest(string Key, St
 internal sealed record SetControllerLedSettingsRequest(SteamInputAddonforClaw.Contracts.ControllerLed.ControllerLedSettings Settings);
 internal sealed record StartClawSensorProbeRequest(FrontendClawSensorProbeMode Mode);
 internal sealed record RunFanProbeRequest(FrontendFanProbeOperation Operation);
-internal sealed record SetBatteryChargeLimitTestEnabledRequest(bool Enabled);
-internal sealed record SetBatteryChargeLimitTestPercentRequest(int Percent);
 internal sealed record SetDeviceBatteryChargeLimitEnabledRequest(bool Enabled);
 internal sealed record SetDeviceBatteryChargeLimitPercentRequest(int Percent);
 internal sealed record SetGameProfileGpuMinimumClockEnabledRequest(uint AppId, bool Enabled);
@@ -270,7 +266,6 @@ internal sealed record SetXboxGameProfileGpuMinimumClockEnabledRequest(string Ke
 internal sealed record SetXboxGameProfileGpuMinimumClockIndexRequest(string Key, int SelectableClockIndex);
 internal sealed record SetControllerVibrationStrengthRequest(int LeftPercent, int RightPercent);
 internal sealed record TestControllerVibrationMotorRequest(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor Motor);
-internal sealed record RunControllerVibrationProfileWriteProbeRequest(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationProfileWriteProbeMode Mode);
 internal sealed record SetDeviceCpuBoostAcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetDeviceCpuBoostDcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetDeviceCpuBoostEnabledRequest(bool Enabled);

@@ -165,39 +165,6 @@ public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeSt
     public static readonly FrontendFanProbeSnapshot Unavailable = new(false, FrontendFanProbeState.Unavailable, "Unavailable", "", "", "", "Unsupported", null, false, "MSI fan probe is unavailable.");
 }
 
-public sealed record FrontendBatteryChargeLimitTestSnapshot(
-    bool Available,
-    string Manufacturer,
-    string Model,
-    string BaseBoard,
-    bool? Enabled,
-    int? LimitPercent,
-    byte? RawValue,
-    bool ProductValueValid,
-    string? FailureMessage)
-{
-    public static readonly FrontendBatteryChargeLimitTestSnapshot Unavailable =
-        new(false, "", "", "", null, null, null, false, "MSI battery charge-limit test is unavailable.");
-}
-
-public enum FrontendBatteryChargeLimitTestMutationOutcome
-{
-    Succeeded,
-    InvalidTarget,
-    ReadFailed,
-    WriteFailed,
-    VerificationFailed,
-    Unavailable
-}
-
-public sealed record FrontendBatteryChargeLimitTestMutationResult(
-    FrontendBatteryChargeLimitTestMutationOutcome Outcome,
-    string? FailureMessage,
-    FrontendBatteryChargeLimitTestSnapshot Snapshot)
-{
-    public bool Succeeded => Outcome == FrontendBatteryChargeLimitTestMutationOutcome.Succeeded;
-}
-
 public enum FrontendBatteryChargeLimitMutationOutcome
 {
     Succeeded,
@@ -235,18 +202,6 @@ public enum FrontendControllerVibrationMotor { Left, Right }
 public enum FrontendControllerVibrationStrengthMutationOutcome { Succeeded, Unavailable, Failed }
 public enum FrontendControllerVibrationTestOutcome { Succeeded, Unavailable, Failed }
 public enum FrontendDeveloperRumbleRearmOutcome { Completed, Unavailable, Failed }
-public enum FrontendControllerVibrationProfileWriteProbeMode { ApplyZeroHundred, RestoreFiftyFifty }
-public enum FrontendControllerVibrationProfileWriteProbeOutcome { Succeeded, Unavailable, Failed }
-public enum FrontendControllerLedProfileReadProbeOutcome
-{
-    CandidateReadbackParsed,
-    TransportWriteFailed,
-    NoReplyOrTimeout,
-    UnexpectedReport,
-    WrongAddressOrIndex,
-    Unavailable,
-    Failed
-}
 
 /// <summary>The persisted desired Left/Right pair and the current production-write capability projection.</summary>
 public sealed record FrontendControllerVibrationStrengthSnapshot(
@@ -291,44 +246,6 @@ public sealed record FrontendDeveloperRumbleRearmResult(
 
     public static FrontendDeveloperRumbleRearmResult Unavailable(string status) =>
         new(FrontendDeveloperRumbleRearmOutcome.Unavailable, status, false, false, false, false, false);
-}
-
-public sealed record FrontendControllerVibrationProfileWriteProbeResult(
-    FrontendControllerVibrationProfileWriteProbeMode Mode,
-    FrontendControllerVibrationProfileWriteProbeOutcome Outcome,
-    string Status)
-{
-    public bool Succeeded => Outcome == FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded;
-}
-
-public sealed record FrontendControllerLedProfileReadProbeResult(
-    FrontendControllerLedProfileReadProbeOutcome Outcome,
-    ushort? FirmwareVersion,
-    ushort CandidateAddress,
-    string Status)
-{
-    public bool ReadResponseValid => Outcome == FrontendControllerLedProfileReadProbeOutcome.CandidateReadbackParsed;
-}
-
-public enum FrontendXbox360RumbleLoopState { Unavailable, Ready, Running, Stopped, Failed }
-
-public sealed record FrontendXbox360RumbleLoopSnapshot(
-    bool Available,
-    FrontendXbox360RumbleLoopState State,
-    string Status,
-    string? RunId,
-    int? Slot,
-    int Cycle,
-    int Step,
-    int StepCount,
-    int? CurrentValue8,
-    byte? LastObservedLeft8,
-    byte? LastObservedRight8,
-    long? LastObservedCallbackSequence,
-    string? FailureReason)
-{
-    public static FrontendXbox360RumbleLoopSnapshot Unavailable(string status = "Xbox360 rumble diagnostic is unavailable.") =>
-        new(false, FrontendXbox360RumbleLoopState.Unavailable, status, null, null, 0, 0, 0, null, null, null, null, null);
 }
 
 public enum SteamVirtualControllerPreference
@@ -730,14 +647,6 @@ public interface IAddonFrontendControl
         Task.FromResult(new QuickSettingsMutationResult(false, "Quick Settings are unavailable.", QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.ProfileTarget)));
     Task<FrontendFanProbeSnapshot> OpenFanProbeAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
     Task<FrontendFanProbeSnapshot> RunFanProbeAsync(FrontendFanProbeOperation operation, CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
-    Task<FrontendBatteryChargeLimitTestSnapshot> CaptureBatteryChargeLimitTestAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendBatteryChargeLimitTestSnapshot.Unavailable);
-    Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendBatteryChargeLimitTestMutationResult(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
-            "MSI battery charge-limit test is unavailable.", FrontendBatteryChargeLimitTestSnapshot.Unavailable));
-    Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestPercentAsync(int percent, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendBatteryChargeLimitTestMutationResult(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
-            "MSI battery charge-limit test is unavailable.", FrontendBatteryChargeLimitTestSnapshot.Unavailable));
     Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendBatteryChargeLimitSnapshot.Unavailable);
     Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
@@ -762,27 +671,6 @@ public interface IAddonFrontendControl
     Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendDeveloperRumbleRearmResult.Unavailable(
             "Controller rumble recovery is unavailable in this Runtime."));
-    Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
-        FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendControllerVibrationProfileWriteProbeResult(
-            mode, FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
-            "The developer-only vibration profile write probe is unavailable."));
-    Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendControllerLedProfileReadProbeResult(
-            FrontendControllerLedProfileReadProbeOutcome.Unavailable, null, 0x024A,
-            "The developer-only A2VM LED profile read probe is unavailable."));
-    Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-    Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-    Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
-    Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
-    Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
-    Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendXboxGameCatalogSnapshot> ScanXboxGamesAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXboxGameCatalogSnapshot.Unavailable("XBOX game catalog is unavailable."));

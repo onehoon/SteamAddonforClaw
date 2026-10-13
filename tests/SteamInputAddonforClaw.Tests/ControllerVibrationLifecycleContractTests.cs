@@ -95,21 +95,6 @@ public sealed class ControllerVibrationLifecycleContractTests
         Assert.Contains("ControllerVibrationSettingsApplyFailed", apply, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Manual_restore_rejects_an_active_terminal_rumble_diagnostic_before_retiring_presentation()
-    {
-        var host = ReadHost();
-        var recovery = Method(host,
-            "private async Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmCoreAsync(",
-            "private string? GetDeveloperRumbleRearmAdmissionFailure(");
-        var capture = recovery.IndexOf("CaptureXbox360RumbleLoopDiagnosticAsync(", StringComparison.Ordinal);
-        var runningGuard = recovery.IndexOf("rumbleLoop.State == FrontendXbox360RumbleLoopState.Running", StringComparison.Ordinal);
-        var retire = recovery.IndexOf("presentation.RunDeveloperRumbleRearmAsync(", StringComparison.Ordinal);
-
-        Assert.True(capture >= 0 && runningGuard > capture && retire > runningGuard);
-        Assert.Contains("Stop the Xbox360 terminal STOP diagnostic before restoring vibration.", recovery, StringComparison.Ordinal);
-    }
-
     private static string ReadHost()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

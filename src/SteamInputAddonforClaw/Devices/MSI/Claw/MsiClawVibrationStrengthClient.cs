@@ -6,19 +6,6 @@ using Windows.Devices.HumanInterfaceDevice;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal enum MsiClawVibrationProfileWriteProbeMode { ApplyZeroHundred, RestoreFiftyFifty }
-internal enum MsiClawVibrationProfileWriteProbeOutcome { Succeeded, Unavailable, Failed }
-
-internal sealed record MsiClawVibrationProfileWriteProbeResult(
-    MsiClawVibrationProfileWriteProbeMode Mode,
-    MsiClawVibrationProfileWriteProbeOutcome Outcome,
-    int LeftPercent,
-    int RightPercent,
-    string Reason)
-{
-    internal bool Succeeded => Outcome == MsiClawVibrationProfileWriteProbeOutcome.Succeeded;
-}
-
 internal interface IMsiClawVibrationProfileIo
 {
     Task<bool> WriteAsync(
@@ -68,8 +55,7 @@ internal sealed class WindowsMsiClawVibrationProfileIo : IMsiClawVibrationProfil
     }
 }
 
-/// <summary>Applies the persisted pair to one freshly resolved, strongly identified PID1902 control HID.
-/// Developer-only profile probes share the same transaction gate.</summary>
+/// <summary>Applies the persisted pair to one freshly resolved, strongly identified PID1902 control HID.</summary>
 internal sealed class MsiClawVibrationStrengthClient
 {
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
@@ -138,101 +124,6 @@ internal sealed class MsiClawVibrationStrengthClient
         }
     }
 
-    internal async Task<MsiClawVibrationProfileWriteProbeResult> RunDiagnosticMotorPairWriteAsync(
-        MsiClawVibrationProfileWriteProbeMode mode,
-        Func<MsiClawPhysicalIdentity?> ownedIdentitySource,
-        Func<bool> centerMIsExactlyDisabled,
-        CancellationToken cancellationToken)
-    {
-        var pair = mode switch
-        {
-            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred => (Left: 0, Right: 100),
-            MsiClawVibrationProfileWriteProbeMode.RestoreFiftyFifty => (Left: 50, Right: 50),
-            _ => ((int Left, int Right)?)null
-        };
-        if (pair is null)
-            return DiagnosticProbeResult(mode, MsiClawVibrationProfileWriteProbeOutcome.Failed, 0, 0, "InvalidProbeMode");
-
-        await _transactionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_modelId.Value is not ("msi.claw.cg3em" or "msi.claw.a2vm.8"))
-                return DiagnosticProbeUnavailable(mode, pair.Value, "UnsupportedModel");
-
-            if (!IsCenterMDisabled(centerMIsExactlyDisabled))
-                return DiagnosticProbeUnavailable(mode, pair.Value, "CenterMIsNotExactlyDisabled");
-
-            var ownedIdentity = CaptureStrongOwnedIdentity(ownedIdentitySource);
-            if (ownedIdentity is null)
-                return DiagnosticProbeUnavailable(mode, pair.Value, "OwnedPhysicalSessionUnavailable");
-
-            var device = ResolveCurrentPid1902ControlHid(ownedIdentity);
-            if (device is null)
-                return DiagnosticProbeUnavailable(mode, pair.Value, "Pid1902ControlHidNotUniquelyResolved");
-
-            // Recheck immediately before the one write so a changed startup authority cannot
-            // authorize this developer-only mutation using an earlier observation.
-            if (!IsCenterMDisabled(centerMIsExactlyDisabled))
-                return DiagnosticProbeUnavailable(mode, pair.Value, "CenterMIsNotExactlyDisabled");
-            if (!IsSameStrongOwnedIdentity(ownedIdentitySource, ownedIdentity))
-                return DiagnosticProbeUnavailable(mode, pair.Value, "OwnedPhysicalSessionUnavailable");
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var report = MsiClawVibrationProfileCommand.BuildMotorPairWrite(
-                pair.Value.Left, pair.Value.Right);
-            AppLog.Info("ControllerVibration", "ControllerVibrationProfileWriteProbeStarted",
-                ("Model", _modelId.Value),
-                ("ProductId", $"0x{device.Device.ProductId:X4}"),
-                ("ProfileIndex", 1),
-                ("Address", "0x0022"),
-                ("Length", 2),
-                ("Left", pair.Value.Left),
-                ("Right", pair.Value.Right),
-                ("SyncToRom", false),
-                ("PhysicalEffectVerifiedByThisProbe", false),
-                ("ThisWriteIsProductionApply", false));
-
-            var transportSucceeded = await _io.WriteAsync(device, report, cancellationToken).ConfigureAwait(false);
-            AppLog.Info("ControllerVibration", "ControllerVibrationProfileWriteProbeCompleted",
-                ("Model", _modelId.Value),
-                ("Left", pair.Value.Left),
-                ("Right", pair.Value.Right),
-                ("TransportSucceeded", transportSucceeded),
-                ("PhysicalEffectVerifiedByThisProbe", false),
-                ("ThisWriteIsProductionApply", false),
-                ("SyncToRom", false));
-
-            return transportSucceeded
-                ? DiagnosticProbeResult(mode, MsiClawVibrationProfileWriteProbeOutcome.Succeeded,
-                    pair.Value.Left, pair.Value.Right, "TransportWriteSucceeded")
-                : DiagnosticProbeResult(mode, MsiClawVibrationProfileWriteProbeOutcome.Failed,
-                    pair.Value.Left, pair.Value.Right, "TransportWriteFailed");
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Info("ControllerVibration", "ControllerVibrationProfileWriteProbeCompleted",
-                ("Model", _modelId.Value),
-                ("Left", pair.Value.Left),
-                ("Right", pair.Value.Right),
-                ("TransportSucceeded", false),
-                ("PhysicalEffectVerifiedByThisProbe", false),
-                ("ThisWriteIsProductionApply", false),
-                ("SyncToRom", false),
-                ("Reason", exception.GetType().Name));
-            return DiagnosticProbeResult(mode, MsiClawVibrationProfileWriteProbeOutcome.Failed,
-                pair.Value.Left, pair.Value.Right, exception.GetType().Name);
-        }
-        finally
-        {
-            _transactionGate.Release();
-        }
-    }
-
     private MsiClawControlHidDevice? ResolveCurrentPid1902ControlHid(MsiClawPhysicalIdentity? expectedIdentity)
     {
         if (expectedIdentity is not null && !IsStrongOwnedPid1902Identity(expectedIdentity))
@@ -279,55 +170,11 @@ internal sealed class MsiClawVibrationStrengthClient
         && identity.ProductId == MsiClawHardware.DirectInputProductId
         && (!string.IsNullOrWhiteSpace(identity.PhysicalDeviceKey) || MsiClawPhysicalIdentity.IsUsableContainer(identity.ContainerId));
 
-    private static MsiClawPhysicalIdentity? CaptureStrongOwnedIdentity(Func<MsiClawPhysicalIdentity?> source)
-    {
-        try
-        {
-            var identity = source?.Invoke();
-            return identity is not null && IsStrongOwnedPid1902Identity(identity) ? identity : null;
-        }
-        catch { return null; }
-    }
-
-    private static bool IsSameStrongOwnedIdentity(
-        Func<MsiClawPhysicalIdentity?> source,
-        MsiClawPhysicalIdentity expected) =>
-        CaptureStrongOwnedIdentity(source) is { } current && current.StronglyMatches(expected);
-
     private bool FailApply(string reason)
     {
         AppLog.Warn("ControllerVibration", "Persisted vibration pair was not applied; controller ownership remains unchanged.", null,
             ("Event", "ControllerVibrationSettingsApplyFailed"), ("Model", _modelId.Value), ("Reason", reason));
         return false;
-    }
-
-    private MsiClawVibrationProfileWriteProbeResult DiagnosticProbeUnavailable(
-        MsiClawVibrationProfileWriteProbeMode mode,
-        (int Left, int Right) pair,
-        string reason)
-    {
-        AppLog.Info("ControllerVibration", "ControllerVibrationProfileWriteProbeUnavailable",
-            ("Model", _modelId.Value),
-            ("Reason", reason),
-            ("Left", pair.Left),
-            ("Right", pair.Right),
-            ("SyncToRom", false),
-            ("VerifiedForProduction", false));
-        return DiagnosticProbeResult(mode, MsiClawVibrationProfileWriteProbeOutcome.Unavailable,
-            pair.Left, pair.Right, reason);
-    }
-
-    private static MsiClawVibrationProfileWriteProbeResult DiagnosticProbeResult(
-        MsiClawVibrationProfileWriteProbeMode mode,
-        MsiClawVibrationProfileWriteProbeOutcome outcome,
-        int left,
-        int right,
-        string reason) => new(mode, outcome, left, right, reason);
-
-    private static bool IsCenterMDisabled(Func<bool> centerMIsExactlyDisabled)
-    {
-        try { return centerMIsExactlyDisabled?.Invoke() == true; }
-        catch { return false; }
     }
 
 }
