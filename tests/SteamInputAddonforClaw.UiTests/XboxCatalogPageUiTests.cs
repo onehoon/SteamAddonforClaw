@@ -203,7 +203,8 @@ public sealed class XboxCatalogPageUiTests
         var deactivate = Method(pageCode, "internal void Deactivate()", "private async void RefreshGamesButton_Click");
         var refresh = Method(pageCode, "private async Task RefreshGamesAsync()", "private void GameSearchBox_TextChanged");
         var refreshButton = Method(pageCode, "private async void RefreshGamesButton_Click", "private async Task RefreshGamesAsync()");
-        var showPage = Method(windowCode, "private void ShowPage(", "private async Task RefreshSystemStatusAsync()");
+        var showPage = Method(windowCode, "private void ShowPage(", "private void RestoreNavigationSelection(");
+        var materialize = Method(windowCode, "private bool TryMaterializeMainPage(", "private void MainNavigationView_SelectionChanged(");
 
         Assert.Contains("private bool _catalogLoaded", pageCode, StringComparison.Ordinal);
         Assert.Contains("_active = true", activate, StringComparison.Ordinal);
@@ -236,8 +237,10 @@ public sealed class XboxCatalogPageUiTests
         Assert.DoesNotContain("if (_catalogLoaded)", refresh, StringComparison.Ordinal);
         Assert.DoesNotContain("ScanXboxGamesAsync", activate, StringComparison.Ordinal);
         Assert.DoesNotContain("ScanXboxGamesAsync", windowCode, StringComparison.Ordinal);
-        Assert.Contains("XboxContent.Activate()", showPage, StringComparison.Ordinal);
-        Assert.Contains("else if (wasXbox) XboxContent.Deactivate()", showPage, StringComparison.Ordinal);
+        Assert.Contains("_xboxContent!.Activate()", showPage, StringComparison.Ordinal);
+        Assert.Contains("else if (wasXbox) _xboxContent?.Deactivate()", showPage, StringComparison.Ordinal);
+        Assert.Contains("GetOrCreateXboxPage()", materialize, StringComparison.Ordinal);
+        Assert.DoesNotContain(".Activate()", materialize, StringComparison.Ordinal);
         Assert.DoesNotContain("StateInvalidated", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("PackageCatalog", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("Timer", pageCode, StringComparison.Ordinal);

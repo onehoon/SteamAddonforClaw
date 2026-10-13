@@ -85,6 +85,87 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Main_window_shows_device_before_sequential_low_priority_page_warmup()
+    {
+        var root = FindRepositoryRoot();
+        var xamlPath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml");
+        var xaml = XDocument.Load(xamlPath);
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        Assert.Contains("Loaded=\"MainAppRoot_Loaded\"", File.ReadAllText(xamlPath), StringComparison.Ordinal);
+        var pageHostGrid = xaml.Descendants().Single(element =>
+            element.Elements().Any(child => child.Name.LocalName == "DevicePage"));
+        var eagerPages = pageHostGrid.Elements()
+            .Where(element => element.Name.LocalName.EndsWith("Page", StringComparison.Ordinal))
+            .Select(element => element.Name.LocalName)
+            .ToArray();
+        Assert.Equal(new[] { "DevicePage" }, eagerPages);
+
+        var hosts = pageHostGrid.Elements().Where(element => element.Name.LocalName == "ContentControl").ToArray();
+        Assert.Equal(9, hosts.Length);
+        Assert.All(hosts, host =>
+        {
+            Assert.Equal("Collapsed", (string?)host.Attribute("Visibility"));
+            Assert.Equal("Stretch", (string?)host.Attribute("HorizontalContentAlignment"));
+            Assert.Equal("Stretch", (string?)host.Attribute("VerticalContentAlignment"));
+            Assert.NotNull(host.Attribute(xamlNamespace + "Name"));
+        });
+
+        var constructor = ExtractMethod(mainWindow, "internal MainWindow(");
+        Assert.Contains("DeviceContent.Initialize(_frontend)", constructor, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetOrCreate", constructor, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsPage.Initialize", constructor, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScanProfileGamesAsync", constructor, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScanXboxGamesAsync", constructor, StringComparison.Ordinal);
+
+        var activation = ExtractMethod(mainWindow, "private void OnWindowActivated(");
+        var firstRender = ExtractMethod(mainWindow, "private void OnInitialMainWindowRendering(");
+        var warmupStart = ExtractMethod(mainWindow, "private void StartDeferredPageWarmup(");
+        var warmNext = ExtractMethod(mainWindow, "private void WarmNextPage()");
+        var materialize = ExtractMethod(mainWindow, "private bool TryMaterializeMainPage(");
+        var showPage = ExtractMethod(mainWindow, "private void ShowPage(");
+
+        Assert.Contains("TryScheduleWarmupAfterInitialDisplay();", activation, StringComparison.Ordinal);
+        Assert.Contains("CompositionTarget.Rendering += OnInitialMainWindowRendering", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("DispatcherQueuePriority.Low, StartDeferredPageWarmup", firstRender, StringComparison.Ordinal);
+        Assert.Contains("DispatcherQueuePriority.Low, WarmNextPage", warmNext, StringComparison.Ordinal);
+        Assert.Equal(1, warmNext.Split("TryMaterializeMainPage(page)", StringSplitOptions.None).Length - 1);
+        Assert.Contains("DeferredWarmupPages[_nextWarmupPageIndex++]", warmNext, StringComparison.Ordinal);
+        Assert.DoesNotContain(".Activate()", warmNext, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScanProfileGamesAsync", materialize, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScanXboxGamesAsync", materialize, StringComparison.Ordinal);
+        Assert.DoesNotContain(".Activate()", materialize, StringComparison.Ordinal);
+        Assert.Contains("TryMaterializeMainPage(page)", showPage, StringComparison.Ordinal);
+        Assert.True(showPage.IndexOf("TryMaterializeMainPage(page)", StringComparison.Ordinal)
+            < showPage.IndexOf("ControllerPageHost.Visibility =", StringComparison.Ordinal));
+
+        var warmupOrder = mainWindow[mainWindow.IndexOf("DeferredWarmupPages =", StringComparison.Ordinal)..
+            mainWindow.IndexOf("private readonly IAddonFrontendControl", StringComparison.Ordinal)];
+        foreach (var page in new[] { "Controller", "Settings", "Overlay", "Shortcut", "Tweaks", "Profile", "Xbox" })
+            Assert.Contains($"MainNavigationPage.{page}", warmupOrder, StringComparison.Ordinal);
+        Assert.DoesNotContain("MainNavigationPage.HowToUse", warmupOrder, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeveloperMenu", warmupOrder, StringComparison.Ordinal);
+
+        var settingsFactory = ExtractMethod(mainWindow, "private SettingsPage GetOrCreateSettingsPage()");
+        Assert.True(settingsFactory.IndexOf("page.AppUpdateSnapshotRendered += OnAppUpdateSnapshotRendered", StringComparison.Ordinal)
+            < settingsFactory.IndexOf("page.Initialize(_bootstrap, _frontend, _mainUiThemePreference)", StringComparison.Ordinal));
+        Assert.Contains("if (_latestSystemStatus is { } status)", settingsFactory, StringComparison.Ordinal);
+
+        var statusRender = ExtractMethod(mainWindow, "private void RenderSystemStatus(FrontendStatusSnapshot snapshot)");
+        Assert.Contains("_latestSystemStatus = snapshot", statusRender, StringComparison.Ordinal);
+        Assert.Contains("_controllerContent?.SetSteamActivity(snapshot.Steam.Active)", statusRender, StringComparison.Ordinal);
+        Assert.Contains("_profileContent?.SetSteamActivity(snapshot.Steam.Active)", statusRender, StringComparison.Ordinal);
+        Assert.Contains("_settingsContent?.RenderRequiredComponents(snapshot)", statusRender, StringComparison.Ordinal);
+
+        var invalidation = ExtractMethod(mainWindow, "private void RefreshInvalidatedFrontendStateOnUiThread()");
+        Assert.DoesNotContain("GetOrCreate", invalidation, StringComparison.Ordinal);
+        var close = ExtractMethod(mainWindow, "private void OnWindowClosed(");
+        Assert.Contains("_windowClosed = true", close, StringComparison.Ordinal);
+        Assert.Contains("CompositionTarget.Rendering -= OnInitialMainWindowRendering", close, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Developer_page_invalidation_shutdown_and_navigation_guards_do_not_materialize_pages()
     {
         var root = FindRepositoryRoot();
@@ -479,12 +560,13 @@ public sealed class UiArchitectureTests
         Assert.Contains("<NavigationViewItem Content=\"ClawHUD\" Tag=\"Overlay\">", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("<NavigationViewItem Content=\"Overlay\" Tag=\"Overlay\">", xaml, StringComparison.Ordinal);
         Assert.Contains("MainNavigationPage.Overlay", navigationState, StringComparison.Ordinal);
-        Assert.Contains("OverlayContent", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("OverlayPageHost", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_overlayContent", mainWindow, StringComparison.Ordinal);
         Assert.Contains("MainNavigationPage.Shortcut", navigationState, StringComparison.Ordinal);
         Assert.Contains("\"Shortcut\" => MainNavigationPage.Shortcut", navigationState, StringComparison.Ordinal);
-        Assert.Contains("ShortcutContent", xaml, StringComparison.Ordinal);
-        Assert.Contains("if (page == MainNavigationPage.Shortcut) ShortcutContent.Activate();", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("else if (wasShortcut) ShortcutContent.Deactivate();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ShortcutPageHost", xaml, StringComparison.Ordinal);
+        Assert.Contains("if (page == MainNavigationPage.Shortcut) _shortcutContent!.Activate();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("else if (wasShortcut) _shortcutContent?.Deactivate();", mainWindow, StringComparison.Ordinal);
 
         // Device is the default page in both the shell and the navigation state.
         Assert.Contains("MainNavigationView.SelectedItem = DeviceNavigationItem;", mainWindow, StringComparison.Ordinal);
@@ -537,7 +619,7 @@ public sealed class UiArchitectureTests
         var discardStagedEdits = shortcutCode.IndexOf("if (result != ContentDialogResult.Primary) return;", StringComparison.Ordinal);
         var persistStagedEdits = shortcutCode.IndexOf("await ApplyMutationAsync(intent)", StringComparison.Ordinal);
         Assert.True(discardStagedEdits >= 0 && discardStagedEdits < persistStagedEdits);
-        Assert.Contains("ShortcutContent.RequestRefresh()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_shortcutContent?.RequestRefresh()", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("ShortcutStore", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("ShortcutsPath", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("ExecuteAsync", shortcutCode, StringComparison.Ordinal);
@@ -985,7 +1067,7 @@ public sealed class UiArchitectureTests
 
         // The snapshot is now routed to the owner pages instead of a Status page.
         Assert.Contains("DeviceContent.RenderDeviceSummary(snapshot)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("SettingsContent.RenderRequiredComponents(snapshot)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_settingsContent?.RenderRequiredComponents(snapshot)", mainWindow, StringComparison.Ordinal);
 
         // The removed "Check Status" wording no longer points users at a page that does not exist.
         Assert.DoesNotContain("Check Status", mainWindow, StringComparison.Ordinal);
@@ -1031,10 +1113,10 @@ public sealed class UiArchitectureTests
         var expectedRefreshes = new[]
         {
             "_ = RefreshSystemStatusAsync();",
-            "SettingsContent.RequestAppUpdateRefresh();",
-            "SettingsContent.RequestGamingHomeRefresh();",
-            "OverlayContent.RequestClawHudRefresh();",
-            "ShortcutContent.RequestRefresh();",
+            "_settingsContent?.RequestAppUpdateRefresh();",
+            "_settingsContent?.RequestGamingHomeRefresh();",
+            "_overlayContent?.RequestClawHudRefresh();",
+            "_shortcutContent?.RequestRefresh();",
         };
         var previousIndex = -1;
         foreach (var refresh in expectedRefreshes)
@@ -1117,8 +1199,8 @@ public sealed class UiArchitectureTests
 
         Assert.DoesNotContain("ClawHud", settingsXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ClawHud", settingsCodeBehind, StringComparison.Ordinal);
-        Assert.Contains("OverlayContent.RequestClawHudRefresh()", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("OverlayContent.Initialize(_frontend)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_overlayContent?.RequestClawHudRefresh()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("page.Initialize(_frontend)", mainWindow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1141,16 +1223,27 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Profile_tab_activation_refreshes_the_catalog_only_when_selected()
+    public void Profile_tab_scans_once_on_first_entry_and_reuses_successful_catalog()
     {
         var root = FindRepositoryRoot();
         var profileCodeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var activate = ExtractMethod(profileCodeBehind, "internal void Activate()");
+        var refresh = ExtractMethod(profileCodeBehind, "private async Task RefreshGamesAsync(");
 
-        Assert.Contains("internal void Activate()", profileCodeBehind, StringComparison.Ordinal);
-        Assert.Contains("_ = RefreshGamesAsync();", profileCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("ShouldStartCatalogScan(_catalogLoaded, _catalogScanInProgress)", activate, StringComparison.Ordinal);
+        Assert.Contains("if (_catalogLoaded)", activate, StringComparison.Ordinal);
+        Assert.Contains("ApplyCatalogFilter();", activate, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScanProfileGamesAsync", activate, StringComparison.Ordinal);
+        Assert.Contains("_ = RefreshGamesAsync();", activate, StringComparison.Ordinal);
+        Assert.Contains("private bool _catalogLoaded, _catalogScanInProgress", profileCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("if (_frontend is null || _catalogScanInProgress) return", refresh, StringComparison.Ordinal);
+        Assert.Contains("await _frontend.ScanProfileGamesAsync()", refresh, StringComparison.Ordinal);
+        Assert.Contains("_catalog = scannedCatalog", refresh, StringComparison.Ordinal);
+        Assert.Contains("_catalogLoaded = true", refresh, StringComparison.Ordinal);
+        Assert.Contains("explicitRefresh: true", profileCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("RefreshGamesButton.IsEnabled = false", refresh, StringComparison.Ordinal);
+        Assert.Contains("RefreshGamesButton.IsEnabled = true", refresh, StringComparison.Ordinal);
         Assert.DoesNotContain("if (_selectedGame is not null) _ = CaptureSelectedAsync(_selectedGame.AppId);", profileCodeBehind, StringComparison.Ordinal);
-        Assert.Contains("private async Task RefreshGamesAsync()", profileCodeBehind, StringComparison.Ordinal);
-        Assert.Contains("_catalog = await _frontend.ScanProfileGamesAsync();", profileCodeBehind, StringComparison.Ordinal);
         Assert.Contains("_frontend?.StateInvalidated -= OnStateInvalidated;", profileCodeBehind, StringComparison.Ordinal);
     }
 

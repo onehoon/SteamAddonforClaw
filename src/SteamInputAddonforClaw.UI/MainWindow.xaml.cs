@@ -3,6 +3,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Windowing;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
@@ -23,6 +24,17 @@ namespace SteamInputAddonforClaw;
 
 public sealed partial class MainWindow : Window
 {
+    private static readonly MainNavigationPage[] DeferredWarmupPages =
+    [
+        MainNavigationPage.Controller,
+        MainNavigationPage.Settings,
+        MainNavigationPage.Overlay,
+        MainNavigationPage.Shortcut,
+        MainNavigationPage.Tweaks,
+        MainNavigationPage.Profile,
+        MainNavigationPage.Xbox,
+    ];
+
     private readonly IAddonFrontendControl _frontend;
     private readonly FrontendBootstrapSnapshot _bootstrap;
     private readonly MainUiThemePreferenceStore? _mainUiThemePreferenceStore;
@@ -40,12 +52,28 @@ public sealed partial class MainWindow : Window
     private int _isRefreshingStatus;
     private int _statusRefreshPending;
     private bool _windowActivatedForUser;
+    private bool _mainAppRootLoaded;
+    private bool _warmupStartQueued;
+    private bool _warmupStarted;
+    private bool _windowClosed;
+    private bool _restoringNavigationSelection;
+    private int _nextWarmupPageIndex;
+    private MainNavigationPage _displayedPage = MainNavigationPage.Device;
+    private readonly long _windowCreatedTimestamp = Stopwatch.GetTimestamp();
     private bool _prerequisiteSetupPendingActivation;
     private bool _prerequisiteSetupInProgress;
     private bool _prerequisiteSetupAttemptedForCurrentProcess;
     private DeveloperPage? _developerMenuContent;
     private ClawSensorProbePage? _clawSensorProbeContent;
     private FanHardwareProbePage? _fanHardwareProbeContent;
+    private ControllerPage? _controllerContent;
+    private ProfilePage? _profileContent;
+    private XboxPage? _xboxContent;
+    private OverlayPage? _overlayContent;
+    private ShortcutPage? _shortcutContent;
+    private WindowsTweaksPage? _tweaksContent;
+    private SettingsPage? _settingsContent;
+    private HowToUsePage? _howToUseContent;
 
     // App UI PR-C: the single ordered mutation path for the WHOLE front-button mapping. The
     // cross-button same-domain uniqueness rule belongs to one whole mapping, so there is one save
@@ -97,7 +125,11 @@ public sealed partial class MainWindow : Window
         _controllerLedUiSettings = bootstrap.Settings.ControllerLed;
         _controllerLedPersistedSettings = bootstrap.Settings.ControllerLed;
 
+        var initializeComponentTimer = Stopwatch.StartNew();
         InitializeComponent();
+        initializeComponentTimer.Stop();
+        AppLog.Info("Startup", "Main UI XAML initialized.",
+            ("DurationMs", initializeComponentTimer.Elapsed.TotalMilliseconds));
         if (Application.Current.Resources.TryGetValue("InformationalDotInfoBadgeStyle", out var infoBadgeStyle)
             && infoBadgeStyle is Style style)
         {
@@ -113,35 +145,16 @@ public sealed partial class MainWindow : Window
         ApplyDefaultWindowSize();
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
-        SettingsContent.AppThemeSelectionRequested += OnAppThemeSelectionRequested;
-        SettingsContent.AppUpdateSnapshotRendered += OnAppUpdateSnapshotRendered;
-        SettingsContent.Initialize(_bootstrap, _frontend, _mainUiThemePreference);
         DeviceContent.Initialize(_frontend);
-        ProfileContent.Initialize(_frontend);
-        XboxContent.Initialize(_frontend);
-        ControllerContent.Initialize(_bootstrap, _frontend, () => WindowNative.GetWindowHandle(this));
         _controllerLedMutationTimer = DispatcherQueue.CreateTimer();
         _controllerLedMutationTimer.Interval = TimeSpan.FromMilliseconds(200);
         _controllerLedMutationTimer.IsRepeating = false;
         _controllerLedMutationTimer.Tick += ControllerLedMutationTimer_Tick;
-        OverlayContent.Initialize(_frontend);
-        ShortcutContent.Initialize(_frontend, () => WindowNative.GetWindowHandle(this));
-        TweaksContent.Initialize(_frontend);
-        // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
-        // leaving the detail page mid-save and immediately toggling on the Controller page had no
-        // ordering relationship between the two pages' independent RPCs, so either could land last
-        // and silently undo the other. Both pages now only ever REQUEST an edit; this window is the
-        // single owner of the current OEM1 mapping and its one ordered save chain, exactly as it
-        // already owns navigation between the two pages.
-        ControllerContent.MappingEditRequested += (_, mapping) => QueueFrontButtonMutation(mapping);
-        ControllerContent.BackButtonMappingEditRequested += (_, mapping) => QueueBackButtonMutation(mapping);
-        ControllerContent.ControllerLedEditRequested += (_, settings) => QueueControllerLedMutation(settings);
-        ControllerContent.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
-        ProfileContent.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
-        SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
         MainNavigationView.SelectedItem = DeviceNavigationItem;
         _ = RefreshSystemStatusAsync();
+        AppLog.Info("Startup", "MainWindow constructor completed.",
+            ("DurationMs", Stopwatch.GetElapsedTime(_windowCreatedTimestamp).TotalMilliseconds));
     }
 
     private void OnFrontendStateInvalidated(object? sender, EventArgs args)
@@ -160,31 +173,151 @@ public sealed partial class MainWindow : Window
 
     private void RefreshInvalidatedFrontendStateOnUiThread()
     {
+        if (_windowClosed) return;
         _ = RefreshSystemStatusAsync();
-        SettingsContent.RequestAppUpdateRefresh();
-        SettingsContent.RequestGamingHomeRefresh();
-        OverlayContent.RequestClawHudRefresh();
-        ShortcutContent.RequestRefresh();
+        _settingsContent?.RequestAppUpdateRefresh();
+        _settingsContent?.RequestGamingHomeRefresh();
+        _overlayContent?.RequestClawHudRefresh();
+        _shortcutContent?.RequestRefresh();
         if (_navigationState.CurrentPage == MainNavigationPage.Tweaks)
-            TweaksContent.RequestRefresh();
+            _tweaksContent?.RequestRefresh();
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        SettingsContent.AppThemeSelectionRequested -= OnAppThemeSelectionRequested;
-        SettingsContent.AppUpdateSnapshotRendered -= OnAppUpdateSnapshotRendered;
+        _windowClosed = true;
+        CompositionTarget.Rendering -= OnInitialMainWindowRendering;
+        if (!_warmupStarted || _nextWarmupPageIndex < DeferredWarmupPages.Length)
+            AppLog.Info("Startup", "MainWindow closed before deferred page warm-up completed.",
+                ("RemainingPages", Math.Max(0, DeferredWarmupPages.Length - _nextWarmupPageIndex)));
+        if (_settingsContent is not null)
+        {
+            _settingsContent.AppThemeSelectionRequested -= OnAppThemeSelectionRequested;
+            _settingsContent.AppUpdateSnapshotRendered -= OnAppUpdateSnapshotRendered;
+            _settingsContent.DeveloperMenuRequested -= OnDeveloperMenuRequested;
+        }
         if (_systemUiSettings is not null)
             _systemUiSettings.ColorValuesChanged -= SystemUiSettings_ColorValuesChanged;
         _frontend.StateInvalidated -= OnFrontendStateInvalidated;
-        ControllerContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
-        ProfileContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
+        if (_controllerContent is not null)
+        {
+            _controllerContent.MappingEditRequested -= OnControllerMappingEditRequested;
+            _controllerContent.BackButtonMappingEditRequested -= OnControllerBackButtonMappingEditRequested;
+            _controllerContent.ControllerLedEditRequested -= OnControllerLedEditRequested;
+            _controllerContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
+        }
+        if (_profileContent is not null)
+            _profileContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
     }
+
+    private SettingsPage GetOrCreateSettingsPage()
+    {
+        if (_settingsContent is not null) return _settingsContent;
+
+        var page = new SettingsPage();
+        page.AppThemeSelectionRequested += OnAppThemeSelectionRequested;
+        page.AppUpdateSnapshotRendered += OnAppUpdateSnapshotRendered;
+        page.DeveloperMenuRequested += OnDeveloperMenuRequested;
+        page.Initialize(_bootstrap, _frontend, _mainUiThemePreference);
+        if (_latestSystemStatus is { } status)
+            page.RenderRequiredComponents(status);
+        SettingsPageHost.Content = page;
+        return _settingsContent = page;
+    }
+
+    private ControllerPage GetOrCreateControllerPage()
+    {
+        if (_controllerContent is not null) return _controllerContent;
+
+        var page = new ControllerPage();
+        page.Initialize(_bootstrap, _frontend, () => WindowNative.GetWindowHandle(this));
+        page.ApplyFrontButtonMapping(_frontButtonUiMapping);
+        page.ApplyBackButtonMapping(_backButtonUiMapping);
+        page.ApplyControllerLedSettings(_controllerLedUiSettings);
+        page.SetSteamActivity(_latestSystemStatus?.Steam.Active);
+        page.MappingEditRequested += OnControllerMappingEditRequested;
+        page.BackButtonMappingEditRequested += OnControllerBackButtonMappingEditRequested;
+        page.ControllerLedEditRequested += OnControllerLedEditRequested;
+        page.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
+        ControllerPageHost.Content = page;
+        return _controllerContent = page;
+    }
+
+    private ProfilePage GetOrCreateProfilePage()
+    {
+        if (_profileContent is not null) return _profileContent;
+
+        var page = new ProfilePage();
+        page.Initialize(_frontend);
+        page.SetSteamActivity(_latestSystemStatus?.Steam.Active);
+        page.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
+        ProfilePageHost.Content = page;
+        return _profileContent = page;
+    }
+
+    private XboxPage GetOrCreateXboxPage()
+    {
+        if (_xboxContent is not null) return _xboxContent;
+
+        var page = new XboxPage();
+        page.Initialize(_frontend);
+        XboxPageHost.Content = page;
+        return _xboxContent = page;
+    }
+
+    private OverlayPage GetOrCreateOverlayPage()
+    {
+        if (_overlayContent is not null) return _overlayContent;
+
+        var page = new OverlayPage();
+        page.Initialize(_frontend);
+        OverlayPageHost.Content = page;
+        return _overlayContent = page;
+    }
+
+    private ShortcutPage GetOrCreateShortcutPage()
+    {
+        if (_shortcutContent is not null) return _shortcutContent;
+
+        var page = new ShortcutPage();
+        page.Initialize(_frontend, () => WindowNative.GetWindowHandle(this));
+        ShortcutPageHost.Content = page;
+        return _shortcutContent = page;
+    }
+
+    private WindowsTweaksPage GetOrCreateTweaksPage()
+    {
+        if (_tweaksContent is not null) return _tweaksContent;
+
+        var page = new WindowsTweaksPage();
+        page.Initialize(_frontend);
+        TweaksPageHost.Content = page;
+        return _tweaksContent = page;
+    }
+
+    private HowToUsePage GetOrCreateHowToUsePage()
+    {
+        if (_howToUseContent is not null) return _howToUseContent;
+
+        var page = new HowToUsePage();
+        HowToUsePageHost.Content = page;
+        return _howToUseContent = page;
+    }
+
+    private void OnControllerMappingEditRequested(object? sender, Contracts.FrontButtons.FrontButtonMappingSettings mapping)
+        => QueueFrontButtonMutation(mapping);
+
+    private void OnControllerBackButtonMappingEditRequested(object? sender, BackButtonMappingSettings mapping)
+        => QueueBackButtonMutation(mapping);
+
+    private void OnControllerLedEditRequested(object? sender, ControllerLedSettings settings)
+        => QueueControllerLedMutation(settings);
 
     private void OnAppThemeSelectionRequested(MainUiTheme theme)
     {
         if (theme == _mainUiThemePreference)
         {
-            SettingsContent.SetAppThemeSelection(_mainUiThemePreference);
+            _settingsContent?.SetAppThemeSelection(_mainUiThemePreference);
             return;
         }
 
@@ -194,7 +327,7 @@ public sealed partial class MainWindow : Window
         {
             AppLog.Warn("Theme", "Main UI theme preference could not be saved; retaining the previous selection.",
                 saveFailure ?? new IOException("The theme preference store is unavailable."));
-            SettingsContent.SetAppThemeSelection(
+            _settingsContent?.SetAppThemeSelection(
                 _mainUiThemePreference,
                 "Theme could not be saved. The previous selection was kept.");
             return;
@@ -202,7 +335,7 @@ public sealed partial class MainWindow : Window
 
         _mainUiThemePreference = theme;
         ApplyMainUiTheme();
-        SettingsContent.SetAppThemeSelection(_mainUiThemePreference);
+        _settingsContent?.SetAppThemeSelection(_mainUiThemePreference);
         AppLog.Info("Theme", "Main UI theme changed.", ("Theme", _mainUiThemePreference));
     }
 
@@ -281,8 +414,8 @@ public sealed partial class MainWindow : Window
 
     private void OnSteamActivityRefreshRequested(object? sender, EventArgs args)
     {
-        ControllerContent.SetSteamActivity(null);
-        ProfileContent.SetSteamActivity(null);
+        _controllerContent?.SetSteamActivity(null);
+        _profileContent?.SetSteamActivity(null);
         _ = RefreshSystemStatusAsync();
     }
 
@@ -304,7 +437,118 @@ public sealed partial class MainWindow : Window
             return;
         }
         _windowActivatedForUser = true;
+        AppLog.Info("Startup", "MainWindow activated.",
+            ("ElapsedMs", Stopwatch.GetElapsedTime(_windowCreatedTimestamp).TotalMilliseconds));
+        TryScheduleWarmupAfterInitialDisplay();
         _ = RefreshSystemStatusAsync();
+    }
+
+    private void MainAppRoot_Loaded(object sender, RoutedEventArgs args)
+    {
+        _mainAppRootLoaded = true;
+        TryScheduleWarmupAfterInitialDisplay();
+    }
+
+    private void TryScheduleWarmupAfterInitialDisplay()
+    {
+        if (_windowClosed || !_windowActivatedForUser || !_mainAppRootLoaded || _warmupStartQueued)
+            return;
+
+        _warmupStartQueued = true;
+        CompositionTarget.Rendering += OnInitialMainWindowRendering;
+    }
+
+    private void OnInitialMainWindowRendering(object? sender, object args)
+    {
+        CompositionTarget.Rendering -= OnInitialMainWindowRendering;
+        if (_windowClosed) return;
+
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, StartDeferredPageWarmup))
+            AppLog.Info("Startup", "Deferred page warm-up was not queued because the UI dispatcher is unavailable.");
+    }
+
+    private void StartDeferredPageWarmup()
+    {
+        if (_windowClosed || _warmupStarted) return;
+
+        _warmupStarted = true;
+        AppLog.Info("Startup", "Deferred Main UI page warm-up started after the initial render opportunity.",
+            ("ElapsedMs", Stopwatch.GetElapsedTime(_windowCreatedTimestamp).TotalMilliseconds));
+        WarmNextPage();
+    }
+
+    private void WarmNextPage()
+    {
+        if (_windowClosed) return;
+
+        while (_nextWarmupPageIndex < DeferredWarmupPages.Length
+            && IsMainPageMaterialized(DeferredWarmupPages[_nextWarmupPageIndex]))
+        {
+            _nextWarmupPageIndex++;
+        }
+
+        if (_nextWarmupPageIndex >= DeferredWarmupPages.Length)
+        {
+            AppLog.Info("Startup", "Deferred Main UI page warm-up completed.",
+                ("ElapsedMs", Stopwatch.GetElapsedTime(_windowCreatedTimestamp).TotalMilliseconds));
+            return;
+        }
+
+        var page = DeferredWarmupPages[_nextWarmupPageIndex++];
+        var pageTimer = Stopwatch.StartNew();
+        var created = TryMaterializeMainPage(page);
+        pageTimer.Stop();
+        AppLog.Info("Startup", "Deferred Main UI page warm-up step completed.",
+            ("Page", page),
+            ("Created", created),
+            ("DurationMs", pageTimer.Elapsed.TotalMilliseconds));
+
+        if (_windowClosed) return;
+        if (_nextWarmupPageIndex >= DeferredWarmupPages.Length)
+        {
+            AppLog.Info("Startup", "Deferred Main UI page warm-up completed.",
+                ("ElapsedMs", Stopwatch.GetElapsedTime(_windowCreatedTimestamp).TotalMilliseconds));
+            return;
+        }
+
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, WarmNextPage))
+            AppLog.Info("Startup", "Remaining deferred pages will be created on demand because the UI dispatcher is unavailable.");
+    }
+
+    private bool IsMainPageMaterialized(MainNavigationPage page) => page switch
+    {
+        MainNavigationPage.Controller => _controllerContent is not null,
+        MainNavigationPage.Settings => _settingsContent is not null,
+        MainNavigationPage.Overlay => _overlayContent is not null,
+        MainNavigationPage.Shortcut => _shortcutContent is not null,
+        MainNavigationPage.Tweaks => _tweaksContent is not null,
+        MainNavigationPage.Profile => _profileContent is not null,
+        MainNavigationPage.Xbox => _xboxContent is not null,
+        _ => true,
+    };
+
+    private bool TryMaterializeMainPage(MainNavigationPage page)
+    {
+        try
+        {
+            switch (page)
+            {
+                case MainNavigationPage.Controller: _ = GetOrCreateControllerPage(); break;
+                case MainNavigationPage.Settings: _ = GetOrCreateSettingsPage(); break;
+                case MainNavigationPage.Overlay: _ = GetOrCreateOverlayPage(); break;
+                case MainNavigationPage.Shortcut: _ = GetOrCreateShortcutPage(); break;
+                case MainNavigationPage.Tweaks: _ = GetOrCreateTweaksPage(); break;
+                case MainNavigationPage.Profile: _ = GetOrCreateProfilePage(); break;
+                case MainNavigationPage.Xbox: _ = GetOrCreateXboxPage(); break;
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Window", "Main UI page could not be materialized.", exception, ("Page", page));
+            return false;
+        }
     }
 
     internal void RequestStatusRefresh()
@@ -409,17 +653,26 @@ public sealed partial class MainWindow : Window
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        if (_restoringNavigationSelection) return;
         var selectedTag = (args.SelectedItem as NavigationViewItem)?.Tag as string;
         ShowPage(_navigationState.SelectNavigationItem(args.IsSettingsSelected, selectedTag));
     }
 
     private void ShowPage(MainNavigationPage page)
     {
-        var wasController = ControllerContent.Visibility == Visibility.Visible;
+        if (_windowClosed) return;
+        if (!TryMaterializeMainPage(page))
+        {
+            _navigationState.RestoreCurrentPage(_displayedPage);
+            RestoreNavigationSelection(_displayedPage);
+            return;
+        }
+
+        var wasController = ControllerPageHost.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
-        var wasProfile = ProfileContent.Visibility == Visibility.Visible;
-        var wasXbox = XboxContent.Visibility == Visibility.Visible;
-        var wasShortcut = ShortcutContent.Visibility == Visibility.Visible;
+        var wasProfile = ProfilePageHost.Visibility == Visibility.Visible;
+        var wasXbox = XboxPageHost.Visibility == Visibility.Visible;
+        var wasShortcut = ShortcutPageHost.Visibility == Visibility.Visible;
         var wasClawSensorProbe = _clawSensorProbeContent is not null &&
             ReferenceEquals(DeveloperContentHost.Content, _clawSensorProbeContent);
         var wasFanHardwareProbe = _fanHardwareProbeContent is not null &&
@@ -433,49 +686,80 @@ public sealed partial class MainWindow : Window
         };
         DeveloperContentHost.Visibility = DeveloperContentHost.Content is null ? Visibility.Collapsed : Visibility.Visible;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
-        ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
-        XboxContent.Visibility = page == MainNavigationPage.Xbox ? Visibility.Visible : Visibility.Collapsed;
-        ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
-        OverlayContent.Visibility = page == MainNavigationPage.Overlay ? Visibility.Visible : Visibility.Collapsed;
-        ShortcutContent.Visibility = page == MainNavigationPage.Shortcut ? Visibility.Visible : Visibility.Collapsed;
-        TweaksContent.Visibility = page == MainNavigationPage.Tweaks ? Visibility.Visible : Visibility.Collapsed;
-        HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
-        SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
-        if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
+        ProfilePageHost.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
+        XboxPageHost.Visibility = page == MainNavigationPage.Xbox ? Visibility.Visible : Visibility.Collapsed;
+        ControllerPageHost.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
+        OverlayPageHost.Visibility = page == MainNavigationPage.Overlay ? Visibility.Visible : Visibility.Collapsed;
+        ShortcutPageHost.Visibility = page == MainNavigationPage.Shortcut ? Visibility.Visible : Visibility.Collapsed;
+        TweaksPageHost.Visibility = page == MainNavigationPage.Tweaks ? Visibility.Visible : Visibility.Collapsed;
+        HowToUsePageHost.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPageHost.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
+        if (page == MainNavigationPage.HowToUse) _howToUseContent!.Activate();
         if (page == MainNavigationPage.Controller)
         {
-            ControllerContent.SetSteamActivity(null);
-            ControllerContent.Activate();
+            _controllerContent!.SetSteamActivity(null);
+            _controllerContent.Activate();
             _ = RefreshSystemStatusAsync();
         }
-        else if (wasController) ControllerContent.Deactivate();
+        else if (wasController) _controllerContent?.Deactivate();
         if (page == MainNavigationPage.Device) DeviceContent.Activate();
         else if (wasDevice) DeviceContent.Deactivate();
         if (page == MainNavigationPage.Profile)
         {
-            ProfileContent.SetSteamActivity(null);
-            ProfileContent.Activate();
+            _profileContent!.SetSteamActivity(null);
+            _profileContent.Activate();
             _ = RefreshSystemStatusAsync();
         }
-        else if (wasProfile) ProfileContent.Deactivate();
-        if (page == MainNavigationPage.Xbox) XboxContent.Activate();
-        else if (wasXbox) XboxContent.Deactivate();
-        if (page == MainNavigationPage.Overlay) OverlayContent.Activate();
-        if (page == MainNavigationPage.Shortcut) ShortcutContent.Activate();
-        else if (wasShortcut) ShortcutContent.Deactivate();
-        if (page == MainNavigationPage.Tweaks) TweaksContent.Activate();
+        else if (wasProfile) _profileContent?.Deactivate();
+        if (page == MainNavigationPage.Xbox) _xboxContent!.Activate();
+        else if (wasXbox) _xboxContent?.Deactivate();
+        if (page == MainNavigationPage.Overlay) _overlayContent!.Activate();
+        if (page == MainNavigationPage.Shortcut) _shortcutContent!.Activate();
+        else if (wasShortcut) _shortcutContent?.Deactivate();
+        if (page == MainNavigationPage.Tweaks) _tweaksContent!.Activate();
         if (page == MainNavigationPage.ClawSensorProbe) _clawSensorProbeContent!.Activate();
         else if (wasClawSensorProbe) _clawSensorProbeContent?.Deactivate();
         if (page == MainNavigationPage.FanHardwareProbe) _fanHardwareProbeContent!.Activate();
         else if (wasFanHardwareProbe) _fanHardwareProbeContent?.Deactivate();
+        _displayedPage = page;
     }
+
+    private void RestoreNavigationSelection(MainNavigationPage page)
+    {
+        var selection = page switch
+        {
+            MainNavigationPage.Settings or MainNavigationPage.DeveloperMenu or MainNavigationPage.ClawSensorProbe
+                or MainNavigationPage.FanHardwareProbe or MainNavigationPage.CenterMButton => MainNavigationView.SettingsItem,
+            _ => MainNavigationView.MenuItems
+                .OfType<NavigationViewItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, NavigationTagFor(page), StringComparison.Ordinal)),
+        };
+
+        if (selection is null) return;
+        _restoringNavigationSelection = true;
+        try { MainNavigationView.SelectedItem = selection; }
+        finally { _restoringNavigationSelection = false; }
+    }
+
+    private static string? NavigationTagFor(MainNavigationPage page) => page switch
+    {
+        MainNavigationPage.Device => "Device",
+        MainNavigationPage.Controller => "Controller",
+        MainNavigationPage.Profile => "Profile",
+        MainNavigationPage.Xbox => "Xbox",
+        MainNavigationPage.Overlay => "Overlay",
+        MainNavigationPage.Shortcut => "Shortcut",
+        MainNavigationPage.Tweaks => "Tweaks",
+        MainNavigationPage.HowToUse => "HowToUse",
+        _ => null,
+    };
 
     private async Task RefreshSystemStatusAsync()
     {
         if (_prerequisiteSetupInProgress)
         {
-            ControllerContent.SetSteamActivity(null);
-            ProfileContent.SetSteamActivity(null);
+            _controllerContent?.SetSteamActivity(null);
+            _profileContent?.SetSteamActivity(null);
             return;
         }
         if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0)
@@ -486,8 +770,8 @@ public sealed partial class MainWindow : Window
         try { RenderSystemStatus(await _frontend.CaptureStatusAsync()); }
         catch (Exception exception)
         {
-            ControllerContent.SetSteamActivity(null);
-            ProfileContent.SetSteamActivity(null);
+            _controllerContent?.SetSteamActivity(null);
+            _profileContent?.SetSteamActivity(null);
             if (exception is FrontendTransportException
                 && exception is not FrontendProtocolException
                 && exception is not FrontendRemoteException)
@@ -517,10 +801,10 @@ public sealed partial class MainWindow : Window
     private void RenderSystemStatus(FrontendStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
-        ControllerContent.SetSteamActivity(snapshot.Steam.Active);
-        ProfileContent.SetSteamActivity(snapshot.Steam.Active);
+        _controllerContent?.SetSteamActivity(snapshot.Steam.Active);
+        _profileContent?.SetSteamActivity(snapshot.Steam.Active);
         DeviceContent.RenderDeviceSummary(snapshot);
-        SettingsContent.RenderRequiredComponents(snapshot);
+        _settingsContent?.RenderRequiredComponents(snapshot);
         if (snapshot.CanInstallRequiredComponents)
         {
             if (_windowActivatedForUser)
@@ -639,7 +923,7 @@ public sealed partial class MainWindow : Window
         _frontButtonUiMapping = next;
         var version = ++_frontButtonEditVersion;
 
-        ControllerContent.ApplyFrontButtonMapping(next);
+        _controllerContent?.ApplyFrontButtonMapping(next);
 
         _frontButtonSaveChain = SaveFrontButtonAfterAsync(_frontButtonSaveChain, next, version);
     }
@@ -657,7 +941,7 @@ public sealed partial class MainWindow : Window
             if (version != _frontButtonEditVersion) return;
 
             _frontButtonUiMapping = result.FrontButtonMapping;
-            ControllerContent.ApplyFrontButtonMapping(result.FrontButtonMapping);
+            _controllerContent?.ApplyFrontButtonMapping(result.FrontButtonMapping);
         }
         catch (Exception exception)
         {
@@ -665,7 +949,7 @@ public sealed partial class MainWindow : Window
             if (version != _frontButtonEditVersion) return;
 
             _frontButtonUiMapping = _frontButtonPersistedMapping;
-            ControllerContent.ApplyFrontButtonMapping(_frontButtonPersistedMapping);
+            _controllerContent?.ApplyFrontButtonMapping(_frontButtonPersistedMapping);
         }
     }
 
@@ -675,7 +959,7 @@ public sealed partial class MainWindow : Window
         _backButtonUiMapping = next;
         var version = ++_backButtonEditVersion;
 
-        ControllerContent.ApplyBackButtonMapping(next);
+        _controllerContent?.ApplyBackButtonMapping(next);
 
         _backButtonSaveChain = SaveBackButtonAfterAsync(_backButtonSaveChain, next, version);
     }
@@ -693,7 +977,7 @@ public sealed partial class MainWindow : Window
             if (version != _backButtonEditVersion) return;
 
             _backButtonUiMapping = result.BackButtonMapping;
-            ControllerContent.ApplyBackButtonMapping(result.BackButtonMapping);
+            _controllerContent?.ApplyBackButtonMapping(result.BackButtonMapping);
         }
         catch (Exception exception)
         {
@@ -701,7 +985,7 @@ public sealed partial class MainWindow : Window
             if (version != _backButtonEditVersion) return;
 
             _backButtonUiMapping = _backButtonPersistedMapping;
-            ControllerContent.ApplyBackButtonMapping(_backButtonPersistedMapping);
+            _controllerContent?.ApplyBackButtonMapping(_backButtonPersistedMapping);
         }
     }
 
@@ -709,7 +993,7 @@ public sealed partial class MainWindow : Window
     {
         _controllerLedUiSettings = next;
         _controllerLedEditVersion++;
-        ControllerContent.ApplyControllerLedSettings(next);
+        _controllerContent?.ApplyControllerLedSettings(next);
         _controllerLedMutationTimer?.Stop();
         _controllerLedMutationTimer?.Start();
     }
@@ -732,14 +1016,14 @@ public sealed partial class MainWindow : Window
             _controllerLedPersistedSettings = result.ControllerLed;
             if (version != _controllerLedEditVersion) return;
             _controllerLedUiSettings = result.ControllerLed;
-            ControllerContent.ApplyControllerLedSettings(result.ControllerLed);
+            _controllerContent?.ApplyControllerLedSettings(result.ControllerLed);
         }
         catch (Exception exception)
         {
             AppLog.Warn("Window", "Controller LED settings save/apply request failed; restoring the last persisted preference.", exception);
             if (version != _controllerLedEditVersion) return;
             _controllerLedUiSettings = _controllerLedPersistedSettings;
-            ControllerContent.ApplyControllerLedSettings(_controllerLedPersistedSettings);
+            _controllerContent?.ApplyControllerLedSettings(_controllerLedPersistedSettings);
         }
     }
 

@@ -21,6 +21,8 @@ internal sealed class MainNavigationState
 {
     internal MainNavigationPage CurrentPage { get; private set; } = MainNavigationPage.Device;
 
+    internal void RestoreCurrentPage(MainNavigationPage page) => CurrentPage = page;
+
     internal MainNavigationPage SelectNavigationItem(bool isSettingsSelected, string? selectedTag)
     {
         CurrentPage = isSettingsSelected

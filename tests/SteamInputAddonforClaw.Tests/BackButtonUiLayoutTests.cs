@@ -99,8 +99,8 @@ public sealed class BackButtonUiLayoutTests
         Assert.Contains("_backButtonSaveChain", mainWindow, StringComparison.Ordinal);
         Assert.Contains("QueueBackButtonMutation", mainWindow, StringComparison.Ordinal);
         Assert.Contains("SetBackButtonMappingAsync(next)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ControllerContent.ApplyBackButtonMapping(result.BackButtonMapping)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ControllerContent.ApplyBackButtonMapping(_backButtonPersistedMapping)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_controllerContent?.ApplyBackButtonMapping(result.BackButtonMapping)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_controllerContent?.ApplyBackButtonMapping(_backButtonPersistedMapping)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("if (version != _backButtonEditVersion) return;", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("SetBackButtonMappingAsync", Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"), StringComparison.Ordinal);
     }

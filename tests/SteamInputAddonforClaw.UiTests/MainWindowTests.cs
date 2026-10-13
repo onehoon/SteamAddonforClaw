@@ -44,8 +44,12 @@ public sealed class MainWindowTests
         var xamlText = File.ReadAllText(xamlPath);
         var xaml = XDocument.Load(xamlPath);
 
-        var subscribe = code.IndexOf("SettingsContent.AppUpdateSnapshotRendered += OnAppUpdateSnapshotRendered", StringComparison.Ordinal);
-        var initialize = code.IndexOf("SettingsContent.Initialize(_bootstrap, _frontend, _mainUiThemePreference)", StringComparison.Ordinal);
+        var settingsFactoryStart = code.IndexOf("private SettingsPage GetOrCreateSettingsPage()", StringComparison.Ordinal);
+        var settingsFactoryEnd = code.IndexOf("private ControllerPage GetOrCreateControllerPage()", settingsFactoryStart, StringComparison.Ordinal);
+        Assert.True(settingsFactoryStart >= 0 && settingsFactoryEnd > settingsFactoryStart);
+        var settingsFactory = code[settingsFactoryStart..settingsFactoryEnd];
+        var subscribe = settingsFactory.IndexOf("page.AppUpdateSnapshotRendered += OnAppUpdateSnapshotRendered", StringComparison.Ordinal);
+        var initialize = settingsFactory.IndexOf("page.Initialize(_bootstrap, _frontend, _mainUiThemePreference)", StringComparison.Ordinal);
         Assert.True(subscribe >= 0 && initialize > subscribe);
 
         var loadedStart = code.IndexOf("private void MainNavigationView_Loaded", StringComparison.Ordinal);
@@ -65,7 +69,7 @@ public sealed class MainWindowTests
         Assert.DoesNotContain(menuItems.Elements().Where(element => element.Name.LocalName == "NavigationViewItem"), item =>
             string.Equals((string?)item.Attribute("Content"), "Settings", StringComparison.Ordinal));
         Assert.DoesNotContain("CaptureAppUpdateAsync", code, StringComparison.Ordinal);
-        Assert.Contains("SettingsContent.RequestAppUpdateRefresh();", code, StringComparison.Ordinal);
+        Assert.Contains("_settingsContent?.RequestAppUpdateRefresh();", code, StringComparison.Ordinal);
     }
 
     private static string Source(params string[] parts)

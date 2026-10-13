@@ -218,7 +218,7 @@ public sealed class WindowsTweaksUiContractTests
         var mainWindow = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
         mainWindow = mainWindow.Replace("\r\n", "\n", StringComparison.Ordinal);
         Assert.Contains(
-            "if (page == MainNavigationPage.Shortcut) ShortcutContent.Activate();\n        else if (wasShortcut) ShortcutContent.Deactivate();\n        if (page == MainNavigationPage.Tweaks) TweaksContent.Activate();",
+            "if (page == MainNavigationPage.Shortcut) _shortcutContent!.Activate();\n        else if (wasShortcut) _shortcutContent?.Deactivate();\n        if (page == MainNavigationPage.Tweaks) _tweaksContent!.Activate();",
             mainWindow,
             StringComparison.Ordinal);
     }
