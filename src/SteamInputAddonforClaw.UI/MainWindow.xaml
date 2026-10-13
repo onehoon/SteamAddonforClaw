@@ -21,32 +21,32 @@
                 Content="Device"
                 Tag="Device">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="AllApps" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE772;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="Controller" Tag="Controller">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Repair" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="Steam" Tag="Profile">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Contact" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8F1;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="XBOX" Tag="Xbox">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Play" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE990;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="ClawHUD" Tag="Overlay">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="View" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="Shortcut" Tag="Shortcut">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Link" />
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71B;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="How to Use" Tag="HowToUse">

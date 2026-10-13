@@ -75,10 +75,10 @@ public sealed partial class OverlayWindow
 
     private static string GlyphFor(AddonQuickSettingsTabId id) => id switch
     {
-        AddonQuickSettingsTabId.Device => "\uE945",
-        AddonQuickSettingsTabId.Profile => "\uE71D",
+        AddonQuickSettingsTabId.Device => "\uE772",
+        AddonQuickSettingsTabId.Profile => "\uE8A5",
         AddonQuickSettingsTabId.Controller => "\uE7FC",
-        AddonQuickSettingsTabId.Shortcut => "\uE75F",
+        AddonQuickSettingsTabId.Shortcut => "\uE71B",
         AddonQuickSettingsTabId.Setting => "\uE713",
         _ => throw new ArgumentOutOfRangeException(nameof(id), id, "Unknown Overlay tab identity."),
     };

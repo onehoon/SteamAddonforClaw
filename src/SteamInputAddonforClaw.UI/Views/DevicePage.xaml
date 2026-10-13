@@ -25,7 +25,7 @@
             <ctcontrols:SettingsCard x:Name="CenterMStartupCard" Header="MSI Center M"
                 Description="Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE7FC;" />
+                    <FontIcon Glyph="&#xE71D;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <TextBlock x:Name="CenterMStartupStatusText" VerticalAlignment="Center" Text="Status: —" />
@@ -91,7 +91,7 @@
             <InfoBar x:Name="PowerModeInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="PowerModeExpander" Header="Windows Power Mode" Description="Configured Windows 11 power mode for each power rail." IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE83F;" />
+                    <FontIcon Glyph="&#xE7E8;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="PowerModeEnabledToggleSwitch" OffContent="" OnContent="" Toggled="PowerModeEnabledToggleSwitch_Toggled" />
                 <ctcontrols:SettingsExpander.Items>

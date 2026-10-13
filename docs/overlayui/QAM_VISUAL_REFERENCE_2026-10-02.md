@@ -100,10 +100,10 @@ The Overlay tab rail uses the explicitly selected **Segoe Fluent Icons** glyphs 
 
 | Rail item | Glyph | Fluent icon name | Behavior |
 | --- | --- | --- | --- |
-| Device | `E945` | LightningBolt | Existing tab selection |
-| Profile | `E71D` | AllApps | Existing tab selection |
+| Device | `E772` | Devices | Existing tab selection |
+| Profile | `E8A5` | Document | Existing tab selection |
 | Controller | `E7FC` | Game | Existing tab selection |
-| Shortcut | `E75F` | Dialpad | Existing tab selection |
+| Shortcut | `E71B` | Link | Existing tab selection |
 | Setting | `E713` | Settings | Existing tab selection |
 | LB hint | `F10C` | BumperLeft | Passive previous-tab guidance |
 | RB hint | `F10D` | BumperRight | Passive next-tab guidance |

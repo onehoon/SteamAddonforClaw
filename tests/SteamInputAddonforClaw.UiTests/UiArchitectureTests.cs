@@ -364,7 +364,7 @@ public sealed class UiArchitectureTests
 
         Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Expander.IsExpanded =", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE83F;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", normalizedXaml, StringComparison.Ordinal);
+        Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE7E8;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", normalizedXaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"TDP Control\"", xaml, StringComparison.Ordinal);
         Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
@@ -1159,13 +1159,13 @@ public sealed class UiArchitectureTests
 
         foreach (var icon in new[]
         {
-            "<SymbolIcon Symbol=\"Setting\" />",
+            "<FontIcon FontFamily=\"Segoe Fluent Icons\" Glyph=\"&#xE7F4;\" />",
             "<SymbolIcon Symbol=\"View\" />",
             "<SymbolIcon Symbol=\"FontSize\" />",
             "<SymbolIcon Symbol=\"Font\" />",
             "<SymbolIcon Symbol=\"AlignCenter\" />",
-            "<SymbolIcon Symbol=\"FullScreen\" />",
-            "<SymbolIcon Symbol=\"FontColor\" />",
+            "<FontIcon FontFamily=\"Segoe Fluent Icons\" Glyph=\"&#xE745;\" />",
+            "<FontIcon FontFamily=\"Segoe Fluent Icons\" Glyph=\"&#xE794;\" />",
             "<SymbolIcon Symbol=\"Repair\" />",
         })
             Assert.Contains(icon, overlayXaml, StringComparison.Ordinal);
@@ -1333,7 +1333,8 @@ public sealed class UiArchitectureTests
         Assert.Contains("Glyph=\"&#xEC4A;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE945;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xEEA1;\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xE83F;\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xE7E8;\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xE9D2;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true", codeBehind, StringComparison.Ordinal);
         Assert.Contains("snapshot.FpsLimit?.Available == true ? \"Uses Intel's official API. Some games may not support FPS limiting.\" : snapshot.FpsLimit?.UnavailableReason", codeBehind, StringComparison.Ordinal);

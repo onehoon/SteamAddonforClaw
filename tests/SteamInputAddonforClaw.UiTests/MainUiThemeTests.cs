@@ -94,7 +94,9 @@ public sealed class MainUiThemeTests
         Assert.True(Array.IndexOf(cardOrder, "AppThemeCard") < Array.IndexOf(cardOrder, "GamingHomeExpander"));
         Assert.Equal("App theme", (string?)themeCard.Attribute("Header"));
         Assert.Equal("Choose the main app appearance.", (string?)themeCard.Attribute("Description"));
-        Assert.Equal("FontColor", (string?)themeCard.Descendants().Single(element => element.Name.LocalName == "SymbolIcon").Attribute("Symbol"));
+        var themeHeaderIcon = themeCard.Elements().Single(element => element.Name.LocalName == "SettingsCard.HeaderIcon");
+        var themeFontIcon = themeHeaderIcon.Elements().Single(element => element.Name.LocalName == "FontIcon");
+        Assert.Equal("\uE7A1", (string?)themeFontIcon.Attribute("Glyph"));
         Assert.Equal(new[] { "System", "Light", "Dark" }, comboBox.Elements()
             .Where(element => element.Name.LocalName == "ComboBoxItem")
             .Select(element => (string?)element.Attribute("Tag")));

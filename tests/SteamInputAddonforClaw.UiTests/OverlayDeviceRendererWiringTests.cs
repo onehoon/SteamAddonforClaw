@@ -968,10 +968,10 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("Glyph = GlyphFor(id)", shell);
         Assert.Contains("FontSize = OverlayQamResources.Get(\"QamRailIconSize\", 24.0)", shell);
         Assert.Contains("private static string GlyphFor(AddonQuickSettingsTabId id)", shell);
-        Assert.Contains("AddonQuickSettingsTabId.Device => \"\\uE945\"", shell);
-        Assert.Contains("AddonQuickSettingsTabId.Profile => \"\\uE71D\"", shell);
+        Assert.Contains("AddonQuickSettingsTabId.Device => \"\\uE772\"", shell);
+        Assert.Contains("AddonQuickSettingsTabId.Profile => \"\\uE8A5\"", shell);
         Assert.Contains("AddonQuickSettingsTabId.Controller => \"\\uE7FC\"", shell);
-        Assert.Contains("AddonQuickSettingsTabId.Shortcut => \"\\uE75F\"", shell);
+        Assert.Contains("AddonQuickSettingsTabId.Shortcut => \"\\uE71B\"", shell);
         Assert.Contains("AddonQuickSettingsTabId.Setting => \"\\uE713\"", shell);
         Assert.DoesNotContain("SymbolIcon", shell);
         Assert.DoesNotContain("SymbolFor(", shell);
