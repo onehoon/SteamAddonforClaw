@@ -3,11 +3,52 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.WindowsTweaks;
+
+internal enum VmpOperation
+{
+    Read,
+    Enable,
+    Disable,
+}
+
+internal sealed record VmpPowerShellResult(int ExitCode, string StandardOutput, string StandardError);
+
+internal sealed class VmpCommandException : Exception
+{
+    internal VmpCommandException(
+        VmpOperation operation,
+        string completion,
+        int? processExitCode,
+        uint? windowsErrorCode,
+        string? windowsErrorId,
+        string? windowsErrorCategory,
+        string? windowsErrorDetail)
+        : base("Virtual Machine Platform PowerShell operation failed.")
+    {
+        Operation = operation;
+        Completion = completion;
+        ProcessExitCode = processExitCode;
+        WindowsErrorCode = windowsErrorCode;
+        WindowsErrorId = windowsErrorId;
+        WindowsErrorCategory = windowsErrorCategory;
+        WindowsErrorDetail = windowsErrorDetail;
+    }
+
+    internal VmpOperation Operation { get; }
+    internal string Completion { get; }
+    internal int? ProcessExitCode { get; }
+    internal uint? WindowsErrorCode { get; }
+    internal string? WindowsErrorId { get; }
+    internal string? WindowsErrorCategory { get; }
+    internal string? WindowsErrorDetail { get; }
+}
 
 internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSystem
 {
@@ -21,7 +62,9 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     private const string WidgetsPolicyPath = @"SOFTWARE\Policies\Microsoft\Dsh";
     private const string EdgePolicyPath = @"SOFTWARE\Policies\Microsoft\Edge";
     private const string ExplorerSerializePath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize";
-    private const string DismFeatureName = "VirtualMachinePlatform";
+    private const string VirtualMachinePlatformFeatureName = "VirtualMachinePlatform";
+    private static readonly TimeSpan VirtualMachinePlatformCommandTimeout = TimeSpan.FromMinutes(30);
+    private const int MaximumVirtualMachinePlatformOutputCharacters = 16 * 1024;
     private const uint SpiGetMenuAnimation = 0x1002;
     private const uint SpiSetMenuAnimation = 0x1003;
     private const uint SpiGetMenuShowDelay = 0x006A;
@@ -30,6 +73,15 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     private const uint SpifSendChange = 0x0002;
     private static readonly Guid NoSubgroup = new("fea3413e-7e05-4911-9a71-700331f1c294");
     private static readonly Guid ConsoleLockSetting = new("0e796bdb-100d-47d6-a2d5-f7d2daa51f51");
+    private static readonly Regex WindowsPathInErrorMessage = new(@"(?i)(?:[A-Z]:\\|\\\\)[^\r\n]*", RegexOptions.Compiled);
+
+    private readonly Func<VmpOperation, string, CancellationToken, VmpPowerShellResult> _runVmpPowerShell;
+
+    internal WindowsTweaksOperatingSystem(
+        Func<VmpOperation, string, CancellationToken, VmpPowerShellResult>? runVmpPowerShell = null)
+    {
+        _runVmpPowerShell = runVmpPowerShell ?? RunVmpPowerShell;
+    }
 
     public WindowsTweakObservation Capture(FrontendWindowsTweakId id, CancellationToken cancellationToken)
     {
@@ -137,65 +189,246 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, "Enabled", enabled ? 1 : 0, RegistryValueKind.DWord);
     }
 
-    private static WindowsTweakObservation CaptureVirtualMachinePlatform(CancellationToken cancellationToken)
+    internal WindowsTweakObservation CaptureVirtualMachinePlatform(CancellationToken cancellationToken)
     {
-        var result = RunDism(["/Online", "/Get-FeatureInfo", $"/FeatureName:{DismFeatureName}", "/English"], cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var result = _runVmpPowerShell(VmpOperation.Read, BuildVmpCaptureScript(), cancellationToken);
         if (result.ExitCode != 0)
-        {
-            var code = unchecked((uint)result.ExitCode);
-            if (IsDismFeatureUnavailable(code))
-                return new(false, false, null, null, "Virtual Machine Platform payload is unavailable on this Windows installation.");
-            return new(true, IsDismPolicyFailure(code), null, null, FormatDismFailure(code));
-        }
+            throw CreateVmpCommandException(VmpOperation.Read, result, "Exited");
 
-        var match = System.Text.RegularExpressions.Regex.Match(result.Output, @"(?im)^\s*State\s*:\s*(.+?)\s*$");
-        if (!match.Success)
-            return new(true, false, null, null, "DISM did not return a recognizable feature state.");
-
-        var state = match.Groups[1].Value.Trim();
-        if (state.Contains("payload removed", StringComparison.OrdinalIgnoreCase))
-            return new(false, false, null, null, "Virtual Machine Platform payload is unavailable on this Windows installation.");
-        if (state.Equals("Enabled", StringComparison.OrdinalIgnoreCase)) return new(true, false, true, true);
-        if (state.Equals("Disabled", StringComparison.OrdinalIgnoreCase)) return new(true, false, false, false);
-        if (state.Equals("Enable Pending", StringComparison.OrdinalIgnoreCase)) return new(true, false, true, false);
-        if (state.Equals("Disable Pending", StringComparison.OrdinalIgnoreCase)) return new(true, false, false, true);
-        if (state.Contains("unknown feature", StringComparison.OrdinalIgnoreCase)
-            || state.Contains("not applicable", StringComparison.OrdinalIgnoreCase))
-            return new(false, false, null, null, "Virtual Machine Platform is unavailable on this Windows edition.");
-        return new(true, false, null, null, "DISM returned an unrecognized feature state.");
+        var state = ReadRequiredMarker(result.StandardOutput, "VMP_STATE=", VmpOperation.Read, result);
+        return ResolveVirtualMachinePlatformState(state);
     }
 
-    private static WindowsTweakApplyResult SetVirtualMachinePlatform(bool enabled, CancellationToken cancellationToken)
+    internal WindowsTweakApplyResult SetVirtualMachinePlatform(bool enabled, CancellationToken cancellationToken)
     {
-        var result = RunDism(BuildDismFeatureMutationArguments(enabled), cancellationToken);
-        if (!IsDismFeatureMutationSuccessful(result.ExitCode))
-        {
-            var code = unchecked((uint)result.ExitCode);
-            if (IsDismFeatureUnavailable(code))
-                throw new InvalidOperationException("Virtual Machine Platform payload is unavailable; no download was attempted.");
-            if (IsDismPolicyFailure(code))
-                throw new UnauthorizedAccessException("Windows servicing policy prevented this feature change.");
-            throw new Win32Exception(result.ExitCode, "DISM did not accept the Virtual Machine Platform request.");
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        var operation = enabled ? VmpOperation.Enable : VmpOperation.Disable;
+        var result = _runVmpPowerShell(operation, BuildVmpMutationScript(enabled), cancellationToken);
+        if (result.ExitCode != 0)
+            throw CreateVmpCommandException(operation, result, "Exited");
 
-        return new(RestartRequired: result.ExitCode == 3010);
+        var restartValue = ReadRequiredMarker(result.StandardOutput, "VMP_RESTART=", operation, result);
+        if (!bool.TryParse(restartValue, out var restartRequired))
+            throw new VmpCommandException(operation, "Exited", result.ExitCode, null,
+                "InvalidRestartMarker", null, "PowerShell returned an invalid restart marker.");
+
+        return new(RestartRequired: restartRequired);
     }
 
-    internal static bool IsDismFeatureMutationSuccessful(int exitCode) => exitCode is 0 or 3010;
+    internal static string BuildVmpCaptureScript() => BuildVmpScript(
+        $"$feature = Get-WindowsOptionalFeature -Online -FeatureName '{VirtualMachinePlatformFeatureName}' -ErrorAction Stop",
+        "[Console]::Out.WriteLine(('VMP_STATE=' + [string]$feature.State))");
 
-    internal static IReadOnlyList<string> BuildDismFeatureMutationArguments(bool enabled)
+    internal static string BuildVmpMutationScript(bool enabled) => BuildVmpScript(
+        enabled
+            ? $"$result = Enable-WindowsOptionalFeature -Online -FeatureName '{VirtualMachinePlatformFeatureName}' -All -NoRestart -ErrorAction Stop"
+            : $"$result = Disable-WindowsOptionalFeature -Online -FeatureName '{VirtualMachinePlatformFeatureName}' -NoRestart -ErrorAction Stop",
+        "[Console]::Out.WriteLine(('VMP_RESTART=' + [string]($result.RestartNeeded -eq $true)))");
+
+    internal static WindowsTweakObservation ResolveVirtualMachinePlatformState(string? state)
     {
-        var arguments = new List<string>
+        if (string.Equals(state, "Enabled", StringComparison.OrdinalIgnoreCase))
+            return new(true, false, true, true);
+        if (string.Equals(state, "Disabled", StringComparison.OrdinalIgnoreCase))
+            return new(true, false, false, false);
+        if (string.Equals(state, "EnablePending", StringComparison.OrdinalIgnoreCase))
+            return new(true, false, true, false);
+        if (string.Equals(state, "DisablePending", StringComparison.OrdinalIgnoreCase))
+            return new(true, false, false, true);
+        if (string.Equals(state, "DisabledWithPayloadRemoved", StringComparison.OrdinalIgnoreCase))
+            return new(false, false, null, null,
+                "Virtual Machine Platform payload is unavailable on this Windows installation.");
+
+        return new(true, false, null, null,
+            "Windows returned an unrecognized Virtual Machine Platform feature state.");
+    }
+
+    internal static string BuildVmpScript(string command, string resultMarker)
+    {
+        var script = new StringBuilder();
+        script.AppendLine("$ErrorActionPreference = 'Stop'");
+        script.AppendLine("try {");
+        script.Append("    ").AppendLine(command);
+        script.Append("    ").AppendLine(resultMarker);
+        script.AppendLine("    exit 0");
+        script.AppendLine("} catch {");
+        script.AppendLine("    $failure = $_");
+        script.AppendLine("    $message = [string]$failure.Exception.Message");
+        script.AppendLine("    $message = $message -replace '[\\r\\n\\t]+', ' '");
+        script.AppendLine("    $message = $message -replace '(?i)(?:[A-Z]:\\\\|\\\\\\\\).*', '<path>'");
+        script.AppendLine("    if ($message.Length -gt 256) { $message = $message.Substring(0, 256) }");
+        script.AppendLine("    $errorId = [string]$failure.FullyQualifiedErrorId");
+        script.AppendLine("    if ($errorId.Length -gt 128) { $errorId = $errorId.Substring(0, 128) }");
+        script.AppendLine("    $category = ([string]$failure.CategoryInfo.Category) -replace '[^A-Za-z0-9_.-]', '_'");
+        script.AppendLine("    $hr = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int32]$failure.Exception.HResult), 0)");
+        script.AppendLine("    [Console]::Error.WriteLine(('VMP_ERROR_HRESULT=0x{0:X8}' -f $hr))");
+        script.AppendLine("    [Console]::Error.WriteLine('VMP_ERROR_ID=' + $errorId)");
+        script.AppendLine("    [Console]::Error.WriteLine('VMP_ERROR_CATEGORY=' + $category)");
+        script.AppendLine("    [Console]::Error.WriteLine('VMP_ERROR_DETAIL=' + $message)");
+        script.AppendLine("    exit 1");
+        script.AppendLine("}");
+        return script.ToString();
+    }
+
+    private static string ReadRequiredMarker(
+        string output,
+        string marker,
+        VmpOperation operation,
+        VmpPowerShellResult result)
+    {
+        var values = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.StartsWith(marker, StringComparison.Ordinal))
+            .Select(line => line[marker.Length..].Trim())
+            .ToArray();
+        if (values.Length != 1 || values[0].Length == 0)
+            throw new VmpCommandException(operation, "Exited", result.ExitCode, null,
+                values.Length == 0 ? "MissingResultMarker" : "InvalidResultMarker",
+                null, "PowerShell returned no unambiguous feature result.");
+        return values[0];
+    }
+
+    private static VmpCommandException CreateVmpCommandException(
+        VmpOperation operation,
+        VmpPowerShellResult result,
+        string completion)
+    {
+        var errorCode = ReadMarker(result.StandardError, "VMP_ERROR_HRESULT=");
+        var errorId = ReadMarker(result.StandardError, "VMP_ERROR_ID=");
+        var category = ReadMarker(result.StandardError, "VMP_ERROR_CATEGORY=");
+        var detail = ReadMarker(result.StandardError, "VMP_ERROR_DETAIL=");
+        return new(operation, completion, result.ExitCode, ParseWindowsErrorCode(errorCode),
+            CleanDiagnosticField(errorId), CleanDiagnosticField(category), CleanDiagnosticField(detail));
+    }
+
+    private static string? ReadMarker(string output, string marker)
+    {
+        var values = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.StartsWith(marker, StringComparison.Ordinal))
+            .Select(line => line[marker.Length..].Trim())
+            .ToArray();
+        return values.Length == 1 ? values[0] : null;
+    }
+
+    private static uint? ParseWindowsErrorCode(string? value)
+    {
+        if (value is null) return null;
+        var digits = value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? value[2..] : value;
+        return uint.TryParse(digits, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var code)
+            ? code
+            : null;
+    }
+
+    private static string? CleanDiagnosticField(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var cleaned = WindowsPathInErrorMessage.Replace(value.Replace('\r', ' ').Replace('\n', ' ').Trim(), "<path>");
+        cleaned = new string(cleaned.Select(character => char.IsControl(character) ? ' ' : character).ToArray()).Trim();
+        return cleaned.Length <= 256 ? cleaned : cleaned[..256];
+    }
+
+    internal static VmpPowerShellResult RunVmpPowerShell(
+        VmpOperation operation,
+        string script,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Environment.Is64BitOperatingSystem)
+            throw new VmpCommandException(operation, "StartupFailed", null, null,
+                "UnsupportedWindowsArchitecture", null, "64-bit Windows is required for Windows optional-feature servicing.");
+
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var systemDirectory = Environment.Is64BitProcess
+            ? Environment.GetFolderPath(Environment.SpecialFolder.System)
+            : string.IsNullOrWhiteSpace(windowsDirectory) ? string.Empty : Path.Combine(windowsDirectory, "Sysnative");
+        if (string.IsNullOrWhiteSpace(systemDirectory))
+            throw new VmpCommandException(operation, "StartupFailed", null, null,
+                "SystemDirectoryUnavailable", null, "Windows system directory is unavailable.");
+
+        var powershellPath = Path.Combine(systemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        if (!File.Exists(powershellPath))
+            throw new VmpCommandException(operation, "StartupFailed", null, null,
+                "PowerShellExecutableUnavailable", null, "Windows PowerShell is unavailable.");
+
+        var start = new ProcessStartInfo(powershellPath)
         {
-            "/Online",
-            enabled ? "/Enable-Feature" : "/Disable-Feature",
-            $"/FeatureName:{DismFeatureName}",
-            "/NoRestart",
-            "/English",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         };
-        if (enabled)
-            arguments.Add("/LimitAccess");
-        return arguments;
+        start.ArgumentList.Add("-NoLogo");
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-NonInteractive");
+        start.ArgumentList.Add("-Command");
+        start.ArgumentList.Add(script);
+
+        var process = new Process { StartInfo = start };
+        try
+        {
+            if (!process.Start())
+            {
+                process.Dispose();
+                throw new VmpCommandException(operation, "StartupFailed", null, null,
+                    "PowerShellStartFailed", null, "Windows PowerShell could not be started.");
+            }
+        }
+        catch (VmpCommandException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            process.Dispose();
+            throw new VmpCommandException(operation, "StartupFailed", null,
+                unchecked((uint)exception.HResult), "PowerShellStartFailed", null, exception.GetType().Name);
+        }
+
+        using (process)
+        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+        {
+            timeout.CancelAfter(VirtualMachinePlatformCommandTimeout);
+            var stdout = ReadBoundedOutputAsync(process.StandardOutput);
+            var stderr = ReadBoundedOutputAsync(process.StandardError);
+            try
+            {
+                process.WaitForExitAsync(timeout.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                catch { }
+                try { process.WaitForExitAsync(CancellationToken.None).GetAwaiter().GetResult(); }
+                catch { }
+                Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+                if (cancellationToken.IsCancellationRequested)
+                    throw new OperationCanceledException(cancellationToken);
+                throw new VmpCommandException(operation, "TimedOut", null, null,
+                    "PowerShellCommandTimedOut", null, "Windows optional-feature servicing exceeded the 30-minute limit.");
+            }
+
+            Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+            cancellationToken.ThrowIfCancellationRequested();
+            return new(process.ExitCode, stdout.GetAwaiter().GetResult(), stderr.GetAwaiter().GetResult());
+        }
+    }
+
+    private static async Task<string> ReadBoundedOutputAsync(StreamReader reader)
+    {
+        var text = new StringBuilder();
+        var buffer = new char[4096];
+        while (true)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false);
+            if (count == 0) break;
+            if (text.Length < MaximumVirtualMachinePlatformOutputCharacters)
+            {
+                var retained = Math.Min(count, MaximumVirtualMachinePlatformOutputCharacters - text.Length);
+                text.Append(buffer, 0, retained);
+            }
+        }
+        return text.ToString();
     }
 
     private static WindowsTweakObservation CaptureInstantContextMenus()
@@ -524,43 +757,6 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         return entries.Cast<object>().Select(entry => Convert.ToInt32(entry, CultureInfo.InvariantCulture)).ToArray();
     }
 
-    private static DismResult RunDism(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
-    {
-        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-        if (string.IsNullOrWhiteSpace(windows))
-            throw new InvalidOperationException("Windows system directory is unavailable.");
-        var start = new ProcessStartInfo(Path.Combine(windows, "System32", "dism.exe"))
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var argument in arguments) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("DISM could not be started.");
-        using var registration = cancellationToken.Register(static state =>
-        {
-            var child = (Process)state!;
-            try { if (!child.HasExited) child.Kill(entireProcessTree: true); }
-            catch { }
-        }, process);
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(120_000))
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch { }
-            throw new TimeoutException("DISM exceeded the 120-second operation bound.");
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-        Task.WaitAll(stdout, stderr);
-        return new(process.ExitCode, string.Concat(stdout.GetAwaiter().GetResult(), Environment.NewLine, stderr.GetAwaiter().GetResult()));
-    }
-
-    private static bool IsDismFeatureUnavailable(uint code) => code is 0x800F080C or 0x800F081F or 0x800F0906 or 0x800F081E;
-    private static bool IsDismPolicyFailure(uint code) => code is 0x800F0900 or 0x800F0922 or 0x80070005;
-    private static string FormatDismFailure(uint code) => $"DISM query failed (0x{code:X8}).";
-
     private static DateTime? ReadRegistryLastWriteTime(RegistryKey root, string path)
     {
         using var key = root.OpenSubKey(path, writable: false);
@@ -632,5 +828,4 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     private static extern IntPtr LocalFree(IntPtr memory);
 
     private sealed record DeviceGuardSnapshot(int[] ConfiguredServices, int[] RunningServices);
-    private sealed record DismResult(int ExitCode, string Output);
 }

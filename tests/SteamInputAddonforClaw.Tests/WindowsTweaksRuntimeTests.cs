@@ -136,6 +136,7 @@ public sealed class WindowsTweaksRuntimeTests
         var failedRow = Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.VirtualMachinePlatform);
         Assert.Equal(FrontendWindowsTweakState.Unknown, failedRow.State);
         Assert.False(failedRow.CanChange);
+        Assert.Equal("Virtual Machine Platform state could not be read. Check Windows servicing configuration.", failedRow.Detail);
         Assert.Equal(FrontendWindowsTweakState.Disabled,
             Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.InstantContextMenus).State);
     }
@@ -210,6 +211,40 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.True(result.UpdatedTweak.ConfiguredEnabled);
         Assert.False(result.UpdatedTweak.EffectiveEnabled);
         Assert.Equal("Windows requires a restart to complete this change.", result.UpdatedTweak.Detail);
+    }
+
+    [Fact]
+    public async Task Vmp_process_failure_stays_failed_and_exposes_only_a_short_safe_message()
+    {
+        var current = new WindowsTweakObservation(true, false, false, false);
+        var platform = new FakePlatform
+        {
+            Read = _ => current,
+            Write = (_, enabled) =>
+            {
+                current = new(true, false, enabled, enabled);
+                throw new VmpCommandException(
+                    VmpOperation.Enable,
+                    "Exited",
+                    1,
+                    0x800F081F,
+                    "SourceUnavailable",
+                    "InvalidOperation",
+                    "Feature source unavailable at C:\\Sensitive\\Windows\\source.wim.");
+            },
+        };
+        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
+
+        var result = await runtime.SetAsync(FrontendWindowsTweakId.VirtualMachinePlatform, enabled: true);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(FrontendWindowsTweakState.Enabled, result.UpdatedTweak.State);
+        Assert.True(result.UpdatedTweak.ConfiguredEnabled);
+        Assert.True(result.UpdatedTweak.EffectiveEnabled);
+        Assert.Equal("Virtual Machine Platform could not be enabled. Check Windows servicing configuration.", result.FailureMessage);
+        Assert.DoesNotContain("VmpCommandException", result.FailureMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("SourceUnavailable", result.FailureMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sensitive", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.WindowsTweaks;
 
@@ -116,9 +117,21 @@ internal sealed class WindowsTweaksRuntime
         if (writeFailure is null && readbackVerified)
             return new(true, null, updated);
 
-        var detail = writeFailure is null
-            ? "Windows did not verify the requested state."
-            : FormatSanitizedFailure(writeFailure);
+        if (id == FrontendWindowsTweakId.VirtualMachinePlatform)
+        {
+            if (writeFailure is VmpCommandException vmpFailure)
+                LogVmpFailure(vmpFailure, updated.State);
+            else if (writeFailure is not null)
+                LogVmpFailure(enabled ? VmpOperation.Enable : VmpOperation.Disable, writeFailure, updated.State);
+            else
+                LogVmpReadbackFailure(enabled ? VmpOperation.Enable : VmpOperation.Disable, updated.State);
+        }
+
+        var detail = id == FrontendWindowsTweakId.VirtualMachinePlatform
+            ? FormatVmpMutationFailure(enabled)
+            : writeFailure is null
+                ? "Windows did not verify the requested state."
+                : FormatSanitizedFailure(writeFailure);
         return new(false, detail, updated);
     }
 
@@ -135,7 +148,19 @@ internal sealed class WindowsTweaksRuntime
         {
             var observation = await Task.Run(() => _operatingSystem.Capture(id, cancellationToken), cancellationToken)
                 .ConfigureAwait(false);
-            return WindowsTweaksStateMapper.Map(id, observation);
+            var snapshot = WindowsTweaksStateMapper.Map(id, observation);
+            if (id == FrontendWindowsTweakId.VirtualMachinePlatform
+                && snapshot.State is FrontendWindowsTweakState.Unknown or FrontendWindowsTweakState.Unsupported)
+            {
+                AppLog.Warn("WindowsTweaks.VMP", "Virtual Machine Platform returned an unusable feature state.", null,
+                    ("Operation", VmpOperation.Read),
+                    ("Completion", "Completed"),
+                    ("ProcessExitCode", 0),
+                    ("WindowsErrorId", snapshot.State == FrontendWindowsTweakState.Unsupported ? "FeatureUnavailable" : "UnknownFeatureState"),
+                    ("WindowsErrorDetail", observation.Detail),
+                    ("ReadbackState", snapshot.State));
+            }
+            return snapshot;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -143,9 +168,61 @@ internal sealed class WindowsTweaksRuntime
         }
         catch (Exception exception)
         {
+            if (id == FrontendWindowsTweakId.VirtualMachinePlatform)
+            {
+                if (exception is VmpCommandException vmpFailure)
+                    LogVmpFailure(vmpFailure, FrontendWindowsTweakState.Unknown);
+                else
+                    LogVmpFailure(VmpOperation.Read, exception, FrontendWindowsTweakState.Unknown);
+                return new(id, FrontendWindowsTweakState.Unknown, null, null, false,
+                    "Virtual Machine Platform state could not be read. Check Windows servicing configuration.");
+            }
+
             return new(id, FrontendWindowsTweakState.Unknown, null, null, false, FormatSanitizedFailure(exception));
         }
     }
+
+    private static string FormatVmpMutationFailure(bool enabled) => enabled
+        ? "Virtual Machine Platform could not be enabled. Check Windows servicing configuration."
+        : "Virtual Machine Platform could not be disabled. Check Windows servicing configuration.";
+
+    private static void LogVmpFailure(VmpCommandException exception, FrontendWindowsTweakState readbackState) =>
+        AppLog.Warn("WindowsTweaks.VMP", "Virtual Machine Platform command failed.", null,
+            ("Operation", exception.Operation),
+            ("Completion", exception.Completion),
+            ("ProcessExitCode", exception.ProcessExitCode),
+            ("WindowsErrorCode", exception.WindowsErrorCode is { } code ? $"0x{code:X8}" : null),
+            ("WindowsErrorId", exception.WindowsErrorId),
+            ("WindowsErrorCategory", exception.WindowsErrorCategory),
+            ("WindowsErrorDetail", exception.WindowsErrorDetail),
+            ("ReadbackState", readbackState));
+
+    private static void LogVmpFailure(
+        VmpOperation operation,
+        Exception exception,
+        FrontendWindowsTweakState readbackState) =>
+        AppLog.Warn("WindowsTweaks.VMP", "Virtual Machine Platform operation failed before a process result was available.", null,
+            ("Operation", operation),
+            ("Completion", exception is OperationCanceledException ? "Cancelled" : "Failed"),
+            ("ProcessExitCode", null),
+            ("WindowsErrorCode", $"0x{exception.HResult:X8}"),
+            ("WindowsErrorId", exception.GetType().Name),
+            ("WindowsErrorCategory", null),
+            ("WindowsErrorDetail", exception is OperationCanceledException ? "Operation was cancelled." : exception.GetType().Name),
+            ("ReadbackState", readbackState));
+
+    private static void LogVmpReadbackFailure(
+        VmpOperation operation,
+        FrontendWindowsTweakState readbackState) =>
+        AppLog.Warn("WindowsTweaks.VMP", "Virtual Machine Platform did not verify the requested state.", null,
+            ("Operation", operation),
+            ("Completion", "Completed"),
+            ("ProcessExitCode", 0),
+            ("WindowsErrorCode", null),
+            ("WindowsErrorId", "ReadbackMismatch"),
+            ("WindowsErrorCategory", null),
+            ("WindowsErrorDetail", "The requested feature state was not observed after the command."),
+            ("ReadbackState", readbackState));
 
     private static string FormatSanitizedFailure(Exception exception) =>
         $"Windows setting operation failed ({exception.GetType().Name}, 0x{exception.HResult:X8}).";
