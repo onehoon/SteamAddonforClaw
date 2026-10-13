@@ -92,7 +92,6 @@ public sealed class SettingsPageLoggingTests
         foreach (var diagnostic in new[]
         {
             "Text=\"Environment Discovery\"",
-            "Header=\"PID1902 Input Cadence\"",
             "Header=\"Vibration Test\"",
             "Header=\"Gyro / Sensor Test\"",
             "Header=\"Fan Hardware Probe\"",

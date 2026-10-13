@@ -97,13 +97,24 @@ public sealed class FrontendContractTests
     {
         const string retiredSurfaceFragment = "Gpu" + "Frequency" + "Probe";
 
-        Assert.Equal(78, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(79, FrontendTransportProtocol.CurrentVersion);
         Assert.DoesNotContain(typeof(IAddonFrontendControl).GetMethods(),
             method => method.Name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
         Assert.DoesNotContain(Enum.GetNames<FrontendRpcMethod>(),
             name => name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
         Assert.DoesNotContain(typeof(IAddonFrontendControl).Assembly.GetTypes(),
             type => type.Name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Retired_pid1902_cadence_rpc_is_absent_from_frontend_contract_and_wire_surface()
+    {
+        const string retiredMethod = "RunPid1902InputCadenceDiagnostic";
+
+        Assert.DoesNotContain(typeof(IAddonFrontendControl).GetMethods(), method => method.Name == retiredMethod);
+        Assert.DoesNotContain(Enum.GetNames<FrontendRpcMethod>(), name => name == retiredMethod);
+        Assert.DoesNotContain(typeof(IAddonFrontendControl).Assembly.GetTypes(),
+            type => type.Name.StartsWith("FrontendPid1902InputCadence", StringComparison.Ordinal));
     }
 
     private sealed class MinimalFrontendControl : IAddonFrontendControl
