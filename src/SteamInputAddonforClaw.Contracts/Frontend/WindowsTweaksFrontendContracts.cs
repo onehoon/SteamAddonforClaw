@@ -83,7 +83,7 @@ public sealed record FrontendWindowsTweaksSnapshot(
 public sealed record FrontendWindowsTweakMutationResult(
     bool Succeeded,
     string? FailureMessage,
-    FrontendWindowsTweaksSnapshot Snapshot);
+    FrontendWindowsTweakSnapshot UpdatedTweak);
 
 public sealed record SetWindowsTweakRequest(FrontendWindowsTweakId Id, bool Enabled);
 public sealed record AcknowledgeWindowsTweaksWarningRequest(DateOnly LocalDate);

@@ -123,12 +123,6 @@ public sealed partial class WindowsTweaksPage : UserControl
         }
     }
 
-    private async Task<FrontendWindowsTweaksSnapshot?> TryCaptureAfterMutationFailureAsync()
-    {
-        try { return await _frontend!.CaptureWindowsTweaksAsync(); }
-        catch { return null; }
-    }
-
     private async Task RefreshCoreAsync()
     {
         _refreshInProgress = true;
@@ -161,15 +155,30 @@ public sealed partial class WindowsTweaksPage : UserControl
                 card.Visibility = GetCardVisibility(snapshot, definition.Id);
                 if (row is null)
                     continue;
-                toggle.Visibility = row.ConfiguredEnabled.HasValue ? Visibility.Visible : Visibility.Collapsed;
-                if (row.ConfiguredEnabled is { } configured)
-                    toggle.IsOn = configured;
-                toggle.IsEnabled = row.CanChange && !_mutatingIds.Contains(definition.Id);
-                stateText.Text = FormatState(row);
+                ApplyTweakRow(row);
             }
         }
         finally { _applyingSnapshot = false; }
     }
+
+    private void ApplyTweakRow(FrontendWindowsTweakSnapshot row)
+    {
+        var (card, toggle, stateText) = GetControls(row.Id);
+        card.Visibility = Visibility.Visible;
+        toggle.Visibility = row.ConfiguredEnabled.HasValue ? Visibility.Visible : Visibility.Collapsed;
+        if (row.ConfiguredEnabled is { } configured)
+            toggle.IsOn = configured;
+        toggle.IsEnabled = row.CanChange && !_mutatingIds.Contains(row.Id);
+        stateText.Text = FormatState(row) ?? string.Empty;
+    }
+
+    internal static FrontendWindowsTweaksSnapshot ReplaceTweak(
+        FrontendWindowsTweaksSnapshot snapshot,
+        FrontendWindowsTweakSnapshot updatedTweak) =>
+        snapshot with
+        {
+            Tweaks = snapshot.Tweaks.Select(row => row.Id == updatedTweak.Id ? updatedTweak : row).ToArray(),
+        };
 
     private async void TweakSwitch_Toggled(object sender, RoutedEventArgs args)
     {
@@ -194,51 +203,49 @@ public sealed partial class WindowsTweaksPage : UserControl
         try
         {
             var result = await _frontend.SetWindowsTweakAsync(id, requested);
-            ApplySnapshot(result.Snapshot);
+            _snapshot = ReplaceTweak(_snapshot, result.UpdatedTweak);
+            _applyingSnapshot = true;
+            ApplyTweakRow(result.UpdatedTweak);
+            _applyingSnapshot = false;
             SetOperationMessage(result.Succeeded ? null : result.FailureMessage);
         }
         catch
         {
-            var actual = await TryCaptureAfterMutationFailureAsync();
-            if (actual is not null)
-            {
-                _snapshot = actual;
-                ApplySnapshot(actual);
-            }
-            else
-            {
-                ApplySnapshot(_snapshot);
-            }
-            SetOperationMessage("The change could not be confirmed. The displayed value is the latest verified Windows state.");
+            _applyingSnapshot = true;
+            ApplyTweakRow(current);
+            _applyingSnapshot = false;
+            SetOperationMessage("The change could not be confirmed. Reopen the Tweaks tab to refresh Windows state.");
         }
         finally
         {
             _mutatingIds.Remove(id);
-            ApplySnapshot(_snapshot);
+            var row = _snapshot.Tweaks.SingleOrDefault(candidate => candidate.Id == id);
+            if (row is not null)
+            {
+                _applyingSnapshot = true;
+                ApplyTweakRow(row);
+                _applyingSnapshot = false;
+            }
             DrainQueuedRefresh();
         }
     }
 
-    private static string FormatState(FrontendWindowsTweakSnapshot row)
+    internal static string? FormatState(FrontendWindowsTweakSnapshot row)
     {
-        var label = row.State switch
+        return row.State switch
         {
-            FrontendWindowsTweakState.Enabled => "On",
-            FrontendWindowsTweakState.Disabled => "Off",
-            FrontendWindowsTweakState.EnablePendingRestart => "Enabled — restart required",
-            FrontendWindowsTweakState.DisablePendingRestart => "Disabled — restart required",
-            FrontendWindowsTweakState.ExplorerRestartPending => row.ConfiguredEnabled == true
-                ? "Enabled — Explorer restart required"
-                : "Disabled — Explorer restart required",
+            FrontendWindowsTweakState.Enabled or FrontendWindowsTweakState.Disabled => null,
+            FrontendWindowsTweakState.EnablePendingRestart
+                when row.Id == FrontendWindowsTweakId.MemoryIntegrity
+                    && row.ConfiguredEnabled == true
+                    && row.EffectiveEnabled == false => "Configured — not running",
+            FrontendWindowsTweakState.EnablePendingRestart or FrontendWindowsTweakState.DisablePendingRestart => "Restart required",
+            FrontendWindowsTweakState.ExplorerRestartPending => "Explorer restart required",
             FrontendWindowsTweakState.Unsupported => "Unsupported",
-            FrontendWindowsTweakState.Managed => "Managed by Windows",
-            FrontendWindowsTweakState.Mixed => "Mixed — turn On to apply the tweak's values",
-            _ => "State unavailable",
+            FrontendWindowsTweakState.Managed => "Managed",
+            FrontendWindowsTweakState.Mixed => "Mixed — turn On to apply",
+            _ => "Unavailable",
         };
-        return string.IsNullOrWhiteSpace(row.Detail)
-            || label.Contains(row.Detail.TrimEnd('.'), StringComparison.OrdinalIgnoreCase)
-            ? label
-            : $"{label} · {row.Detail}";
     }
 
     private void SetOperationMessage(string? message)

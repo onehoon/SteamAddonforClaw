@@ -22,13 +22,17 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         Assert.Contains("var managed = IsMemoryIntegrityPolicyManaged()", capture, StringComparison.Ordinal);
         Assert.DoesNotContain("CodeIntegrityPolicyEnforcementStatus", capture, StringComparison.Ordinal);
         Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, \"Enabled\"", mutation, StringComparison.Ordinal);
-        Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, \"Locked\"", mutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureMemoryIntegrity", mutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReadDeviceGuard", mutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, \"Locked\"", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("SetValue(\"Locked\", 1", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("Mandatory", mutation, StringComparison.Ordinal);
 
         var policy = Method("IsMemoryIntegrityPolicyManaged");
-        Assert.Contains("ReadDword(Registry.LocalMachine, DeviceGuardRegistryPath, \"Locked\") == 1", policy, StringComparison.Ordinal);
-        Assert.Contains("ReadDword(Registry.LocalMachine, HvciRegistryPath, \"Locked\") == 1", policy, StringComparison.Ordinal);
+        Assert.Contains("HasMemoryIntegrityPolicy() || IsMemoryIntegrityLocked()", policy, StringComparison.Ordinal);
+        var locked = Method("IsMemoryIntegrityLocked");
+        Assert.Contains("ReadDword(Registry.LocalMachine, DeviceGuardRegistryPath, \"Locked\") == 1", locked, StringComparison.Ordinal);
+        Assert.Contains("ReadDword(Registry.LocalMachine, HvciRegistryPath, \"Locked\") == 1", locked, StringComparison.Ordinal);
         var readDword = Method("ReadDword");
         Assert.Contains("WindowsTweakRegistry.Read(root, path, name)", readDword, StringComparison.Ordinal);
         Assert.Contains("read.Kind != RegistryValueKind.DWord", readDword, StringComparison.Ordinal);
@@ -94,6 +98,12 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         Assert.Contains("/Disable-Feature", disableArguments);
         Assert.Contains("/Enable-Feature", enableArguments);
         Assert.Contains("BuildDismFeatureMutationArguments(enabled)", mutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureVirtualMachinePlatform", mutation, StringComparison.Ordinal);
+        Assert.Contains("IsDismFeatureMutationSuccessful(result.ExitCode)", mutation, StringComparison.Ordinal);
+        Assert.True(WindowsTweaksOperatingSystem.IsDismFeatureMutationSuccessful(0));
+        Assert.True(WindowsTweaksOperatingSystem.IsDismFeatureMutationSuccessful(3010));
+        Assert.False(WindowsTweaksOperatingSystem.IsDismFeatureMutationSuccessful(1));
+        Assert.False(WindowsTweaksOperatingSystem.IsDismFeatureMutationSuccessful(unchecked((int)0x800F081F)));
         Assert.Contains("\"Enable Pending\"", Method("CaptureVirtualMachinePlatform"), StringComparison.Ordinal);
         Assert.Contains("\"Disable Pending\"", Method("CaptureVirtualMachinePlatform"), StringComparison.Ordinal);
     }
@@ -102,23 +112,47 @@ public sealed class WindowsTweaksOperatingSystemContractTests
     public void Faster_menus_tweak_reads_and_writes_animation_and_submenu_delay()
     {
         var capture = Method("CaptureInstantContextMenus");
-        var mutation = Method("SetInstantContextMenus");
+        var mutation = Method("ApplyInstantContextMenuSettings");
+        var setter = Method("SetInstantContextMenus");
         Assert.Contains("SpiGetMenuAnimation", capture, StringComparison.Ordinal);
         Assert.Contains("SpiGetMenuShowDelay", capture, StringComparison.Ordinal);
         Assert.Contains("SystemParametersInfoW(SpiGetMenuShowDelay, 0, ref delayMs, 0)", capture, StringComparison.Ordinal);
+        Assert.Contains("ApplyInstantContextMenuSettings(enabled", setter, StringComparison.Ordinal);
         Assert.Contains("SpiSetMenuAnimation", mutation, StringComparison.Ordinal);
         Assert.Contains("SpiSetMenuShowDelay", mutation, StringComparison.Ordinal);
-        Assert.Contains("SystemParametersInfoW(SpiSetMenuShowDelay, targetDelay, IntPtr.Zero, SpifUpdateIniFile | SpifSendChange)", mutation, StringComparison.Ordinal);
         Assert.Contains("SystemParametersInfoW(uint action, uint parameter, IntPtr value, uint flags)", Source, StringComparison.Ordinal);
+        Assert.Contains("SystemParametersInfoW(uint action, uint parameter, ref int value, uint flags)", Source, StringComparison.Ordinal);
         Assert.Contains("0x006A", Source, StringComparison.Ordinal);
         Assert.Contains("0x006B", Source, StringComparison.Ordinal);
-        Assert.Contains("enabled ? 0 : 1", mutation, StringComparison.Ordinal);
         Assert.Contains("enabled ? 10u : 400u", mutation, StringComparison.Ordinal);
         Assert.Contains("SpifUpdateIniFile | SpifSendChange", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("WindowsTweakRegistry.Write", mutation, StringComparison.Ordinal);
         Assert.Equal(2, Regex.Matches(capture, "throw new Win32Exception\\(Marshal.GetLastWin32Error\\(\\)\\)").Count);
         Assert.True(mutation.IndexOf("SpiSetMenuAnimation", StringComparison.Ordinal)
             < mutation.IndexOf("SpiSetMenuShowDelay", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(true, 0x1003u, 0u, 0u)]
+    [InlineData(false, 0x1003u, 0u, 1u)]
+    public void Faster_menus_set_animation_with_bool_value_and_delay_with_uiparam(
+        bool enabled,
+        uint expectedAnimationAction,
+        uint expectedAnimationParameter,
+        uint expectedAnimationValue)
+    {
+        var calls = new List<(uint Action, uint Parameter, IntPtr Value, uint Flags)>();
+
+        WindowsTweaksOperatingSystem.ApplyInstantContextMenuSettings(enabled,
+            (action, parameter, value, flags) =>
+            {
+                calls.Add((action, parameter, value, flags));
+                return true;
+            });
+
+        Assert.Equal(2, calls.Count);
+        Assert.Equal((expectedAnimationAction, expectedAnimationParameter, new IntPtr(expectedAnimationValue), 3u), calls[0]);
+        Assert.Equal((0x006Bu, enabled ? 10u : 400u, IntPtr.Zero, 3u), calls[1]);
     }
 
     [Fact]
@@ -263,11 +297,10 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         Assert.Contains("DeleteSubKey(\"InprocServer32\", throwOnMissingSubKey: false)", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteSubKeyTree", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteSubKey(\"{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}", mutation, StringComparison.Ordinal);
+        Assert.Contains("IsForeignClassicContextMenuRegistration(registration)", mutation, StringComparison.Ordinal);
         var capture = Method("CaptureClassicContextMenu");
         Assert.Contains("WindowsTweakRegistry.Read(Registry.CurrentUser, ClassicContextMenuPath, string.Empty)", capture, StringComparison.Ordinal);
-        Assert.Contains("if (!registration.ValueExists)", capture, StringComparison.Ordinal);
-        Assert.Contains("registration.Kind != RegistryValueKind.String", capture, StringComparison.Ordinal);
-        Assert.Contains("value.Length != 0", capture, StringComparison.Ordinal);
+        Assert.Contains("IsForeignClassicContextMenuRegistration(registration)", capture, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -296,7 +329,7 @@ public sealed class WindowsTweaksOperatingSystemContractTests
 
     private static string Method(string name)
     {
-        var match = Regex.Match(Source, $@"private static [^\r\n]*\b{Regex.Escape(name)}\(");
+        var match = Regex.Match(Source, $@"(?:private|internal) static [^\r\n]*\b{Regex.Escape(name)}\(");
         Assert.True(match.Success, $"Method {name} was not found.");
         var start = match.Index;
         var next = Source.IndexOf("\n    private static ", start + 1, StringComparison.Ordinal);

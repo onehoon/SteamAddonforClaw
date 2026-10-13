@@ -11,10 +11,12 @@ internal sealed record WindowsTweakObservation(
     bool ExplorerRestartPending = false,
     bool IsMixed = false);
 
+internal readonly record struct WindowsTweakApplyResult(bool RestartRequired = false);
+
 internal interface IWindowsTweaksOperatingSystem
 {
     WindowsTweakObservation Capture(FrontendWindowsTweakId id, CancellationToken cancellationToken);
-    void Set(FrontendWindowsTweakId id, bool enabled, CancellationToken cancellationToken);
+    WindowsTweakApplyResult Set(FrontendWindowsTweakId id, bool enabled, CancellationToken cancellationToken);
 }
 
 internal static class WindowsTweaksStateMapper
@@ -79,52 +81,45 @@ internal sealed class WindowsTweaksRuntime
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!_definitions.Any(definition => definition.Id == id))
-            return new(false, "This Windows setting is unavailable for the identified device.", await CaptureAsync(cancellationToken).ConfigureAwait(false));
-
-        var before = await CaptureOneAsync(id, cancellationToken).ConfigureAwait(false);
-        if (!before.CanChange || !before.ConfiguredEnabled.HasValue)
-        {
-            var current = await CaptureAsync(cancellationToken).ConfigureAwait(false);
-            return new(false, "Windows does not currently allow this setting to be changed.", current);
-        }
+            return new(false, "This Windows setting is unavailable for the identified device.",
+                new(id, FrontendWindowsTweakState.Unknown, null, null, false, "This setting is unavailable for the identified device."));
 
         Exception? writeFailure = null;
-        if (before.ConfiguredEnabled.Value != enabled || before.State == FrontendWindowsTweakState.Mixed)
+        var applyResult = default(WindowsTweakApplyResult);
+        try
         {
-            try
-            {
-                await Task.Run(() => _operatingSystem.Set(id, enabled, cancellationToken), cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                // A platform write can be interrupted after Windows has applied part of it. Always
-                // read back once without the cancelled request token before propagating cancellation.
-                await CaptureAsync(CancellationToken.None).ConfigureAwait(false);
-                throw;
-            }
-            catch (Exception exception)
-            {
-                writeFailure = exception;
-            }
+            applyResult = await Task.Run(() => _operatingSystem.Set(id, enabled, cancellationToken), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            writeFailure = exception;
         }
 
-        var after = await CaptureAsync(CancellationToken.None).ConfigureAwait(false);
-        var changed = after.Tweaks.SingleOrDefault(row => row.Id == id);
-        var readbackVerified = changed is not null
-            && changed.ConfiguredEnabled == enabled
-            && changed.State is not (FrontendWindowsTweakState.Unknown or FrontendWindowsTweakState.Unsupported or FrontendWindowsTweakState.Managed or FrontendWindowsTweakState.Mixed);
+        var updated = await CaptureOneAsync(id, CancellationToken.None).ConfigureAwait(false);
+        if (applyResult.RestartRequired
+            && id == FrontendWindowsTweakId.VirtualMachinePlatform
+            && updated.ConfiguredEnabled == enabled
+            && updated.State is FrontendWindowsTweakState.Enabled or FrontendWindowsTweakState.Disabled)
+        {
+            updated = updated with
+            {
+                State = enabled ? FrontendWindowsTweakState.EnablePendingRestart : FrontendWindowsTweakState.DisablePendingRestart,
+                EffectiveEnabled = !enabled,
+                Detail = "Windows requires a restart to complete this change.",
+            };
+        }
+
+        var readbackVerified = updated.ConfiguredEnabled == enabled
+            && updated.State is not (FrontendWindowsTweakState.Unknown or FrontendWindowsTweakState.Unsupported or FrontendWindowsTweakState.Managed or FrontendWindowsTweakState.Mixed);
 
         if (writeFailure is null && readbackVerified)
-            return new(true, null, after);
+            return new(true, null, updated);
 
         var detail = writeFailure is null
             ? "Windows did not verify the requested state."
             : FormatSanitizedFailure(writeFailure);
-        if (changed is not null)
-            after = after with { Tweaks = after.Tweaks.Select(row => row.Id == id ? changed with { Detail = detail } : row).ToArray() };
-
-        return new(false, detail, after);
+        return new(false, detail, updated);
     }
 
     internal static IReadOnlyList<FrontendWindowsTweakDefinition> FilterApplicableDefinitions(

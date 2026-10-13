@@ -33,7 +33,7 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.Equal(5, (int)FrontendWindowsTweakId.DisableWindowsWidgets);
         Assert.Equal(6, (int)FrontendWindowsTweakId.DisableEdgeBackground);
         Assert.Equal(7, (int)FrontendWindowsTweakId.DisableStartupAppDelay);
-        Assert.Equal(81, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(82, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(7, (int)FrontendWindowsTweakState.Unknown);
         Assert.Equal(8, (int)FrontendWindowsTweakState.Mixed);
     }
@@ -159,40 +159,76 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.Null(row.ConfiguredEnabled);
     }
 
-    [Fact]
-    public async Task Mutation_revalidates_before_writing_and_returns_readback()
+    [Theory]
+    [InlineData(FrontendWindowsTweakId.MemoryIntegrity)]
+    [InlineData(FrontendWindowsTweakId.VirtualMachinePlatform)]
+    [InlineData(FrontendWindowsTweakId.InstantContextMenus)]
+    [InlineData(FrontendWindowsTweakId.ClassicContextMenu)]
+    [InlineData(FrontendWindowsTweakId.DisablePasswordOnWake)]
+    [InlineData(FrontendWindowsTweakId.DisableWindowsWidgets)]
+    [InlineData(FrontendWindowsTweakId.DisableEdgeBackground)]
+    [InlineData(FrontendWindowsTweakId.DisableStartupAppDelay)]
+    public async Task Mutation_sets_without_preflight_and_returns_only_targeted_readback(FrontendWindowsTweakId id)
     {
-        var reads = 0;
+        var current = new WindowsTweakObservation(true, false, false, false);
         var platform = new FakePlatform
         {
-            Read = _ => Interlocked.Increment(ref reads) == 1
-                ? new(true, false, false, false)
-                : new(true, false, true, false),
+            Read = _ => current,
+            Write = (_, enabled) => current = new(true, false, enabled, enabled),
         };
         var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
 
-        var result = await runtime.SetAsync(FrontendWindowsTweakId.MemoryIntegrity, enabled: true);
+        var result = await runtime.SetAsync(id, enabled: true);
 
         Assert.True(result.Succeeded);
-        Assert.Equal([(FrontendWindowsTweakId.MemoryIntegrity, true)], platform.Writes);
-        var row = Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.MemoryIntegrity);
-        Assert.Equal(FrontendWindowsTweakState.EnablePendingRestart, row.State);
+        Assert.Equal([(id, true)], platform.Writes);
+        Assert.Equal([id], platform.Reads);
+        Assert.Equal(id, result.UpdatedTweak.Id);
+        var row = result.UpdatedTweak;
+        Assert.Equal(FrontendWindowsTweakState.Enabled, row.State);
         Assert.True(row.ConfiguredEnabled);
-        Assert.False(row.EffectiveEnabled);
+        Assert.True(row.EffectiveEnabled);
+    }
+
+    [Fact]
+    public async Task Vmp_3010_success_is_exposed_as_a_restart_pending_updated_row()
+    {
+        var platform = new FakePlatform
+        {
+            Read = _ => new(true, false, true, true),
+            Apply = (id, _) => id == FrontendWindowsTweakId.VirtualMachinePlatform
+                ? new WindowsTweakApplyResult(RestartRequired: true)
+                : default,
+        };
+        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
+
+        var result = await runtime.SetAsync(FrontendWindowsTweakId.VirtualMachinePlatform, enabled: true);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal([FrontendWindowsTweakId.VirtualMachinePlatform], platform.Reads);
+        Assert.Equal(FrontendWindowsTweakState.EnablePendingRestart, result.UpdatedTweak.State);
+        Assert.True(result.UpdatedTweak.ConfiguredEnabled);
+        Assert.False(result.UpdatedTweak.EffectiveEnabled);
+        Assert.Equal("Windows requires a restart to complete this change.", result.UpdatedTweak.Detail);
     }
 
     [Fact]
     public async Task Mutation_does_not_write_when_current_state_is_not_changeable()
     {
-        var platform = new FakePlatform { Read = _ => new(true, true, false, false) };
+        var platform = new FakePlatform
+        {
+            Read = _ => new(true, true, false, false),
+            Write = (_, _) => throw new UnauthorizedAccessException("Synthetic managed guard."),
+        };
         var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
 
         var result = await runtime.SetAsync(FrontendWindowsTweakId.MemoryIntegrity, enabled: true);
 
         Assert.False(result.Succeeded);
-        Assert.Empty(platform.Writes);
+        Assert.Equal([(FrontendWindowsTweakId.MemoryIntegrity, true)], platform.Writes);
+        Assert.Equal([FrontendWindowsTweakId.MemoryIntegrity], platform.Reads);
         Assert.Equal(FrontendWindowsTweakState.Managed,
-            Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.MemoryIntegrity).State);
+            result.UpdatedTweak.State);
     }
 
     [Fact]
@@ -203,14 +239,16 @@ public sealed class WindowsTweaksRuntimeTests
             Read = id => id == FrontendWindowsTweakId.DisableWindowsWidgets
                 ? new(false, false, null, null, "The Windows Widgets policy is not supported on this Windows edition.")
                 : new(true, false, false, false),
+            Write = (_, _) => throw new PlatformNotSupportedException("The Windows Widgets policy is unavailable."),
         };
         var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
 
         var result = await runtime.SetAsync(FrontendWindowsTweakId.DisableWindowsWidgets, enabled: true);
 
         Assert.False(result.Succeeded);
-        Assert.Empty(platform.Writes);
-        var row = Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.DisableWindowsWidgets);
+        Assert.Equal([(FrontendWindowsTweakId.DisableWindowsWidgets, true)], platform.Writes);
+        Assert.Equal([FrontendWindowsTweakId.DisableWindowsWidgets], platform.Reads);
+        var row = result.UpdatedTweak;
         Assert.Equal(FrontendWindowsTweakState.Unsupported, row.State);
         Assert.False(row.CanChange);
         Assert.Contains("not supported", row.Detail, StringComparison.OrdinalIgnoreCase);
@@ -234,11 +272,11 @@ public sealed class WindowsTweaksRuntimeTests
 
         Assert.False(result.Succeeded);
         Assert.Equal([(FrontendWindowsTweakId.DisableWindowsWidgets, true)], platform.Writes);
-        var row = Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.DisableWindowsWidgets);
+        var row = result.UpdatedTweak;
         Assert.Equal(FrontendWindowsTweakState.Disabled, row.State);
         Assert.False(row.ConfiguredEnabled);
         Assert.False(row.EffectiveEnabled);
-        Assert.Contains("UnauthorizedAccessException", row.Detail, StringComparison.Ordinal);
+        Assert.Contains("UnauthorizedAccessException", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -265,11 +303,11 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.False(result.Succeeded);
         Assert.True(animationWriteApplied);
         Assert.Equal([(FrontendWindowsTweakId.InstantContextMenus, false)], platform.Writes);
-        var row = Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.InstantContextMenus);
+        var row = result.UpdatedTweak;
         Assert.Equal(FrontendWindowsTweakState.Mixed, row.State);
         Assert.False(row.ConfiguredEnabled);
         Assert.True(row.CanChange);
-        Assert.Contains("InvalidOperationException", row.Detail, StringComparison.Ordinal);
+        Assert.Contains("InvalidOperationException", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -291,8 +329,7 @@ public sealed class WindowsTweaksRuntimeTests
 
         Assert.True(result.Succeeded);
         Assert.Equal([(FrontendWindowsTweakId.InstantContextMenus, true)], platform.Writes);
-        Assert.Equal(FrontendWindowsTweakState.Enabled,
-            Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.InstantContextMenus).State);
+        Assert.Equal(FrontendWindowsTweakState.Enabled, result.UpdatedTweak.State);
     }
 
     [Fact]
@@ -314,11 +351,35 @@ public sealed class WindowsTweaksRuntimeTests
         var result = await runtime.SetAsync(FrontendWindowsTweakId.MemoryIntegrity, enabled: true);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(FrontendWindowsTweakState.Disabled,
-            Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.MemoryIntegrity).State);
-        Assert.Contains("UnauthorizedAccessException", Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.MemoryIntegrity).Detail);
+        Assert.Equal(FrontendWindowsTweakState.Disabled, result.UpdatedTweak.State);
+        Assert.Contains("UnauthorizedAccessException", result.FailureMessage, StringComparison.Ordinal);
         Assert.NotNull(result.FailureMessage);
-        Assert.Equal(2, targetReads);
+        Assert.Equal(1, targetReads);
+    }
+
+    [Fact]
+    public async Task Interrupted_write_reads_back_only_the_requested_tweak_and_returns_actual_state()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var mixed = new WindowsTweakObservation(true, false, false, null, "Values differ.", IsMixed: true);
+        var platform = new FakePlatform
+        {
+            Read = _ => mixed,
+            Write = (_, _) =>
+            {
+                cancellation.Cancel();
+                throw new OperationCanceledException(cancellation.Token);
+            },
+        };
+        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
+
+        var result = await runtime.SetAsync(FrontendWindowsTweakId.DisableEdgeBackground, true, cancellation.Token);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal([FrontendWindowsTweakId.DisableEdgeBackground], platform.Reads);
+        Assert.Equal(FrontendWindowsTweakState.Mixed, result.UpdatedTweak.State);
+        Assert.True(result.UpdatedTweak.CanChange);
+        Assert.NotNull(result.FailureMessage);
     }
 
     [Fact]
@@ -344,12 +405,12 @@ public sealed class WindowsTweaksRuntimeTests
 
         Assert.False(result.Succeeded);
         Assert.Equal([(FrontendWindowsTweakId.DisableEdgeBackground, true)], platform.Writes);
-        var row = Assert.Single(result.Snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.DisableEdgeBackground);
+        var row = result.UpdatedTweak;
         Assert.Equal(FrontendWindowsTweakState.Mixed, row.State);
         Assert.False(row.ConfiguredEnabled);
         Assert.Null(row.EffectiveEnabled);
         Assert.True(row.CanChange);
-        Assert.Contains("UnauthorizedAccessException", row.Detail, StringComparison.Ordinal);
+        Assert.Contains("UnauthorizedAccessException", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -367,19 +428,23 @@ public sealed class WindowsTweaksRuntimeTests
     {
         public Func<FrontendWindowsTweakId, WindowsTweakObservation> Read { get; init; } = _ => new(true, false, false, false);
         public Action<FrontendWindowsTweakId, bool>? Write { get; init; }
+        public Func<FrontendWindowsTweakId, bool, WindowsTweakApplyResult>? Apply { get; init; }
+        public List<FrontendWindowsTweakId> Reads { get; } = [];
         public List<(FrontendWindowsTweakId Id, bool Enabled)> Writes { get; } = [];
 
         public WindowsTweakObservation Capture(FrontendWindowsTweakId id, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Reads.Add(id);
             return Read(id);
         }
 
-        public void Set(FrontendWindowsTweakId id, bool enabled, CancellationToken cancellationToken)
+        public WindowsTweakApplyResult Set(FrontendWindowsTweakId id, bool enabled, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Writes.Add((id, enabled));
             Write?.Invoke(id, enabled);
+            return Apply?.Invoke(id, enabled) ?? default;
         }
     }
 }
