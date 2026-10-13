@@ -38,7 +38,7 @@ The Full1902 elevated Runtime remains the privileged platform owner. The Main UI
 
 ## Product and UI scope
 
-Add one top-level **Tweaks** navigation item and its page to the existing Main UI navigation. Keep the existing Device default selection and the order/behavior of all existing items. Do not place the page inside Settings, Quick Settings Overlay, or the in-game Overlay.
+Add one top-level **Tweaks** navigation item and its page to the existing Main UI navigation. Insert **Tweaks immediately above How to Use**. Keep the existing Device default selection and preserve the relative order and behavior of every existing item. Do not place the page inside Settings, Quick Settings Overlay, or the in-game Overlay.
 
 The page contains exactly the five items listed above. Each row has a concise description, a switch, and a compact state/detail label. Match existing WinUI SettingsCard spacing and Fluent styling. Do not add decorative assets, a new visual-design system, or an advanced editor.
 
@@ -172,7 +172,7 @@ The tweak definitions/catalog must support an explicit applicability value so mo
 Add focused tests for the state mapping and Runtime/frontend contract using fakes or pure state-mapping helpers. At minimum verify:
 
 - Exactly five entries exist and their order/names match the approved list.
-- Navigation adds Tweaks without changing the existing default page or the behavior/order of other navigation items.
+- Navigation places Tweaks immediately above How to Use without changing the existing default page or the relative order/behavior of other navigation items.
 - Every displayed switch is initialized from an OS snapshot; unknown/pending/managed are never mapped to Off.
 - ON and OFF map to the exact values and only the owned key/feature/power settings are changed.
 - The context-menu animation toggle uses `SPI_GETMENUANIMATION` / `SPI_SETMENUANIMATION`, and there is no `MenuShowDelay` mutation.
@@ -199,7 +199,7 @@ Run the focused automated tests and the repository's standard build/test checks 
 
 ## Acceptance criteria
 
-- The Main UI has a dedicated Tweaks tab with exactly the five approved entries and a consolidated once-per-local-day warning.
+- The Main UI has a dedicated Tweaks tab immediately above How to Use, with exactly the five approved entries and a consolidated once-per-local-day warning.
 - Each switch reads current Windows state, immediately writes its defined ON/OFF values, reads back, and clearly distinguishes effective, pending, managed, unsupported, and error states.
 - There is no automatic restart, per-toggle restart popup/banner, or Apply button.
 - Unsupported or unknown models never see any A2VM-only registry tweak.
