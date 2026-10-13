@@ -108,7 +108,8 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         Assert.Contains("SystemParametersInfoW(SpiGetMenuShowDelay, 0, ref delayMs, 0)", capture, StringComparison.Ordinal);
         Assert.Contains("SpiSetMenuAnimation", mutation, StringComparison.Ordinal);
         Assert.Contains("SpiSetMenuShowDelay", mutation, StringComparison.Ordinal);
-        Assert.Contains("SystemParametersInfoW(SpiSetMenuShowDelay, targetDelay, ref ignored, SpifUpdateIniFile | SpifSendChange)", mutation, StringComparison.Ordinal);
+        Assert.Contains("SystemParametersInfoW(SpiSetMenuShowDelay, targetDelay, IntPtr.Zero, SpifUpdateIniFile | SpifSendChange)", mutation, StringComparison.Ordinal);
+        Assert.Contains("SystemParametersInfoW(uint action, uint parameter, IntPtr value, uint flags)", Source, StringComparison.Ordinal);
         Assert.Contains("0x006A", Source, StringComparison.Ordinal);
         Assert.Contains("0x006B", Source, StringComparison.Ordinal);
         Assert.Contains("enabled ? 0 : 1", mutation, StringComparison.Ordinal);

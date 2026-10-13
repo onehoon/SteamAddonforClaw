@@ -217,9 +217,8 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         if (!SystemParametersInfoW(SpiSetMenuAnimation, 0, ref menuAnimation, SpifUpdateIniFile | SpifSendChange))
             throw new Win32Exception(Marshal.GetLastWin32Error());
 
-        var ignored = 0;
         uint targetDelay = enabled ? 10u : 400u;
-        if (!SystemParametersInfoW(SpiSetMenuShowDelay, targetDelay, ref ignored, SpifUpdateIniFile | SpifSendChange))
+        if (!SystemParametersInfoW(SpiSetMenuShowDelay, targetDelay, IntPtr.Zero, SpifUpdateIniFile | SpifSendChange))
             throw new Win32Exception(Marshal.GetLastWin32Error());
     }
 
@@ -455,6 +454,10 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SystemParametersInfoW(uint action, uint parameter, ref int value, uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfoW(uint action, uint parameter, IntPtr value, uint flags);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetShellWindow();
