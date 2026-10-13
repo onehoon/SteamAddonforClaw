@@ -96,7 +96,7 @@ public sealed partial class WindowsTweaksPage : UserControl
             + "Memory Integrity strengthens kernel protection. Disabling it reduces protection. Enabling it can make incompatible drivers or apps malfunction and, rarely, prevent normal boot.\n\n"
             + "Virtual Machine Platform may be required by virtualization-dependent software; disabling it can stop that software from working.\n\n"
             + "Disabling password/sign-in on wake lets someone with physical access resume directly to the desktop.\n\n"
-            + "These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change.";
+            + "These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change. Registry policy controls may be restricted, and removing startup delay can make startup apps launch closer together.";
         var dialog = new ContentDialog
         {
             Title = "Windows Tweaks safety notice",
@@ -121,12 +121,6 @@ public sealed partial class WindowsTweaksPage : UserControl
             _snapshot = FrontendWindowsTweaksSnapshot.Unavailable;
             return _snapshot;
         }
-    }
-
-    private async Task<FrontendWindowsTweaksSnapshot?> TryCaptureAfterMutationFailureAsync()
-    {
-        try { return await _frontend!.CaptureWindowsTweaksAsync(); }
-        catch { return null; }
     }
 
     private async Task RefreshCoreAsync()
@@ -161,15 +155,30 @@ public sealed partial class WindowsTweaksPage : UserControl
                 card.Visibility = GetCardVisibility(snapshot, definition.Id);
                 if (row is null)
                     continue;
-                toggle.Visibility = row.ConfiguredEnabled.HasValue ? Visibility.Visible : Visibility.Collapsed;
-                if (row.ConfiguredEnabled is { } configured)
-                    toggle.IsOn = configured;
-                toggle.IsEnabled = row.CanChange && !_mutatingIds.Contains(definition.Id);
-                stateText.Text = FormatState(row);
+                ApplyTweakRow(row);
             }
         }
         finally { _applyingSnapshot = false; }
     }
+
+    private void ApplyTweakRow(FrontendWindowsTweakSnapshot row)
+    {
+        var (card, toggle, stateText) = GetControls(row.Id);
+        card.Visibility = Visibility.Visible;
+        toggle.Visibility = row.ConfiguredEnabled.HasValue ? Visibility.Visible : Visibility.Collapsed;
+        if (row.ConfiguredEnabled is { } configured)
+            toggle.IsOn = configured;
+        toggle.IsEnabled = row.CanChange && !_mutatingIds.Contains(row.Id);
+        stateText.Text = FormatState(row) ?? string.Empty;
+    }
+
+    internal static FrontendWindowsTweaksSnapshot ReplaceTweak(
+        FrontendWindowsTweaksSnapshot snapshot,
+        FrontendWindowsTweakSnapshot updatedTweak) =>
+        snapshot with
+        {
+            Tweaks = snapshot.Tweaks.Select(row => row.Id == updatedTweak.Id ? updatedTweak : row).ToArray(),
+        };
 
     private async void TweakSwitch_Toggled(object sender, RoutedEventArgs args)
     {
@@ -194,51 +203,49 @@ public sealed partial class WindowsTweaksPage : UserControl
         try
         {
             var result = await _frontend.SetWindowsTweakAsync(id, requested);
-            ApplySnapshot(result.Snapshot);
+            _snapshot = ReplaceTweak(_snapshot, result.UpdatedTweak);
+            _applyingSnapshot = true;
+            ApplyTweakRow(result.UpdatedTweak);
+            _applyingSnapshot = false;
             SetOperationMessage(result.Succeeded ? null : result.FailureMessage);
         }
         catch
         {
-            var actual = await TryCaptureAfterMutationFailureAsync();
-            if (actual is not null)
-            {
-                _snapshot = actual;
-                ApplySnapshot(actual);
-            }
-            else
-            {
-                ApplySnapshot(_snapshot);
-            }
-            SetOperationMessage("The change could not be confirmed. The displayed value is the latest verified Windows state.");
+            _applyingSnapshot = true;
+            ApplyTweakRow(current);
+            _applyingSnapshot = false;
+            SetOperationMessage("The change could not be confirmed. Reopen the Tweaks tab to refresh Windows state.");
         }
         finally
         {
             _mutatingIds.Remove(id);
-            ApplySnapshot(_snapshot);
+            var row = _snapshot.Tweaks.SingleOrDefault(candidate => candidate.Id == id);
+            if (row is not null)
+            {
+                _applyingSnapshot = true;
+                ApplyTweakRow(row);
+                _applyingSnapshot = false;
+            }
             DrainQueuedRefresh();
         }
     }
 
-    private static string FormatState(FrontendWindowsTweakSnapshot row)
+    internal static string? FormatState(FrontendWindowsTweakSnapshot row)
     {
-        var label = row.State switch
+        return row.State switch
         {
-            FrontendWindowsTweakState.Enabled => "On",
-            FrontendWindowsTweakState.Disabled => "Off",
-            FrontendWindowsTweakState.EnablePendingRestart => "Enabled — restart required",
-            FrontendWindowsTweakState.DisablePendingRestart => "Disabled — restart required",
-            FrontendWindowsTweakState.ExplorerRestartPending => row.ConfiguredEnabled == true
-                ? "Enabled — Explorer restart required"
-                : "Disabled — Explorer restart required",
+            FrontendWindowsTweakState.Enabled or FrontendWindowsTweakState.Disabled => null,
+            FrontendWindowsTweakState.EnablePendingRestart
+                when row.Id == FrontendWindowsTweakId.MemoryIntegrity
+                    && row.ConfiguredEnabled == true
+                    && row.EffectiveEnabled == false => "Configured — not running",
+            FrontendWindowsTweakState.EnablePendingRestart or FrontendWindowsTweakState.DisablePendingRestart => "Restart required",
+            FrontendWindowsTweakState.ExplorerRestartPending => "Explorer restart required",
             FrontendWindowsTweakState.Unsupported => "Unsupported",
-            FrontendWindowsTweakState.Managed => "Managed by Windows",
-            FrontendWindowsTweakState.Mixed => "Mixed — turn On to apply both Faster Menus values",
-            _ => "State unavailable",
+            FrontendWindowsTweakState.Managed => "Managed",
+            FrontendWindowsTweakState.Mixed => "Mixed — turn On to apply",
+            _ => "Unavailable",
         };
-        return string.IsNullOrWhiteSpace(row.Detail)
-            || label.Contains(row.Detail.TrimEnd('.'), StringComparison.OrdinalIgnoreCase)
-            ? label
-            : $"{label} · {row.Detail}";
     }
 
     private void SetOperationMessage(string? message)
@@ -254,6 +261,9 @@ public sealed partial class WindowsTweaksPage : UserControl
         FrontendWindowsTweakId.InstantContextMenus => (InstantContextMenusCard, InstantContextMenusSwitch, InstantContextMenusState),
         FrontendWindowsTweakId.ClassicContextMenu => (ClassicContextMenuCard, ClassicContextMenuSwitch, ClassicContextMenuState),
         FrontendWindowsTweakId.DisablePasswordOnWake => (DisablePasswordOnWakeCard, DisablePasswordOnWakeSwitch, DisablePasswordOnWakeState),
+        FrontendWindowsTweakId.DisableWindowsWidgets => (DisableWindowsWidgetsCard, DisableWindowsWidgetsSwitch, DisableWindowsWidgetsState),
+        FrontendWindowsTweakId.DisableEdgeBackground => (DisableEdgeBackgroundCard, DisableEdgeBackgroundSwitch, DisableEdgeBackgroundState),
+        FrontendWindowsTweakId.DisableStartupAppDelay => (DisableStartupAppDelayCard, DisableStartupAppDelaySwitch, DisableStartupAppDelayState),
         _ => throw new ArgumentOutOfRangeException(nameof(id)),
     };
 
@@ -264,6 +274,9 @@ public sealed partial class WindowsTweaksPage : UserControl
         var value when ReferenceEquals(value, InstantContextMenusSwitch) => FrontendWindowsTweakId.InstantContextMenus,
         var value when ReferenceEquals(value, ClassicContextMenuSwitch) => FrontendWindowsTweakId.ClassicContextMenu,
         var value when ReferenceEquals(value, DisablePasswordOnWakeSwitch) => FrontendWindowsTweakId.DisablePasswordOnWake,
+        var value when ReferenceEquals(value, DisableWindowsWidgetsSwitch) => FrontendWindowsTweakId.DisableWindowsWidgets,
+        var value when ReferenceEquals(value, DisableEdgeBackgroundSwitch) => FrontendWindowsTweakId.DisableEdgeBackground,
+        var value when ReferenceEquals(value, DisableStartupAppDelaySwitch) => FrontendWindowsTweakId.DisableStartupAppDelay,
         _ => throw new ArgumentOutOfRangeException(nameof(toggle)),
     };
 }

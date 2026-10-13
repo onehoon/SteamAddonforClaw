@@ -7,6 +7,9 @@ public enum FrontendWindowsTweakId
     InstantContextMenus,
     ClassicContextMenu,
     DisablePasswordOnWake,
+    DisableWindowsWidgets,
+    DisableEdgeBackground,
+    DisableStartupAppDelay,
 }
 
 public enum FrontendWindowsTweakState
@@ -43,6 +46,9 @@ public static class FrontendWindowsTweakCatalog
         new(FrontendWindowsTweakId.InstantContextMenus, "Faster Menus", "Disable menu animation and reduce submenu delay to 10 ms.", FrontendWindowsTweakApplicability.AllSupportedWindows),
         new(FrontendWindowsTweakId.ClassicContextMenu, "Classic Context Menu", "Use the classic Windows 11 context menu for this user.", FrontendWindowsTweakApplicability.AllSupportedWindows),
         new(FrontendWindowsTweakId.DisablePasswordOnWake, "Disable Password on Wake", "Return from sleep without requiring sign-in.", FrontendWindowsTweakApplicability.AllSupportedWindows),
+        new(FrontendWindowsTweakId.DisableWindowsWidgets, "Disable Windows Widgets", "Block the Windows Widgets experience where supported by Windows policy.", FrontendWindowsTweakApplicability.AllSupportedWindows),
+        new(FrontendWindowsTweakId.DisableEdgeBackground, "Disable Edge Background", "Disable Edge Startup Boost and background mode; existing processes may continue until closed.", FrontendWindowsTweakApplicability.AllSupportedWindows),
+        new(FrontendWindowsTweakId.DisableStartupAppDelay, "Disable Startup App Delay", "Remove configured Explorer startup-app launch delays; actual startup gains may vary.", FrontendWindowsTweakApplicability.AllSupportedWindows),
     ];
 }
 
@@ -65,6 +71,9 @@ public sealed record FrontendWindowsTweaksSnapshot(
         UnavailableTweak(FrontendWindowsTweakId.InstantContextMenus),
         UnavailableTweak(FrontendWindowsTweakId.ClassicContextMenu),
         UnavailableTweak(FrontendWindowsTweakId.DisablePasswordOnWake),
+        UnavailableTweak(FrontendWindowsTweakId.DisableWindowsWidgets),
+        UnavailableTweak(FrontendWindowsTweakId.DisableEdgeBackground),
+        UnavailableTweak(FrontendWindowsTweakId.DisableStartupAppDelay),
     ]);
 
     private static FrontendWindowsTweakSnapshot UnavailableTweak(FrontendWindowsTweakId id) =>
@@ -74,7 +83,7 @@ public sealed record FrontendWindowsTweaksSnapshot(
 public sealed record FrontendWindowsTweakMutationResult(
     bool Succeeded,
     string? FailureMessage,
-    FrontendWindowsTweaksSnapshot Snapshot);
+    FrontendWindowsTweakSnapshot UpdatedTweak);
 
 public sealed record SetWindowsTweakRequest(FrontendWindowsTweakId Id, bool Enabled);
 public sealed record AcknowledgeWindowsTweaksWarningRequest(DateOnly LocalDate);

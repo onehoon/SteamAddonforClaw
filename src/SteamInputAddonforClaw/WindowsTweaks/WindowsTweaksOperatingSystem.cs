@@ -17,6 +17,10 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     private const string DeviceGuardMdmPath = @"SOFTWARE\Microsoft\PolicyManager\current\device\DeviceGuard";
     private const string ClassicContextMenuPath = @"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32";
     private const string ClassicContextMenuParentPath = @"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}";
+    private const string WindowsCurrentVersionPath = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+    private const string WidgetsPolicyPath = @"SOFTWARE\Policies\Microsoft\Dsh";
+    private const string EdgePolicyPath = @"SOFTWARE\Policies\Microsoft\Edge";
+    private const string ExplorerSerializePath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize";
     private const string DismFeatureName = "VirtualMachinePlatform";
     private const uint SpiGetMenuAnimation = 0x1002;
     private const uint SpiSetMenuAnimation = 0x1003;
@@ -40,11 +44,14 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
             FrontendWindowsTweakId.InstantContextMenus => CaptureInstantContextMenus(),
             FrontendWindowsTweakId.ClassicContextMenu => CaptureClassicContextMenu(),
             FrontendWindowsTweakId.DisablePasswordOnWake => CapturePasswordOnWake(),
+            FrontendWindowsTweakId.DisableWindowsWidgets => CaptureDisableWindowsWidgets(),
+            FrontendWindowsTweakId.DisableEdgeBackground => CaptureDisableEdgeBackground(),
+            FrontendWindowsTweakId.DisableStartupAppDelay => CaptureDisableStartupAppDelay(),
             _ => new(false, false, null, null, "This setting is not supported.")
         };
     }
 
-    public void Set(FrontendWindowsTweakId id, bool enabled, CancellationToken cancellationToken)
+    public WindowsTweakApplyResult Set(FrontendWindowsTweakId id, bool enabled, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
@@ -56,8 +63,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
                 SetMemoryIntegrity(enabled, cancellationToken);
                 break;
             case FrontendWindowsTweakId.VirtualMachinePlatform:
-                SetVirtualMachinePlatform(enabled, cancellationToken);
-                break;
+                return SetVirtualMachinePlatform(enabled, cancellationToken);
             case FrontendWindowsTweakId.InstantContextMenus:
                 SetInstantContextMenus(enabled);
                 break;
@@ -67,9 +73,20 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
             case FrontendWindowsTweakId.DisablePasswordOnWake:
                 SetPasswordOnWake(enabled);
                 break;
+            case FrontendWindowsTweakId.DisableWindowsWidgets:
+                SetDisableWindowsWidgets(enabled);
+                break;
+            case FrontendWindowsTweakId.DisableEdgeBackground:
+                SetDisableEdgeBackground(enabled);
+                break;
+            case FrontendWindowsTweakId.DisableStartupAppDelay:
+                SetDisableStartupAppDelay(enabled);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(id));
         }
+
+        return default;
     }
 
     private static WindowsTweakObservation CaptureMemoryIntegrity(CancellationToken cancellationToken)
@@ -110,19 +127,14 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
 
     private static void SetMemoryIntegrity(bool enabled, CancellationToken cancellationToken)
     {
-        var current = CaptureMemoryIntegrity(cancellationToken);
-        if (current.Managed)
+        cancellationToken.ThrowIfCancellationRequested();
+        if (HasMemoryIntegrityPolicy())
             throw new UnauthorizedAccessException("Windows policy or firmware owns Memory Integrity.");
-        if (current.ConfiguredEnabled is null)
-            throw new InvalidOperationException("Windows could not determine Memory Integrity state.");
 
-        var locked = ReadDword(Registry.LocalMachine, HvciRegistryPath, "Locked");
-        if (locked == 1)
+        if (IsMemoryIntegrityLocked())
             throw new UnauthorizedAccessException("Memory Integrity is UEFI locked.");
 
         WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, "Enabled", enabled ? 1 : 0, RegistryValueKind.DWord);
-        if (enabled && locked is null)
-            WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, "Locked", 0, RegistryValueKind.DWord);
     }
 
     private static WindowsTweakObservation CaptureVirtualMachinePlatform(CancellationToken cancellationToken)
@@ -153,14 +165,10 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         return new(true, false, null, null, "DISM returned an unrecognized feature state.");
     }
 
-    private static void SetVirtualMachinePlatform(bool enabled, CancellationToken cancellationToken)
+    private static WindowsTweakApplyResult SetVirtualMachinePlatform(bool enabled, CancellationToken cancellationToken)
     {
-        var current = CaptureVirtualMachinePlatform(cancellationToken);
-        if (!current.Supported || current.Managed || current.ConfiguredEnabled is null)
-            throw new InvalidOperationException(current.Detail ?? "Virtual Machine Platform cannot currently be changed.");
-
         var result = RunDism(BuildDismFeatureMutationArguments(enabled), cancellationToken);
-        if (result.ExitCode != 0)
+        if (!IsDismFeatureMutationSuccessful(result.ExitCode))
         {
             var code = unchecked((uint)result.ExitCode);
             if (IsDismFeatureUnavailable(code))
@@ -169,7 +177,11 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
                 throw new UnauthorizedAccessException("Windows servicing policy prevented this feature change.");
             throw new Win32Exception(result.ExitCode, "DISM did not accept the Virtual Machine Platform request.");
         }
+
+        return new(RestartRequired: result.ExitCode == 3010);
     }
+
+    internal static bool IsDismFeatureMutationSuccessful(int exitCode) => exitCode is 0 or 3010;
 
     internal static IReadOnlyList<string> BuildDismFeatureMutationArguments(bool enabled)
     {
@@ -213,29 +225,134 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
 
     private static void SetInstantContextMenus(bool enabled)
     {
-        var menuAnimation = enabled ? 0 : 1;
-        if (!SystemParametersInfoW(SpiSetMenuAnimation, 0, ref menuAnimation, SpifUpdateIniFile | SpifSendChange))
+        ApplyInstantContextMenuSettings(enabled,
+            (action, parameter, value, flags) => SystemParametersInfoW(action, parameter, value, flags));
+    }
+
+    internal static void ApplyInstantContextMenuSettings(
+        bool enabled,
+        Func<uint, uint, IntPtr, uint, bool> setSystemParameter)
+    {
+        ArgumentNullException.ThrowIfNull(setSystemParameter);
+        var menuAnimation = enabled ? IntPtr.Zero : new IntPtr(1);
+        if (!setSystemParameter(SpiSetMenuAnimation, 0, menuAnimation, SpifUpdateIniFile | SpifSendChange))
             throw new Win32Exception(Marshal.GetLastWin32Error());
 
         uint targetDelay = enabled ? 10u : 400u;
-        if (!SystemParametersInfoW(SpiSetMenuShowDelay, targetDelay, IntPtr.Zero, SpifUpdateIniFile | SpifSendChange))
+        if (!setSystemParameter(SpiSetMenuShowDelay, targetDelay, IntPtr.Zero, SpifUpdateIniFile | SpifSendChange))
             throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    private static WindowsTweakObservation CaptureDisableWindowsWidgets()
+    {
+        var editionSupport = ReadWidgetsPolicyEditionSupport();
+        if (editionSupport is null)
+            return new(true, false, null, null, "Windows Widgets policy support could not be determined for this edition.");
+        if (!editionSupport.Value)
+            return new(false, false, null, null, "The Windows Widgets policy is not supported on this Windows edition.");
+
+        return ResolveZeroDwordRegistryValues(
+            WindowsTweakRegistry.Read(Registry.LocalMachine, WidgetsPolicyPath, "AllowNewsAndInterests"));
+    }
+
+    private static void SetDisableWindowsWidgets(bool enabled)
+    {
+        var editionSupport = ReadWidgetsPolicyEditionSupport();
+        if (editionSupport is null)
+            throw new InvalidOperationException("Windows Widgets policy support could not be determined for this edition.");
+        if (!editionSupport.Value)
+            throw new PlatformNotSupportedException("The Windows Widgets policy is not supported on this Windows edition.");
+
+        if (enabled)
+            WindowsTweakRegistry.Write(Registry.LocalMachine, WidgetsPolicyPath, "AllowNewsAndInterests", 0, RegistryValueKind.DWord);
+        else
+            WindowsTweakRegistry.DeleteValue(Registry.LocalMachine, WidgetsPolicyPath, "AllowNewsAndInterests");
+    }
+
+    private static WindowsTweakObservation CaptureDisableEdgeBackground() =>
+        ResolveZeroDwordRegistryValues(
+            WindowsTweakRegistry.Read(Registry.LocalMachine, EdgePolicyPath, "StartupBoostEnabled"),
+            WindowsTweakRegistry.Read(Registry.LocalMachine, EdgePolicyPath, "BackgroundModeEnabled"));
+
+    private static void SetDisableEdgeBackground(bool enabled)
+    {
+        if (enabled)
+        {
+            WindowsTweakRegistry.Write(Registry.LocalMachine, EdgePolicyPath, "StartupBoostEnabled", 0, RegistryValueKind.DWord);
+            WindowsTweakRegistry.Write(Registry.LocalMachine, EdgePolicyPath, "BackgroundModeEnabled", 0, RegistryValueKind.DWord);
+            return;
+        }
+
+        WindowsTweakRegistry.DeleteValue(Registry.LocalMachine, EdgePolicyPath, "StartupBoostEnabled");
+        WindowsTweakRegistry.DeleteValue(Registry.LocalMachine, EdgePolicyPath, "BackgroundModeEnabled");
+    }
+
+    private static WindowsTweakObservation CaptureDisableStartupAppDelay() =>
+        ResolveZeroDwordRegistryValues(
+            WindowsTweakRegistry.Read(Registry.CurrentUser, ExplorerSerializePath, "StartupDelayInMSec"),
+            WindowsTweakRegistry.Read(Registry.CurrentUser, ExplorerSerializePath, "WaitForIdleState"));
+
+    private static void SetDisableStartupAppDelay(bool enabled)
+    {
+        if (enabled)
+        {
+            WindowsTweakRegistry.Write(Registry.CurrentUser, ExplorerSerializePath, "StartupDelayInMSec", 0, RegistryValueKind.DWord);
+            WindowsTweakRegistry.Write(Registry.CurrentUser, ExplorerSerializePath, "WaitForIdleState", 0, RegistryValueKind.DWord);
+            return;
+        }
+
+        WindowsTweakRegistry.DeleteValue(Registry.CurrentUser, ExplorerSerializePath, "StartupDelayInMSec");
+        WindowsTweakRegistry.DeleteValue(Registry.CurrentUser, ExplorerSerializePath, "WaitForIdleState");
+    }
+
+    internal static bool? ResolveWidgetsPolicyEditionSupport(string? editionId)
+    {
+        if (string.IsNullOrWhiteSpace(editionId))
+            return null;
+
+        var edition = editionId.Trim();
+        if (edition.StartsWith("Core", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(edition, "IoTCore", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return edition.ToUpperInvariant() switch
+        {
+            "PROFESSIONAL" or "PROFESSIONALN" or "PROFESSIONALWORKSTATION" or "PROFESSIONALWORKSTATIONN"
+                or "ENTERPRISE" or "ENTERPRISEN" or "ENTERPRISES" or "ENTERPRISESN"
+                or "EDUCATION" or "EDUCATIONN" or "IOTENTERPRISE" or "IOTENTERPRISES" => true,
+            _ => null,
+        };
+    }
+
+    private static bool? ReadWidgetsPolicyEditionSupport()
+    {
+        var edition = WindowsTweakRegistry.Read(Registry.LocalMachine, WindowsCurrentVersionPath, "EditionID");
+        if (!edition.ValueExists || edition.Kind != RegistryValueKind.String || edition.Value is not string editionId)
+            return null;
+        return ResolveWidgetsPolicyEditionSupport(editionId);
+    }
+
+    internal static WindowsTweakObservation ResolveZeroDwordRegistryValues(params WindowsTweakRegistryValueRead[] values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        if (values.Length == 0)
+            throw new ArgumentException("At least one registry value is required.", nameof(values));
+
+        if (values.All(value => value.ValueExists && value.Kind == RegistryValueKind.DWord && value.Value is int dword && dword == 0))
+            return new(true, false, true, true);
+        if (values.All(value => !value.ValueExists))
+            return new(true, false, false, false);
+
+        return new(true, false, false, null, "Registry values are mixed or custom.", IsMixed: true);
     }
 
     private static WindowsTweakObservation CaptureClassicContextMenu()
     {
         var registration = WindowsTweakRegistry.Read(Registry.CurrentUser, ClassicContextMenuPath, string.Empty);
-        var configured = false;
-        if (registration.KeyExists)
-        {
-            if (!registration.ValueExists)
-                return new(true, true, null, null, "The exact shell registration exists but is not owned by this tweak.");
-            if (registration.Kind != RegistryValueKind.String
-                || registration.Value is not string value
-                || value.Length != 0)
-                return new(true, true, null, null, "The exact shell registration has a different value and was left unchanged.");
-            configured = true;
-        }
+        if (IsForeignClassicContextMenuRegistration(registration))
+            return new(true, true, null, null, "The exact shell registration exists but is not owned by this tweak.");
+
+        var configured = registration.KeyExists;
 
         var parentWriteTime = ReadRegistryLastWriteTime(Registry.CurrentUser, ClassicContextMenuParentPath);
         var shellStartTime = ReadShellProcessStartTimeUtc();
@@ -245,6 +362,10 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
 
     private static void SetClassicContextMenu(bool enabled)
     {
+        var registration = WindowsTweakRegistry.Read(Registry.CurrentUser, ClassicContextMenuPath, string.Empty);
+        if (IsForeignClassicContextMenuRegistration(registration))
+            throw new UnauthorizedAccessException("The shell registration belongs to another setting and was left unchanged.");
+
         if (enabled)
         {
             WindowsTweakRegistry.Write(Registry.CurrentUser, ClassicContextMenuPath, string.Empty, string.Empty, RegistryValueKind.String);
@@ -254,6 +375,13 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         using var parent = Registry.CurrentUser.OpenSubKey(ClassicContextMenuParentPath, writable: true);
         parent?.DeleteSubKey("InprocServer32", throwOnMissingSubKey: false);
     }
+
+    private static bool IsForeignClassicContextMenuRegistration(WindowsTweakRegistryValueRead registration) =>
+        registration.KeyExists
+        && (!registration.ValueExists
+            || registration.Kind != RegistryValueKind.String
+            || registration.Value is not string value
+            || value.Length != 0);
 
     private static WindowsTweakObservation CapturePasswordOnWake()
     {
@@ -329,16 +457,18 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
 
     private static bool IsMemoryIntegrityPolicyManaged()
     {
-        if (ReadDword(Registry.LocalMachine, DeviceGuardRegistryPath, "Locked") == 1)
-            return true;
-        if (ReadDword(Registry.LocalMachine, HvciRegistryPath, "Locked") == 1)
-            return true;
-
-        return HasPolicyValues(Registry.LocalMachine, DeviceGuardPolicyPath,
-                ["EnableVirtualizationBasedSecurity", "RequirePlatformSecurityFeatures", "HypervisorEnforcedCodeIntegrity"])
-            || HasPolicyValues(Registry.LocalMachine, DeviceGuardMdmPath,
-                ["EnableVirtualizationBasedSecurity", "RequirePlatformSecurityFeatures", "HypervisorEnforcedCodeIntegrity"]);
+        return HasMemoryIntegrityPolicy() || IsMemoryIntegrityLocked();
     }
+
+    private static bool HasMemoryIntegrityPolicy() =>
+        HasPolicyValues(Registry.LocalMachine, DeviceGuardPolicyPath,
+            ["EnableVirtualizationBasedSecurity", "RequirePlatformSecurityFeatures", "HypervisorEnforcedCodeIntegrity"])
+        || HasPolicyValues(Registry.LocalMachine, DeviceGuardMdmPath,
+            ["EnableVirtualizationBasedSecurity", "RequirePlatformSecurityFeatures", "HypervisorEnforcedCodeIntegrity"]);
+
+    private static bool IsMemoryIntegrityLocked() =>
+        ReadDword(Registry.LocalMachine, DeviceGuardRegistryPath, "Locked") == 1
+        || ReadDword(Registry.LocalMachine, HvciRegistryPath, "Locked") == 1;
 
     private static bool IsPasswordOnWakePolicyManaged()
     {

@@ -2,7 +2,7 @@
 
 Steam Addon for Claw adds controller integration and game-specific performance controls for supported MSI Claw handhelds. It can present the built-in controller as a Steam Deck or DualSense Edge while Steam gaming is active, and as an Xbox 360 controller otherwise. You can choose a global Steam controller and an optional per-game Steam override, configure the controller's front and rear buttons, set per-game performance options, and use a performance HUD, shortcuts, a separate Quick Settings Overlay, and Windows gaming-home behavior.
 
-This guide describes the features currently exposed by the app. The Main App includes **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
+This guide describes the features currently exposed by the app. The Main App includes **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **Tweaks**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
 
 ## Table of contents
 
@@ -19,6 +19,7 @@ This guide describes the features currently exposed by the app. The Main App inc
   - [XBOX](#xbox)
   - [ClawHUD](#clawhud)
   - [Shortcut](#shortcut)
+  - [Tweaks](#tweaks)
   - [Settings](#settings)
 - [Game profiles and setting priority](#game-profiles-and-setting-priority)
 - [Non-Steam games](#non-steam-games)
@@ -197,6 +198,12 @@ The **Application (.exe)** and **PowerShell** Add/Edit panels include **Run as a
 The Screenshot action captures the primary display as a JPEG. Its save folder is configured inside that Screenshot Shortcut's Add/Edit dialog: choose a custom folder or use the default Windows `Pictures\Screenshots` folder. **Browse** stages a folder, **Use default** stages the default location, **Open folder** opens the currently selected location, and **Save** commits the folder with the Shortcut; **Cancel** discards staged changes. The normal editor allows at most one Screenshot Shortcut. A shortcut displayed in the Overlay runs the action you configured here; the Overlay receives only the tile and never the folder path.
 
 Shortcut tiles use an action-specific Fluent icon by default. In the Main App's Add/Edit dialog, choose a curated icon or restore the action default; the icon appears before the tile title in both the Main App and Overlay.
+
+### Tweaks
+
+The **Tweaks** page reads Windows state when opened and after each change. It keeps mixed, unavailable, and unsupported states distinct from a verified **On** or **Off** state. A consolidated safety notice appears at most once per local calendar day. The app does not automatically restart Windows, sign out, or restart Explorer; some existing Windows settings may require one of those actions to become fully effective.
+
+The **Registry Tweaks** group includes **Faster Menus**, **Classic Context Menu**, **Disable Password on Wake**, **Disable Windows Widgets**, **Disable Edge Background**, and **Disable Startup App Delay**. The Widgets policy is offered only on Windows editions documented to support it; Windows 11 Home is unsupported. Edge background policies do not immediately close existing Edge processes. Startup App Delay configures two Explorer values for future logins; actual startup changes may vary.
 
 ### Settings
 

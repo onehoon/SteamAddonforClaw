@@ -900,17 +900,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         if (_windowsTweaksRuntime is null)
-            return new(false, "Windows Tweaks are unavailable.", FrontendWindowsTweaksSnapshot.Unavailable);
+            return new(false, "Windows Tweaks are unavailable.",
+                new(id, FrontendWindowsTweakState.Unknown, null, null, false, "Windows Tweaks are unavailable."));
 
         var result = await _windowsTweaksRuntime.SetAsync(id, enabled, cancellationToken).ConfigureAwait(false);
         AppLog.Info("WindowsTweaks", "Windows tweak operation completed.",
             ("Id", id), ("Enabled", enabled), ("Succeeded", result.Succeeded),
-            ("State", result.Snapshot.Tweaks.SingleOrDefault(row => row.Id == id)?.State ?? FrontendWindowsTweakState.Unknown));
-        StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return result with
-        {
-            Snapshot = result.Snapshot with { WarningAcknowledgedLocalDate = _settings.WindowsTweaksWarningAcknowledgedLocalDate }
-        };
+            ("State", result.UpdatedTweak.State));
+        return result;
     }
 
     public Task<bool> AcknowledgeWindowsTweaksWarningAsync(DateOnly localDate, CancellationToken cancellationToken = default)

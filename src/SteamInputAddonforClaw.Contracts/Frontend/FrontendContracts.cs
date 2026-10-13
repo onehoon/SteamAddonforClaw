@@ -512,7 +512,10 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendWindowsTweaksSnapshot.Unavailable);
     Task<FrontendWindowsTweakMutationResult> SetWindowsTweakAsync(
         FrontendWindowsTweakId id, bool enabled, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendWindowsTweakMutationResult(false, "Windows Tweaks are unavailable.", FrontendWindowsTweaksSnapshot.Unavailable));
+        Task.FromResult(new FrontendWindowsTweakMutationResult(
+            false,
+            "Windows Tweaks are unavailable.",
+            new FrontendWindowsTweakSnapshot(id, FrontendWindowsTweakState.Unknown, null, null, false, "Windows Tweaks are unavailable.")));
     Task<bool> AcknowledgeWindowsTweaksWarningAsync(DateOnly localDate, CancellationToken cancellationToken = default) =>
         Task.FromResult(false);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);

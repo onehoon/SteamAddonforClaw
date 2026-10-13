@@ -70,6 +70,32 @@ public sealed class WindowsTweakRegistryTests
         }
     }
 
+    [Fact]
+    public void Deleting_two_startup_delay_values_preserves_other_serialize_values_and_the_key()
+    {
+        var path = CreateTestPath();
+        try
+        {
+            WindowsTweakRegistry.Write(Registry.CurrentUser, path, "StartupDelayInMSec", 0, RegistryValueKind.DWord);
+            WindowsTweakRegistry.Write(Registry.CurrentUser, path, "WaitForIdleState", 0, RegistryValueKind.DWord);
+            WindowsTweakRegistry.Write(Registry.CurrentUser, path, "UnrelatedSibling", 23, RegistryValueKind.DWord);
+
+            WindowsTweakRegistry.DeleteValue(Registry.CurrentUser, path, "StartupDelayInMSec");
+            WindowsTweakRegistry.DeleteValue(Registry.CurrentUser, path, "WaitForIdleState");
+
+            Assert.True(WindowsTweakRegistry.Read(Registry.CurrentUser, path, "StartupDelayInMSec").KeyExists);
+            Assert.False(WindowsTweakRegistry.Read(Registry.CurrentUser, path, "StartupDelayInMSec").ValueExists);
+            Assert.False(WindowsTweakRegistry.Read(Registry.CurrentUser, path, "WaitForIdleState").ValueExists);
+            var sibling = WindowsTweakRegistry.Read(Registry.CurrentUser, path, "UnrelatedSibling");
+            Assert.True(sibling.ValueExists);
+            Assert.Equal(23, sibling.Value);
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(path, throwOnMissingSubKey: false);
+        }
+    }
+
     private static string CreateTestPath() =>
         $@"Software\SteamInputAddonforClaw.Tests\WindowsTweakRegistry\{Guid.NewGuid():N}";
 }
