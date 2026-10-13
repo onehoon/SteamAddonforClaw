@@ -1,4 +1,6 @@
 using System.Xml.Linq;
+using Microsoft.UI.Xaml;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Views;
 using SteamInputAddonforClaw.Windowing;
 using Xunit;
@@ -39,10 +41,32 @@ public sealed class WindowsTweaksUiContractTests
         }, names);
         foreach (var card in cards)
         {
+            Assert.False(string.IsNullOrWhiteSpace((string?)card.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))));
             var toggle = Assert.Single(card.Descendants(), element => element.Name.LocalName == "ToggleSwitch");
             Assert.Equal("False", (string?)toggle.Attribute("IsEnabled"));
             Assert.Null(toggle.Attribute("IsOn"));
         }
+    }
+
+    [Fact]
+    public void Omitted_model_specific_tweak_hides_the_entire_card()
+    {
+        var modelSpecific = new FrontendWindowsTweakDefinition(
+            FrontendWindowsTweakId.VirtualMachinePlatform,
+            "Synthetic model-specific tweak",
+            "Test only",
+            FrontendWindowsTweakApplicability.A2vmOnly);
+        // Runtime applicability filtering omits this A2VM-only row on non-A2VM devices.
+        var runtimeFilteredSnapshot = new FrontendWindowsTweaksSnapshot(
+            Array.Empty<FrontendWindowsTweakSnapshot>());
+
+        Assert.Equal(
+            Visibility.Collapsed,
+            WindowsTweaksPage.GetCardVisibility(runtimeFilteredSnapshot, modelSpecific.Id));
+
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml.cs"));
+        Assert.Contains("card.Visibility = GetCardVisibility(snapshot, definition.Id)", page, StringComparison.Ordinal);
     }
 
     [Fact]

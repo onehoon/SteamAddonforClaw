@@ -47,6 +47,9 @@ public sealed partial class WindowsTweaksPage : UserControl
     internal static bool ShouldShowWarning(DateOnly localDate, DateOnly? persistedDate, DateOnly? acceptedThisProcess) =>
         persistedDate != localDate && acceptedThisProcess != localDate;
 
+    internal static Visibility GetCardVisibility(FrontendWindowsTweaksSnapshot snapshot, FrontendWindowsTweakId id) =>
+        snapshot.Tweaks.Any(candidate => candidate.Id == id) ? Visibility.Visible : Visibility.Collapsed;
+
     private async Task ActivateCoreAsync()
     {
         try
@@ -153,9 +156,11 @@ public sealed partial class WindowsTweaksPage : UserControl
         {
             foreach (var definition in FrontendWindowsTweakCatalog.All)
             {
-                var row = snapshot.Tweaks.SingleOrDefault(candidate => candidate.Id == definition.Id)
-                    ?? new FrontendWindowsTweakSnapshot(definition.Id, FrontendWindowsTweakState.Unknown, null, null, false, "Windows state could not be verified.");
-                var (toggle, stateText) = GetControls(definition.Id);
+                var (card, toggle, stateText) = GetControls(definition.Id);
+                var row = snapshot.Tweaks.SingleOrDefault(candidate => candidate.Id == definition.Id);
+                card.Visibility = GetCardVisibility(snapshot, definition.Id);
+                if (row is null)
+                    continue;
                 toggle.Visibility = row.ConfiguredEnabled.HasValue ? Visibility.Visible : Visibility.Collapsed;
                 if (row.ConfiguredEnabled is { } configured)
                     toggle.IsOn = configured;
@@ -241,13 +246,13 @@ public sealed partial class WindowsTweaksPage : UserControl
         OperationMessageText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private (ToggleSwitch Toggle, TextBlock State) GetControls(FrontendWindowsTweakId id) => id switch
+    private (SettingsCard Card, ToggleSwitch Toggle, TextBlock State) GetControls(FrontendWindowsTweakId id) => id switch
     {
-        FrontendWindowsTweakId.MemoryIntegrity => (MemoryIntegritySwitch, MemoryIntegrityState),
-        FrontendWindowsTweakId.VirtualMachinePlatform => (VirtualMachinePlatformSwitch, VirtualMachinePlatformState),
-        FrontendWindowsTweakId.InstantContextMenus => (InstantContextMenusSwitch, InstantContextMenusState),
-        FrontendWindowsTweakId.ClassicContextMenu => (ClassicContextMenuSwitch, ClassicContextMenuState),
-        FrontendWindowsTweakId.DisablePasswordOnWake => (DisablePasswordOnWakeSwitch, DisablePasswordOnWakeState),
+        FrontendWindowsTweakId.MemoryIntegrity => (MemoryIntegrityCard, MemoryIntegritySwitch, MemoryIntegrityState),
+        FrontendWindowsTweakId.VirtualMachinePlatform => (VirtualMachinePlatformCard, VirtualMachinePlatformSwitch, VirtualMachinePlatformState),
+        FrontendWindowsTweakId.InstantContextMenus => (InstantContextMenusCard, InstantContextMenusSwitch, InstantContextMenusState),
+        FrontendWindowsTweakId.ClassicContextMenu => (ClassicContextMenuCard, ClassicContextMenuSwitch, ClassicContextMenuState),
+        FrontendWindowsTweakId.DisablePasswordOnWake => (DisablePasswordOnWakeCard, DisablePasswordOnWakeSwitch, DisablePasswordOnWakeState),
         _ => throw new ArgumentOutOfRangeException(nameof(id)),
     };
 

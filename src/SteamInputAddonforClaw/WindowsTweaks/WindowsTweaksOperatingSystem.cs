@@ -22,7 +22,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     private const uint SpiSetMenuAnimation = 0x1003;
     private const uint SpifUpdateIniFile = 0x0001;
     private const uint SpifSendChange = 0x0002;
-    private static readonly Guid SleepSubgroup = new("238c9fa8-0aad-41ed-83f4-97be242c8f20");
+    private static readonly Guid NoSubgroup = new("fea3413e-7e05-4911-9a71-700331f1c294");
     private static readonly Guid ConsoleLockSetting = new("0e796bdb-100d-47d6-a2d5-f7d2daa51f51");
 
     public WindowsTweakObservation Capture(FrontendWindowsTweakId id, CancellationToken cancellationToken)
@@ -73,10 +73,11 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     private static WindowsTweakObservation CaptureMemoryIntegrity(CancellationToken cancellationToken)
     {
         var deviceGuard = ReadDeviceGuard(cancellationToken);
-        var configured = deviceGuard.ConfiguredServices.Contains(2);
+        using var hvci = Registry.LocalMachine.OpenSubKey(HvciRegistryPath, writable: false);
+        var configured = ResolveMemoryIntegrityConfiguredState(
+            ReadDword(hvci, "Enabled"), deviceGuard.ConfiguredServices.Contains(2));
         var running = deviceGuard.RunningServices.Contains(2);
-        var managed = IsMemoryIntegrityPolicyManaged()
-            || (deviceGuard.CodeIntegrityPolicyEnforcementStatus != 0 && (configured || running));
+        var managed = IsMemoryIntegrityPolicyManaged();
         var detail = managed
             ? "Managed or locked by Windows policy or firmware."
             : configured && !running
@@ -84,6 +85,14 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
                 : null;
         return new(true, managed, configured, running, detail);
     }
+
+    internal static bool ResolveMemoryIntegrityConfiguredState(int? registryEnabled, bool wmiConfigured) =>
+        registryEnabled switch
+        {
+            0 => false,
+            1 => true,
+            _ => wmiConfigured,
+        };
 
     private static void SetMemoryIntegrity(bool enabled, CancellationToken cancellationToken)
     {
@@ -138,8 +147,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         if (!current.Supported || current.Managed || current.ConfiguredEnabled is null)
             throw new InvalidOperationException(current.Detail ?? "Virtual Machine Platform cannot currently be changed.");
 
-        var verb = enabled ? "/Enable-Feature" : "/Disable-Feature";
-        var result = RunDism(["/Online", verb, $"/FeatureName:{DismFeatureName}", "/NoRestart", "/LimitAccess", "/English"], cancellationToken);
+        var result = RunDism(BuildDismFeatureMutationArguments(enabled), cancellationToken);
         if (result.ExitCode != 0)
         {
             var code = unchecked((uint)result.ExitCode);
@@ -149,6 +157,21 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
                 throw new UnauthorizedAccessException("Windows servicing policy prevented this feature change.");
             throw new Win32Exception(result.ExitCode, "DISM did not accept the Virtual Machine Platform request.");
         }
+    }
+
+    internal static IReadOnlyList<string> BuildDismFeatureMutationArguments(bool enabled)
+    {
+        var arguments = new List<string>
+        {
+            "/Online",
+            enabled ? "/Enable-Feature" : "/Disable-Feature",
+            $"/FeatureName:{DismFeatureName}",
+            "/NoRestart",
+            "/English",
+        };
+        if (enabled)
+            arguments.Add("/LimitAccess");
+        return arguments;
     }
 
     private static WindowsTweakObservation CaptureInstantContextMenus()
@@ -234,10 +257,10 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         try
         {
             var value = enabled ? 0u : 1u;
-            var subgroup = SleepSubgroup;
+            var subgroup = NoSubgroup;
             var setting = ConsoleLockSetting;
             CheckPowerResult(PowerWriteACValueIndex(IntPtr.Zero, ref scheme, ref subgroup, ref setting, value));
-            subgroup = SleepSubgroup;
+            subgroup = NoSubgroup;
             setting = ConsoleLockSetting;
             CheckPowerResult(PowerWriteDCValueIndex(IntPtr.Zero, ref scheme, ref subgroup, ref setting, value));
             CheckPowerResult(PowerSetActiveScheme(IntPtr.Zero, ref scheme));
@@ -250,7 +273,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
 
     private static int ReadPowerValue(Guid scheme, bool ac)
     {
-        var subgroup = SleepSubgroup;
+        var subgroup = NoSubgroup;
         var setting = ConsoleLockSetting;
         uint value;
         var result = ac
@@ -290,8 +313,8 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
 
     private static bool IsPasswordOnWakePolicyManaged()
     {
-        var settingPath = $@"SOFTWARE\Policies\Microsoft\Power\PowerSettings\{SleepSubgroup:B}\{ConsoleLockSetting:B}";
-        var mdmPath = $@"SOFTWARE\Microsoft\PolicyManager\current\device\Power\PowerSettings\{SleepSubgroup:B}\{ConsoleLockSetting:B}";
+        var settingPath = $@"SOFTWARE\Policies\Microsoft\Power\PowerSettings\{ConsoleLockSetting:B}";
+        var mdmPath = $@"SOFTWARE\Microsoft\PolicyManager\current\device\Power\PowerSettings\{ConsoleLockSetting:B}";
         const string userPolicyPath = @"Software\Policies\Microsoft\Windows\System\Power";
         return HasPolicyValues(Registry.LocalMachine, settingPath, ["ACSettingIndex", "DCSettingIndex"])
             || HasPolicyValues(Registry.LocalMachine, mdmPath, ["ACSettingIndex", "DCSettingIndex"])
@@ -315,7 +338,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     {
         cancellationToken.ThrowIfCancellationRequested();
         var scope = new ManagementScope(@"\\.\root\Microsoft\Windows\DeviceGuard");
-        var query = new ObjectQuery("SELECT SecurityServicesConfigured, SecurityServicesRunning, CodeIntegrityPolicyEnforcementStatus FROM Win32_DeviceGuard");
+        var query = new ObjectQuery("SELECT SecurityServicesConfigured, SecurityServicesRunning FROM Win32_DeviceGuard");
         var options = new System.Management.EnumerationOptions { Timeout = TimeSpan.FromSeconds(10), ReturnImmediately = false };
         using var searcher = new ManagementObjectSearcher(
             scope, query, options);
@@ -326,8 +349,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
             {
                 var configured = ReadServiceIds(item["SecurityServicesConfigured"]);
                 var running = ReadServiceIds(item["SecurityServicesRunning"]);
-                var ciStatus = Convert.ToInt32(item["CodeIntegrityPolicyEnforcementStatus"], CultureInfo.InvariantCulture);
-                return new(configured, running, ciStatus);
+                return new(configured, running);
             }
         }
         throw new InvalidOperationException("Win32_DeviceGuard returned no instance.");
@@ -443,6 +465,6 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr LocalFree(IntPtr memory);
 
-    private sealed record DeviceGuardSnapshot(int[] ConfiguredServices, int[] RunningServices, int CodeIntegrityPolicyEnforcementStatus);
+    private sealed record DeviceGuardSnapshot(int[] ConfiguredServices, int[] RunningServices);
     private sealed record DismResult(int ExitCode, string Output);
 }

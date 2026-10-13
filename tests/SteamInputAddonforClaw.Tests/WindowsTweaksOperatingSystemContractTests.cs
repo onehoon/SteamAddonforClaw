@@ -1,5 +1,7 @@
 using Xunit;
 using System.Text.RegularExpressions;
+using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.WindowsTweaks;
 
 namespace SteamInputAddonforClaw.Tests;
 
@@ -13,12 +15,29 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         var capture = Method("CaptureMemoryIntegrity");
         var mutation = Method("SetMemoryIntegrity");
 
+        Assert.Contains("ReadDword(hvci, \"Enabled\")", capture, StringComparison.Ordinal);
         Assert.Contains("deviceGuard.ConfiguredServices.Contains(2)", capture, StringComparison.Ordinal);
         Assert.Contains("deviceGuard.RunningServices.Contains(2)", capture, StringComparison.Ordinal);
+        Assert.Contains("var managed = IsMemoryIntegrityPolicyManaged()", capture, StringComparison.Ordinal);
+        Assert.DoesNotContain("CodeIntegrityPolicyEnforcementStatus", capture, StringComparison.Ordinal);
         Assert.Contains("key.SetValue(\"Enabled\", enabled ? 1 : 0", mutation, StringComparison.Ordinal);
         Assert.Contains("key.SetValue(\"Locked\", 0", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("SetValue(\"Locked\", 1", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("Mandatory", mutation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HVCI_registry_configuration_wins_over_stale_WMI_configuration()
+    {
+        var configured = WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
+            registryEnabled: 0, wmiConfigured: true);
+        var snapshot = WindowsTweaksStateMapper.Map(
+            FrontendWindowsTweakId.MemoryIntegrity,
+            new(true, false, configured, EffectiveEnabled: true));
+
+        Assert.False(snapshot.ConfiguredEnabled);
+        Assert.Equal(FrontendWindowsTweakState.DisablePendingRestart, snapshot.State);
+        Assert.True(snapshot.CanChange);
     }
 
     [Fact]
@@ -27,9 +46,18 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         var mutation = Method("SetVirtualMachinePlatform");
         Assert.Contains("private const string DismFeatureName = \"VirtualMachinePlatform\"", Source, StringComparison.Ordinal);
         Assert.Contains("/NoRestart", mutation, StringComparison.Ordinal);
-        Assert.Contains("/LimitAccess", mutation, StringComparison.Ordinal);
-        Assert.Contains("$\"/FeatureName:{DismFeatureName}\"", mutation, StringComparison.Ordinal);
-        Assert.DoesNotContain("/All", mutation, StringComparison.Ordinal);
+        var enableArguments = WindowsTweaksOperatingSystem.BuildDismFeatureMutationArguments(enabled: true);
+        var disableArguments = WindowsTweaksOperatingSystem.BuildDismFeatureMutationArguments(enabled: false);
+        Assert.Contains("/NoRestart", enableArguments);
+        Assert.Contains("/NoRestart", disableArguments);
+        Assert.Contains("/FeatureName:VirtualMachinePlatform", enableArguments);
+        Assert.DoesNotContain("/All", enableArguments);
+        Assert.DoesNotContain("/All", disableArguments);
+        Assert.Contains("/LimitAccess", enableArguments);
+        Assert.DoesNotContain("/LimitAccess", disableArguments);
+        Assert.Contains("/Disable-Feature", disableArguments);
+        Assert.Contains("/Enable-Feature", enableArguments);
+        Assert.Contains("BuildDismFeatureMutationArguments(enabled)", mutation, StringComparison.Ordinal);
         Assert.Contains("\"Enable Pending\"", Method("CaptureVirtualMachinePlatform"), StringComparison.Ordinal);
         Assert.Contains("\"Disable Pending\"", Method("CaptureVirtualMachinePlatform"), StringComparison.Ordinal);
     }
@@ -62,6 +90,11 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         var capture = Method("CapturePasswordOnWake");
         var mutation = Method("SetPasswordOnWake");
         Assert.Contains("0e796bdb-100d-47d6-a2d5-f7d2daa51f51", Source, StringComparison.Ordinal);
+        Assert.Contains("fea3413e-7e05-4911-9a71-700331f1c294", Source, StringComparison.Ordinal);
+        Assert.Contains("ReadPowerValue", capture, StringComparison.Ordinal);
+        Assert.Contains("NoSubgroup", mutation, StringComparison.Ordinal);
+        Assert.Contains("NoSubgroup", Method("ReadPowerValue"), StringComparison.Ordinal);
+        Assert.DoesNotContain("SleepSubgroup", Source, StringComparison.Ordinal);
         Assert.Contains("ReadPowerValue(scheme, ac: true)", capture, StringComparison.Ordinal);
         Assert.Contains("ReadPowerValue(scheme, ac: false)", capture, StringComparison.Ordinal);
         Assert.Contains("if (ac != dc)", capture, StringComparison.Ordinal);
@@ -70,6 +103,7 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         Assert.Contains("PowerWriteDCValueIndex", mutation, StringComparison.Ordinal);
         Assert.Contains("PowerSetActiveScheme", mutation, StringComparison.Ordinal);
         var policy = Method("IsPasswordOnWakePolicyManaged");
+        Assert.Contains("PowerSettings\\{ConsoleLockSetting:B}", policy, StringComparison.Ordinal);
         Assert.Contains("Software\\Policies\\Microsoft\\Windows\\System\\Power", policy, StringComparison.Ordinal);
         Assert.Contains("PromptPasswordOnResume", policy, StringComparison.Ordinal);
     }
