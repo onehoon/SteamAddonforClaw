@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using Xunit;
 using System.Text.RegularExpressions;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -15,22 +16,30 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         var capture = Method("CaptureMemoryIntegrity");
         var mutation = Method("SetMemoryIntegrity");
 
-        Assert.Contains("ReadDword(hvci, \"Enabled\")", capture, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Read(Registry.LocalMachine, HvciRegistryPath, \"Enabled\")", capture, StringComparison.Ordinal);
         Assert.Contains("deviceGuard.ConfiguredServices.Contains(2)", capture, StringComparison.Ordinal);
         Assert.Contains("deviceGuard.RunningServices.Contains(2)", capture, StringComparison.Ordinal);
         Assert.Contains("var managed = IsMemoryIntegrityPolicyManaged()", capture, StringComparison.Ordinal);
         Assert.DoesNotContain("CodeIntegrityPolicyEnforcementStatus", capture, StringComparison.Ordinal);
-        Assert.Contains("key.SetValue(\"Enabled\", enabled ? 1 : 0", mutation, StringComparison.Ordinal);
-        Assert.Contains("key.SetValue(\"Locked\", 0", mutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, \"Enabled\"", mutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, \"Locked\"", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("SetValue(\"Locked\", 1", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("Mandatory", mutation, StringComparison.Ordinal);
+
+        var policy = Method("IsMemoryIntegrityPolicyManaged");
+        Assert.Contains("ReadDword(Registry.LocalMachine, DeviceGuardRegistryPath, \"Locked\") == 1", policy, StringComparison.Ordinal);
+        Assert.Contains("ReadDword(Registry.LocalMachine, HvciRegistryPath, \"Locked\") == 1", policy, StringComparison.Ordinal);
+        var readDword = Method("ReadDword");
+        Assert.Contains("WindowsTweakRegistry.Read(root, path, name)", readDword, StringComparison.Ordinal);
+        Assert.Contains("read.Kind != RegistryValueKind.DWord", readDword, StringComparison.Ordinal);
+        Assert.Contains("throw new InvalidOperationException", readDword, StringComparison.Ordinal);
     }
 
     [Fact]
     public void HVCI_registry_configuration_wins_over_stale_WMI_configuration()
     {
         var configured = WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
-            registryEnabled: 0, wmiConfigured: true);
+            new(true, true, 0, RegistryValueKind.DWord), wmiConfigured: true);
         var snapshot = WindowsTweaksStateMapper.Map(
             FrontendWindowsTweakId.MemoryIntegrity,
             new(true, false, configured, EffectiveEnabled: true));
@@ -38,6 +47,33 @@ public sealed class WindowsTweaksOperatingSystemContractTests
         Assert.False(snapshot.ConfiguredEnabled);
         Assert.Equal(FrontendWindowsTweakState.DisablePendingRestart, snapshot.State);
         Assert.True(snapshot.CanChange);
+    }
+
+    [Fact]
+    public void HVCI_configuration_requires_an_exact_dword_and_only_uses_WMI_when_the_value_is_absent()
+    {
+        Assert.False(WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
+            new(true, true, 0, RegistryValueKind.DWord), wmiConfigured: true));
+        Assert.True(WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
+            new(true, true, 1, RegistryValueKind.DWord), wmiConfigured: false));
+        Assert.Null(WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
+            new(true, true, 2, RegistryValueKind.DWord), wmiConfigured: true));
+        Assert.Null(WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
+            new(true, true, "0", RegistryValueKind.String), wmiConfigured: true));
+        Assert.True(WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
+            new(true, false, null, null), wmiConfigured: true));
+        Assert.False(WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
+            new(false, false, null, null), wmiConfigured: false));
+
+        var customValue = WindowsTweaksStateMapper.Map(
+            FrontendWindowsTweakId.MemoryIntegrity,
+            new(true, false,
+                WindowsTweaksOperatingSystem.ResolveMemoryIntegrityConfiguredState(
+                    new(true, true, 2, RegistryValueKind.DWord), wmiConfigured: true),
+                EffectiveEnabled: null,
+                Detail: "Memory Integrity has an unrecognized registry configuration value."));
+        Assert.Equal(FrontendWindowsTweakState.Unknown, customValue.State);
+        Assert.False(customValue.CanChange);
     }
 
     [Fact]
@@ -78,10 +114,15 @@ public sealed class WindowsTweaksOperatingSystemContractTests
     {
         var mutation = Method("SetClassicContextMenu");
         Assert.Contains("Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32", Source, StringComparison.Ordinal);
-        Assert.Contains("key.SetValue(string.Empty, string.Empty, RegistryValueKind.String)", mutation, StringComparison.Ordinal);
+        Assert.Contains("WindowsTweakRegistry.Write(Registry.CurrentUser, ClassicContextMenuPath, string.Empty, string.Empty, RegistryValueKind.String)", mutation, StringComparison.Ordinal);
         Assert.Contains("DeleteSubKey(\"InprocServer32\", throwOnMissingSubKey: false)", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteSubKeyTree", mutation, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteSubKey(\"{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}", mutation, StringComparison.Ordinal);
+        var capture = Method("CaptureClassicContextMenu");
+        Assert.Contains("WindowsTweakRegistry.Read(Registry.CurrentUser, ClassicContextMenuPath, string.Empty)", capture, StringComparison.Ordinal);
+        Assert.Contains("if (!registration.ValueExists)", capture, StringComparison.Ordinal);
+        Assert.Contains("registration.Kind != RegistryValueKind.String", capture, StringComparison.Ordinal);
+        Assert.Contains("value.Length != 0", capture, StringComparison.Ordinal);
     }
 
     [Fact]

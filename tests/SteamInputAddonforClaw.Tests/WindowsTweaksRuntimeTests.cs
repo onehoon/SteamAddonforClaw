@@ -77,7 +77,7 @@ public sealed class WindowsTweaksRuntimeTests
     }
 
     [Fact]
-    public async Task Capture_isolates_a_single_setting_read_failure()
+    public async Task Capture_maps_a_setting_read_failure_to_unavailable_without_affecting_other_settings()
     {
         var platform = new FakePlatform
         {
@@ -90,8 +90,9 @@ public sealed class WindowsTweaksRuntimeTests
         var snapshot = await runtime.CaptureAsync();
 
         Assert.Equal(5, snapshot.Tweaks.Count);
-        Assert.Equal(FrontendWindowsTweakState.Unknown,
-            Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.VirtualMachinePlatform).State);
+        var failedRow = Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.VirtualMachinePlatform);
+        Assert.Equal(FrontendWindowsTweakState.Unknown, failedRow.State);
+        Assert.False(failedRow.CanChange);
         Assert.Equal(FrontendWindowsTweakState.Disabled,
             Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.InstantContextMenus).State);
     }

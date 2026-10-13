@@ -73,26 +73,38 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     private static WindowsTweakObservation CaptureMemoryIntegrity(CancellationToken cancellationToken)
     {
         var deviceGuard = ReadDeviceGuard(cancellationToken);
-        using var hvci = Registry.LocalMachine.OpenSubKey(HvciRegistryPath, writable: false);
+        var enabledValue = WindowsTweakRegistry.Read(Registry.LocalMachine, HvciRegistryPath, "Enabled");
         var configured = ResolveMemoryIntegrityConfiguredState(
-            ReadDword(hvci, "Enabled"), deviceGuard.ConfiguredServices.Contains(2));
+            enabledValue, deviceGuard.ConfiguredServices.Contains(2));
         var running = deviceGuard.RunningServices.Contains(2);
         var managed = IsMemoryIntegrityPolicyManaged();
+        var invalidConfiguration = enabledValue.ValueExists && configured is null;
         var detail = managed
             ? "Managed or locked by Windows policy or firmware."
-            : configured && !running
-                ? "Configured, but Windows does not report it running; a restart or system requirement may be pending."
-                : null;
-        return new(true, managed, configured, running, detail);
+            : invalidConfiguration
+                ? "Memory Integrity has an unrecognized registry configuration value."
+                : configured == true && !running
+                    ? "Configured, but Windows does not report it running; a restart or system requirement may be pending."
+                    : null;
+        return new(true, managed, configured, invalidConfiguration ? null : running, detail);
     }
 
-    internal static bool ResolveMemoryIntegrityConfiguredState(int? registryEnabled, bool wmiConfigured) =>
-        registryEnabled switch
+    internal static bool? ResolveMemoryIntegrityConfiguredState(
+        WindowsTweakRegistryValueRead registryEnabled,
+        bool wmiConfigured)
+    {
+        if (!registryEnabled.ValueExists)
+            return wmiConfigured;
+        if (registryEnabled.Kind != RegistryValueKind.DWord || registryEnabled.Value is not int value)
+            return null;
+
+        return value switch
         {
             0 => false,
             1 => true,
-            _ => wmiConfigured,
+            _ => null,
         };
+    }
 
     private static void SetMemoryIntegrity(bool enabled, CancellationToken cancellationToken)
     {
@@ -102,15 +114,13 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         if (current.ConfiguredEnabled is null)
             throw new InvalidOperationException("Windows could not determine Memory Integrity state.");
 
-        using var key = Registry.LocalMachine.CreateSubKey(HvciRegistryPath, writable: true)
-            ?? throw new UnauthorizedAccessException("The Memory Integrity configuration key is unavailable.");
-        var locked = ReadDword(key, "Locked");
+        var locked = ReadDword(Registry.LocalMachine, HvciRegistryPath, "Locked");
         if (locked == 1)
             throw new UnauthorizedAccessException("Memory Integrity is UEFI locked.");
 
-        key.SetValue("Enabled", enabled ? 1 : 0, RegistryValueKind.DWord);
+        WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, "Enabled", enabled ? 1 : 0, RegistryValueKind.DWord);
         if (enabled && locked is null)
-            key.SetValue("Locked", 0, RegistryValueKind.DWord);
+            WindowsTweakRegistry.Write(Registry.LocalMachine, HvciRegistryPath, "Locked", 0, RegistryValueKind.DWord);
     }
 
     private static WindowsTweakObservation CaptureVirtualMachinePlatform(CancellationToken cancellationToken)
@@ -192,13 +202,14 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
 
     private static WindowsTweakObservation CaptureClassicContextMenu()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(ClassicContextMenuPath, writable: false);
+        var registration = WindowsTweakRegistry.Read(Registry.CurrentUser, ClassicContextMenuPath, string.Empty);
         var configured = false;
-        if (key is not null)
+        if (registration.KeyExists)
         {
-            if (!key.GetValueNames().Contains(string.Empty, StringComparer.Ordinal))
+            if (!registration.ValueExists)
                 return new(true, true, null, null, "The exact shell registration exists but is not owned by this tweak.");
-            if (key.GetValue(string.Empty, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not string value
+            if (registration.Kind != RegistryValueKind.String
+                || registration.Value is not string value
                 || value.Length != 0)
                 return new(true, true, null, null, "The exact shell registration has a different value and was left unchanged.");
             configured = true;
@@ -214,9 +225,7 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     {
         if (enabled)
         {
-            using var key = Registry.CurrentUser.CreateSubKey(ClassicContextMenuPath, writable: true)
-                ?? throw new UnauthorizedAccessException("The per-user context-menu key could not be created.");
-            key.SetValue(string.Empty, string.Empty, RegistryValueKind.String);
+            WindowsTweakRegistry.Write(Registry.CurrentUser, ClassicContextMenuPath, string.Empty, string.Empty, RegistryValueKind.String);
             return;
         }
 
@@ -298,11 +307,9 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
 
     private static bool IsMemoryIntegrityPolicyManaged()
     {
-        using var deviceGuard = Registry.LocalMachine.OpenSubKey(DeviceGuardRegistryPath, writable: false);
-        if (ReadDword(deviceGuard, "Locked") == 1)
+        if (ReadDword(Registry.LocalMachine, DeviceGuardRegistryPath, "Locked") == 1)
             return true;
-        using var hvci = Registry.LocalMachine.OpenSubKey(HvciRegistryPath, writable: false);
-        if (ReadDword(hvci, "Locked") == 1)
+        if (ReadDword(Registry.LocalMachine, HvciRegistryPath, "Locked") == 1)
             return true;
 
         return HasPolicyValues(Registry.LocalMachine, DeviceGuardPolicyPath,
@@ -327,10 +334,13 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         return key?.GetValueNames().Any(name => names.Contains(name, StringComparer.OrdinalIgnoreCase)) == true;
     }
 
-    private static int? ReadDword(RegistryKey? root, string name)
+    private static int? ReadDword(RegistryKey root, string path, string name)
     {
-        if (root?.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not int value)
+        var read = WindowsTweakRegistry.Read(root, path, name);
+        if (!read.ValueExists)
             return null;
+        if (read.Kind != RegistryValueKind.DWord || read.Value is not int value)
+            throw new InvalidOperationException("Windows returned an invalid DWORD registry value for a Windows tweak.");
         return value;
     }
 
