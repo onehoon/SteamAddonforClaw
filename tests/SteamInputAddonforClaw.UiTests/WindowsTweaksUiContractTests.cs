@@ -49,6 +49,37 @@ public sealed class WindowsTweaksUiContractTests
     }
 
     [Fact]
+    public void Page_groups_tweaks_under_the_approved_section_headers()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml"));
+        var pageTitle = xaml.Descendants().Single(element =>
+            element.Name.LocalName == "TextBlock" && (string?)element.Attribute("FontSize") == "24");
+        Assert.Equal("Tweaks", (string?)pageTitle.Attribute("Text"));
+
+        var panel = xaml.Descendants().Single(element =>
+            element.Name.LocalName == "StackPanel"
+            && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "TweaksPanel");
+        var items = panel.Elements().Select(element => element.Name.LocalName switch
+        {
+            "TextBlock" => (string?)element.Attribute("Text"),
+            "SettingsCard" => (string?)element.Attribute("Header"),
+            _ => null,
+        }).ToArray();
+
+        Assert.Equal(new[]
+        {
+            "Gaming Performance",
+            "Memory Integrity",
+            "Virtual Machine Platform",
+            "Registry Tweaks",
+            "Instant Context Menus",
+            "Classic Context Menu",
+            "Disable Password on Wake",
+        }, items);
+    }
+
+    [Fact]
     public void Omitted_model_specific_tweak_hides_the_entire_card()
     {
         var modelSpecific = new FrontendWindowsTweakDefinition(

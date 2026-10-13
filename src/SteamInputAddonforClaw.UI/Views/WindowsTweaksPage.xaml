@@ -5,10 +5,11 @@
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
         <StackPanel Spacing="16">
-            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Windows Tweaks" />
+            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Tweaks" />
             <TextBlock x:Name="EntryPromptText" Text="Review the safety notice to open these controls." TextWrapping="Wrap" Visibility="Collapsed" />
             <TextBlock x:Name="OperationMessageText" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
             <StackPanel x:Name="TweaksPanel" Spacing="12" Visibility="Collapsed">
+                <TextBlock Text="Gaming Performance" FontWeight="SemiBold" Margin="0,8,0,0" />
                 <ctcontrols:SettingsCard x:Name="MemoryIntegrityCard" Header="Memory Integrity" Description="Configure Windows kernel memory protection.">
                     <StackPanel Width="250" Spacing="4">
                         <ToggleSwitch x:Name="MemoryIntegritySwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
@@ -21,6 +22,7 @@
                         <TextBlock x:Name="VirtualMachinePlatformState" Text="State unavailable" TextWrapping="Wrap" />
                     </StackPanel>
                 </ctcontrols:SettingsCard>
+                <TextBlock Text="Registry Tweaks" FontWeight="SemiBold" Margin="0,12,0,0" />
                 <ctcontrols:SettingsCard x:Name="InstantContextMenusCard" Header="Instant Context Menus" Description="Turn off menu animation so menus appear immediately.">
                     <StackPanel Width="250" Spacing="4">
                         <ToggleSwitch x:Name="InstantContextMenusSwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
