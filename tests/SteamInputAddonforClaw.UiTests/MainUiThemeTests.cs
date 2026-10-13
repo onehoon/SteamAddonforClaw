@@ -161,7 +161,7 @@ public sealed class MainUiThemeTests
         var failureStart = handler.IndexOf("if (_mainUiThemePreferenceStore is null", StringComparison.Ordinal);
         var successStart = handler.IndexOf("_mainUiThemePreference = theme", failureStart, StringComparison.Ordinal);
         var failureBranch = handler[failureStart..successStart];
-        var rollback = failureBranch.IndexOf("SettingsContent.SetAppThemeSelection(", StringComparison.Ordinal);
+        var rollback = failureBranch.IndexOf("_settingsContent?.SetAppThemeSelection(", StringComparison.Ordinal);
         var savedSelectionRestore = failureBranch.IndexOf("_mainUiThemePreference", rollback, StringComparison.Ordinal);
         var apply = handler.IndexOf("ApplyMainUiTheme();", StringComparison.Ordinal);
         var successfulSelection = handler.IndexOf("_mainUiThemePreference = theme", StringComparison.Ordinal);

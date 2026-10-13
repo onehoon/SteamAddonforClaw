@@ -108,17 +108,17 @@ public sealed class SteamVirtualControllerUiTests
         var renderEnd = mainWindow.IndexOf("private void RequestPrerequisiteSetupActivation()", renderStart, StringComparison.Ordinal);
         Assert.True(renderStart >= 0 && renderEnd > renderStart);
         var render = mainWindow[renderStart..renderEnd];
-        Assert.Contains("ControllerContent.SetSteamActivity(snapshot.Steam.Active)", render, StringComparison.Ordinal);
-        Assert.Contains("ProfileContent.SetSteamActivity(snapshot.Steam.Active)", render, StringComparison.Ordinal);
+        Assert.Contains("_controllerContent?.SetSteamActivity(snapshot.Steam.Active)", render, StringComparison.Ordinal);
+        Assert.Contains("_profileContent?.SetSteamActivity(snapshot.Steam.Active)", render, StringComparison.Ordinal);
 
         var refreshStart = mainWindow.IndexOf("private async Task RefreshSystemStatusAsync()", StringComparison.Ordinal);
         var refreshEnd = mainWindow.IndexOf("private void RenderSystemStatus(", refreshStart, StringComparison.Ordinal);
         Assert.True(refreshStart >= 0 && refreshEnd > refreshStart);
         var refresh = mainWindow[refreshStart..refreshEnd];
-        Assert.Contains("ControllerContent.SetSteamActivity(null)", refresh, StringComparison.Ordinal);
-        Assert.Contains("ProfileContent.SetSteamActivity(null)", refresh, StringComparison.Ordinal);
-        Assert.Contains("ControllerContent.Activate()", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ProfileContent.Activate()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_controllerContent?.SetSteamActivity(null)", refresh, StringComparison.Ordinal);
+        Assert.Contains("_profileContent?.SetSteamActivity(null)", refresh, StringComparison.Ordinal);
+        Assert.Contains("_controllerContent.Activate()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_profileContent.Activate()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshSystemStatusAsync()", mainWindow, StringComparison.Ordinal);
     }
 

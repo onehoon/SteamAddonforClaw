@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
@@ -10,6 +11,7 @@ public sealed partial class ProfilePage : UserControl
 {
     private IAddonFrontendControl? _frontend;
     private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents, _suppressGpuEvents;
+    private bool _catalogLoaded, _catalogScanInProgress;
     private bool? _steamActive;
     private int _steamVirtualControllerMutationInProgress;
     private IReadOnlyList<FrontendProfileGameCatalogEntry> _catalog = [];
@@ -30,23 +32,65 @@ public sealed partial class ProfilePage : UserControl
 }
     internal event EventHandler? SteamActivityRefreshRequested;
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
-    internal void Activate() { _active = true; if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated; _ = RefreshGamesAsync(); }
+    internal void Activate()
+    {
+        _active = true;
+        if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated;
+
+        if (_catalogLoaded)
+        {
+            ApplyCatalogFilter();
+            if (_selectedGame is { } selected)
+                _ = CaptureSelectedAsync(selected.AppId);
+            return;
+        }
+
+        if (ShouldStartCatalogScan(_catalogLoaded, _catalogScanInProgress))
+            _ = RefreshGamesAsync();
+    }
+
+    internal static bool ShouldStartCatalogScan(bool catalogLoaded, bool scanInProgress) =>
+        !catalogLoaded && !scanInProgress;
+
     internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; CancelGpuMinimumClockDebounce(); }
     private void OnStateInvalidated(object? sender, EventArgs e) { if (_active && _selectedGame is not null) DispatcherQueue.TryEnqueue(() => _ = CaptureSelectedAsync(_selectedGame.AppId)); }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
-        => await RefreshGamesAsync();
+        => await RefreshGamesAsync(explicitRefresh: true);
 
-    private async Task RefreshGamesAsync()
+    private async Task RefreshGamesAsync(bool explicitRefresh = false)
     {
-        if (_frontend is null) return;
+        if (_frontend is null || _catalogScanInProgress) return;
+        _catalogScanInProgress = true;
+        RefreshGamesButton.IsEnabled = false;
+        var trigger = explicitRefresh ? "ManualRefresh" : "FirstTabEntry";
+        var scanTimer = Stopwatch.StartNew();
+        AppLog.Info("Profiles.Catalog", "Steam profile catalog scan requested.", ("Trigger", trigger));
         try
         {
-            var selected = _selectedGame?.AppId; _catalog = await _frontend.ScanProfileGamesAsync(); ApplyCatalogFilter();
+            var selected = _selectedGame?.AppId;
+            var scannedCatalog = await _frontend.ScanProfileGamesAsync();
+            _catalog = scannedCatalog;
+            _catalogLoaded = true;
+            ApplyCatalogFilter();
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
             if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo("No installed Steam games were found."); else ClearError(); } else { await CaptureSelectedAsync(_selectedGame.AppId); }
+            AppLog.Info("Profiles.Catalog", "Steam profile catalog scan completed.",
+                ("GameCount", _catalog.Count),
+                ("DurationMs", scanTimer.Elapsed.TotalMilliseconds));
         }
-        catch (Exception exception) { ShowError("Game catalog could not be refreshed.", exception); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Profiles.Catalog", "Steam profile catalog scan failed.", exception,
+                ("DurationMs", scanTimer.Elapsed.TotalMilliseconds),
+                ("CatalogWasLoaded", _catalogLoaded));
+            ShowError("Game catalog could not be refreshed.", exception);
+        }
+        finally
+        {
+            _catalogScanInProgress = false;
+            RefreshGamesButton.IsEnabled = true;
+        }
     }
 
     private void GameSearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyCatalogFilter();

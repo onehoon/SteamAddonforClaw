@@ -342,7 +342,7 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("private void ControllerPage_Unloaded", page, StringComparison.Ordinal);
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
-        Assert.Contains("else if (wasController) ControllerContent.Deactivate();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("else if (wasController) _controllerContent?.Deactivate();", mainWindow, StringComparison.Ordinal);
 
         var testHandlerStart = page.IndexOf("private async Task TestVibrationMotorAsync", StringComparison.Ordinal);
         var testHandlerEnd = page.IndexOf("internal static bool CanRunVibrationMotorTest", testHandlerStart, StringComparison.Ordinal);

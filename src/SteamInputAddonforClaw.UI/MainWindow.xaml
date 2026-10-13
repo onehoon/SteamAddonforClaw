@@ -7,7 +7,7 @@
     <Window.SystemBackdrop>
         <MicaBackdrop />
     </Window.SystemBackdrop>
-    <Grid x:Name="MainAppRoot" XYFocusKeyboardNavigation="Enabled">
+    <Grid x:Name="MainAppRoot" XYFocusKeyboardNavigation="Enabled" Loaded="MainAppRoot_Loaded">
     <NavigationView
         x:Name="MainNavigationView"
         PaneDisplayMode="Left"
@@ -64,21 +64,14 @@
         <Grid>
             <views:DevicePage x:Name="DeviceContent" />
 
-            <views:ProfilePage x:Name="ProfileContent" Visibility="Collapsed" />
-
-            <views:XboxPage x:Name="XboxContent" Visibility="Collapsed" />
-
-            <views:HowToUsePage x:Name="HowToUseContent" Visibility="Collapsed" />
-
-            <views:ControllerPage x:Name="ControllerContent" Visibility="Collapsed" />
-
-            <views:OverlayPage x:Name="OverlayContent" Visibility="Collapsed" />
-
-            <views:ShortcutPage x:Name="ShortcutContent" Visibility="Collapsed" />
-
-            <views:WindowsTweaksPage x:Name="TweaksContent" Visibility="Collapsed" />
-
-            <views:SettingsPage x:Name="SettingsContent" Visibility="Collapsed" />
+            <ContentControl x:Name="ControllerPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="ProfilePageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="XboxPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="OverlayPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="ShortcutPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="TweaksPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="SettingsPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="HowToUsePageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
 
             <ContentControl
                 x:Name="DeveloperContentHost"
