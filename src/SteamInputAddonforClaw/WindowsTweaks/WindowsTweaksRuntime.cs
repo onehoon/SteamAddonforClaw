@@ -8,7 +8,8 @@ internal sealed record WindowsTweakObservation(
     bool? ConfiguredEnabled,
     bool? EffectiveEnabled,
     string? Detail = null,
-    bool ExplorerRestartPending = false);
+    bool ExplorerRestartPending = false,
+    bool IsMixed = false);
 
 internal interface IWindowsTweaksOperatingSystem
 {
@@ -20,27 +21,32 @@ internal static class WindowsTweaksStateMapper
 {
     internal static FrontendWindowsTweakSnapshot Map(FrontendWindowsTweakId id, WindowsTweakObservation observation)
     {
+        var isMixed = id == FrontendWindowsTweakId.InstantContextMenus && observation.IsMixed;
         var state = !observation.Supported
             ? FrontendWindowsTweakState.Unsupported
             : observation.Managed
                 ? FrontendWindowsTweakState.Managed
-                : observation.ExplorerRestartPending
-                    ? FrontendWindowsTweakState.ExplorerRestartPending
-                    : observation.ConfiguredEnabled is { } configured
-                        && observation.EffectiveEnabled is { } effective
-                        && configured != effective
-                            ? configured
-                                ? FrontendWindowsTweakState.EnablePendingRestart
-                                : FrontendWindowsTweakState.DisablePendingRestart
-                            : observation.EffectiveEnabled is { } current
-                                ? current ? FrontendWindowsTweakState.Enabled : FrontendWindowsTweakState.Disabled
-                                : FrontendWindowsTweakState.Unknown;
+                : isMixed
+                    ? FrontendWindowsTweakState.Mixed
+                    : observation.ExplorerRestartPending
+                        ? FrontendWindowsTweakState.ExplorerRestartPending
+                        : observation.ConfiguredEnabled is { } configured
+                            && observation.EffectiveEnabled is { } effective
+                            && configured != effective
+                                ? configured
+                                    ? FrontendWindowsTweakState.EnablePendingRestart
+                                    : FrontendWindowsTweakState.DisablePendingRestart
+                                : observation.EffectiveEnabled is { } current
+                                    ? current ? FrontendWindowsTweakState.Enabled : FrontendWindowsTweakState.Disabled
+                                    : FrontendWindowsTweakState.Unknown;
 
+        var configuredEnabled = isMixed ? false : observation.ConfiguredEnabled;
+        var effectiveEnabled = isMixed ? null : observation.EffectiveEnabled;
         var canChange = observation.Supported
             && !observation.Managed
             && state != FrontendWindowsTweakState.Unknown
-            && observation.ConfiguredEnabled.HasValue;
-        return new(id, state, observation.ConfiguredEnabled, observation.EffectiveEnabled, canChange, observation.Detail);
+            && configuredEnabled.HasValue;
+        return new(id, state, configuredEnabled, effectiveEnabled, canChange, observation.Detail);
     }
 }
 
@@ -79,7 +85,7 @@ internal sealed class WindowsTweaksRuntime
         }
 
         Exception? writeFailure = null;
-        if (before.ConfiguredEnabled.Value != enabled)
+        if (before.ConfiguredEnabled.Value != enabled || before.State == FrontendWindowsTweakState.Mixed)
         {
             try
             {
@@ -103,7 +109,7 @@ internal sealed class WindowsTweaksRuntime
         var changed = after.Tweaks.SingleOrDefault(row => row.Id == id);
         var readbackVerified = changed is not null
             && changed.ConfiguredEnabled == enabled
-            && changed.State is not (FrontendWindowsTweakState.Unknown or FrontendWindowsTweakState.Unsupported or FrontendWindowsTweakState.Managed);
+            && changed.State is not (FrontendWindowsTweakState.Unknown or FrontendWindowsTweakState.Unsupported or FrontendWindowsTweakState.Managed or FrontendWindowsTweakState.Mixed);
 
         if (writeFailure is null && readbackVerified)
             return new(true, null, after);

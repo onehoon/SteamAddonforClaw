@@ -20,6 +20,8 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
     private const string DismFeatureName = "VirtualMachinePlatform";
     private const uint SpiGetMenuAnimation = 0x1002;
     private const uint SpiSetMenuAnimation = 0x1003;
+    private const uint SpiGetMenuShowDelay = 0x006A;
+    private const uint SpiSetMenuShowDelay = 0x006B;
     private const uint SpifUpdateIniFile = 0x0001;
     private const uint SpifSendChange = 0x0002;
     private static readonly Guid NoSubgroup = new("fea3413e-7e05-4911-9a71-700331f1c294");
@@ -189,14 +191,35 @@ internal sealed class WindowsTweaksOperatingSystem : IWindowsTweaksOperatingSyst
         var animation = 0;
         if (!SystemParametersInfoW(SpiGetMenuAnimation, 0, ref animation, 0))
             throw new Win32Exception(Marshal.GetLastWin32Error());
-        var instant = animation == 0;
-        return new(true, false, instant, instant);
+
+        var delayMs = 0;
+        if (!SystemParametersInfoW(SpiGetMenuShowDelay, 0, ref delayMs, 0))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+
+        return ResolveInstantContextMenus(animation != 0, delayMs);
+    }
+
+    internal static WindowsTweakObservation ResolveInstantContextMenus(bool animationEnabled, int delayMs)
+    {
+        if (!animationEnabled && delayMs == 10)
+            return new(true, false, true, true);
+        if (animationEnabled && delayMs == 400)
+            return new(true, false, false, false);
+
+        return new(true, false, false, null,
+            "Menu animation and submenu delay do not match either Faster Menus setting.",
+            IsMixed: true);
     }
 
     private static void SetInstantContextMenus(bool enabled)
     {
         var menuAnimation = enabled ? 0 : 1;
         if (!SystemParametersInfoW(SpiSetMenuAnimation, 0, ref menuAnimation, SpifUpdateIniFile | SpifSendChange))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+
+        var ignored = 0;
+        uint targetDelay = enabled ? 10u : 400u;
+        if (!SystemParametersInfoW(SpiSetMenuShowDelay, targetDelay, ref ignored, SpifUpdateIniFile | SpifSendChange))
             throw new Win32Exception(Marshal.GetLastWin32Error());
     }
 

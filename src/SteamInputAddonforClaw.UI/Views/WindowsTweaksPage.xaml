@@ -23,7 +23,7 @@
                     </StackPanel>
                 </ctcontrols:SettingsCard>
                 <TextBlock Text="Registry Tweaks" FontWeight="SemiBold" Margin="0,12,0,0" />
-                <ctcontrols:SettingsCard x:Name="InstantContextMenusCard" Header="Instant Context Menus" Description="Turn off menu animation so menus appear immediately.">
+                <ctcontrols:SettingsCard x:Name="InstantContextMenusCard" Header="Faster Menus" Description="Disable menu animation and reduce submenu delay to 10 ms.">
                     <StackPanel Width="250" Spacing="4">
                         <ToggleSwitch x:Name="InstantContextMenusSwitch" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                         <TextBlock x:Name="InstantContextMenusState" Text="State unavailable" TextWrapping="Wrap" />

@@ -232,6 +232,7 @@ public sealed partial class WindowsTweaksPage : UserControl
                 : "Disabled — Explorer restart required",
             FrontendWindowsTweakState.Unsupported => "Unsupported",
             FrontendWindowsTweakState.Managed => "Managed by Windows",
+            FrontendWindowsTweakState.Mixed => "Mixed — turn On to apply both Faster Menus values",
             _ => "State unavailable",
         };
         return string.IsNullOrWhiteSpace(row.Detail)

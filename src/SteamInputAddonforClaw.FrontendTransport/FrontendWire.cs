@@ -183,7 +183,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 77: add the Developer-only experimental virtual-touchpad preference RPC.
 // Version 78: add the Main UI Windows Tweaks snapshot, mutation, and daily-warning acknowledgement RPCs.
 // Version 79: retire the Developer-only PID1902 input cadence diagnostic RPC and result contract.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 79; }
+// Version 80: append the explicit Mixed state to the existing Windows Tweaks snapshot contract.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 80; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
