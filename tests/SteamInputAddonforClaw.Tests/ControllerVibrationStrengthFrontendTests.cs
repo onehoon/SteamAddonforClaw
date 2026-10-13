@@ -225,56 +225,6 @@ public sealed class ControllerVibrationStrengthFrontendTests : IDisposable
         Assert.Equal(0, applyCount);
     }
 
-    [Fact]
-    public async Task Developer_profile_probe_remains_separate_and_requires_disabled_authority()
-    {
-        var (settings, _) = CreateSettings(ControllerVibrationSettings.Default);
-        var devices = new CountingEnumerator([]);
-        var io = new NoOpVibrationProfileIo();
-        var client = CreateClient("msi.claw.cg3em", devices, io);
-        var control = CreateControl(settings, centerM: null, client);
-
-        var result = await control.RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
-
-        Assert.Equal(FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable, result.Outcome);
-        Assert.Equal(0, devices.EnumerationCount);
-        Assert.Equal(0, io.WriteCount);
-    }
-
-    [Fact]
-    public async Task A2vm_probe_status_distinguishes_transport_acceptance_from_verified_effect_and_surfaces_failed_restore()
-    {
-        var device = CreateControlDevice();
-        var identity = MsiClawPhysicalIdentity.From(device);
-        var (settings, _) = CreateSettings(ControllerVibrationSettings.Default);
-        var applyIo = new NoOpVibrationProfileIo();
-        var applyClient = CreateClient("msi.claw.a2vm.8", new CountingEnumerator([device]), applyIo);
-        var applyControl = CreateControl(settings, CenterM(FrontendCenterMStartupState.Disabled), applyClient,
-            ownedIdentity: () => identity);
-
-        var apply = await applyControl.RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
-
-        Assert.Equal(FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded, apply.Outcome);
-        Assert.Contains("0% / 100% motor asymmetry was physically observed on A2VM 8", apply.Status, StringComparison.Ordinal);
-        Assert.Contains("this probe result confirms HID transport only", apply.Status, StringComparison.Ordinal);
-        Assert.DoesNotContain("CG3EM", apply.Status, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, applyIo.WriteCount);
-
-        var restoreIo = new NoOpVibrationProfileIo { WriteResult = false };
-        var restoreClient = CreateClient("msi.claw.a2vm.8", new CountingEnumerator([device]), restoreIo);
-        var restoreControl = CreateControl(settings, CenterM(FrontendCenterMStartupState.Disabled), restoreClient,
-            ownedIdentity: () => identity);
-
-        var restore = await restoreControl.RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty);
-
-        Assert.Equal(FrontendControllerVibrationProfileWriteProbeOutcome.Failed, restore.Outcome);
-        Assert.Contains("Restore failed; the motors may remain at test values", restore.Status, StringComparison.Ordinal);
-        Assert.Equal(1, restoreIo.WriteCount);
-    }
-
     private (StartupSettingsCoordinator Settings, SettingsStore Store) CreateSettings(ControllerVibrationSettings vibration)
     {
         var store = new SettingsStore(Path.Combine(_directory, Guid.NewGuid().ToString("N"), "settings.json"));
@@ -289,38 +239,13 @@ public sealed class ControllerVibrationStrengthFrontendTests : IDisposable
         MsiClawVibrationStrengthClient? client,
         Func<bool>? testAvailable = null,
         Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? test = null,
-        Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? apply = null,
-        Func<MsiClawPhysicalIdentity?>? ownedIdentity = null) =>
+        Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? apply = null) =>
         new(settings, new ThrowingSystemStatusProvider(), null,
             centerMStartup: centerM,
             controllerVibrationStrengthClient: client,
             controllerVibrationTestAvailable: testAvailable,
             testControllerVibrationMotor: test,
-            applyControllerVibrationSettings: apply,
-            controllerVibrationProbeIdentitySource: ownedIdentity);
-
-    private static ControllerDeviceInfo CreateControlDevice()
-    {
-        var root = "USB\\VID_0DB0&PID_1902\\CLAW";
-        var container = new Guid("5d6f297b-0f1a-4d58-b737-0048baec0dd1");
-        return new ControllerDeviceInfo(
-            "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CLAW",
-            container,
-            root,
-            [root],
-            "HID",
-            ["HID\\VID_0DB0&PID_1902"],
-            [],
-            "HIDClass",
-            null,
-            "HidUsb",
-            0x0DB0,
-            0x1902,
-            true,
-            "MSI Claw Control",
-            0xFFF0,
-            0x0040);
-    }
+            applyControllerVibrationSettings: apply);
 
     private static CenterMStartupControl CenterM(FrontendCenterMStartupState state)
     {

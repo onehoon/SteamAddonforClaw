@@ -65,34 +65,6 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
-    public async Task Xbox360_rumble_loop_default_frontend_methods_fail_closed_as_unavailable()
-    {
-        IAddonFrontendControl control = new MinimalFrontendControl();
-
-        var captured = await control.CaptureXbox360RumbleLoopDiagnosticAsync();
-        var started = await control.StartXbox360RumbleLoopDiagnosticAsync();
-        var stopped = await control.StopXbox360RumbleLoopDiagnosticAsync();
-
-        Assert.Equal(FrontendXbox360RumbleLoopSnapshot.Unavailable(), captured);
-        Assert.Equal(FrontendXbox360RumbleLoopSnapshot.Unavailable(), started);
-        Assert.Equal(FrontendXbox360RumbleLoopSnapshot.Unavailable(), stopped);
-    }
-
-    [Fact]
-    public async Task GameInput_system_button_probe_default_frontend_methods_fail_closed_as_unavailable()
-    {
-        IAddonFrontendControl control = new MinimalFrontendControl();
-
-        var captured = await control.CaptureGameInputSystemButtonProbeAsync();
-        var started = await control.StartGameInputSystemButtonProbeAsync();
-        var stopped = await control.StopGameInputSystemButtonProbeAsync();
-
-        Assert.Equal(FrontendGameInputSystemButtonProbeSnapshot.Unavailable(), captured);
-        Assert.Equal(FrontendGameInputSystemButtonProbeSnapshot.Unavailable(), started);
-        Assert.Equal(FrontendGameInputSystemButtonProbeSnapshot.Unavailable(), stopped);
-    }
-
-    [Fact]
     public void Retired_gpu_frequency_probe_is_absent_from_frontend_contract_and_rpc_surface()
     {
         const string retiredSurfaceFragment = "Gpu" + "Frequency" + "Probe";
@@ -115,6 +87,45 @@ public sealed class FrontendContractTests
         Assert.DoesNotContain(Enum.GetNames<FrontendRpcMethod>(), name => name == retiredMethod);
         Assert.DoesNotContain(typeof(IAddonFrontendControl).Assembly.GetTypes(),
             type => type.Name.StartsWith("FrontendPid1902InputCadence", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Retired_developer_diagnostic_contracts_are_absent_while_product_controls_remain()
+    {
+        var retiredMethods = new[]
+        {
+            "RunControllerLedProfileReadProbe",
+            "RunControllerVibrationProfileWriteProbe",
+            "CaptureBatteryChargeLimitTest", "SetBatteryChargeLimitTestEnabled", "SetBatteryChargeLimitTestPercent",
+            "CaptureXbox360RumbleLoopDiagnostic", "StartXbox360RumbleLoopDiagnostic", "StopXbox360RumbleLoopDiagnostic",
+            "CaptureGameInputSystemButtonProbe", "StartGameInputSystemButtonProbe", "StopGameInputSystemButtonProbe",
+        };
+        var controlMethods = typeof(IAddonFrontendControl).GetMethods().Select(method => method.Name).ToHashSet(StringComparer.Ordinal);
+        var rpcNames = Enum.GetNames<FrontendRpcMethod>().ToHashSet(StringComparer.Ordinal);
+        var contractNames = typeof(IAddonFrontendControl).Assembly.GetTypes().Select(type => type.Name).ToHashSet(StringComparer.Ordinal);
+        var wireTypeNames = typeof(FrontendTransportProtocol).Assembly.GetTypes().Select(type => type.Name).ToHashSet(StringComparer.Ordinal);
+
+        Assert.All(retiredMethods, method =>
+        {
+            Assert.DoesNotContain(method, controlMethods);
+            Assert.DoesNotContain(method, rpcNames);
+        });
+        Assert.DoesNotContain(contractNames, name => name.Contains("BatteryChargeLimitTest", StringComparison.Ordinal));
+        Assert.DoesNotContain(contractNames, name => name.Contains("Xbox360RumbleLoop", StringComparison.Ordinal));
+        Assert.DoesNotContain(contractNames, name => name.Contains("GameInputSystemButtonProbe", StringComparison.Ordinal));
+        Assert.DoesNotContain(contractNames, name => name.Contains("ControllerLedProfileReadProbe", StringComparison.Ordinal));
+        Assert.DoesNotContain(contractNames, name => name.Contains("VibrationProfileWriteProbe", StringComparison.Ordinal));
+        Assert.DoesNotContain("SetBatteryChargeLimitTestEnabledRequest", wireTypeNames);
+        Assert.DoesNotContain("SetBatteryChargeLimitTestPercentRequest", wireTypeNames);
+        Assert.DoesNotContain("RunControllerVibrationProfileWriteProbeRequest", wireTypeNames);
+
+        Assert.Contains(nameof(IAddonFrontendControl.CaptureBatteryChargeLimitAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.SetDeviceBatteryChargeLimitEnabledAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.SetControllerLedSettingsAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.CaptureControllerVibrationStrengthAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.SetControllerVibrationStrengthAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.TestControllerVibrationMotorAsync), controlMethods);
+        Assert.Contains(nameof(IAddonFrontendControl.RunDeveloperRumbleRearmAsync), controlMethods);
     }
 
     private sealed class MinimalFrontendControl : IAddonFrontendControl

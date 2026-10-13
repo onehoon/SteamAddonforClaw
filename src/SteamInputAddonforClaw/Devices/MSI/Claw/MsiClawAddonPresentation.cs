@@ -281,11 +281,6 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     Task<SuspendResumeResult> ResumeAfterSuspendAsync(
         IMsiClawPreparedInputSource? source, Func<SteamPresentationSnapshot> captureSnapshot, CancellationToken cancellationToken);
 
-    Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(
-        uint currentSteamAppId, CancellationToken cancellationToken);
-    Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(
-        uint currentSteamAppId, CancellationToken cancellationToken);
-    Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -313,14 +308,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly Func<SteamVirtualControllerPreference> _steamVirtualControllerPreferenceProvider;
     private readonly Func<uint, (bool Enabled, SteamVirtualControllerPreference? Preference)>? _steamGameControllerPreferenceProvider;
     private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
-    private readonly Func<IXbox360RumbleLoopXInput> _rumbleLoopXInputFactory;
-    private readonly Func<IXbox360UsbTraceCapture>? _rumbleLoopUsbTraceCaptureFactory;
     private readonly Func<MsiClawMotionState>? _motionSnapshotProvider;
     private readonly Func<SteamDeckRightPadContact>? _rightPadProvider;
     private readonly Func<CancellationToken, Task<bool>>? _beforePresentationRetire;
-    private readonly TimeSpan _rumbleLoopBurstStepCadence;
-    private readonly TimeSpan _rumbleLoopCycleIdle;
-    private readonly TimeSpan _rumbleLoopTerminalCallbackTimeout;
     private readonly Func<bool>? _physicalRumbleTestAvailabilityProvider;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<bool> _requires250Hz;
@@ -333,9 +323,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// or null when none is armed. Its lifetime is part of the presentation lifecycle serialized by
     /// <see cref="_gate"/>; it is never a second authority.</summary>
     private IDisposable? _armedFeedback;
-    private Xbox360RumbleLoopDiagnostic? _rumbleLoopDiagnostic;
-    private CancellationTokenSource? _rumbleLoopStop;
-    private Task? _rumbleLoopTask;
 
     /// <summary>Full1902 A2: the one output-only synthetic Steam/QuickAccess system-button primitive,
     /// shared with the live SteamDeck publisher via <see cref="_deckPublisherFactory"/> so a front
@@ -370,11 +357,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher>? xbox360PublisherFactory = null,
         Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? deckPublisherFactory = null,
         Func<BackButtonMappingSettings>? backButtonMappingProvider = null,
-        Func<IXbox360RumbleLoopXInput>? rumbleLoopXInputFactory = null,
-        TimeSpan? rumbleLoopBurstStepCadence = null,
-        TimeSpan? rumbleLoopTerminalCallbackTimeout = null,
-        Func<IXbox360UsbTraceCapture>? rumbleLoopUsbTraceCaptureFactory = null,
-        TimeSpan? rumbleLoopCycleIdle = null,
         Func<bool>? physicalRumbleTestAvailabilityProvider = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Func<MsiClawMotionState>? motionSnapshotProvider = null,
@@ -388,12 +370,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
-        _rumbleLoopXInputFactory = rumbleLoopXInputFactory ?? (static () => new WindowsXbox360RumbleLoopXInput());
-        _rumbleLoopUsbTraceCaptureFactory = rumbleLoopUsbTraceCaptureFactory;
-        _rumbleLoopBurstStepCadence = rumbleLoopBurstStepCadence ?? Xbox360RumbleLoopDiagnostic.ProductionBurstStepCadence;
-        _rumbleLoopCycleIdle = rumbleLoopCycleIdle ?? Xbox360RumbleLoopDiagnostic.ProductionCycleIdle;
-        _rumbleLoopTerminalCallbackTimeout = rumbleLoopTerminalCallbackTimeout
-            ?? Xbox360RumbleLoopDiagnostic.ProductionTerminalCallbackTimeout;
         _physicalRumbleTestAvailabilityProvider = physicalRumbleTestAvailabilityProvider;
         _delay = delay ?? Task.Delay;
         _motionSnapshotProvider = motionSnapshotProvider;
@@ -574,191 +550,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         finally { _gate.Release(); }
     }
 
-    public async Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(
-        uint currentSteamAppId, CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_rumbleLoopDiagnostic is { } diagnostic &&
-                diagnostic.Snapshot.State is FrontendXbox360RumbleLoopState.Running
-                    or FrontendXbox360RumbleLoopState.Stopped
-                    or FrontendXbox360RumbleLoopState.Failed)
-                return diagnostic.Snapshot;
-
-            return CaptureRumbleLoopReadiness(currentSteamAppId, out _);
-        }
-        finally { _gate.Release(); }
-    }
-
-    public async Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(
-        uint currentSteamAppId, CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_disposed)
-                return FrontendXbox360RumbleLoopSnapshot.Unavailable("The presentation owner is shutting down.");
-            if (_rumbleLoopDiagnostic is { } existing && existing.Snapshot.State == FrontendXbox360RumbleLoopState.Running)
-                return existing.Snapshot;
-
-            var readiness = CaptureRumbleLoopReadiness(currentSteamAppId, out var xinput);
-            if (readiness.State != FrontendXbox360RumbleLoopState.Ready || readiness.Slot is not int slot || xinput is null)
-                return readiness;
-            if (_armedFeedback is not Xbox360RumbleFeedbackBridge bridge || !bridge.IsArmed)
-                return FrontendXbox360RumbleLoopSnapshot.Unavailable("The production Xbox360 rumble callback is not armed.");
-
-            if (_rumbleLoopDiagnostic is not null)
-            {
-                if (_rumbleLoopTask is { } previousTask)
-                    await previousTask.ConfigureAwait(false);
-                ReleaseRumbleLoopTaskResourcesLocked();
-            }
-
-            var diagnostic = new Xbox360RumbleLoopDiagnostic(
-                slot,
-                xinput,
-                bridge.WriteDiagnosticPhysicalStop,
-                burstStepCadence: _rumbleLoopBurstStepCadence,
-                terminalCallbackTimeout: _rumbleLoopTerminalCallbackTimeout,
-                usbTraceCapture: _rumbleLoopUsbTraceCaptureFactory?.Invoke(),
-                cycleIdle: _rumbleLoopCycleIdle);
-            var stop = new CancellationTokenSource();
-            _rumbleLoopDiagnostic = diagnostic;
-            _rumbleLoopStop = stop;
-            // Task.Run ensures the first native XInput call cannot extend this serialized Start RPC.
-            _rumbleLoopTask = Task.Run(() => diagnostic.RunAsync(stop.Token));
-            return diagnostic.Snapshot;
-        }
-        finally { _gate.Release(); }
-    }
-
-    public async Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(
-        CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_rumbleLoopDiagnostic is not { } diagnostic)
-                return FrontendXbox360RumbleLoopSnapshot.Unavailable("The Xbox360 rumble diagnostic is not running.");
-
-            var beforeStop = diagnostic.Snapshot;
-            // In particular, TerminalStopMissing is a frozen evidence state: a page-deactivate or
-            // disconnected-client Stop must not issue another host 0/0 or another physical write.
-            if (beforeStop.State != FrontendXbox360RumbleLoopState.Running || diagnostic.IsTerminalResultFrozen)
-            {
-                if (_rumbleLoopTask is { } completedOrFailingTask)
-                    await completedOrFailingTask.ConfigureAwait(false);
-                ReleaseRumbleLoopTaskResourcesLocked();
-                return beforeStop;
-            }
-
-            _rumbleLoopStop?.Cancel();
-            if (_rumbleLoopTask is { } task)
-                await task.ConfigureAwait(false);
-
-            if (diagnostic.Snapshot.State == FrontendXbox360RumbleLoopState.Running)
-                await diagnostic.CompleteManualStopAsync().ConfigureAwait(false);
-            ReleaseRumbleLoopTaskResourcesLocked();
-            return diagnostic.Snapshot;
-        }
-        finally { _gate.Release(); }
-    }
-
-    private FrontendXbox360RumbleLoopSnapshot CaptureRumbleLoopReadiness(
-        uint currentSteamAppId, out IXbox360RumbleLoopXInput? xinput)
-    {
-        xinput = null;
-        if (_disposed) return FrontendXbox360RumbleLoopSnapshot.Unavailable("The presentation owner is shutting down.");
-        if (currentSteamAppId != 0) return FrontendXbox360RumbleLoopSnapshot.Unavailable("Close the running Steam game before starting this diagnostic.");
-        if (_activeKind != AddonPresentationKind.Xbox360) return FrontendXbox360RumbleLoopSnapshot.Unavailable("The active Full1902 presentation is not Xbox360.");
-        if (_publisher is not { IsRunning: true }) return FrontendXbox360RumbleLoopSnapshot.Unavailable("The Xbox360 publisher is not running.");
-        if (_overlayPaused || _suspendPaused) return FrontendXbox360RumbleLoopSnapshot.Unavailable("The presentation is paused.");
-        if (_rumbleSink is null) return FrontendXbox360RumbleLoopSnapshot.Unavailable("The physical rumble sink is unavailable.");
-        if (_armedFeedback is not Xbox360RumbleFeedbackBridge { IsArmed: true })
-            return FrontendXbox360RumbleLoopSnapshot.Unavailable("The production Xbox360 rumble callback is not armed.");
-        if (!AppLog.IsEnabled(AppLogLevel.Debug)) return FrontendXbox360RumbleLoopSnapshot.Unavailable("Enable Debug logging before starting this diagnostic.");
-
-        try { xinput = _rumbleLoopXInputFactory(); }
-        catch (Exception exception)
-        {
-            return FrontendXbox360RumbleLoopSnapshot.Unavailable("XInput is unavailable: " + exception.GetType().Name);
-        }
-
-        var connected = new List<int>();
-        for (uint slot = 0; slot < 4; slot++)
-        {
-            uint result;
-            try { result = xinput.GetState(slot); }
-            catch (Exception exception)
-            {
-                xinput = null;
-                return FrontendXbox360RumbleLoopSnapshot.Unavailable($"XInput slot scan failed at {slot}: {exception.GetType().Name}");
-            }
-
-            AppLog.Debug("Rumble", "Xbox360 diagnostic initial topology slot scanned.",
-                ("Event", "X360LoopProbeTopologySlot"), ("XInputSlot", slot), ("XInputResult", result));
-            if (result == Xbox360RumbleLoopDiagnostic.ErrorSuccess) connected.Add((int)slot);
-            else if (result != Xbox360RumbleLoopDiagnostic.ErrorDeviceNotConnected)
-            {
-                xinput = null;
-                return FrontendXbox360RumbleLoopSnapshot.Unavailable($"XInput slot scan returned {result} for slot {slot}.");
-            }
-        }
-
-        if (connected.Count != 1)
-        {
-            xinput = null;
-            return FrontendXbox360RumbleLoopSnapshot.Unavailable(connected.Count == 0
-                ? "No XInput controller is connected."
-                : "Multiple XInput controllers are connected; attribution would be ambiguous.");
-        }
-
-        return Xbox360RumbleLoopDiagnostic.Ready(connected[0]);
-    }
-
-    private async Task CancelRumbleLoopForLifecycleLockedAsync(string reason)
-    {
-        if (_rumbleLoopDiagnostic is not { } diagnostic) return;
-        if (diagnostic.Snapshot.State != FrontendXbox360RumbleLoopState.Running || diagnostic.IsTerminalResultFrozen)
-        {
-            // An automatic failure freezes its terminal result before the bridge-serialized physical
-            // cleanup and trace finalization. Join it before lifecycle teardown can dispose the
-            // bridge or retire the capture.
-            if (_rumbleLoopTask is { } completedOrCleaningTask)
-                await completedOrCleaningTask.ConfigureAwait(false);
-            return;
-        }
-
-        _rumbleLoopStop?.Cancel();
-        if (_rumbleLoopTask is { } task)
-            await task.ConfigureAwait(false);
-    }
-
-    private async Task FinalizeRumbleLoopAfterLifecycleLockedAsync(string reason)
-    {
-        if (_rumbleLoopDiagnostic is not { } diagnostic) return;
-        if (_rumbleLoopTask is { } task)
-            await task.ConfigureAwait(false);
-        await diagnostic.FinalizeTraceAsync("Lifecycle:" + reason).ConfigureAwait(false);
-        if (diagnostic.Snapshot.State == FrontendXbox360RumbleLoopState.Running)
-            diagnostic.MarkStopped("Stopped by presentation lifecycle: " + reason);
-        ReleaseRumbleLoopTaskResourcesLocked();
-        AppLog.Debug("Rumble", "Xbox360 diagnostic stopped by presentation lifecycle.",
-            ("Event", "X360LoopProbeLifecycleStopped"), ("RunId", diagnostic.Snapshot.RunId ?? "Unknown"),
-            ("Reason", reason));
-    }
-
-    private void ReleaseRumbleLoopTaskResourcesLocked()
-    {
-        _rumbleLoopStop?.Dispose();
-        _rumbleLoopStop = null;
-        _rumbleLoopTask = null;
-    }
-
-    private void ObserveXbox360RumbleCallback(byte left8, byte right8, long? callbackSequence) =>
-        Volatile.Read(ref _rumbleLoopDiagnostic)?.ObserveCallback(left8, right8, callbackSequence);
-
     public Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, SteamPresentationSnapshot snapshot, CancellationToken cancellationToken) =>
         AttachInitialAsync(source, () => snapshot, cancellationToken);
 
@@ -904,9 +695,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 return new(true, false, null, false, "RumbleEndpointLifecycleUnavailable");
             if (Volatile.Read(ref _motorTestInProgress) != 0)
                 return new(true, false, null, false, "PhysicalMotorTestAlreadyRunning");
-            if (_rumbleLoopDiagnostic?.Snapshot.State == FrontendXbox360RumbleLoopState.Running)
-                return new(true, false, null, false, "Xbox360RumbleLoopAlreadyRunning");
-
             _developerRumbleRearmInProgress = true;
             var startKind = _activeKind;
             var retirement = await RetireActivePresentationCoreAsync("DeveloperRumbleRearm").ConfigureAwait(false);
@@ -1142,8 +930,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             AddonPresentationKind.Xbox360 =>
                 Xbox360RumbleFeedbackBridge.TryArm(
                     _rumbleSink,
-                    cb => _viiper!.SetXbox360RumbleCallback(cb),
-                    diagnosticObserver: ObserveXbox360RumbleCallback),
+                    cb => _viiper!.SetXbox360RumbleCallback(cb)),
             AddonPresentationKind.SteamDeck when _deckSession is { } session =>
                 SteamDeckRumbleFeedbackAdapter.TryArm(_rumbleSink, session.SetOutputCallback, session.ClearOutputCallback),
             AddonPresentationKind.DualSenseEdge when _edgeSession is { } session =>
@@ -1268,7 +1055,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             if (kind == AddonPresentationKind.DualSenseEdge && _edgeSession is not { State: CanonicalDualSenseEdgeSessionState.Active })
                 return PauseBlocked("DualSenseEdgeSessionNotActive:" + (_edgeSession?.State.ToString() ?? "None"));
 
-            await CancelRumbleLoopForLifecycleLockedAsync("OverlayPause").ConfigureAwait(false);
             if (kind == AddonPresentationKind.DualSenseEdge) _edgeSystemButtonOverlay.Clear();
             // 1. Stop + prove the publisher joined. Never write neutral underneath a possibly-live
             //    publisher; never detach here.
@@ -1280,21 +1066,18 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Warn("OverlayCapture", "Presentation publisher could not be stopped for Overlay; presentation stays live.", exception,
                     ("Event", "OverlayPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStopThrew"));
-                await FinalizeRumbleLoopAfterLifecycleLockedAsync("OverlayPause").ConfigureAwait(false);
                 return new(OverlayPauseOutcome.PublisherNotStopped, "PublisherStopThrew");
             }
             if (publisher.IsRunning)
             {
                 AppLog.Warn("OverlayCapture", "Presentation publisher still running after StopAsync; presentation stays live.", null,
                     ("Event", "OverlayPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
-                await FinalizeRumbleLoopAfterLifecycleLockedAsync("OverlayPause").ConfigureAwait(false);
                 return new(OverlayPauseOutcome.PublisherNotStopped, "PublisherStillRunning");
             }
 
             // 1b. Clear the feedback callback and request a physical STOP so opening the Overlay can
             //     never leave a pre-existing vibration latched. Resume re-arms the SAME presentation.
-            try { DisarmFeedbackAndStopLocked("OverlayPause"); }
-            finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync("OverlayPause").ConfigureAwait(false); }
+            DisarmFeedbackAndStopLocked("OverlayPause");
 
             // 2. Write the SAME attached device neutral. A rejected neutral write on a proven-stopped
             //    publisher is a real output-safety failure: fail-close the current presentation
@@ -1408,7 +1191,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             var wasAlreadyPaused = _suspendPaused;
             _suspendPaused = true;
             _edgeSystemButtonOverlay.Clear();
-            await CancelRumbleLoopForLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
             // Physical STOP is a separate safety fact from virtual presentation state. No configured
             // sink means there is no physical rumble output to stop; otherwise only a successful STOP
             // result confirms this suspend path.
@@ -1421,8 +1203,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // PausedNoPresentation, and only after residual typed-device ownership is ruled out.
             if (_activeKind is null && _publisher is null)
             {
-                try { physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend"); }
-                finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false); }
+                physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend");
                 if (!TryProveNoResidualPresentationLocked(out var residualReason))
                 {
                     AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual typed-device ownership evidence.", null,
@@ -1443,7 +1224,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Error("ControllerPresentation", "Presentation suspend pause: publisher present without an active presentation kind.", null,
                     ("Event", "PresentationSuspendPauseFailed"), ("Reason", "InconsistentPresentationState"));
-                await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
                 return new(SuspendPauseOutcome.Blocked, "InconsistentPresentationState", physicalRumbleStopConfirmed);
             }
 
@@ -1468,14 +1248,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 {
                     AppLog.Warn("ControllerPresentation", "Presentation publisher could not be stopped for Suspend; pause stays unsafe.", exception,
                         ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStopThrew"));
-                    await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
                     return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStopThrew", physicalRumbleStopConfirmed);
                 }
                 if (publisher!.IsRunning)
                 {
                     AppLog.Warn("ControllerPresentation", "Presentation publisher still running after StopAsync for Suspend; pause stays unsafe.", null,
                         ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
-                    await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
                     return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStillRunning", physicalRumbleStopConfirmed);
                 }
             }
@@ -1486,8 +1264,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
             // 3-6. Clear the feedback callback, DRAIN any in-progress physical rumble write, then
             //       request a final physical STOP (sections 7.1 / 12). Reuses the #488 helper.
-            try { physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend"); }
-            finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false); }
+            physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend");
 
             // 7. Write the SAME attached device neutral. A rejected write on a proven-stopped
             //    publisher is a real output-safety failure: fail-close the current presentation
@@ -1779,7 +1556,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             }
         }
 
-        await CancelRumbleLoopForLifecycleLockedAsync(reason).ConfigureAwait(false);
         _edgeSystemButtonOverlay.Clear();
         cancellationToken.ThrowIfCancellationRequested();
         var physicalRumbleStopConfirmed = _rumbleSink is null;
@@ -1798,14 +1574,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Error("ControllerPresentation", "Presentation publisher could not be joined; ownership retained.", exception,
                     ("Reason", reason), ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(publisherStopStartedAt).TotalMilliseconds));
-                await FinalizeRumbleLoopAfterLifecycleLockedAsync(reason).ConfigureAwait(false);
                 return new(false, physicalRumbleStopConfirmed, FeedbackDrainConfirmed: false);
             }
             if (publisher.IsRunning)
             {
                 AppLog.Error("ControllerPresentation", "Presentation publisher still running after StopAsync; ownership retained.", null,
                     ("Reason", reason), ("StageElapsedMs", (long)Stopwatch.GetElapsedTime(publisherStopStartedAt).TotalMilliseconds));
-                await FinalizeRumbleLoopAfterLifecycleLockedAsync(reason).ConfigureAwait(false);
                 return new(false, physicalRumbleStopConfirmed, FeedbackDrainConfirmed: false);
             }
             if (string.Equals(reason, "WindowsSessionEnd", StringComparison.Ordinal))
@@ -1830,20 +1604,16 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             || windowsSessionEnd;
         var feedbackDrainConfirmed = true;
         var feedbackRetirementStartedAt = Stopwatch.GetTimestamp();
-        try
+        if (strictFeedbackRetirement)
         {
-            if (strictFeedbackRetirement)
-            {
-                feedbackDrainConfirmed = TryDisarmFeedbackLocked(reason);
-                if (feedbackDrainConfirmed && !windowsSessionEnd)
-                    physicalRumbleStopConfirmed = RequestPhysicalRumbleStopLocked(reason);
-            }
-            else
-            {
-                physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked(reason);
-            }
+            feedbackDrainConfirmed = TryDisarmFeedbackLocked(reason);
+            if (feedbackDrainConfirmed && !windowsSessionEnd)
+                physicalRumbleStopConfirmed = RequestPhysicalRumbleStopLocked(reason);
         }
-        finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync(reason).ConfigureAwait(false); }
+        else
+        {
+            physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked(reason);
+        }
 
         if (windowsSessionEnd)
         {

@@ -100,27 +100,6 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
-    public void DeveloperMenu_opens_battery_charge_limit_test_and_returns_to_developer_menu()
-    {
-        var navigation = new MainNavigationState();
-
-        navigation.OpenDeveloperMenu();
-        Assert.Equal(MainNavigationPage.BatteryChargeLimitTest, navigation.OpenBatteryChargeLimitTest());
-        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.ReturnToDeveloperMenu());
-    }
-
-    [Fact]
-    public void DeveloperMenu_opens_gameinput_system_button_probe_and_mouse_back_returns_to_developer_menu()
-    {
-        var navigation = new MainNavigationState();
-
-        navigation.OpenDeveloperMenu();
-        Assert.Equal(MainNavigationPage.GameInputSystemButtonProbe, navigation.OpenGameInputSystemButtonProbe());
-        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
-        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.ReturnToDeveloperMenu());
-    }
-
-    [Fact]
     public void MouseBack_destinations_match_developer_page_hierarchy()
     {
         var navigation = new MainNavigationState();
@@ -130,9 +109,6 @@ public sealed class MainNavigationStateTests
         Assert.Equal(MainNavigationPage.Settings, navigation.GetMouseBackDestination());
 
         navigation.OpenClawSensorProbe();
-        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
-
-        navigation.OpenBatteryChargeLimitTest();
         Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
 
     }

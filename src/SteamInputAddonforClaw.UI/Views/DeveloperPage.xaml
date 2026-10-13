@@ -47,13 +47,6 @@
                 </Grid>
             </Border>
 
-            <ctcontrols:SettingsCard Header="Vibration Test" Description="Run the Full1902 Xbox360 terminal STOP callback diagnostic. Close games and other XInput rumble tools first.">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE1D9;" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <Button Content="Open" Click="OpenVibrationTestButton_Click" />
-            </ctcontrols:SettingsCard>
-
             <ctcontrols:SettingsCard Header="Gyro / Sensor Test" Description="Read-only diagnostic for MSI Claw gyroscope and accelerometer discovery and motion capture.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="Rotate" />
@@ -64,16 +57,6 @@
             <ctcontrols:SettingsCard Header="Fan Hardware Probe" Description="Developer-only MSI fan EC/WMI diagnostics. Bounded writes always return to MSI firmware Auto.">
                 <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsCard.HeaderIcon>
                 <Button Content="Open" Click="OpenFanHardwareProbeButton_Click" />
-            </ctcontrols:SettingsCard>
-
-            <ctcontrols:SettingsCard Header="Battery Charge Limit Test" Description="Developer-only MSI battery charge-limit read/write validation. Changes apply immediately and remain until changed.">
-                <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="AllApps" /></ctcontrols:SettingsCard.HeaderIcon>
-                <Button Content="Open" Click="OpenBatteryChargeLimitTestButton_Click" />
-            </ctcontrols:SettingsCard>
-
-            <ctcontrols:SettingsCard Header="GameInput System Button Probe" Description="Identify which GameInput device emits Guide/Share when WING is pressed.">
-                <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Keyboard" /></ctcontrols:SettingsCard.HeaderIcon>
-                <Button Content="Open" Click="OpenGameInputSystemButtonProbeButton_Click" />
             </ctcontrols:SettingsCard>
 
         </StackPanel>

@@ -3,9 +3,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>Full1902 Cleanup J: the disconnected legacy Vibration Test RPC/session wire contract is
-/// gone and the frontend protocol is bumped so a v22 peer fails the handshake up front instead of
-/// invoking methods the Runtime no longer implements.</summary>
+/// <summary>Retired developer vibration actions stay absent while production vibration controls remain.</summary>
 public sealed class VibrationContractRemovalTests
 {
     [Fact]
@@ -13,26 +11,14 @@ public sealed class VibrationContractRemovalTests
         => Assert.Equal(81, FrontendTransportProtocol.CurrentVersion);
 
     [Fact]
-    public void No_vibration_test_rpc_methods_remain()
+    public void Retired_vibration_diagnostic_rpc_methods_remain_absent()
     {
-        foreach (var removed in new[] { "RunVibrationTest", "OpenVibrationTestSession", "CloseVibrationTestSession" })
-            Assert.DoesNotContain(removed, Enum.GetNames<FrontendRpcMethod>());
-    }
-
-    [Fact]
-    public void Full1902_xbox360_loop_diagnostic_uses_its_new_typed_rpc_contract()
-    {
-        foreach (var required in new[]
+        foreach (var removed in new[]
         {
-            "CaptureXbox360RumbleLoopDiagnostic",
-            "StartXbox360RumbleLoopDiagnostic",
-            "StopXbox360RumbleLoopDiagnostic",
+            "RunVibrationTest", "OpenVibrationTestSession", "CloseVibrationTestSession",
+            "RunControllerVibrationProfileWriteProbe"
         })
-            Assert.Contains(required, Enum.GetNames<FrontendRpcMethod>());
-
-        var contracts = typeof(SteamInputAddonforClaw.Contracts.Frontend.IAddonFrontendControl).Assembly;
-        Assert.NotNull(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendXbox360RumbleLoopSnapshot"));
-        Assert.Null(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendVibrationTestCommand"));
+            Assert.DoesNotContain(removed, Enum.GetNames<FrontendRpcMethod>());
     }
 
     [Fact]
@@ -41,9 +27,26 @@ public sealed class VibrationContractRemovalTests
         var contracts = typeof(SteamInputAddonforClaw.Contracts.Frontend.IAddonFrontendControl).Assembly;
         Assert.Null(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendVibrationTestCommand"));
         Assert.Null(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendVibrationTestResult"));
+        Assert.Null(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationProfileWriteProbeMode"));
+        Assert.Null(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationProfileWriteProbeOutcome"));
+        Assert.Null(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationProfileWriteProbeResult"));
+        var runtime = typeof(SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl).Assembly;
+        Assert.Null(runtime.GetType("SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationProfileWriteProbeMode"));
+        Assert.Null(runtime.GetType("SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationProfileWriteProbeOutcome"));
+        Assert.Null(runtime.GetType("SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationProfileWriteProbeResult"));
+        var strengthClient = runtime.GetType("SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationStrengthClient");
+        Assert.NotNull(strengthClient);
+        Assert.DoesNotContain(strengthClient!.GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+            method => method.Name == "RunDiagnosticMotorPairWriteAsync");
         Assert.DoesNotContain(
             typeof(SteamInputAddonforClaw.Contracts.Frontend.IAddonFrontendControl).GetMethods(),
             m => m.Name.Contains("VibrationTest", StringComparison.Ordinal));
+        var productionMethods = typeof(SteamInputAddonforClaw.Contracts.Frontend.IAddonFrontendControl).GetMethods()
+            .Select(method => method.Name).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("CaptureControllerVibrationStrengthAsync", productionMethods);
+        Assert.Contains("SetControllerVibrationStrengthAsync", productionMethods);
+        Assert.Contains("TestControllerVibrationMotorAsync", productionMethods);
+        Assert.Contains("RunDeveloperRumbleRearmAsync", productionMethods);
     }
 
     [Fact] // Full1902 production rumble (work order section 19.7): the production feedback path must

@@ -56,7 +56,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
     private async Task AcceptLoopAsync()
     { while (!_lifetime.IsCancellationRequested) { try { await using var pipe = _pipeFactory(); Interlocked.Exchange(ref _activePipe, pipe); _ready.TrySetResult(); await pipe.WaitForConnectionAsync(_lifetime.Token).ConfigureAwait(false); await ServeAsync(pipe, _lifetime.Token).ConfigureAwait(false); } catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { _ready.TrySetCanceled(_lifetime.Token); } catch (Exception exception) { if (_ready.TrySetException(exception)) return; try { await Task.Delay(100, _lifetime.Token).ConfigureAwait(false); } catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { } } finally { Interlocked.Exchange(ref _activePipe, null)?.Dispose(); } } }
     private async Task ServeAsync(Stream pipe, CancellationToken token)
-    { using var connection = CancellationTokenSource.CreateLinkedTokenSource(token); using var gate = new SemaphoreSlim(1, 1); var requests = new ConcurrentDictionary<long, CancellationTokenSource>(); var activeRequests = new ConcurrentDictionary<long, Task>(); var operationGate = new SemaphoreSlim(1, 1); var notificationGate = new object(); Task? notificationTask = null; var notificationDirty = false; var notificationSending = false; var probeSessionMayBeOpen = false; var rumbleLoopMayBeRunning = false; var connectionClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    { using var connection = CancellationTokenSource.CreateLinkedTokenSource(token); using var gate = new SemaphoreSlim(1, 1); var requests = new ConcurrentDictionary<long, CancellationTokenSource>(); var activeRequests = new ConcurrentDictionary<long, Task>(); var operationGate = new SemaphoreSlim(1, 1); var notificationGate = new object(); Task? notificationTask = null; var notificationDirty = false; var notificationSending = false; var probeSessionMayBeOpen = false; var connectionClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         async Task Send(FrontendWireEnvelope e) => await FrontendWireCodec.WriteAsync(pipe, e, gate, connection.Token).ConfigureAwait(false);
         async Task Notify()
         {
@@ -85,10 +85,6 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     var payload = await InvokeAsync(message.Method!.Value, message.Payload, requestCts.Token).ConfigureAwait(false);
                     if (message.Method.Value == FrontendRpcMethod.OpenClawSensorProbe) probeSessionMayBeOpen = true;
                     else if (message.Method.Value == FrontendRpcMethod.CloseClawSensorProbe) probeSessionMayBeOpen = false;
-                    else if (message.Method.Value == FrontendRpcMethod.StartXbox360RumbleLoopDiagnostic)
-                        rumbleLoopMayBeRunning = FrontendWireCodec.Decode<FrontendXbox360RumbleLoopSnapshot>(payload).State == FrontendXbox360RumbleLoopState.Running;
-                    else if (message.Method.Value == FrontendRpcMethod.StopXbox360RumbleLoopDiagnostic)
-                        rumbleLoopMayBeRunning = false;
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, message.Method, Payload: payload)).ConfigureAwait(false);
                     if (_afterResponse is not null)
                         await _afterResponse().ConfigureAwait(false);
@@ -170,7 +166,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureGamingHome or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.CaptureShortcutEditor or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.ScanXboxGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit or FrontendRpcMethod.CaptureControllerVibrationStrength or FrontendRpcMethod.CaptureXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StartXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StopXbox360RumbleLoopDiagnostic or FrontendRpcMethod.CaptureGameInputSystemButtonProbe or FrontendRpcMethod.StartGameInputSystemButtonProbe or FrontendRpcMethod.StopGameInputSystemButtonProbe or FrontendRpcMethod.RunControllerLedProfileReadProbe or FrontendRpcMethod.RunDeveloperRumbleRearm)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureGamingHome or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.CaptureShortcutEditor or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.ScanXboxGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimit or FrontendRpcMethod.CaptureControllerVibrationStrength or FrontendRpcMethod.RunDeveloperRumbleRearm)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
@@ -194,8 +190,6 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
             // Runtime after the WinUI process is gone, so a missed Close would leak it indefinitely
             // (PR #290 review). Best-effort only -- this is the concrete single-frontend disconnect
             // boundary, not a general session/connection framework.
-            if (rumbleLoopMayBeRunning)
-                try { await _inner.StopXbox360RumbleLoopDiagnosticAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
             if (probeSessionMayBeOpen)
                 try { await _inner.CloseClawSensorProbeAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
             operationGate.Dispose(); }
@@ -221,8 +215,6 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     && pair.RightPercent is >= 0 and <= 100,
                 FrontendRpcMethod.TestControllerVibrationMotor =>
                     Enum.IsDefined(FrontendWireCodec.Decode<TestControllerVibrationMotorRequest>(payload).Motor),
-                FrontendRpcMethod.RunControllerVibrationProfileWriteProbe =>
-                    Enum.IsDefined(FrontendWireCodec.Decode<RunControllerVibrationProfileWriteProbeRequest>(payload).Mode),
                 _ => true,
             };
         }
@@ -326,8 +318,6 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.OpenFanProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RunFanProbe
         ? FrontendWireCodec.Payload(await _inner.RunFanProbeAsync(FrontendWireCodec.Decode<RunFanProbeRequest>(p).Operation, t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.CaptureBatteryChargeLimitTest
-        ? FrontendWireCodec.Payload(await _inner.CaptureBatteryChargeLimitTestAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureBatteryChargeLimit
         ? FrontendWireCodec.Payload(await _inner.CaptureBatteryChargeLimitAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureControllerVibrationStrength
@@ -341,34 +331,12 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.TestControllerVibrationMotorAsync(
             FrontendWireCodec.Decode<TestControllerVibrationMotorRequest>(p).Motor,
             t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.RunControllerVibrationProfileWriteProbe
-        ? FrontendWireCodec.Payload(await _inner.RunControllerVibrationProfileWriteProbeAsync(
-            FrontendWireCodec.Decode<RunControllerVibrationProfileWriteProbeRequest>(p).Mode,
-            t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.RunControllerLedProfileReadProbe
-        ? FrontendWireCodec.Payload(await _inner.RunControllerLedProfileReadProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RunDeveloperRumbleRearm
         ? FrontendWireCodec.Payload(await _inner.RunDeveloperRumbleRearmAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetDeviceBatteryChargeLimitEnabled
         ? FrontendWireCodec.Payload(await _inner.SetDeviceBatteryChargeLimitEnabledAsync(FrontendWireCodec.Decode<SetDeviceBatteryChargeLimitEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetDeviceBatteryChargeLimitPercent
         ? FrontendWireCodec.Payload(await _inner.SetDeviceBatteryChargeLimitPercentAsync(FrontendWireCodec.Decode<SetDeviceBatteryChargeLimitPercentRequest>(p).Percent, t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.SetBatteryChargeLimitTestEnabled
-        ? FrontendWireCodec.Payload(await _inner.SetBatteryChargeLimitTestEnabledAsync(FrontendWireCodec.Decode<SetBatteryChargeLimitTestEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.SetBatteryChargeLimitTestPercent
-        ? FrontendWireCodec.Payload(await _inner.SetBatteryChargeLimitTestPercentAsync(FrontendWireCodec.Decode<SetBatteryChargeLimitTestPercentRequest>(p).Percent, t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.CaptureXbox360RumbleLoopDiagnostic
-        ? FrontendWireCodec.Payload(await _inner.CaptureXbox360RumbleLoopDiagnosticAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.StartXbox360RumbleLoopDiagnostic
-        ? FrontendWireCodec.Payload(await _inner.StartXbox360RumbleLoopDiagnosticAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.StopXbox360RumbleLoopDiagnostic
-        ? FrontendWireCodec.Payload(await _inner.StopXbox360RumbleLoopDiagnosticAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.CaptureGameInputSystemButtonProbe
-        ? FrontendWireCodec.Payload(await _inner.CaptureGameInputSystemButtonProbeAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.StartGameInputSystemButtonProbe
-        ? FrontendWireCodec.Payload(await _inner.StartGameInputSystemButtonProbeAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.StopGameInputSystemButtonProbe
-        ? FrontendWireCodec.Payload(await _inner.StopGameInputSystemButtonProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureXboxGameProfile
         ? FrontendWireCodec.Payload(await _inner.CaptureXboxGameProfileAsync(FrontendWireCodec.Decode<CaptureXboxGameProfileRequest>(p).Key, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetXboxGameProfileFavorite

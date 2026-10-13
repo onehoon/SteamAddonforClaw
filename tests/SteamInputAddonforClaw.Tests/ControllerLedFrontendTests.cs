@@ -110,42 +110,6 @@ public sealed class ControllerLedFrontendTests : IDisposable
         Assert.Equal(0, callbackCount);
     }
 
-    [Fact]
-    public async Task A2vm_led_read_probe_reports_structural_readback_without_claiming_physical_write_validation()
-    {
-        AppLog.DirectoryOverride = _directory;
-        var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
-        var control = new InProcessAddonFrontendControl(
-            coordinator,
-            new ThrowingStatusProvider(),
-            null,
-            controllerLedProfileReadProbe: _ => Task.FromResult(new MsiClawLedProfileReadProbeResult(
-                MsiClawLedProfileReadProbeOutcome.CandidateReadbackParsed, 0x0230, 1, 3, 100, "CandidateReadbackParsed")));
-
-        var result = await control.RunControllerLedProfileReadProbeAsync();
-
-        Assert.Equal(FrontendControllerLedProfileReadProbeOutcome.CandidateReadbackParsed, result.Outcome);
-        Assert.Equal((ushort)0x0230, result.FirmwareVersion);
-        Assert.Equal((ushort)0x024A, result.CandidateAddress);
-        Assert.True(result.ReadResponseValid);
-        Assert.Contains("physical Static LED output from production writes remains unverified", result.Status, StringComparison.Ordinal);
-        Assert.DoesNotContain("CG3EM", result.Status, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task A2vm_led_read_probe_without_runtime_hook_returns_unavailable()
-    {
-        AppLog.DirectoryOverride = _directory;
-        var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
-        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingStatusProvider(), null);
-
-        var result = await control.RunControllerLedProfileReadProbeAsync();
-
-        Assert.Equal(FrontendControllerLedProfileReadProbeOutcome.Unavailable, result.Outcome);
-        Assert.Equal((ushort)0x024A, result.CandidateAddress);
-        Assert.False(result.ReadResponseValid);
-    }
-
     public void Dispose()
     {
         AppLog.DrainForTests();

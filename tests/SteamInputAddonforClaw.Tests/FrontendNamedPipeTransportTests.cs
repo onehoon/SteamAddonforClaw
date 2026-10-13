@@ -341,85 +341,16 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task Battery_charge_limit_test_operations_round_trip_through_the_named_pipe()
+    public async Task Production_battery_charge_limit_operations_round_trip_through_the_named_pipe()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(81, FrontendTransportProtocol.CurrentVersion);
-        Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
-        Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
-        Assert.True(fake.LastBatteryEnabled);
-        Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestPercentAsync(85));
-        Assert.Equal(85, fake.LastBatteryPercent);
         Assert.Equal(fake.ProductionBatterySnapshot, await client.CaptureBatteryChargeLimitAsync());
         Assert.Equal(fake.ProductionBatteryMutationResult, await client.SetDeviceBatteryChargeLimitEnabledAsync(false));
         Assert.Equal(fake.ProductionBatteryMutationResult, await client.SetDeviceBatteryChargeLimitPercentAsync(90));
-    }
-
-    [Fact]
-    public async Task Xbox360_rumble_diagnostic_start_capture_and_stop_round_trip_without_blocking_control()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-        using var requestCancellation = new CancellationTokenSource();
-
-        Assert.Equal(81, FrontendTransportProtocol.CurrentVersion);
-        Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
-        var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
-            .WaitAsync(TimeSpan.FromSeconds(5));
-        requestCancellation.Cancel();
-        Assert.Equal(FrontendXbox360RumbleLoopState.Running, started.State);
-
-        var capturedWhileRunning = await client.CaptureXbox360RumbleLoopDiagnosticAsync();
-        Assert.Equal(FrontendXbox360RumbleLoopState.Running, capturedWhileRunning.State);
-        var stopped = await client.StopXbox360RumbleLoopDiagnosticAsync();
-
-        Assert.Equal(FrontendXbox360RumbleLoopState.Stopped, stopped.State);
-        Assert.Equal(1, fake.RumbleLoopStartCount);
-        Assert.Equal(1, fake.RumbleLoopStopCount);
-    }
-
-    [Fact]
-    public async Task GameInput_system_button_probe_capture_start_and_stop_round_trip()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-
-        Assert.Equal(81, FrontendTransportProtocol.CurrentVersion);
-        Assert.Equal(fake.GameInputProbeSnapshot, await client.CaptureGameInputSystemButtonProbeAsync());
-        Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.StartGameInputSystemButtonProbeAsync()).State);
-        Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.CaptureGameInputSystemButtonProbeAsync()).State);
-        Assert.Equal(FrontendGameInputSystemButtonProbeState.Stopped, (await client.StopGameInputSystemButtonProbeAsync()).State);
-        Assert.Equal(2, fake.GameInputProbeCaptureCount);
-        Assert.Equal(1, fake.GameInputProbeStartCount);
-        Assert.Equal(1, fake.GameInputProbeStopCount);
-    }
-
-    [Fact]
-    public async Task GameInput_system_button_probe_rejects_an_unexpected_payload()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-        await pipe.ConnectAsync(5000);
-        using var writeGate = new SemaphoreSlim(1, 1);
-        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
-        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
-        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Request, 1,
-            FrontendRpcMethod.StartGameInputSystemButtonProbe, Payload: FrontendWireCodec.Payload(new { unexpected = true })), writeGate, CancellationToken.None);
-
-        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
-
-        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
-        Assert.Equal(0, fake.GameInputProbeStartCount);
     }
 
     [Fact]
@@ -445,42 +376,6 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task Developer_vibration_profile_probe_round_trips_only_apply_and_restore_modes()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-
-        Assert.Equal(81, FrontendTransportProtocol.CurrentVersion);
-        var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
-        var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty);
-
-        Assert.Equal(fake.ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred), applied);
-        Assert.Equal(fake.ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty), restored);
-        Assert.Equal([
-            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred,
-            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty], fake.ProfileWriteProbeModes);
-    }
-
-    [Fact]
-    public async Task Developer_A2VM_LED_profile_read_probe_round_trips_without_payload_and_keeps_protocol_version()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-
-        var result = await client.RunControllerLedProfileReadProbeAsync();
-
-        Assert.Equal(81, FrontendTransportProtocol.CurrentVersion);
-        Assert.Equal(fake.ControllerLedProfileReadProbeResult, result);
-        Assert.Equal(1, fake.ControllerLedProfileReadProbeCount);
-    }
-
-    [Fact]
     public async Task Developer_rumble_rearm_round_trips_typed_software_restoration_evidence()
     {
         var fake = new RecordingFrontendControl();
@@ -502,11 +397,6 @@ public sealed class FrontendNamedPipeTransportTests
     [Theory]
     [InlineData("SetControllerVibrationStrength", "{\"LeftPercent\":101,\"RightPercent\":50}")]
     [InlineData("TestControllerVibrationMotor", "{\"Motor\":99}")]
-    [InlineData("RunControllerVibrationProfileWriteProbe", "{}")]
-    [InlineData("RunControllerVibrationProfileWriteProbe", "null")]
-    [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":\"Unknown\"}")]
-    [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":99}")]
-    [InlineData("RunControllerLedProfileReadProbe", "{}")]
     [InlineData("RunDeveloperRumbleRearm", "{}")]
     public async Task Invalid_controller_vibration_payload_fails_closed_before_frontend_dispatch(string method, string payload)
     {
@@ -530,26 +420,7 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
         Assert.Equal(0, fake.ControllerVibrationMutationCount);
         Assert.Empty(fake.ControllerVibrationTestMotors);
-        Assert.Empty(fake.ProfileWriteProbeModes);
-        Assert.Equal(0, fake.ControllerLedProfileReadProbeCount);
         Assert.Equal(0, fake.DeveloperRumbleRearmCount);
-    }
-
-    [Fact]
-    public async Task Frontend_disconnect_stops_a_committed_rumble_diagnostic_once()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-
-        await using (var client = await ConnectAsync(pipeName))
-        {
-            var started = await client.StartXbox360RumbleLoopDiagnosticAsync().WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.Equal(FrontendXbox360RumbleLoopState.Running, started.State);
-        }
-
-        await fake.RumbleLoopStopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(1, fake.RumbleLoopStopCount);
     }
 
     [Fact]
@@ -1738,8 +1609,20 @@ public sealed class FrontendNamedPipeTransportTests
         await Assert.ThrowsAnyAsync<Exception>(() => FrontendWireCodec.ReadAsync(stream, CancellationToken.None));
     }
 
-    [Fact]
-    public async Task Unknown_string_method_returns_unsupported_method_without_invoking_frontend()
+    [Theory]
+    [InlineData("FutureMethod")]
+    [InlineData("RunControllerLedProfileReadProbe")]
+    [InlineData("CaptureBatteryChargeLimitTest")]
+    [InlineData("SetBatteryChargeLimitTestEnabled")]
+    [InlineData("SetBatteryChargeLimitTestPercent")]
+    [InlineData("CaptureXbox360RumbleLoopDiagnostic")]
+    [InlineData("StartXbox360RumbleLoopDiagnostic")]
+    [InlineData("StopXbox360RumbleLoopDiagnostic")]
+    [InlineData("CaptureGameInputSystemButtonProbe")]
+    [InlineData("StartGameInputSystemButtonProbe")]
+    [InlineData("StopGameInputSystemButtonProbe")]
+    [InlineData("RunControllerVibrationProfileWriteProbe")]
+    public async Task Retired_or_unknown_string_methods_return_unsupported_without_invoking_frontend(string method)
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
@@ -1750,7 +1633,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"FutureMethod\"}}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\"}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
@@ -1870,29 +1753,6 @@ public sealed class FrontendNamedPipeTransportTests
         await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{{}}}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
-        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
-        Assert.Equal(0, fake.TotalCalls);
-    }
-
-    [Theory]
-    [InlineData("CaptureXbox360RumbleLoopDiagnostic")]
-    [InlineData("StartXbox360RumbleLoopDiagnostic")]
-    [InlineData("StopXbox360RumbleLoopDiagnostic")]
-    public async Task Xbox360_rumble_loop_no_argument_methods_reject_payloads(string method)
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-        await pipe.ConnectAsync(5000);
-        using var writeGate = new SemaphoreSlim(1, 1);
-        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
-        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
-
-        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{{}}}}");
-        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
-
-        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
         Assert.Equal(0, fake.TotalCalls);
     }
@@ -2354,13 +2214,6 @@ public sealed class FrontendNamedPipeTransportTests
                     : QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.ProfileTarget)));
         }
 
-        public FrontendBatteryChargeLimitTestSnapshot BatterySnapshot { get; } = new(true, "MSI", "Claw", "MS-1T91", true, 80, 0xD0, true, null);
-        public FrontendBatteryChargeLimitTestMutationResult BatteryMutationResult { get; } = new(FrontendBatteryChargeLimitTestMutationOutcome.Succeeded, null, new(true, "MSI", "Claw", "MS-1T91", true, 85, 0xD5, true, null));
-        public bool? LastBatteryEnabled { get; private set; }
-        public int? LastBatteryPercent { get; private set; }
-        public Task<FrontendBatteryChargeLimitTestSnapshot> CaptureBatteryChargeLimitTestAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(BatterySnapshot); }
-        public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastBatteryEnabled = enabled; return Task.FromResult(BatteryMutationResult); }
-        public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestPercentAsync(int percent, CancellationToken t = default) { TotalCalls++; LastBatteryPercent = percent; return Task.FromResult(BatteryMutationResult); }
         public FrontendBatteryChargeLimitSnapshot ProductionBatterySnapshot { get; } = new(true, true, true, true, 80, true, 85, null);
         public FrontendBatteryChargeLimitMutationResult ProductionBatteryMutationResult { get; } = new(FrontendBatteryChargeLimitMutationOutcome.Succeeded, null, new(true, true, true, false, 90, false, 90, null));
         public Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatterySnapshot); }
@@ -2374,11 +2227,6 @@ public sealed class FrontendNamedPipeTransportTests
         public (int Left, int Right)? LastControllerVibrationPair { get; private set; }
         public int ControllerVibrationMutationCount { get; private set; }
         public List<FrontendControllerVibrationMotor> ControllerVibrationTestMotors { get; } = [];
-        public List<FrontendControllerVibrationProfileWriteProbeMode> ProfileWriteProbeModes { get; } = [];
-        public FrontendControllerLedProfileReadProbeResult ControllerLedProfileReadProbeResult { get; } = new(
-            FrontendControllerLedProfileReadProbeOutcome.CandidateReadbackParsed, 0x0230, 0x024A,
-            "CandidateReadbackParsed. Firmware 0x0230; candidate 0x024A; valid read response: yes.");
-        public int ControllerLedProfileReadProbeCount { get; private set; }
         public FrontendDeveloperRumbleRearmResult DeveloperRumbleRearmResult { get; } = new(
             FrontendDeveloperRumbleRearmOutcome.Completed,
             "Mode cycle and controller restoration completed. Physical motor vibration is NOT verified: go to Controller > Vibration Strength and run Left Test / Right Test.",
@@ -2390,65 +2238,8 @@ public sealed class FrontendNamedPipeTransportTests
         { TotalCalls++; ControllerVibrationMutationCount++; LastControllerVibrationPair = (left, right); return Task.FromResult(ControllerVibrationMutationResult); }
         public Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor motor, CancellationToken t = default)
         { TotalCalls++; ControllerVibrationTestMotors.Add(motor); return Task.FromResult(new FrontendControllerVibrationTestResult(FrontendControllerVibrationTestOutcome.Succeeded, null)); }
-        public FrontendControllerVibrationProfileWriteProbeResult ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode mode) =>
-            new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded, "HID transport write succeeded. This pair was physically validated on CG3EM firmware 0x0419.");
-        public Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
-            FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken t = default)
-        { TotalCalls++; ProfileWriteProbeModes.Add(mode); return Task.FromResult(ProfileWriteProbeResult(mode)); }
-        public Task<FrontendControllerLedProfileReadProbeResult> RunControllerLedProfileReadProbeAsync(CancellationToken t = default)
-        { TotalCalls++; ControllerLedProfileReadProbeCount++; return Task.FromResult(ControllerLedProfileReadProbeResult); }
         public Task<FrontendDeveloperRumbleRearmResult> RunDeveloperRumbleRearmAsync(CancellationToken t = default)
         { TotalCalls++; DeveloperRumbleRearmCount++; return Task.FromResult(DeveloperRumbleRearmResult); }
-        public FrontendXbox360RumbleLoopSnapshot RumbleLoopSnapshot { get; private set; } =
-            new(true, FrontendXbox360RumbleLoopState.Ready, "Ready", null, 0, 0, 0, 0, null, null, null, null, null);
-        public int RumbleLoopStartCount { get; private set; }
-        public int RumbleLoopStopCount { get; private set; }
-        public TaskCompletionSource RumbleLoopStopped { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken t = default)
-        {
-            TotalCalls++;
-            return Task.FromResult(RumbleLoopSnapshot);
-        }
-        public Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken t = default)
-        {
-            TotalCalls++;
-            RumbleLoopStartCount++;
-            RumbleLoopSnapshot = RumbleLoopSnapshot with { State = FrontendXbox360RumbleLoopState.Running, Status = "Running", RunId = "test-run" };
-            return Task.FromResult(RumbleLoopSnapshot);
-        }
-        public Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken t = default)
-        {
-            TotalCalls++;
-            RumbleLoopStopCount++;
-            RumbleLoopSnapshot = RumbleLoopSnapshot with { State = FrontendXbox360RumbleLoopState.Stopped, Status = "Stopped" };
-            RumbleLoopStopped.TrySetResult();
-            return Task.FromResult(RumbleLoopSnapshot);
-        }
-        public FrontendGameInputSystemButtonProbeSnapshot GameInputProbeSnapshot { get; private set; } =
-            new(true, FrontendGameInputSystemButtonProbeState.Ready, "Ready", 0, null);
-        public int GameInputProbeCaptureCount { get; private set; }
-        public int GameInputProbeStartCount { get; private set; }
-        public int GameInputProbeStopCount { get; private set; }
-        public Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken t = default)
-        {
-            TotalCalls++;
-            GameInputProbeCaptureCount++;
-            return Task.FromResult(GameInputProbeSnapshot);
-        }
-        public Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken t = default)
-        {
-            TotalCalls++;
-            GameInputProbeStartCount++;
-            GameInputProbeSnapshot = GameInputProbeSnapshot with { State = FrontendGameInputSystemButtonProbeState.Running, Status = "Running" };
-            return Task.FromResult(GameInputProbeSnapshot);
-        }
-        public Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken t = default)
-        {
-            TotalCalls++;
-            GameInputProbeStopCount++;
-            GameInputProbeSnapshot = GameInputProbeSnapshot with { State = FrontendGameInputSystemButtonProbeState.Stopped, Status = "Stopped" };
-            return Task.FromResult(GameInputProbeSnapshot);
-        }
     }
 
     private sealed class PartialReadStream : MemoryStream
