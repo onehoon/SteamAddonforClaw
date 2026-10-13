@@ -8,6 +8,7 @@ internal enum MainNavigationPage
     Controller,
     Overlay,
     Shortcut,
+    Tweaks,
     HowToUse,
     Settings,
     DeveloperMenu,
@@ -35,6 +36,7 @@ internal sealed class MainNavigationState
                 "Controller" => MainNavigationPage.Controller,
                 "Overlay" => MainNavigationPage.Overlay,
                 "Shortcut" => MainNavigationPage.Shortcut,
+                "Tweaks" => MainNavigationPage.Tweaks,
                 "HowToUse" => MainNavigationPage.HowToUse,
                 _ => MainNavigationPage.Device
             };

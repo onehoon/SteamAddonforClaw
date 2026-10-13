@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Globalization;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.ControllerVibration;
@@ -80,7 +81,8 @@ public sealed class SettingsStore
                 BackButtonMapping = ReadBackButtonMapping(root),
                 ControllerLed = ReadControllerLedSettings(root),
                 ControllerVibration = ReadControllerVibrationSettings(root),
-                AddonQuickSettingsTabOrder = ReadAddonQuickSettingsTabOrder(root)
+                AddonQuickSettingsTabOrder = ReadAddonQuickSettingsTabOrder(root),
+                WindowsTweaksWarningAcknowledgedLocalDate = ReadWindowsTweaksWarningDate(root)
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LogLevel", settings.LogLevel));
             return settings;
@@ -101,6 +103,20 @@ public sealed class SettingsStore
                 FrontButtonMapping = selectedFrontButtonMappingDefault
             };
         }
+    }
+
+    private static DateOnly? ReadWindowsTweaksWarningDate(JsonElement root)
+    {
+        if (!root.TryGetProperty("WindowsTweaksWarningAcknowledgedLocalDate", out var property))
+            return null;
+
+        if (property.ValueKind == JsonValueKind.String
+            && DateOnly.TryParseExact(property.GetString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            return date;
+
+        AppLog.Warn("Settings", "Windows Tweaks warning date is malformed; it will be shown again.", null,
+            ("Reason", "InvalidWindowsTweaksWarningDate"));
+        return null;
     }
 
     /// <summary>Reads the optional Steam-facing presentation choice in isolation; malformed values
@@ -308,7 +324,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SteamVirtualController, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SteamVirtualController, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, WindowsTweaksWarningAcknowledgedLocalDate = settings.WindowsTweaksWarningAcknowledgedLocalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

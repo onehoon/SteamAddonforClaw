@@ -45,6 +45,16 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void Tweaks_navigation_tag_opens_its_own_top_level_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.Tweaks, navigation.SelectNavigationItem(false, "Tweaks"));
+        Assert.Equal(MainNavigationPage.Tweaks, navigation.CurrentPage);
+        Assert.Null(navigation.GetMouseBackDestination());
+    }
+
+    [Fact]
     public void Controller_navigation_item_opens_controller_page()
     {
         var navigation = new MainNavigationState();

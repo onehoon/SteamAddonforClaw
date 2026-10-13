@@ -181,7 +181,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 76: retire both Developer-only M1/M2 profile RPCs and their result contracts. A v75 peer
 // must fail the handshake before invoking methods no longer exposed by the product.
 // Version 77: add the Developer-only experimental virtual-touchpad preference RPC.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 77; }
+// Version 78: add the Main UI Windows Tweaks snapshot, mutation, and daily-warning acknowledgement RPCs.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 78; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -207,7 +208,37 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, CaptureAppUpdate, CheckAndDownloadAppUpdate, InstallAppUpdate, SetFrontButtonMapping, SetBackButtonMapping, SetControllerLedSettings, SuppressDeveloperMenuWarning, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder, MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled, SetDeviceBatteryChargeLimitPercent, SetQuickSettingsCurrentPowerSourceOnly, CaptureGamingHome, SetGamingHomeSelection, SetGamingHomeStartup, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting, CaptureShortcutEditor, MutateShortcut, CaptureXbox360RumbleLoopDiagnostic, StartXbox360RumbleLoopDiagnostic, StopXbox360RumbleLoopDiagnostic, RunPid1902InputCadenceDiagnostic, CaptureControllerVibrationStrength, SetControllerVibrationStrength, TestControllerVibrationMotor, RunControllerVibrationProfileWriteProbe, CaptureGameInputSystemButtonProbe, StartGameInputSystemButtonProbe, StopGameInputSystemButtonProbe, ScanXboxGames, CaptureXboxGameProfile, SetXboxGameProfileFavorite, SetXboxGameProfileEnabled, SetXboxGameProfileCpuBoostEnabled, SetXboxGameProfileCpuBoostAc, SetXboxGameProfileCpuBoostDc, SetXboxGameProfileTdpEnabled, SetXboxGameProfileTdp, SetXboxGameProfilePowerModeEnabled, SetXboxGameProfilePowerModeAc, SetXboxGameProfilePowerModeDc, SetXboxGameProfileFpsLimitEnabled, SetXboxGameProfileFpsLimitAc, SetXboxGameProfileFpsLimitDc, SetXboxGameProfileResolution, SetXboxGameProfileBackButtonMapping, SetGameProfileGpuMinimumClockEnabled, SetGameProfileGpuMinimumClockAc, SetGameProfileGpuMinimumClockDc, SetXboxGameProfileGpuMinimumClockEnabled, SetXboxGameProfileGpuMinimumClockAc, SetXboxGameProfileGpuMinimumClockDc, RunControllerLedProfileReadProbe, RunDeveloperRumbleRearm, SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled }
+internal enum FrontendRpcMethod
+{
+    Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, CaptureAppUpdate, CheckAndDownloadAppUpdate, InstallAppUpdate,
+    SetFrontButtonMapping, SetBackButtonMapping, SetControllerLedSettings, SuppressDeveloperMenuWarning, RunPrerequisiteSetup,
+    GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled,
+    CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe,
+    NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames,
+    CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc,
+    SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution,
+    CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled,
+    SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc,
+    SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition,
+    CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder,
+    MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled,
+    SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled,
+    SetDeviceBatteryChargeLimitPercent, SetQuickSettingsCurrentPowerSourceOnly, CaptureGamingHome, SetGamingHomeSelection,
+    SetGamingHomeStartup, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting, CaptureShortcutEditor, MutateShortcut,
+    CaptureXbox360RumbleLoopDiagnostic, StartXbox360RumbleLoopDiagnostic, StopXbox360RumbleLoopDiagnostic,
+    RunPid1902InputCadenceDiagnostic, CaptureControllerVibrationStrength, SetControllerVibrationStrength,
+    TestControllerVibrationMotor, RunControllerVibrationProfileWriteProbe, CaptureGameInputSystemButtonProbe,
+    StartGameInputSystemButtonProbe, StopGameInputSystemButtonProbe, ScanXboxGames, CaptureXboxGameProfile,
+    SetXboxGameProfileFavorite, SetXboxGameProfileEnabled, SetXboxGameProfileCpuBoostEnabled, SetXboxGameProfileCpuBoostAc,
+    SetXboxGameProfileCpuBoostDc, SetXboxGameProfileTdpEnabled, SetXboxGameProfileTdp, SetXboxGameProfilePowerModeEnabled,
+    SetXboxGameProfilePowerModeAc, SetXboxGameProfilePowerModeDc, SetXboxGameProfileFpsLimitEnabled,
+    SetXboxGameProfileFpsLimitAc, SetXboxGameProfileFpsLimitDc, SetXboxGameProfileResolution,
+    SetXboxGameProfileBackButtonMapping, SetGameProfileGpuMinimumClockEnabled, SetGameProfileGpuMinimumClockAc,
+    SetGameProfileGpuMinimumClockDc, SetXboxGameProfileGpuMinimumClockEnabled, SetXboxGameProfileGpuMinimumClockAc,
+    SetXboxGameProfileGpuMinimumClockDc, RunControllerLedProfileReadProbe, RunDeveloperRumbleRearm,
+    SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled,
+    CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning
+}
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -216,6 +247,8 @@ internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetQuickSettingsCurrentPowerSourceOnlyRequest(bool Enabled);
 internal sealed record SetSteamVirtualControllerRequest(SteamVirtualControllerPreference Preference);
 internal sealed record SetExperimentalVirtualTouchpadEnabledRequest(bool Enabled);
+internal sealed record SetWindowsTweakRequest(FrontendWindowsTweakId Id, bool Enabled);
+internal sealed record AcknowledgeWindowsTweaksWarningRequest(DateOnly LocalDate);
 internal sealed record SetGamingHomeSelectionRequest(FrontendGamingHomeSelection Selection);
 internal sealed record SetGamingHomeStartupRequest(bool Enabled);
 internal sealed record SetClawHudEnabledRequest(bool Enabled);

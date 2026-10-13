@@ -129,6 +129,7 @@ public sealed partial class MainWindow : Window
         _controllerLedMutationTimer.Tick += ControllerLedMutationTimer_Tick;
         OverlayContent.Initialize(_frontend);
         ShortcutContent.Initialize(_frontend, () => WindowNative.GetWindowHandle(this));
+        TweaksContent.Initialize(_frontend);
         // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
         // leaving the detail page mid-save and immediately toggling on the Controller page had no
         // ordering relationship between the two pages' independent RPCs, so either could land last
@@ -167,6 +168,8 @@ public sealed partial class MainWindow : Window
         SettingsContent.RequestGamingHomeRefresh();
         OverlayContent.RequestClawHudRefresh();
         ShortcutContent.RequestRefresh();
+        if (_navigationState.CurrentPage == MainNavigationPage.Tweaks)
+            TweaksContent.RequestRefresh();
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
@@ -504,6 +507,7 @@ public sealed partial class MainWindow : Window
         ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
         OverlayContent.Visibility = page == MainNavigationPage.Overlay ? Visibility.Visible : Visibility.Collapsed;
         ShortcutContent.Visibility = page == MainNavigationPage.Shortcut ? Visibility.Visible : Visibility.Collapsed;
+        TweaksContent.Visibility = page == MainNavigationPage.Tweaks ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
@@ -533,6 +537,7 @@ public sealed partial class MainWindow : Window
         if (page == MainNavigationPage.Overlay) OverlayContent.Activate();
         if (page == MainNavigationPage.Shortcut) ShortcutContent.Activate();
         else if (wasShortcut) ShortcutContent.Deactivate();
+        if (page == MainNavigationPage.Tweaks) TweaksContent.Activate();
         if (page == MainNavigationPage.ClawSensorProbe) _clawSensorProbeContent!.Activate();
         else if (wasClawSensorProbe) _clawSensorProbeContent?.Deactivate();
         if (page == MainNavigationPage.FanHardwareProbe) _fanHardwareProbeContent!.Activate();

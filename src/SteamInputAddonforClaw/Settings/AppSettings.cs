@@ -45,6 +45,9 @@ public sealed record AppSettings(
     /// <summary>One global desired controller vibration pair. Older settings files default to 50/50.</summary>
     public ControllerVibrationSettings ControllerVibration { get; init; } = ControllerVibrationSettings.Default;
 
+    /// <summary>Last local calendar date on which the consolidated Windows Tweaks safety notice was accepted.</summary>
+    public DateOnly? WindowsTweaksWarningAcknowledgedLocalDate { get; init; }
+
     /// <summary>
     /// The order of the five fixed top-level Overlay tabs. Same init-only compatibility pattern as
     /// FrontButtonMapping above. Always a complete normalized order (all five tabs, each once); the

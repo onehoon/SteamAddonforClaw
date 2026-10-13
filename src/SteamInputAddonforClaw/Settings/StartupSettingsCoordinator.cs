@@ -31,6 +31,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public ControllerVibrationSettings ControllerVibration => Settings.ControllerVibration;
     public SteamVirtualControllerPreference SteamVirtualController => Settings.SteamVirtualController;
     public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
+    public DateOnly? WindowsTweaksWarningAcknowledgedLocalDate => Settings.WindowsTweaksWarningAcknowledgedLocalDate;
     public event EventHandler? FrontButtonMappingChanged;
 
     /// <summary>Installed-app lifecycle infrastructure: make sure the owned Task Scheduler task
@@ -203,6 +204,17 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
         var next = Settings with { SuppressDeveloperMenuWarning = true };
         _settingsStore.Save(next);
         Settings = next;
+    }
+
+    public bool TryAcknowledgeWindowsTweaksWarning(DateOnly localDate)
+    {
+        if (Settings.WindowsTweaksWarningAcknowledgedLocalDate == localDate)
+            return true;
+
+        var next = Settings with { WindowsTweaksWarningAcknowledgedLocalDate = localDate };
+        _settingsStore.Save(next);
+        Settings = next;
+        return true;
     }
 
     public void ChangeQuickSettingsCurrentPowerSourceOnly(bool enabled)
