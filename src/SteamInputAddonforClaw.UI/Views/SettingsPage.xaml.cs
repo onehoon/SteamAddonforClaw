@@ -1,4 +1,5 @@
 using CommunityToolkit.WinUI.Controls;
+using Microsoft.Windows.ApplicationModel.Resources;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -62,11 +63,28 @@ public sealed partial class SettingsPage : UserControl
             AppThemeComboBox.SelectedItem = AppThemeComboBox.Items
                 .OfType<ComboBoxItem>()
                 .FirstOrDefault(item => string.Equals(item.Tag as string, theme.ToString(), StringComparison.Ordinal));
-            AppThemeCard.Description = failureDescription ?? DefaultAppThemeDescription;
+            AppThemeCard.Description = failureDescription ?? GetDefaultAppThemeDescription();
         }
         finally
         {
             _isApplyingAppThemeSelection = false;
+        }
+    }
+
+    private static string GetDefaultAppThemeDescription()
+    {
+        try
+        {
+            var priPath = Path.Combine(AppContext.BaseDirectory, "SteamInputAddonforClaw.UI.pri");
+            var value = new ResourceManager(priPath)
+                .MainResourceMap
+                .GetValue("Resources/Settings_AppTheme_Description")
+                .ValueAsString;
+            return string.IsNullOrEmpty(value) ? DefaultAppThemeDescription : value;
+        }
+        catch (Exception)
+        {
+            return DefaultAppThemeDescription;
         }
     }
 
