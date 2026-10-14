@@ -66,8 +66,8 @@
   <data name="Device_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
   <data name="Device_CpuBoost_RuntimeInterrupted" xml:space="preserve"><value>CPU Boost could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Device_CpuBoost_SettingsUnwritable" xml:space="preserve"><value>CPU Boost settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Device_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Device_CpuBoostAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
   <data name="Device_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Device_PageTitle.Text" xml:space="preserve"><value>Device</value></data>
@@ -78,10 +78,10 @@
   <data name="Device_PowerMode_RuntimeInterrupted" xml:space="preserve"><value>Power Mode could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Device_PowerMode_SettingsUnavailable" xml:space="preserve"><value>Power Mode settings are unavailable.</value></data>
   <data name="Device_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
-  <data name="Device_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Device_PowerModeAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_PowerModeDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_PowerModeExpander.Description" xml:space="preserve"><value>Configured Windows 11 power mode for each power rail.</value></data>
-  <data name="Device_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
+  <data name="Device_PowerModeExpander.Header" xml:space="preserve"><value>Power Mode</value></data>
   <data name="Device_Tdp_ChangeFailed" xml:space="preserve"><value>The TDP change failed.</value></data>
   <data name="Device_Tdp_ResultFail" xml:space="preserve"><value>Fail</value></data>
   <data name="Device_Tdp_ResultSuccess" xml:space="preserve"><value>Success</value></data>
@@ -89,8 +89,8 @@
   <data name="Device_Tdp_SettingsUnwritable" xml:space="preserve"><value>TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
   <data name="Device_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
   <data name="Device_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
-  <data name="Device_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Device_TdpAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_TdpDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
   <data name="Device_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>Controller</value></data>

@@ -21,9 +21,9 @@
   <data name="Settings_AppTheme_Description" xml:space="preserve">
     <value>Choose the main app appearance.</value>
   </data>
-  <data name="Device_Battery_CurrentKnown" xml:space="preserve"><value>Current hardware: {0}%</value></data>
-  <data name="Device_Battery_CurrentUnavailable" xml:space="preserve"><value>Current hardware: unavailable</value></data>
-  <data name="Device_Battery_DesiredKnown" xml:space="preserve"><value>Desired: {0}% ({1})</value></data>
+  <data name="Device_Battery_CurrentKnown" xml:space="preserve"><value>현재 설정: {0}%</value></data>
+  <data name="Device_Battery_CurrentUnavailable" xml:space="preserve"><value>현재 설정: unavailable</value></data>
+  <data name="Device_Battery_DesiredKnown" xml:space="preserve"><value>설정값: {0}% ({1})</value></data>
   <data name="Device_Battery_DesiredNotInitialized" xml:space="preserve"><value>Desired: not initialized; choose a supported 60–100% value to take ownership.</value></data>
   <data name="Device_Battery_EnabledWord" xml:space="preserve"><value>enabled</value></data>
   <data name="Device_Battery_DisabledWord" xml:space="preserve"><value>disabled</value></data>
@@ -32,8 +32,8 @@
   <data name="Device_Battery_MismatchToDesired" xml:space="preserve"><value>Current hardware does not match the saved desired battery charge limit; it will be reconciled on the next lifecycle event.</value></data>
   <data name="Device_Battery_UpdateFailed" xml:space="preserve"><value>Battery charge limit could not be updated.</value></data>
   <data name="Device_Battery_RuntimeInterrupted" xml:space="preserve"><value>Battery charge limit could not be updated because the Runtime connection was interrupted.</value></data>
-  <data name="Device_BatteryChargeLimitCard.Header" xml:space="preserve"><value>Battery charge limit</value></data>
-  <data name="Device_CenterM_Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Device_BatteryChargeLimitCard.Header" xml:space="preserve"><value>배터리 충전 제한</value></data>
+  <data name="Device_CenterM_Cancel" xml:space="preserve"><value>취소</value></data>
   <data name="Device_CenterM_ChangeCancelled" xml:space="preserve"><value>The controller authority change was cancelled.</value></data>
   <data name="Device_CenterM_ChangeFailed" xml:space="preserve"><value>The controller authority change could not be completed.</value></data>
   <data name="Device_CenterMStartupCard.Description" xml:space="preserve"><value>Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.</value></data>
@@ -46,53 +46,53 @@
   <data name="Device_CenterM_DisableTitle" xml:space="preserve"><value>Disable MSI Center M</value></data>
   <data name="Device_CenterM_RestartingWindows" xml:space="preserve"><value>Controller authority updated. Restarting Windows…</value></data>
   <data name="Device_CenterM_RuntimeInterrupted" xml:space="preserve"><value>The controller authority change could not be completed because the Runtime connection was interrupted.</value></data>
-  <data name="Device_CenterM_StatusDisabled" xml:space="preserve"><value>Status: Disabled</value></data>
-  <data name="Device_CenterM_StatusEnabled" xml:space="preserve"><value>Status: Enabled</value></data>
-  <data name="Device_CenterM_StatusNeedsAttention" xml:space="preserve"><value>Status: Needs attention</value></data>
-  <data name="Device_CenterM_StatusUnavailable" xml:space="preserve"><value>Status: Unavailable</value></data>
+  <data name="Device_CenterM_StatusDisabled" xml:space="preserve"><value>상태: 비활성화</value></data>
+  <data name="Device_CenterM_StatusEnabled" xml:space="preserve"><value>상태: 활성화</value></data>
+  <data name="Device_CenterM_StatusNeedsAttention" xml:space="preserve"><value>상태: Needs attention</value></data>
+  <data name="Device_CenterM_StatusUnavailable" xml:space="preserve"><value>상태: Unavailable</value></data>
   <data name="Device_CenterM_Unavailable" xml:space="preserve"><value>MSI Center M controller authority control is unavailable.</value></data>
   <data name="Device_CenterMStartupCard.Header" xml:space="preserve"><value>MSI Center M</value></data>
-  <data name="Device_CenterMStartupDisableButton.Content" xml:space="preserve"><value>Disable</value></data>
-  <data name="Device_CenterMStartupEnableButton.Content" xml:space="preserve"><value>Enable</value></data>
-  <data name="Device_CenterMStartupStatusText.Text" xml:space="preserve"><value>Status: —</value></data>
+  <data name="Device_CenterMStartupDisableButton.Content" xml:space="preserve"><value>비활성화</value></data>
+  <data name="Device_CenterMStartupEnableButton.Content" xml:space="preserve"><value>활성화</value></data>
+  <data name="Device_CenterMStartupStatusText.Text" xml:space="preserve"><value>상태: —</value></data>
   <data name="Device_CpuBoost_ChangeFailed" xml:space="preserve"><value>The CPU Boost change failed.</value></data>
   <data name="Device_CpuBoost_LastChangeFailed" xml:space="preserve"><value>The last CPU Boost change could not be applied to Windows: {0}</value></data>
-  <data name="Device_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
+  <data name="Device_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>적극적</value></data>
   <data name="Device_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
-  <data name="Device_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
-  <data name="Device_CpuBoost_Mode_EfficientAggressive" xml:space="preserve"><value>Efficient Aggressive</value></data>
+  <data name="Device_CpuBoost_Mode_Disabled" xml:space="preserve"><value>사용안함</value></data>
+  <data name="Device_CpuBoost_Mode_EfficientAggressive" xml:space="preserve"><value>효율적 적극적</value></data>
   <data name="Device_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve"><value>Efficient Aggressive At Guaranteed</value></data>
-  <data name="Device_CpuBoost_Mode_EfficientEnabled" xml:space="preserve"><value>Efficient Enabled</value></data>
-  <data name="Device_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="Device_CpuBoost_Mode_EfficientEnabled" xml:space="preserve"><value>효율적 활성화</value></data>
+  <data name="Device_CpuBoost_Mode_Enabled" xml:space="preserve"><value>활성</value></data>
   <data name="Device_CpuBoost_RuntimeInterrupted" xml:space="preserve"><value>CPU Boost could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Device_CpuBoost_SettingsUnwritable" xml:space="preserve"><value>CPU Boost settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Device_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Device_CpuBoostAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
-  <data name="Device_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
-  <data name="Device_PageTitle.Text" xml:space="preserve"><value>Device</value></data>
+  <data name="Device_CpuBoostExpander.Header" xml:space="preserve"><value>CPU 부스트</value></data>
+  <data name="Device_PageTitle.Text" xml:space="preserve"><value>디바이스</value></data>
   <data name="Device_PowerMode_InitializationFailed" xml:space="preserve"><value>Windows Power Mode could not be initialized.</value></data>
-  <data name="Device_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>
-  <data name="Device_PowerMode_Mode_BestPerformance" xml:space="preserve"><value>Best performance</value></data>
-  <data name="Device_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve"><value>Best power efficiency</value></data>
+  <data name="Device_PowerMode_Mode_Balanced" xml:space="preserve"><value>균형</value></data>
+  <data name="Device_PowerMode_Mode_BestPerformance" xml:space="preserve"><value>최상의 성능</value></data>
+  <data name="Device_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve"><value>최고의 전력 효율성</value></data>
   <data name="Device_PowerMode_RuntimeInterrupted" xml:space="preserve"><value>Power Mode could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Device_PowerMode_SettingsUnavailable" xml:space="preserve"><value>Power Mode settings are unavailable.</value></data>
   <data name="Device_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
-  <data name="Device_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Device_PowerModeAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_PowerModeDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_PowerModeExpander.Description" xml:space="preserve"><value>Configured Windows 11 power mode for each power rail.</value></data>
-  <data name="Device_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
+  <data name="Device_PowerModeExpander.Header" xml:space="preserve"><value>전원 모드</value></data>
   <data name="Device_Tdp_ChangeFailed" xml:space="preserve"><value>The TDP change failed.</value></data>
-  <data name="Device_Tdp_ResultFail" xml:space="preserve"><value>Fail</value></data>
-  <data name="Device_Tdp_ResultSuccess" xml:space="preserve"><value>Success</value></data>
+  <data name="Device_Tdp_ResultFail" xml:space="preserve"><value>실패</value></data>
+  <data name="Device_Tdp_ResultSuccess" xml:space="preserve"><value>성공</value></data>
   <data name="Device_Tdp_RuntimeInterrupted" xml:space="preserve"><value>TDP could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Device_Tdp_SettingsUnwritable" xml:space="preserve"><value>TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
   <data name="Device_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
   <data name="Device_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
-  <data name="Device_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Device_TdpAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_TdpDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
-  <data name="Device_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
+  <data name="Device_TdpExpander.Header" xml:space="preserve"><value>TDP 조절</value></data>
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
