@@ -174,4 +174,64 @@
   <data name="Controller_BackTarget_View" xml:space="preserve"><value>View</value></data>
   <data name="Controller_BackTarget_Menu" xml:space="preserve"><value>Menu</value></data>
   <data name="Controller_BackTarget_XboxGuide" xml:space="preserve"><value>Xbox Guide</value></data>
+  <data name="MainNav_Steam.Content" xml:space="preserve"><value>Steam</value></data>
+  <data name="Steam_BackButton.Content" xml:space="preserve"><value>Back</value></data>
+  <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
+  <data name="Steam_Catalog_RefreshFailed" xml:space="preserve"><value>Game catalog could not be refreshed.</value></data>
+  <data name="Steam_CatalogTitle.Text" xml:space="preserve"><value>Steam</value></data>
+  <data name="Steam_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
+  <data name="Steam_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
+  <data name="Steam_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Steam_CpuBoost_Mode_EfficientAggressive" xml:space="preserve"><value>Efficient Aggressive</value></data>
+  <data name="Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve"><value>Efficient Aggressive At Guaranteed</value></data>
+  <data name="Steam_CpuBoost_Mode_EfficientEnabled" xml:space="preserve"><value>Efficient Enabled</value></data>
+  <data name="Steam_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="Steam_CpuBoost_UpdateFailed" xml:space="preserve"><value>CPU Boost could not be updated.</value></data>
+  <data name="Steam_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Steam_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
+  <data name="Steam_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
+  <data name="Steam_Favorite_SaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
+  <data name="Steam_FpsAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Steam_FpsDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_GameSearchBox.PlaceholderText" xml:space="preserve"><value>Search games...</value></data>
+  <data name="Steam_GpuMinimumClock_UpdateFailed" xml:space="preserve"><value>Minimum GPU Clock could not be updated.</value></data>
+  <data name="Steam_GpuMinimumClockAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Steam_GpuMinimumClockDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_GpuMinimumClockExpander.Description" xml:space="preserve"><value>Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.</value></data>
+  <data name="Steam_GpuMinimumClockExpander.Header" xml:space="preserve"><value>Minimum GPU Clock</value></data>
+  <data name="Steam_IntelFps_Unavailable" xml:space="preserve"><value>Intel FPS Limit is unavailable.</value></data>
+  <data name="Steam_IntelFps_UpdateFailed" xml:space="preserve"><value>Intel FPS Limit could not be updated.</value></data>
+  <data name="Steam_IntelFpsExpander.Description" xml:space="preserve"><value>Uses Intel's official API. Some games may not support FPS limiting.</value></data>
+  <data name="Steam_IntelFpsExpander.Header" xml:space="preserve"><value>Intel FPS Limit</value></data>
+  <data name="Steam_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>
+  <data name="Steam_PowerMode_Mode_BestPerformance" xml:space="preserve"><value>Best performance</value></data>
+  <data name="Steam_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve"><value>Best power efficiency</value></data>
+  <data name="Steam_PowerMode_ToggleUpdateFailed" xml:space="preserve"><value>Windows Power Mode could not be updated.</value></data>
+  <data name="Steam_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
+  <data name="Steam_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Steam_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
+  <data name="Steam_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
+  <data name="Steam_Profile_LoadFailed" xml:space="preserve"><value>Profile settings could not be loaded.</value></data>
+  <data name="Steam_Profile_RuntimeInterrupted" xml:space="preserve"><value>Profile could not be updated because the Runtime connection was interrupted.</value></data>
+  <data name="Steam_Profile_SettingsUnwritable" xml:space="preserve"><value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
+  <data name="Steam_Profile_UpdateFailed" xml:space="preserve"><value>Profile could not be updated.</value></data>
+  <data name="Steam_RefreshGamesButton.Content" xml:space="preserve"><value>↻ Refresh</value></data>
+  <data name="Steam_Resolution_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
+  <data name="Steam_Resolution_UpdateFailed" xml:space="preserve"><value>Display resolution could not be updated.</value></data>
+  <data name="Steam_ResolutionCard.Header" xml:space="preserve"><value>Resolution</value></data>
+  <data name="Steam_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
+  <data name="Steam_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
+  <data name="Steam_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Steam_TdpControl_ToggleUpdateFailed" xml:space="preserve"><value>TDP Control could not be updated.</value></data>
+  <data name="Steam_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
+  <data name="Steam_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
+  <data name="Steam_VirtualController_DefaultOption.Content" xml:space="preserve"><value>Use default</value></data>
+  <data name="Steam_VirtualController_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
+  <data name="Steam_VirtualController_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
+  <data name="Steam_VirtualController_UpdateFailed" xml:space="preserve"><value>Virtual Controller could not be updated.</value></data>
+  <data name="Steam_VirtualControllerCard.Description" xml:space="preserve"><value>Overrides the Controller default for this Steam game.</value></data>
+  <data name="Steam_VirtualControllerCard.Header" xml:space="preserve"><value>Virtual Controller</value></data>
 </root>

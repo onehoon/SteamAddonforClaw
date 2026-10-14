@@ -1357,9 +1357,14 @@ public sealed class UiArchitectureTests
         }
         Assert.DoesNotContain("x:Name=\"DisplayExpander\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("<ctcontrols:SettingsCard Header=\"Resolution\">", xaml, StringComparison.Ordinal);
+        var profileDocument = XDocument.Parse(xaml);
+        XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var resolutionCard = Assert.Single(profileDocument.Descendants(), element =>
+            element.Name.LocalName == "SettingsCard"
+            && (string?)element.Attribute(xamlNamespace + "Uid") == "Steam_ResolutionCard");
+        Assert.Equal("Resolution", (string?)resolutionCard.Attribute("Header"));
         Assert.DoesNotContain("Expander.IsExpanded =", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("new(null, null, \"Do not change\"), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("new(null, null, MainUiStrings.Get(\"Steam_Resolution_DoNotChange\", \"Do not change\")), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", codeBehind, StringComparison.Ordinal);
         Assert.Contains("HeaderIcon", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xEC4A;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE945;\"", xaml, StringComparison.Ordinal);
@@ -1368,7 +1373,7 @@ public sealed class UiArchitectureTests
         Assert.Contains("Glyph=\"&#xE9D2;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("snapshot.FpsLimit?.Available == true ? \"Uses Intel's official API. Some games may not support FPS limiting.\" : snapshot.FpsLimit?.UnavailableReason", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("snapshot.FpsLimit?.Available == true ? MainUiStrings.Get(\"Steam_IntelFpsExpander/Description\", \"Uses Intel's official API. Some games may not support FPS limiting.\") : snapshot.FpsLimit?.UnavailableReason ?? MainUiStrings.Get(\"Steam_IntelFps_Unavailable\"", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("<TextBlock Text=\"Profile\" VerticalAlignment=\"Center\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsCard Grid.Row=\"1\">", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SelectedGameNameText\"", xaml, StringComparison.Ordinal);
