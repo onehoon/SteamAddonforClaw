@@ -1,5 +1,110 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <!--  
+    Microsoft ResX Schema 
+    
+    Version 2.0
+    
+    The primary goals of this format is to allow a simple XML format 
+    that is mostly human readable. The generation and parsing of the 
+    various data types are done through the TypeConverter classes 
+    associated with the data types.
+    
+    Example:
+    
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+                
+    There are any number of "resheader" rows that contain simple 
+    name/value pairs.
+    
+    Each data row contains a name, and value. The row also contains a 
+    type or mimetype. Type corresponds to a .NET class that support 
+    text/value conversion through the TypeConverter architecture. 
+    Classes that don't support this are serialized and stored with the 
+    mimetype set.
+    
+    The mimetype is used for serialized objects, and tells the 
+    ResXResourceReader how to depersist the object. This is currently not 
+    extensible. For a given mimetype the value must be set accordingly:
+    
+    Note - application/x-microsoft.net.object.binary.base64 is the format 
+    that the ResXResourceWriter will generate, however the reader can 
+    read any of the formats listed below.
+    
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+    
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array 
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
   <resheader name="resmimetype">
     <value>text/microsoft-resx</value>
   </resheader>
@@ -7,456 +112,1329 @@
     <value>2.0</value>
   </resheader>
   <resheader name="reader">
-    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <resheader name="writer">
-    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="MainNav_Device.Content" xml:space="preserve">
-    <value>Device</value>
+    <value>디바이스</value>
   </data>
   <data name="HowToUse_Loading.Text" xml:space="preserve">
-    <value>Loading documentation…</value>
+    <value>로딩중입니다.</value>
   </data>
   <data name="Settings_AppTheme_Description" xml:space="preserve">
     <value>Choose the main app appearance.</value>
   </data>
-  <data name="Device_Battery_CurrentKnown" xml:space="preserve"><value>Current hardware: {0}%</value></data>
-  <data name="Device_Battery_CurrentUnavailable" xml:space="preserve"><value>Current hardware: unavailable</value></data>
-  <data name="Device_Battery_DesiredKnown" xml:space="preserve"><value>Desired: {0}% ({1})</value></data>
-  <data name="Device_Battery_DesiredNotInitialized" xml:space="preserve"><value>Desired: not initialized; choose a supported 60–100% value to take ownership.</value></data>
-  <data name="Device_Battery_EnabledWord" xml:space="preserve"><value>enabled</value></data>
-  <data name="Device_Battery_DisabledWord" xml:space="preserve"><value>disabled</value></data>
-  <data name="Device_Battery_Unavailable" xml:space="preserve"><value>Battery charge-limit control is unavailable on this device.</value></data>
-  <data name="Device_Battery_SettingsUnwritable" xml:space="preserve"><value>Battery settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Device_Battery_MismatchToDesired" xml:space="preserve"><value>Current hardware does not match the saved desired battery charge limit; it will be reconciled on the next lifecycle event.</value></data>
-  <data name="Device_Battery_UpdateFailed" xml:space="preserve"><value>Battery charge limit could not be updated.</value></data>
-  <data name="Device_Battery_RuntimeInterrupted" xml:space="preserve"><value>Battery charge limit could not be updated because the Runtime connection was interrupted.</value></data>
-  <data name="Device_BatteryChargeLimitCard.Header" xml:space="preserve"><value>Battery charge limit</value></data>
-  <data name="Device_CenterM_Cancel" xml:space="preserve"><value>Cancel</value></data>
-  <data name="Device_CenterM_ChangeCancelled" xml:space="preserve"><value>The controller authority change was cancelled.</value></data>
-  <data name="Device_CenterM_ChangeFailed" xml:space="preserve"><value>The controller authority change could not be completed.</value></data>
-  <data name="Device_CenterMStartupCard.Description" xml:space="preserve"><value>Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.</value></data>
-  <data name="Device_CenterM_EnableAndRestart" xml:space="preserve"><value>Enable and Restart</value></data>
-  <data name="Device_CenterM_EnableConfirmation" xml:space="preserve"><value>Restore MSI Center M controller authority.&#xA;&#xA;Windows must restart to apply this change.</value></data>
-  <data name="Device_CenterM_EnableTitle" xml:space="preserve"><value>Enable MSI Center M</value></data>
-  <data name="Device_CenterM_Inconsistent" xml:space="preserve"><value>MSI Center M startup configuration is inconsistent. Choose Enable or Disable to repair it.</value></data>
-  <data name="Device_CenterM_DisableAndRestart" xml:space="preserve"><value>Disable and Restart</value></data>
-  <data name="Device_CenterM_DisableConfirmation" xml:space="preserve"><value>Disable MSI Center M and switch controller authority to Steam Addon for Claw.&#xA;&#xA;Windows must restart to apply this change.</value></data>
-  <data name="Device_CenterM_DisableTitle" xml:space="preserve"><value>Disable MSI Center M</value></data>
-  <data name="Device_CenterM_RestartingWindows" xml:space="preserve"><value>Controller authority updated. Restarting Windows…</value></data>
-  <data name="Device_CenterM_RuntimeInterrupted" xml:space="preserve"><value>The controller authority change could not be completed because the Runtime connection was interrupted.</value></data>
-  <data name="Device_CenterM_StatusDisabled" xml:space="preserve"><value>Status: Disabled</value></data>
-  <data name="Device_CenterM_StatusEnabled" xml:space="preserve"><value>Status: Enabled</value></data>
-  <data name="Device_CenterM_StatusNeedsAttention" xml:space="preserve"><value>Status: Needs attention</value></data>
-  <data name="Device_CenterM_StatusUnavailable" xml:space="preserve"><value>Status: Unavailable</value></data>
-  <data name="Device_CenterM_Unavailable" xml:space="preserve"><value>MSI Center M controller authority control is unavailable.</value></data>
-  <data name="Device_CenterMStartupCard.Header" xml:space="preserve"><value>MSI Center M</value></data>
-  <data name="Device_CenterMStartupDisableButton.Content" xml:space="preserve"><value>Disable</value></data>
-  <data name="Device_CenterMStartupEnableButton.Content" xml:space="preserve"><value>Enable</value></data>
-  <data name="Device_CenterMStartupStatusText.Text" xml:space="preserve"><value>Status: —</value></data>
-  <data name="Device_CpuBoost_ChangeFailed" xml:space="preserve"><value>The CPU Boost change failed.</value></data>
-  <data name="Device_CpuBoost_LastChangeFailed" xml:space="preserve"><value>The last CPU Boost change could not be applied to Windows: {0}</value></data>
-  <data name="Device_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
-  <data name="Device_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
-  <data name="Device_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
-  <data name="Device_CpuBoost_Mode_EfficientAggressive" xml:space="preserve"><value>Efficient Aggressive</value></data>
-  <data name="Device_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve"><value>Efficient Aggressive At Guaranteed</value></data>
-  <data name="Device_CpuBoost_Mode_EfficientEnabled" xml:space="preserve"><value>Efficient Enabled</value></data>
-  <data name="Device_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
-  <data name="Device_CpuBoost_RuntimeInterrupted" xml:space="preserve"><value>CPU Boost could not be updated because the Runtime connection was interrupted.</value></data>
-  <data name="Device_CpuBoost_SettingsUnwritable" xml:space="preserve"><value>CPU Boost settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Device_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Device_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
-  <data name="Device_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
-  <data name="Device_PageTitle.Text" xml:space="preserve"><value>Device</value></data>
-  <data name="Device_PowerMode_InitializationFailed" xml:space="preserve"><value>Windows Power Mode could not be initialized.</value></data>
-  <data name="Device_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>
-  <data name="Device_PowerMode_Mode_BestPerformance" xml:space="preserve"><value>Best performance</value></data>
-  <data name="Device_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve"><value>Best power efficiency</value></data>
-  <data name="Device_PowerMode_RuntimeInterrupted" xml:space="preserve"><value>Power Mode could not be updated because the Runtime connection was interrupted.</value></data>
-  <data name="Device_PowerMode_SettingsUnavailable" xml:space="preserve"><value>Power Mode settings are unavailable.</value></data>
-  <data name="Device_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
-  <data name="Device_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Device_PowerModeExpander.Description" xml:space="preserve"><value>Configured Windows 11 power mode for each power rail.</value></data>
-  <data name="Device_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
-  <data name="Device_Tdp_ChangeFailed" xml:space="preserve"><value>The TDP change failed.</value></data>
-  <data name="Device_Tdp_ResultFail" xml:space="preserve"><value>Fail</value></data>
-  <data name="Device_Tdp_ResultSuccess" xml:space="preserve"><value>Success</value></data>
-  <data name="Device_Tdp_RuntimeInterrupted" xml:space="preserve"><value>TDP could not be updated because the Runtime connection was interrupted.</value></data>
-  <data name="Device_Tdp_SettingsUnwritable" xml:space="preserve"><value>TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Device_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
-  <data name="Device_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
-  <data name="Device_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Device_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Device_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
-  <data name="Device_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
-  <data name="MainNav_Controller.Content" xml:space="preserve"><value>Controller</value></data>
-  <data name="Controller_PageTitle.Text" xml:space="preserve"><value>Controller</value></data>
-  <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
-  <data name="Controller_SteamVirtualControllerCard.Header" xml:space="preserve"><value>Steam용 컨트롤러</value></data>
-  <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve"><value>Steam에서 사용할 컨트롤러와 자이로 입력을 설정합니다.</value></data>
-  <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve"><value>Steam 게임 또는 Big Picture가 활성 상태이면 컨트롤러 선택이 잠깁니다.</value></data>
-  <data name="Controller_SteamControllerUnavailable.Content" xml:space="preserve"><value>사용할 수 없음</value></data>
-  <data name="Controller_SteamControllerRow.Text" xml:space="preserve"><value>컨트롤러</value></data>
-  <data name="Controller_GyroscopeRow.Text" xml:space="preserve"><value>자이로스코프</value></data>
-  <data name="Controller_GyroscopeUpdateFailed" xml:space="preserve"><value>자이로스코프 설정을 저장하지 못했습니다. 마지막으로 확인된 값으로 복원했습니다.</value></data>
-  <data name="Controller_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
-  <data name="Controller_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
-  <data name="Controller_MappingUnavailable.Text" xml:space="preserve"><value>Unavailable</value></data>
-  <data name="Controller_ButtonMappingHeader.Text" xml:space="preserve"><value>Button Mapping</value></data>
-  <data name="Controller_GamebarExpander.Header" xml:space="preserve"><value>Gamebar Button</value></data>
-  <data name="Controller_GamebarExpander.Description" xml:space="preserve"><value>The action for the Gamebar button, per runtime presentation domain.</value></data>
-  <data name="Controller_GamebarNormalCard.Header" xml:space="preserve"><value>Normal</value></data>
-  <data name="Controller_GamebarSteamCard.Header" xml:space="preserve"><value>Steam Game / Big Picture</value></data>
-  <data name="Controller_CenterMExpander.Header" xml:space="preserve"><value>Center M Button</value></data>
-  <data name="Controller_CenterMExpander.Description" xml:space="preserve"><value>The action for the Center M button, per runtime presentation domain.</value></data>
-  <data name="Controller_CenterMNormalCard.Header" xml:space="preserve"><value>Normal</value></data>
-  <data name="Controller_CenterMSteamCard.Header" xml:space="preserve"><value>Steam Game / Big Picture</value></data>
-  <data name="Controller_BackButtonMappingExpander.Header" xml:space="preserve"><value>M1 / M2</value></data>
-  <data name="Controller_BackButtonMappingExpander.Description" xml:space="preserve"><value>Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4.</value></data>
-  <data name="Controller_M1Card.Header" xml:space="preserve"><value>M1</value></data>
-  <data name="Controller_M2Card.Header" xml:space="preserve"><value>M2</value></data>
-  <data name="Controller_SettingsHeader.Text" xml:space="preserve"><value>Controller Settings</value></data>
-  <data name="Controller_LedExpander.Header" xml:space="preserve"><value>Joystick LED</value></data>
-  <data name="Controller_LedExpander.Description" xml:space="preserve"><value>Set one static color and global brightness for all controller LEDs.</value></data>
-  <data name="Controller_LedBrightnessCard.Header" xml:space="preserve"><value>Brightness</value></data>
-  <data name="Controller_LedColorCard.Header" xml:space="preserve"><value>Color</value></data>
-  <data name="Controller_LedChooseColor.Text" xml:space="preserve"><value>Choose color</value></data>
-  <data name="Controller_VibrationStrengthExpander.Header" xml:space="preserve"><value>Vibration Strength</value></data>
-  <data name="Controller_VibrationStrengthExpander.Description" xml:space="preserve"><value>Set the vibration strength applied while the Addon owns the controller.</value></data>
-  <data name="Controller_LeftMotorCard.Header" xml:space="preserve"><value>Left Motor</value></data>
-  <data name="Controller_LeftMotorTestButton.Content" xml:space="preserve"><value>Test</value></data>
-  <data name="Controller_RightMotorCard.Header" xml:space="preserve"><value>Right Motor</value></data>
-  <data name="Controller_RightMotorTestButton.Content" xml:space="preserve"><value>Test</value></data>
-  <data name="Controller_VibrationRecoveryCard.Header" xml:space="preserve"><value>Vibration Recovery</value></data>
-  <data name="Controller_RestoreVibrationButton.Content" xml:space="preserve"><value>Restore Vibration</value></data>
-  <data name="Controller_SteamActivity_Active" xml:space="preserve"><value>Steam이 활성 상태입니다. 실제 적용된 컨트롤러를 표시하며 선택은 잠깁니다.</value></data>
-  <data name="Controller_SteamActivity_Idle" xml:space="preserve"><value>Steam 게임이나 Big Picture가 아닐 때 컨트롤러를 변경할 수 있습니다.</value></data>
-  <data name="Controller_SteamActivity_Unknown" xml:space="preserve"><value>컨트롤러 상태를 확인할 수 없어 선택이 잠겼습니다.</value></data>
-  <data name="Controller_SteamChoice_NotChanged" xml:space="preserve"><value>저장된 컨트롤러 선택을 변경하지 못했습니다.</value></data>
-  <data name="Controller_SteamChoice_Uncertain" xml:space="preserve"><value>변경을 확인하지 못했습니다. 마지막으로 확인된 선택을 표시합니다.</value></data>
-  <data name="Controller_Action_QuickSettingsOverlay" xml:space="preserve"><value>Quick Settings Overlay</value></data>
-  <data name="Controller_Action_SteamBigPicture" xml:space="preserve"><value>Steam Big Picture</value></data>
-  <data name="Controller_Action_SteamButton" xml:space="preserve"><value>Steam Button</value></data>
-  <data name="Controller_Action_SteamQuickAccess" xml:space="preserve"><value>Steam Quick Access</value></data>
-  <data name="Controller_Action_KeyboardHotkey" xml:space="preserve"><value>Keyboard / Hotkey</value></data>
-  <data name="Controller_Action_LaunchApplication" xml:space="preserve"><value>Launch Application</value></data>
-  <data name="Controller_Action_Xbox" xml:space="preserve"><value>Xbox</value></data>
-  <data name="Controller_BindingEditor_ApplicationPath" xml:space="preserve"><value>Application path</value></data>
-  <data name="Controller_BindingEditor_Arguments" xml:space="preserve"><value>Arguments (optional)</value></data>
-  <data name="Controller_BindingEditor_RunAsAdministrator" xml:space="preserve"><value>Run as administrator</value></data>
-  <data name="Controller_BindingEditor_Browse" xml:space="preserve"><value>Browse…</value></data>
-  <data name="Controller_BindingEditor_PrivilegeExplanation" xml:space="preserve"><value>Runs with administrator privileges; otherwise requests normal user privileges.</value></data>
-  <data name="Controller_RestoreVibrationButton_Tooltip" xml:space="preserve"><value>Temporarily disconnects virtual controller input. Save and close your game first.</value></data>
-  <data name="Controller_RestoreVibrationButton_BusyContent" xml:space="preserve"><value>Restoring…</value></data>
-  <data name="Controller_RumbleRearm_Succeeded" xml:space="preserve"><value>Controller restored. Test both motors to confirm vibration.</value></data>
-  <data name="Controller_RumbleRearm_Unavailable" xml:space="preserve"><value>Vibration recovery is unavailable right now.</value></data>
-  <data name="Controller_RumbleRearm_Failed" xml:space="preserve"><value>Could not restore the controller. See the application log.</value></data>
-  <data name="Controller_Vibration_ApplyFailed" xml:space="preserve"><value>The saved vibration setting could not be applied now.</value></data>
-  <data name="Controller_Vibration_SaveUncertain" xml:space="preserve"><value>The saved setting could not be confirmed. Refreshing the current setting.</value></data>
-  <data name="Controller_Vibration_TestFailed" xml:space="preserve"><value>The physical vibration test did not complete safely.</value></data>
-  <data name="Controller_Vibration_TestUncertain" xml:space="preserve"><value>The test result is uncertain. Refreshing the saved strength values.</value></data>
-  <data name="Controller_Vibration_LoadFailed" xml:space="preserve"><value>The saved vibration setting could not be loaded.</value></data>
-  <data name="Controller_BackTarget_Disabled" xml:space="preserve"><value>Disabled</value></data>
-  <data name="Controller_BackTarget_A" xml:space="preserve"><value>A</value></data>
-  <data name="Controller_BackTarget_B" xml:space="preserve"><value>B</value></data>
-  <data name="Controller_BackTarget_X" xml:space="preserve"><value>X</value></data>
-  <data name="Controller_BackTarget_Y" xml:space="preserve"><value>Y</value></data>
-  <data name="Controller_BackTarget_DPadUp" xml:space="preserve"><value>D-Pad Up</value></data>
-  <data name="Controller_BackTarget_DPadRight" xml:space="preserve"><value>D-Pad Right</value></data>
-  <data name="Controller_BackTarget_DPadDown" xml:space="preserve"><value>D-Pad Down</value></data>
-  <data name="Controller_BackTarget_DPadLeft" xml:space="preserve"><value>D-Pad Left</value></data>
-  <data name="Controller_BackTarget_LeftBumper" xml:space="preserve"><value>Left Bumper (LB)</value></data>
-  <data name="Controller_BackTarget_RightBumper" xml:space="preserve"><value>Right Bumper (RB)</value></data>
-  <data name="Controller_BackTarget_LeftTrigger" xml:space="preserve"><value>Left Trigger (LT)</value></data>
-  <data name="Controller_BackTarget_RightTrigger" xml:space="preserve"><value>Right Trigger (RT)</value></data>
-  <data name="Controller_BackTarget_LeftStickClick" xml:space="preserve"><value>Left Stick Click (L3)</value></data>
-  <data name="Controller_BackTarget_RightStickClick" xml:space="preserve"><value>Right Stick Click (R3)</value></data>
-  <data name="Controller_BackTarget_View" xml:space="preserve"><value>View</value></data>
-  <data name="Controller_BackTarget_Menu" xml:space="preserve"><value>Menu</value></data>
-  <data name="Controller_BackTarget_XboxGuide" xml:space="preserve"><value>Xbox Guide</value></data>
-  <data name="MainNav_Steam.Content" xml:space="preserve"><value>Steam</value></data>
-  <data name="Steam_BackButton.Content" xml:space="preserve"><value>Back</value></data>
-  <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
-  <data name="Steam_Catalog_RefreshFailed" xml:space="preserve"><value>Game catalog could not be refreshed.</value></data>
-  <data name="Steam_CatalogTitle.Text" xml:space="preserve"><value>Steam</value></data>
-  <data name="Steam_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
-  <data name="Steam_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
-  <data name="Steam_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
-  <data name="Steam_CpuBoost_Mode_EfficientAggressive" xml:space="preserve"><value>Efficient Aggressive</value></data>
-  <data name="Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve"><value>Efficient Aggressive At Guaranteed</value></data>
-  <data name="Steam_CpuBoost_Mode_EfficientEnabled" xml:space="preserve"><value>Efficient Enabled</value></data>
-  <data name="Steam_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
-  <data name="Steam_CpuBoost_UpdateFailed" xml:space="preserve"><value>CPU Boost could not be updated.</value></data>
-  <data name="Steam_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Steam_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
-  <data name="Steam_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
-  <data name="Steam_Favorite_SaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
-  <data name="Steam_FpsAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_FpsDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Steam_GameSearchBox.PlaceholderText" xml:space="preserve"><value>Search games...</value></data>
-  <data name="Steam_GpuMinimumClock_UpdateFailed" xml:space="preserve"><value>Minimum GPU Clock could not be updated.</value></data>
-  <data name="Steam_GpuMinimumClockAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_GpuMinimumClockDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Steam_GpuMinimumClockExpander.Description" xml:space="preserve"><value>Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.</value></data>
-  <data name="Steam_GpuMinimumClockExpander.Header" xml:space="preserve"><value>Minimum GPU Clock</value></data>
-  <data name="Steam_IntelFps_Unavailable" xml:space="preserve"><value>Intel FPS Limit is unavailable.</value></data>
-  <data name="Steam_IntelFps_UpdateFailed" xml:space="preserve"><value>Intel FPS Limit could not be updated.</value></data>
-  <data name="Steam_IntelFpsExpander.Description" xml:space="preserve"><value>Uses Intel's official API. Some games may not support FPS limiting.</value></data>
-  <data name="Steam_IntelFpsExpander.Header" xml:space="preserve"><value>Intel FPS Limit</value></data>
-  <data name="Steam_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>
-  <data name="Steam_PowerMode_Mode_BestPerformance" xml:space="preserve"><value>Best performance</value></data>
-  <data name="Steam_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve"><value>Best power efficiency</value></data>
-  <data name="Steam_PowerMode_ToggleUpdateFailed" xml:space="preserve"><value>Windows Power Mode could not be updated.</value></data>
-  <data name="Steam_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
-  <data name="Steam_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Steam_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
-  <data name="Steam_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
-  <data name="Steam_Profile_LoadFailed" xml:space="preserve"><value>Profile settings could not be loaded.</value></data>
-  <data name="Steam_Profile_RuntimeInterrupted" xml:space="preserve"><value>Profile could not be updated because the Runtime connection was interrupted.</value></data>
-  <data name="Steam_Profile_SettingsUnwritable" xml:space="preserve"><value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Steam_Profile_UpdateFailed" xml:space="preserve"><value>Profile could not be updated.</value></data>
-  <data name="Steam_RefreshGamesButton.Content" xml:space="preserve"><value>↻ Refresh</value></data>
-  <data name="Steam_Resolution_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
-  <data name="Steam_Resolution_UpdateFailed" xml:space="preserve"><value>Display resolution could not be updated.</value></data>
-  <data name="Steam_ResolutionCard.Header" xml:space="preserve"><value>Resolution</value></data>
-  <data name="Steam_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
-  <data name="Steam_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
-  <data name="Steam_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_TdpControl_ToggleUpdateFailed" xml:space="preserve"><value>TDP Control could not be updated.</value></data>
-  <data name="Steam_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Steam_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
-  <data name="Steam_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
-  <data name="Steam_VirtualController_DefaultOption.Content" xml:space="preserve"><value>Use default</value></data>
-  <data name="Steam_VirtualController_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
-  <data name="Steam_VirtualController_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
-  <data name="Steam_VirtualController_UpdateFailed" xml:space="preserve"><value>Virtual Controller could not be updated.</value></data>
-  <data name="Steam_VirtualControllerCard.Description" xml:space="preserve"><value>Overrides the Controller default for this Steam game.</value></data>
-  <data name="Steam_VirtualControllerCard.Header" xml:space="preserve"><value>Virtual Controller</value></data>
+  <data name="Device_Battery_CurrentKnown" xml:space="preserve">
+    <value>Current hardware: {0}%</value>
+  </data>
+  <data name="Device_Battery_CurrentUnavailable" xml:space="preserve">
+    <value>Current hardware: unavailable</value>
+  </data>
+  <data name="Device_Battery_DesiredKnown" xml:space="preserve">
+    <value>Desired: {0}% ({1})</value>
+  </data>
+  <data name="Device_Battery_DesiredNotInitialized" xml:space="preserve">
+    <value>Desired: not initialized; choose a supported 60–100% value to take ownership.</value>
+  </data>
+  <data name="Device_Battery_EnabledWord" xml:space="preserve">
+    <value>enabled</value>
+  </data>
+  <data name="Device_Battery_DisabledWord" xml:space="preserve">
+    <value>disabled</value>
+  </data>
+  <data name="Device_Battery_Unavailable" xml:space="preserve">
+    <value>Battery charge-limit control is unavailable on this device.</value>
+  </data>
+  <data name="Device_Battery_SettingsUnwritable" xml:space="preserve">
+    <value>Battery settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value>
+  </data>
+  <data name="Device_Battery_MismatchToDesired" xml:space="preserve">
+    <value>Current hardware does not match the saved desired battery charge limit; it will be reconciled on the next lifecycle event.</value>
+  </data>
+  <data name="Device_Battery_UpdateFailed" xml:space="preserve">
+    <value>Battery charge limit could not be updated.</value>
+  </data>
+  <data name="Device_Battery_RuntimeInterrupted" xml:space="preserve">
+    <value>Battery charge limit could not be updated because the Runtime connection was interrupted.</value>
+  </data>
+  <data name="Device_BatteryChargeLimitCard.Header" xml:space="preserve">
+    <value>Battery charge limit</value>
+  </data>
+  <data name="Device_CenterM_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Device_CenterM_ChangeCancelled" xml:space="preserve">
+    <value>The controller authority change was cancelled.</value>
+  </data>
+  <data name="Device_CenterM_ChangeFailed" xml:space="preserve">
+    <value>The controller authority change could not be completed.</value>
+  </data>
+  <data name="Device_CenterMStartupCard.Description" xml:space="preserve">
+    <value>Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.</value>
+  </data>
+  <data name="Device_CenterM_EnableAndRestart" xml:space="preserve">
+    <value>Enable and Restart</value>
+  </data>
+  <data name="Device_CenterM_EnableConfirmation" xml:space="preserve">
+    <value>Restore MSI Center M controller authority.
 
-  <data name="MainNav_Xbox.Content" xml:space="preserve"><value>XBOX</value></data>
-  <data name="Xbox_BackButton.Content" xml:space="preserve"><value>Back</value></data>
-  <data name="Xbox_BackMapping_InvalidTargets" xml:space="preserve"><value>Choose valid M1 and M2 targets before saving the per-game mapping.</value></data>
-  <data name="Xbox_BackMapping_UpdateFailed" xml:space="preserve"><value>M1 / M2 mapping could not be updated.</value></data>
-  <data name="Xbox_BackTarget_Disabled" xml:space="preserve"><value>Disabled</value></data>
-  <data name="Xbox_BackTarget_A" xml:space="preserve"><value>A</value></data>
-  <data name="Xbox_BackTarget_B" xml:space="preserve"><value>B</value></data>
-  <data name="Xbox_BackTarget_X" xml:space="preserve"><value>X</value></data>
-  <data name="Xbox_BackTarget_Y" xml:space="preserve"><value>Y</value></data>
-  <data name="Xbox_BackTarget_DPadUp" xml:space="preserve"><value>D-Pad Up</value></data>
-  <data name="Xbox_BackTarget_DPadRight" xml:space="preserve"><value>D-Pad Right</value></data>
-  <data name="Xbox_BackTarget_DPadDown" xml:space="preserve"><value>D-Pad Down</value></data>
-  <data name="Xbox_BackTarget_DPadLeft" xml:space="preserve"><value>D-Pad Left</value></data>
-  <data name="Xbox_BackTarget_LeftBumper" xml:space="preserve"><value>Left Bumper (LB)</value></data>
-  <data name="Xbox_BackTarget_RightBumper" xml:space="preserve"><value>Right Bumper (RB)</value></data>
-  <data name="Xbox_BackTarget_LeftTrigger" xml:space="preserve"><value>Left Trigger (LT)</value></data>
-  <data name="Xbox_BackTarget_RightTrigger" xml:space="preserve"><value>Right Trigger (RT)</value></data>
-  <data name="Xbox_BackTarget_LeftStickClick" xml:space="preserve"><value>Left Stick Click (L3)</value></data>
-  <data name="Xbox_BackTarget_RightStickClick" xml:space="preserve"><value>Right Stick Click (R3)</value></data>
-  <data name="Xbox_BackTarget_View" xml:space="preserve"><value>View</value></data>
-  <data name="Xbox_BackTarget_Menu" xml:space="preserve"><value>Menu</value></data>
-  <data name="Xbox_BackTarget_XboxGuide" xml:space="preserve"><value>Xbox Guide</value></data>
-  <data name="Xbox_Catalog_LoadFailed" xml:space="preserve"><value>XBOX game catalog could not be loaded.</value></data>
-  <data name="Xbox_Catalog_NoGames" xml:space="preserve"><value>No installed XBOX games were found.</value></data>
-  <data name="Xbox_Catalog_RefreshFailed" xml:space="preserve"><value>XBOX game catalog could not be refreshed.</value></data>
-  <data name="Xbox_CatalogTitle.Text" xml:space="preserve"><value>XBOX</value></data>
-  <data name="Xbox_ControllerMappingExpander.Description" xml:space="preserve"><value>Enable a per-game M1 / M2 override for Xbox 360 output. Off uses the global mapping.</value></data>
-  <data name="Xbox_ControllerMappingExpander.Header" xml:space="preserve"><value>M1 / M2 Button Mapping</value></data>
-  <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Xbox_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
-  <data name="Xbox_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
-  <data name="Xbox_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
-  <data name="Xbox_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
-  <data name="Xbox_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
-  <data name="Xbox_CpuBoost_Mode_EfficientAggressive" xml:space="preserve"><value>Efficient Aggressive</value></data>
-  <data name="Xbox_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve"><value>Efficient Aggressive At Guaranteed</value></data>
-  <data name="Xbox_CpuBoost_Mode_EfficientEnabled" xml:space="preserve"><value>Efficient Enabled</value></data>
-  <data name="Xbox_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
-  <data name="Xbox_CpuBoost_UpdateFailed" xml:space="preserve"><value>CPU Boost could not be updated.</value></data>
-  <data name="Xbox_Favorite_SaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
-  <data name="Xbox_FpsAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_FpsDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Xbox_GameSearchBox.PlaceholderText" xml:space="preserve"><value>Search games...</value></data>
-  <data name="Xbox_GpuMinimumClockAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_GpuMinimumClockDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Xbox_GpuMinimumClockExpander.Description" xml:space="preserve"><value>Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.</value></data>
-  <data name="Xbox_GpuMinimumClockExpander.Header" xml:space="preserve"><value>Minimum GPU Clock</value></data>
-  <data name="Xbox_GpuMinimumClock_UpdateFailed" xml:space="preserve"><value>Minimum GPU Clock could not be updated.</value></data>
-  <data name="Xbox_IntelFpsExpander.Description" xml:space="preserve"><value>Uses Intel&apos;s official API. Some games may not support FPS limiting.</value></data>
-  <data name="Xbox_IntelFpsExpander.Header" xml:space="preserve"><value>Intel FPS Limit</value></data>
-  <data name="Xbox_IntelFps_Unavailable" xml:space="preserve"><value>Intel FPS Limit is unavailable.</value></data>
-  <data name="Xbox_IntelFps_UpdateFailed" xml:space="preserve"><value>Intel FPS Limit could not be updated.</value></data>
-  <data name="Xbox_M1Card.Header" xml:space="preserve"><value>M1</value></data>
-  <data name="Xbox_M2Card.Header" xml:space="preserve"><value>M2</value></data>
-  <data name="Xbox_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Xbox_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
-  <data name="Xbox_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
-  <data name="Xbox_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>
-  <data name="Xbox_PowerMode_Mode_BestPerformance" xml:space="preserve"><value>Best performance</value></data>
-  <data name="Xbox_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve"><value>Best power efficiency</value></data>
-  <data name="Xbox_PowerMode_ToggleUpdateFailed" xml:space="preserve"><value>Windows Power Mode could not be updated.</value></data>
-  <data name="Xbox_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
-  <data name="Xbox_Profile_LoadFailed" xml:space="preserve"><value>XBOX profile settings could not be loaded.</value></data>
-  <data name="Xbox_Profile_RuntimeInterrupted" xml:space="preserve"><value>Profile could not be updated because the Runtime connection was interrupted.</value></data>
-  <data name="Xbox_Profile_SettingsUnwritable" xml:space="preserve"><value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Xbox_Profile_UpdateFailed" xml:space="preserve"><value>Profile could not be updated.</value></data>
-  <data name="Xbox_RefreshGamesButton.Content" xml:space="preserve"><value>↻ Refresh</value></data>
-  <data name="Xbox_Resolution_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
-  <data name="Xbox_Resolution_UpdateFailed" xml:space="preserve"><value>Display resolution could not be updated.</value></data>
-  <data name="Xbox_ResolutionCard.Header" xml:space="preserve"><value>Resolution</value></data>
-  <data name="Xbox_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
-  <data name="Xbox_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
-  <data name="Xbox_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_TdpControl_ToggleUpdateFailed" xml:space="preserve"><value>TDP Control could not be updated.</value></data>
-  <data name="Xbox_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Xbox_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
-  <data name="Xbox_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
-  <data name="MainNav_ClawHud.Content" xml:space="preserve"><value>ClawHUD</value></data>
-  <data name="ClawHud_PageTitle.Text" xml:space="preserve"><value>Overlay</value></data>
-  <data name="ClawHud_PageSubtitle.Text" xml:space="preserve"><value>Configure the performance overlay and display behavior.</value></data>
-  <data name="ClawHud_RetryButton.Content" xml:space="preserve"><value>Retry</value></data>
-  <data name="ClawHud_EnableCard.Header" xml:space="preserve"><value>Enable HUD</value></data>
-  <data name="ClawHud_DisplayModeCard.Header" xml:space="preserve"><value>Display mode</value></data>
-  <data name="ClawHud_DisplayModeCard.Description" xml:space="preserve"><value>Choose when the HUD is visible.</value></data>
-  <data name="ClawHud_DisplayMode_Option_InGameOnly.Content" xml:space="preserve"><value>In game only</value></data>
-  <data name="ClawHud_DisplayMode_Option_Always.Content" xml:space="preserve"><value>Always</value></data>
-  <data name="ClawHud_SizeCard.Header" xml:space="preserve"><value>HUD size</value></data>
-  <data name="ClawHud_SizeCard.Description" xml:space="preserve"><value>Adjust the overall HUD scale.</value></data>
-  <data name="ClawHud_Size_Option_Default.Content" xml:space="preserve"><value>Default</value></data>
-  <data name="ClawHud_FontCard.Header" xml:space="preserve"><value>Font</value></data>
-  <data name="ClawHud_FontCard.Description" xml:space="preserve"><value>Font used by the performance HUD.</value></data>
-  <data name="ClawHud_Font_Option_Unispace.Content" xml:space="preserve"><value>Unispace</value></data>
-  <data name="ClawHud_Font_Option_SegoeUiVariable.Content" xml:space="preserve"><value>Segoe UI Variable</value></data>
-  <data name="ClawHud_AlignmentCard.Header" xml:space="preserve"><value>Alignment</value></data>
-  <data name="ClawHud_AlignmentCard.Description" xml:space="preserve"><value>Horizontal alignment of HUD content.</value></data>
-  <data name="ClawHud_Alignment_Option_Left.Content" xml:space="preserve"><value>Left</value></data>
-  <data name="ClawHud_Alignment_Option_Center.Content" xml:space="preserve"><value>Center</value></data>
-  <data name="ClawHud_Alignment_Option_Right.Content" xml:space="preserve"><value>Right</value></data>
-  <data name="ClawHud_BackgroundWidthCard.Header" xml:space="preserve"><value>Background width</value></data>
-  <data name="ClawHud_BackgroundWidthCard.Description" xml:space="preserve"><value>Choose how far the HUD background extends.</value></data>
-  <data name="ClawHud_BackgroundWidth_Option_FullWidth.Content" xml:space="preserve"><value>Full width</value></data>
-  <data name="ClawHud_BackgroundWidth_Option_ContentWidth.Content" xml:space="preserve"><value>Content width</value></data>
-  <data name="ClawHud_OpacityCard.Header" xml:space="preserve"><value>HUD opacity</value></data>
-  <data name="ClawHud_IntelVrrCard.Header" xml:space="preserve"><value>Intel VRR Range Fix</value></data>
-  <data name="ClawHud_LocalStatus_Off" xml:space="preserve"><value>Off</value></data>
-  <data name="ClawHud_LocalStatus_Starting" xml:space="preserve"><value>Starting…</value></data>
-  <data name="ClawHud_Enable_ChangeFailed" xml:space="preserve"><value>ClawHUD could not be changed.</value></data>
-  <data name="ClawHud_Setting_VerificationFailed" xml:space="preserve"><value>HUD setting could not be verified.</value></data>
-  <data name="ClawHud_VrrStatus_Disabled" xml:space="preserve"><value>Disabled</value></data>
-  <data name="ClawHud_VrrStatus_Unavailable" xml:space="preserve"><value>Unavailable</value></data>
-  <data name="ClawHud_VrrStatus_UnsupportedPanel" xml:space="preserve"><value>UnsupportedPanel</value></data>
-  <data name="ClawHud_VrrStatus_AmbiguousDisplay" xml:space="preserve"><value>AmbiguousDisplay</value></data>
-  <data name="ClawHud_VrrStatus_AlreadyCorrect" xml:space="preserve"><value>AlreadyCorrect</value></data>
-  <data name="ClawHud_VrrStatus_SkippedUserProfile" xml:space="preserve"><value>SkippedUserProfile</value></data>
-  <data name="ClawHud_VrrStatus_Applied" xml:space="preserve"><value>Applied</value></data>
-  <data name="ClawHud_VrrStatus_ApplyFailed" xml:space="preserve"><value>ApplyFailed</value></data>
-  <data name="ClawHud_VrrStatus_VerificationFailed" xml:space="preserve"><value>VerificationFailed</value></data>
-  <data name="MainNav_Shortcut.Content" xml:space="preserve"><value>Shortcut</value></data>
-  <data name="MainNav_HowToUse.Content" xml:space="preserve"><value>How to Use</value></data>
-  <data name="HowToUse_Failure.Text" xml:space="preserve"><value>How to Use could not be loaded.</value></data>
-  <data name="HowToUse_Retry.Content" xml:space="preserve"><value>Retry</value></data>
-  <data name="Shortcut_PageTitle.Text" xml:space="preserve"><value>Shortcut</value></data>
-  <data name="Shortcut_PageSubtitle.Text" xml:space="preserve"><value>Create and organize actions shown in the Shortcut overlay page.</value></data>
-  <data name="Shortcut_AddButton.Content" xml:space="preserve"><value>＋ Add Shortcut</value></data>
-  <data name="Shortcut_EditButton.Content" xml:space="preserve"><value>Edit</value></data>
-  <data name="Shortcut_DeleteButton.Content" xml:space="preserve"><value>Delete</value></data>
-  <data name="Shortcut_EmptyTitle.Text" xml:space="preserve"><value>No shortcuts yet.</value></data>
-  <data name="Shortcut_EmptySubtitle.Text" xml:space="preserve"><value>Add a Shortcut to get started.</value></data>
-  <data name="Shortcut_Title_Header" xml:space="preserve"><value>Title</value></data>
-  <data name="Shortcut_Title_Placeholder" xml:space="preserve"><value>Shortcut name</value></data>
-  <data name="Shortcut_ActionPicker_Header" xml:space="preserve"><value>Action type</value></data>
-  <data name="Shortcut_Icon_Label" xml:space="preserve"><value>Icon</value></data>
-  <data name="Shortcut_Icon_Change" xml:space="preserve"><value>Change icon</value></data>
-  <data name="Shortcut_Icon_UseDefault" xml:space="preserve"><value>Use default</value></data>
-  <data name="Shortcut_Action_Application" xml:space="preserve"><value>Application (.exe)</value></data>
-  <data name="Shortcut_Action_PowerShell" xml:space="preserve"><value>PowerShell</value></data>
-  <data name="Shortcut_Action_Website" xml:space="preserve"><value>Website (URL)</value></data>
-  <data name="Shortcut_Action_SteamBigPicture" xml:space="preserve"><value>Steam Big Picture</value></data>
-  <data name="Shortcut_Action_Steam" xml:space="preserve"><value>Steam</value></data>
-  <data name="Shortcut_Action_XboxApp" xml:space="preserve"><value>XBOX</value></data>
-  <data name="Shortcut_Action_Screenshot" xml:space="preserve"><value>Screenshot</value></data>
-  <data name="Shortcut_CloseOverlay_Header" xml:space="preserve"><value>Close Overlay after launch</value></data>
-  <data name="Shortcut_CloseOverlay_Close" xml:space="preserve"><value>Close Overlay</value></data>
-  <data name="Shortcut_CloseOverlay_KeepOpen" xml:space="preserve"><value>Keep Overlay open</value></data>
-  <data name="Shortcut_Dialog_AddTitle" xml:space="preserve"><value>Add Shortcut</value></data>
-  <data name="Shortcut_Dialog_EditTitle" xml:space="preserve"><value>Edit Shortcut</value></data>
-  <data name="Shortcut_Dialog_Save" xml:space="preserve"><value>Save</value></data>
-  <data name="Shortcut_Dialog_Cancel" xml:space="preserve"><value>Cancel</value></data>
-  <data name="Shortcut_ExecutablePath_Header" xml:space="preserve"><value>Executable path</value></data>
-  <data name="Shortcut_Browse" xml:space="preserve"><value>Browse…</value></data>
-  <data name="Shortcut_Arguments_Header" xml:space="preserve"><value>Arguments</value></data>
-  <data name="Shortcut_Arguments_Placeholder" xml:space="preserve"><value>Optional arguments</value></data>
-  <data name="Shortcut_RunAsAdministrator" xml:space="preserve"><value>Run as administrator</value></data>
-  <data name="Shortcut_RunAsAdministrator_Description" xml:space="preserve"><value>Runs with administrator privileges; otherwise requests normal user privileges.</value></data>
-  <data name="Shortcut_PowerShellScript_Header" xml:space="preserve"><value>Script</value></data>
-  <data name="Shortcut_PowerShellScript_Placeholder" xml:space="preserve"><value>Enter a PowerShell script</value></data>
-  <data name="Shortcut_Url_Header" xml:space="preserve"><value>URL</value></data>
-  <data name="Shortcut_Screenshot_UseDefault" xml:space="preserve"><value>Use default</value></data>
-  <data name="Shortcut_Screenshot_OpenFolder" xml:space="preserve"><value>Open folder</value></data>
-  <data name="Shortcut_Screenshot_Description" xml:space="preserve"><value>Captures the primary display as JPEG.</value></data>
-  <data name="Shortcut_Screenshot_SaveFolder" xml:space="preserve"><value>Save folder</value></data>
-  <data name="Shortcut_Description_SteamBigPicture" xml:space="preserve"><value>Opens Steam Big Picture.</value></data>
-  <data name="Shortcut_Description_Steam" xml:space="preserve"><value>Opens the Steam client.</value></data>
-  <data name="Shortcut_Description_XboxApp" xml:space="preserve"><value>Opens the XBOX app.</value></data>
-  <data name="Shortcut_SettingsLoadFailed" xml:space="preserve"><value>Shortcut settings could not be loaded.</value></data>
-  <data name="Shortcut_EditorUnavailable" xml:space="preserve"><value>Shortcut editing is unavailable.</value></data>
-  <data name="Shortcut_TileNotFound" xml:space="preserve"><value>Shortcut tile was not found.</value></data>
-  <data name="Shortcut_FolderPickerFailed" xml:space="preserve"><value>The folder picker could not be opened.</value></data>
-  <data name="Shortcut_ScreenshotFolderUnavailable" xml:space="preserve"><value>The effective Screenshot folder is unavailable.</value></data>
-  <data name="Shortcut_ScreenshotFolderOpenFailed" xml:space="preserve"><value>The Screenshot folder could not be opened.</value></data>
-  <data name="Shortcut_ApplicationPickerFailed" xml:space="preserve"><value>The application picker could not be opened.</value></data>
-  <data name="Shortcut_PayloadTooLarge" xml:space="preserve"><value>One or more fields exceed the supported Shortcut editor size.</value></data>
-  <data name="Shortcut_SaveFailed" xml:space="preserve"><value>Shortcut changes could not be saved.</value></data>
-  <data name="Shortcut_Delete_Title" xml:space="preserve"><value>Delete Shortcut?</value></data>
-  <data name="Shortcut_Delete_ConfirmationBody" xml:space="preserve"><value>Delete ‘{0}’? This cannot be undone.</value></data>
-  <data name="Shortcut_Delete_Confirm" xml:space="preserve"><value>Delete</value></data>
-  <data name="Shortcut_Target_SteamBigPicture" xml:space="preserve"><value>Steam Big Picture</value></data>
-  <data name="Shortcut_Target_SteamClient" xml:space="preserve"><value>Steam client</value></data>
-  <data name="Shortcut_Target_XboxApp" xml:space="preserve"><value>XBOX app</value></data>
-  <data name="Shortcut_Target_Screenshot" xml:space="preserve"><value>Fullscreen screenshot</value></data>
-  <data name="Shortcut_Target_PowerShell" xml:space="preserve"><value>PowerShell</value></data>
-  <data name="Shortcut_A11y_DragToReorder" xml:space="preserve"><value>Drag to reorder this Shortcut</value></data>
-  <data name="Shortcut_A11y_Icon" xml:space="preserve"><value>Shortcut icon</value></data>
-  <data name="Shortcut_IconPreview_A11y" xml:space="preserve"><value>{0} Shortcut icon</value></data>
-  <data name="Shortcut_Icon_E71D" xml:space="preserve"><value>All apps</value></data>
-  <data name="Shortcut_Icon_E713" xml:space="preserve"><value>Settings</value></data>
-  <data name="Shortcut_Icon_E714" xml:space="preserve"><value>Video</value></data>
-  <data name="Shortcut_Icon_E715" xml:space="preserve"><value>Mail</value></data>
-  <data name="Shortcut_Icon_E719" xml:space="preserve"><value>Shop</value></data>
-  <data name="Shortcut_Icon_E720" xml:space="preserve"><value>Microphone</value></data>
-  <data name="Shortcut_Icon_E721" xml:space="preserve"><value>Search</value></data>
-  <data name="Shortcut_Icon_E722" xml:space="preserve"><value>Camera</value></data>
-  <data name="Shortcut_Icon_E71B" xml:space="preserve"><value>Link</value></data>
-  <data name="Shortcut_Icon_E734" xml:space="preserve"><value>Favorite</value></data>
-  <data name="Shortcut_Icon_E74E" xml:space="preserve"><value>Save</value></data>
-  <data name="Shortcut_Icon_E753" xml:space="preserve"><value>Cloud</value></data>
-  <data name="Shortcut_Icon_E756" xml:space="preserve"><value>Command prompt</value></data>
-  <data name="Shortcut_Icon_E765" xml:space="preserve"><value>Keyboard</value></data>
-  <data name="Shortcut_Icon_E768" xml:space="preserve"><value>Play</value></data>
-  <data name="Shortcut_Icon_E770" xml:space="preserve"><value>System</value></data>
-  <data name="Shortcut_Icon_E772" xml:space="preserve"><value>Devices</value></data>
-  <data name="Shortcut_Icon_E774" xml:space="preserve"><value>Globe</value></data>
-  <data name="Shortcut_Icon_E77B" xml:space="preserve"><value>Contact</value></data>
-  <data name="Shortcut_Icon_E787" xml:space="preserve"><value>Calendar</value></data>
-  <data name="Shortcut_Icon_E7AA" xml:space="preserve"><value>Photo collection</value></data>
-  <data name="Shortcut_Icon_E7B8" xml:space="preserve"><value>Package</value></data>
-  <data name="Shortcut_Icon_E7C4" xml:space="preserve"><value>Task view</value></data>
-  <data name="Shortcut_Icon_E7C5" xml:space="preserve"><value>Browse photos</value></data>
-  <data name="Shortcut_Icon_E7E8" xml:space="preserve"><value>Power</value></data>
-  <data name="Shortcut_Icon_E7F4" xml:space="preserve"><value>TV / monitor</value></data>
-  <data name="Shortcut_Icon_E7F5" xml:space="preserve"><value>Speakers</value></data>
-  <data name="Shortcut_Icon_E7F6" xml:space="preserve"><value>Headphones</value></data>
-  <data name="Shortcut_Icon_E7F8" xml:space="preserve"><value>Laptop</value></data>
-  <data name="Shortcut_Icon_E7FC" xml:space="preserve"><value>Game</value></data>
-  <data name="Shortcut_Icon_E838" xml:space="preserve"><value>Folder open</value></data>
-  <data name="Shortcut_Icon_E990" xml:space="preserve"><value>Xbox console</value></data>
+Windows must restart to apply this change.</value>
+  </data>
+  <data name="Device_CenterM_EnableTitle" xml:space="preserve">
+    <value>Enable MSI Center M</value>
+  </data>
+  <data name="Device_CenterM_Inconsistent" xml:space="preserve">
+    <value>MSI Center M startup configuration is inconsistent. Choose Enable or Disable to repair it.</value>
+  </data>
+  <data name="Device_CenterM_DisableAndRestart" xml:space="preserve">
+    <value>Disable and Restart</value>
+  </data>
+  <data name="Device_CenterM_DisableConfirmation" xml:space="preserve">
+    <value>Disable MSI Center M and switch controller authority to Steam Addon for Claw.
+
+Windows must restart to apply this change.</value>
+  </data>
+  <data name="Device_CenterM_DisableTitle" xml:space="preserve">
+    <value>Disable MSI Center M</value>
+  </data>
+  <data name="Device_CenterM_RestartingWindows" xml:space="preserve">
+    <value>Controller authority updated. Restarting Windows…</value>
+  </data>
+  <data name="Device_CenterM_RuntimeInterrupted" xml:space="preserve">
+    <value>The controller authority change could not be completed because the Runtime connection was interrupted.</value>
+  </data>
+  <data name="Device_CenterM_StatusDisabled" xml:space="preserve">
+    <value>Status: Disabled</value>
+  </data>
+  <data name="Device_CenterM_StatusEnabled" xml:space="preserve">
+    <value>Status: Enabled</value>
+  </data>
+  <data name="Device_CenterM_StatusNeedsAttention" xml:space="preserve">
+    <value>Status: Needs attention</value>
+  </data>
+  <data name="Device_CenterM_StatusUnavailable" xml:space="preserve">
+    <value>Status: Unavailable</value>
+  </data>
+  <data name="Device_CenterM_Unavailable" xml:space="preserve">
+    <value>MSI Center M controller authority control is unavailable.</value>
+  </data>
+  <data name="Device_CenterMStartupCard.Header" xml:space="preserve">
+    <value>MSI Center M</value>
+  </data>
+  <data name="Device_CenterMStartupDisableButton.Content" xml:space="preserve">
+    <value>Disable</value>
+  </data>
+  <data name="Device_CenterMStartupEnableButton.Content" xml:space="preserve">
+    <value>Enable</value>
+  </data>
+  <data name="Device_CenterMStartupStatusText.Text" xml:space="preserve">
+    <value>Status: —</value>
+  </data>
+  <data name="Device_CpuBoost_ChangeFailed" xml:space="preserve">
+    <value>The CPU Boost change failed.</value>
+  </data>
+  <data name="Device_CpuBoost_LastChangeFailed" xml:space="preserve">
+    <value>The last CPU Boost change could not be applied to Windows: {0}</value>
+  </data>
+  <data name="Device_CpuBoost_Mode_Aggressive" xml:space="preserve">
+    <value>Aggressive</value>
+  </data>
+  <data name="Device_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve">
+    <value>Aggressive At Guaranteed</value>
+  </data>
+  <data name="Device_CpuBoost_Mode_Disabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+  <data name="Device_CpuBoost_Mode_EfficientAggressive" xml:space="preserve">
+    <value>Efficient Aggressive</value>
+  </data>
+  <data name="Device_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve">
+    <value>Efficient Aggressive At Guaranteed</value>
+  </data>
+  <data name="Device_CpuBoost_Mode_EfficientEnabled" xml:space="preserve">
+    <value>Efficient Enabled</value>
+  </data>
+  <data name="Device_CpuBoost_Mode_Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="Device_CpuBoost_RuntimeInterrupted" xml:space="preserve">
+    <value>CPU Boost could not be updated because the Runtime connection was interrupted.</value>
+  </data>
+  <data name="Device_CpuBoost_SettingsUnwritable" xml:space="preserve">
+    <value>CPU Boost settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value>
+  </data>
+  <data name="Device_CpuBoostAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Device_CpuBoostDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Device_CpuBoostExpander.Description" xml:space="preserve">
+    <value>Processor performance boost mode.</value>
+  </data>
+  <data name="Device_CpuBoostExpander.Header" xml:space="preserve">
+    <value>CPU Boost</value>
+  </data>
+  <data name="Device_PageTitle.Text" xml:space="preserve">
+    <value>Device</value>
+  </data>
+  <data name="Device_PowerMode_InitializationFailed" xml:space="preserve">
+    <value>Windows Power Mode could not be initialized.</value>
+  </data>
+  <data name="Device_PowerMode_Mode_Balanced" xml:space="preserve">
+    <value>Balanced</value>
+  </data>
+  <data name="Device_PowerMode_Mode_BestPerformance" xml:space="preserve">
+    <value>Best performance</value>
+  </data>
+  <data name="Device_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve">
+    <value>Best power efficiency</value>
+  </data>
+  <data name="Device_PowerMode_RuntimeInterrupted" xml:space="preserve">
+    <value>Power Mode could not be updated because the Runtime connection was interrupted.</value>
+  </data>
+  <data name="Device_PowerMode_SettingsUnavailable" xml:space="preserve">
+    <value>Power Mode settings are unavailable.</value>
+  </data>
+  <data name="Device_PowerMode_UpdateFailed" xml:space="preserve">
+    <value>Power Mode could not be updated.</value>
+  </data>
+  <data name="Device_PowerModeAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Device_PowerModeDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Device_PowerModeExpander.Description" xml:space="preserve">
+    <value>Configured Windows 11 power mode for each power rail.</value>
+  </data>
+  <data name="Device_PowerModeExpander.Header" xml:space="preserve">
+    <value>Windows Power Mode</value>
+  </data>
+  <data name="Device_Tdp_ChangeFailed" xml:space="preserve">
+    <value>The TDP change failed.</value>
+  </data>
+  <data name="Device_Tdp_ResultFail" xml:space="preserve">
+    <value>Fail</value>
+  </data>
+  <data name="Device_Tdp_ResultSuccess" xml:space="preserve">
+    <value>Success</value>
+  </data>
+  <data name="Device_Tdp_RuntimeInterrupted" xml:space="preserve">
+    <value>TDP could not be updated because the Runtime connection was interrupted.</value>
+  </data>
+  <data name="Device_Tdp_SettingsUnwritable" xml:space="preserve">
+    <value>TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value>
+  </data>
+  <data name="Device_Tdp_Unavailable" xml:space="preserve">
+    <value>TDP Control is unavailable on this device.</value>
+  </data>
+  <data name="Device_Tdp_UpdateFailed" xml:space="preserve">
+    <value>TDP could not be updated.</value>
+  </data>
+  <data name="Device_TdpAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Device_TdpDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Device_TdpExpander.Description" xml:space="preserve">
+    <value>Configure processor power limits for plugged-in and battery operation.</value>
+  </data>
+  <data name="Device_TdpExpander.Header" xml:space="preserve">
+    <value>TDP Control</value>
+  </data>
+  <data name="MainNav_Controller.Content" xml:space="preserve">
+    <value>Controller</value>
+  </data>
+  <data name="Controller_PageTitle.Text" xml:space="preserve">
+    <value>컨트롤러</value>
+  </data>
+  <data name="Controller_PageDescription.Text" xml:space="preserve">
+    <value>Configure controller buttons and controller-specific settings.</value>
+  </data>
+  <data name="Controller_SteamVirtualControllerCard.Header" xml:space="preserve">
+    <value>Steam용 컨트롤러</value>
+  </data>
+  <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve">
+    <value>Steam에서 사용할 컨트롤러와 자이로 입력을 설정합니다.</value>
+  </data>
+  <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve">
+    <value>Steam 게임 또는 Big Picture가 활성 상태이면 컨트롤러 선택이 잠깁니다.</value>
+  </data>
+  <data name="Controller_SteamControllerUnavailable.Content" xml:space="preserve">
+    <value>사용할 수 없음</value>
+  </data>
+  <data name="Controller_SteamControllerRow.Text" xml:space="preserve">
+    <value>컨트롤러</value>
+  </data>
+  <data name="Controller_GyroscopeRow.Text" xml:space="preserve">
+    <value>자이로스코프</value>
+  </data>
+  <data name="Controller_GyroscopeUpdateFailed" xml:space="preserve">
+    <value>자이로스코프 설정을 저장하지 못했습니다. 마지막으로 확인된 값으로 복원했습니다.</value>
+  </data>
+  <data name="Controller_SteamDeckOption.Content" xml:space="preserve">
+    <value>Steam Deck</value>
+  </data>
+  <data name="Controller_DualSenseEdgeOption.Content" xml:space="preserve">
+    <value>DualSense Edge</value>
+  </data>
+  <data name="Controller_MappingUnavailable.Text" xml:space="preserve">
+    <value>Unavailable</value>
+  </data>
+  <data name="Controller_ButtonMappingHeader.Text" xml:space="preserve">
+    <value>Button Mapping</value>
+  </data>
+  <data name="Controller_GamebarExpander.Header" xml:space="preserve">
+    <value>Gamebar Button</value>
+  </data>
+  <data name="Controller_GamebarExpander.Description" xml:space="preserve">
+    <value>The action for the Gamebar button, per runtime presentation domain.</value>
+  </data>
+  <data name="Controller_GamebarNormalCard.Header" xml:space="preserve">
+    <value>Normal</value>
+  </data>
+  <data name="Controller_GamebarSteamCard.Header" xml:space="preserve">
+    <value>Steam Game / Big Picture</value>
+  </data>
+  <data name="Controller_CenterMExpander.Header" xml:space="preserve">
+    <value>Center M Button</value>
+  </data>
+  <data name="Controller_CenterMExpander.Description" xml:space="preserve">
+    <value>The action for the Center M button, per runtime presentation domain.</value>
+  </data>
+  <data name="Controller_CenterMNormalCard.Header" xml:space="preserve">
+    <value>Normal</value>
+  </data>
+  <data name="Controller_CenterMSteamCard.Header" xml:space="preserve">
+    <value>Steam Game / Big Picture</value>
+  </data>
+  <data name="Controller_BackButtonMappingExpander.Header" xml:space="preserve">
+    <value>M1 / M2</value>
+  </data>
+  <data name="Controller_BackButtonMappingExpander.Description" xml:space="preserve">
+    <value>XBOX 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4.</value>
+  </data>
+  <data name="Controller_M1Card.Header" xml:space="preserve">
+    <value>M1</value>
+  </data>
+  <data name="Controller_M2Card.Header" xml:space="preserve">
+    <value>M2</value>
+  </data>
+  <data name="Controller_SettingsHeader.Text" xml:space="preserve">
+    <value>Controller Settings</value>
+  </data>
+  <data name="Controller_LedExpander.Header" xml:space="preserve">
+    <value>Joystick LED</value>
+  </data>
+  <data name="Controller_LedExpander.Description" xml:space="preserve">
+    <value>Set one static color and global brightness for all controller LEDs.</value>
+  </data>
+  <data name="Controller_LedBrightnessCard.Header" xml:space="preserve">
+    <value>Brightness</value>
+  </data>
+  <data name="Controller_LedColorCard.Header" xml:space="preserve">
+    <value>Color</value>
+  </data>
+  <data name="Controller_LedChooseColor.Text" xml:space="preserve">
+    <value>Choose color</value>
+  </data>
+  <data name="Controller_VibrationStrengthExpander.Header" xml:space="preserve">
+    <value>Vibration Strength</value>
+  </data>
+  <data name="Controller_VibrationStrengthExpander.Description" xml:space="preserve">
+    <value>Set the vibration strength applied while the Addon owns the controller.</value>
+  </data>
+  <data name="Controller_LeftMotorCard.Header" xml:space="preserve">
+    <value>Left Motor</value>
+  </data>
+  <data name="Controller_LeftMotorTestButton.Content" xml:space="preserve">
+    <value>테스트</value>
+  </data>
+  <data name="Controller_RightMotorCard.Header" xml:space="preserve">
+    <value>Right Motor</value>
+  </data>
+  <data name="Controller_RightMotorTestButton.Content" xml:space="preserve">
+    <value>테스트</value>
+  </data>
+  <data name="Controller_VibrationRecoveryCard.Header" xml:space="preserve">
+    <value>Vibration Recovery</value>
+  </data>
+  <data name="Controller_RestoreVibrationButton.Content" xml:space="preserve">
+    <value>Restore Vibration</value>
+  </data>
+  <data name="Controller_SteamActivity_Active" xml:space="preserve">
+    <value>Steam이 활성 상태입니다. 실제 적용된 컨트롤러를 표시하며 선택은 잠깁니다.</value>
+  </data>
+  <data name="Controller_SteamActivity_Idle" xml:space="preserve">
+    <value>Steam 게임이나 Big Picture가 아닐 때 컨트롤러를 변경할 수 있습니다.</value>
+  </data>
+  <data name="Controller_SteamActivity_Unknown" xml:space="preserve">
+    <value>컨트롤러 상태를 확인할 수 없어 선택이 잠겼습니다.</value>
+  </data>
+  <data name="Controller_SteamChoice_NotChanged" xml:space="preserve">
+    <value>저장된 컨트롤러 선택을 변경하지 못했습니다.</value>
+  </data>
+  <data name="Controller_SteamChoice_Uncertain" xml:space="preserve">
+    <value>변경을 확인하지 못했습니다. 마지막으로 확인된 선택을 표시합니다.</value>
+  </data>
+  <data name="Controller_Action_QuickSettingsOverlay" xml:space="preserve">
+    <value>Quick Settings Overlay</value>
+  </data>
+  <data name="Controller_Action_SteamBigPicture" xml:space="preserve">
+    <value>Steam Big Picture</value>
+  </data>
+  <data name="Controller_Action_SteamButton" xml:space="preserve">
+    <value>Steam Button</value>
+  </data>
+  <data name="Controller_Action_SteamQuickAccess" xml:space="preserve">
+    <value>Steam Quick Access</value>
+  </data>
+  <data name="Controller_Action_KeyboardHotkey" xml:space="preserve">
+    <value>Keyboard / Hotkey</value>
+  </data>
+  <data name="Controller_Action_LaunchApplication" xml:space="preserve">
+    <value>Launch Application</value>
+  </data>
+  <data name="Controller_Action_Xbox" xml:space="preserve">
+    <value>XBOX</value>
+  </data>
+  <data name="Controller_BindingEditor_ApplicationPath" xml:space="preserve">
+    <value>Application path</value>
+  </data>
+  <data name="Controller_BindingEditor_Arguments" xml:space="preserve">
+    <value>Arguments (optional)</value>
+  </data>
+  <data name="Controller_BindingEditor_RunAsAdministrator" xml:space="preserve">
+    <value>Run as administrator</value>
+  </data>
+  <data name="Controller_BindingEditor_Browse" xml:space="preserve">
+    <value>Browse…</value>
+  </data>
+  <data name="Controller_BindingEditor_PrivilegeExplanation" xml:space="preserve">
+    <value>Runs with administrator privileges; otherwise requests normal user privileges.</value>
+  </data>
+  <data name="Controller_RestoreVibrationButton_Tooltip" xml:space="preserve">
+    <value>Temporarily disconnects virtual controller input. Save and close your game first.</value>
+  </data>
+  <data name="Controller_RestoreVibrationButton_BusyContent" xml:space="preserve">
+    <value>Restoring…</value>
+  </data>
+  <data name="Controller_RumbleRearm_Succeeded" xml:space="preserve">
+    <value>Controller restored. Test both motors to confirm vibration.</value>
+  </data>
+  <data name="Controller_RumbleRearm_Unavailable" xml:space="preserve">
+    <value>Vibration recovery is unavailable right now.</value>
+  </data>
+  <data name="Controller_RumbleRearm_Failed" xml:space="preserve">
+    <value>Could not restore the controller. See the application log.</value>
+  </data>
+  <data name="Controller_Vibration_ApplyFailed" xml:space="preserve">
+    <value>The saved vibration setting could not be applied now.</value>
+  </data>
+  <data name="Controller_Vibration_SaveUncertain" xml:space="preserve">
+    <value>The saved setting could not be confirmed. Refreshing the current setting.</value>
+  </data>
+  <data name="Controller_Vibration_TestFailed" xml:space="preserve">
+    <value>The physical vibration test did not complete safely.</value>
+  </data>
+  <data name="Controller_Vibration_TestUncertain" xml:space="preserve">
+    <value>The test result is uncertain. Refreshing the saved strength values.</value>
+  </data>
+  <data name="Controller_Vibration_LoadFailed" xml:space="preserve">
+    <value>The saved vibration setting could not be loaded.</value>
+  </data>
+  <data name="Controller_BackTarget_Disabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+  <data name="Controller_BackTarget_A" xml:space="preserve">
+    <value>A</value>
+  </data>
+  <data name="Controller_BackTarget_B" xml:space="preserve">
+    <value>B</value>
+  </data>
+  <data name="Controller_BackTarget_X" xml:space="preserve">
+    <value>X</value>
+  </data>
+  <data name="Controller_BackTarget_Y" xml:space="preserve">
+    <value>Y</value>
+  </data>
+  <data name="Controller_BackTarget_DPadUp" xml:space="preserve">
+    <value>D-Pad Up</value>
+  </data>
+  <data name="Controller_BackTarget_DPadRight" xml:space="preserve">
+    <value>D-Pad Right</value>
+  </data>
+  <data name="Controller_BackTarget_DPadDown" xml:space="preserve">
+    <value>D-Pad Down</value>
+  </data>
+  <data name="Controller_BackTarget_DPadLeft" xml:space="preserve">
+    <value>D-Pad Left</value>
+  </data>
+  <data name="Controller_BackTarget_LeftBumper" xml:space="preserve">
+    <value>Left Bumper (LB)</value>
+  </data>
+  <data name="Controller_BackTarget_RightBumper" xml:space="preserve">
+    <value>Right Bumper (RB)</value>
+  </data>
+  <data name="Controller_BackTarget_LeftTrigger" xml:space="preserve">
+    <value>Left Trigger (LT)</value>
+  </data>
+  <data name="Controller_BackTarget_RightTrigger" xml:space="preserve">
+    <value>Right Trigger (RT)</value>
+  </data>
+  <data name="Controller_BackTarget_LeftStickClick" xml:space="preserve">
+    <value>Left Stick Click (L3)</value>
+  </data>
+  <data name="Controller_BackTarget_RightStickClick" xml:space="preserve">
+    <value>Right Stick Click (R3)</value>
+  </data>
+  <data name="Controller_BackTarget_View" xml:space="preserve">
+    <value>View</value>
+  </data>
+  <data name="Controller_BackTarget_Menu" xml:space="preserve">
+    <value>Menu</value>
+  </data>
+  <data name="Controller_BackTarget_XboxGuide" xml:space="preserve">
+    <value>Xbox Guide</value>
+  </data>
+  <data name="MainNav_Steam.Content" xml:space="preserve">
+    <value>Steam</value>
+  </data>
+  <data name="Steam_BackButton.Content" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="Steam_Catalog_NoGames" xml:space="preserve">
+    <value>No installed Steam games were found.</value>
+  </data>
+  <data name="Steam_Catalog_RefreshFailed" xml:space="preserve">
+    <value>Game catalog could not be refreshed.</value>
+  </data>
+  <data name="Steam_CatalogTitle.Text" xml:space="preserve">
+    <value>Steam</value>
+  </data>
+  <data name="Steam_CpuBoost_Mode_Aggressive" xml:space="preserve">
+    <value>Aggressive</value>
+  </data>
+  <data name="Steam_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve">
+    <value>Aggressive At Guaranteed</value>
+  </data>
+  <data name="Steam_CpuBoost_Mode_Disabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+  <data name="Steam_CpuBoost_Mode_EfficientAggressive" xml:space="preserve">
+    <value>Efficient Aggressive</value>
+  </data>
+  <data name="Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve">
+    <value>Efficient Aggressive At Guaranteed</value>
+  </data>
+  <data name="Steam_CpuBoost_Mode_EfficientEnabled" xml:space="preserve">
+    <value>Efficient Enabled</value>
+  </data>
+  <data name="Steam_CpuBoost_Mode_Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="Steam_CpuBoost_UpdateFailed" xml:space="preserve">
+    <value>CPU Boost could not be updated.</value>
+  </data>
+  <data name="Steam_CpuBoostAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Steam_CpuBoostDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Steam_CpuBoostExpander.Description" xml:space="preserve">
+    <value>Processor performance boost mode.</value>
+  </data>
+  <data name="Steam_CpuBoostExpander.Header" xml:space="preserve">
+    <value>CPU Boost</value>
+  </data>
+  <data name="Steam_Favorite_SaveFailed" xml:space="preserve">
+    <value>Favorite could not be saved.</value>
+  </data>
+  <data name="Steam_FpsAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Steam_FpsDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Steam_GameSearchBox.PlaceholderText" xml:space="preserve">
+    <value>Search games...</value>
+  </data>
+  <data name="Steam_GpuMinimumClock_UpdateFailed" xml:space="preserve">
+    <value>Minimum GPU Clock could not be updated.</value>
+  </data>
+  <data name="Steam_GpuMinimumClockAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Steam_GpuMinimumClockDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Steam_GpuMinimumClockExpander.Description" xml:space="preserve">
+    <value>Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.</value>
+  </data>
+  <data name="Steam_GpuMinimumClockExpander.Header" xml:space="preserve">
+    <value>Minimum GPU Clock</value>
+  </data>
+  <data name="Steam_IntelFps_Unavailable" xml:space="preserve">
+    <value>Intel FPS Limit is unavailable.</value>
+  </data>
+  <data name="Steam_IntelFps_UpdateFailed" xml:space="preserve">
+    <value>Intel FPS Limit could not be updated.</value>
+  </data>
+  <data name="Steam_IntelFpsExpander.Description" xml:space="preserve">
+    <value>Uses Intel's official API. Some games may not support FPS limiting.</value>
+  </data>
+  <data name="Steam_IntelFpsExpander.Header" xml:space="preserve">
+    <value>Intel FPS Limit</value>
+  </data>
+  <data name="Steam_PowerMode_Mode_Balanced" xml:space="preserve">
+    <value>Balanced</value>
+  </data>
+  <data name="Steam_PowerMode_Mode_BestPerformance" xml:space="preserve">
+    <value>Best performance</value>
+  </data>
+  <data name="Steam_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve">
+    <value>Best power efficiency</value>
+  </data>
+  <data name="Steam_PowerMode_ToggleUpdateFailed" xml:space="preserve">
+    <value>Windows Power Mode could not be updated.</value>
+  </data>
+  <data name="Steam_PowerMode_UpdateFailed" xml:space="preserve">
+    <value>Power Mode could not be updated.</value>
+  </data>
+  <data name="Steam_PowerModeAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Steam_PowerModeDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Steam_PowerModeExpander.Description" xml:space="preserve">
+    <value>Configured AC/DC Windows power mode.</value>
+  </data>
+  <data name="Steam_PowerModeExpander.Header" xml:space="preserve">
+    <value>Windows Power Mode</value>
+  </data>
+  <data name="Steam_Profile_LoadFailed" xml:space="preserve">
+    <value>Profile settings could not be loaded.</value>
+  </data>
+  <data name="Steam_Profile_RuntimeInterrupted" xml:space="preserve">
+    <value>Profile could not be updated because the Runtime connection was interrupted.</value>
+  </data>
+  <data name="Steam_Profile_SettingsUnwritable" xml:space="preserve">
+    <value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value>
+  </data>
+  <data name="Steam_Profile_UpdateFailed" xml:space="preserve">
+    <value>Profile could not be updated.</value>
+  </data>
+  <data name="Steam_RefreshGamesButton.Content" xml:space="preserve">
+    <value>↻ Refresh</value>
+  </data>
+  <data name="Steam_Resolution_DoNotChange" xml:space="preserve">
+    <value>Do not change</value>
+  </data>
+  <data name="Steam_Resolution_UpdateFailed" xml:space="preserve">
+    <value>Display resolution could not be updated.</value>
+  </data>
+  <data name="Steam_ResolutionCard.Header" xml:space="preserve">
+    <value>Resolution</value>
+  </data>
+  <data name="Steam_Tdp_Unavailable" xml:space="preserve">
+    <value>TDP Control is unavailable on this device.</value>
+  </data>
+  <data name="Steam_Tdp_UpdateFailed" xml:space="preserve">
+    <value>TDP could not be updated.</value>
+  </data>
+  <data name="Steam_TdpAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Steam_TdpControl_ToggleUpdateFailed" xml:space="preserve">
+    <value>TDP Control could not be updated.</value>
+  </data>
+  <data name="Steam_TdpDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Steam_TdpExpander.Description" xml:space="preserve">
+    <value>Configure processor power limits for plugged-in and battery operation.</value>
+  </data>
+  <data name="Steam_TdpExpander.Header" xml:space="preserve">
+    <value>TDP Control</value>
+  </data>
+  <data name="Steam_VirtualController_DefaultOption.Content" xml:space="preserve">
+    <value>Use default</value>
+  </data>
+  <data name="Steam_VirtualController_DualSenseEdgeOption.Content" xml:space="preserve">
+    <value>DualSense Edge</value>
+  </data>
+  <data name="Steam_VirtualController_SteamDeckOption.Content" xml:space="preserve">
+    <value>Steam Deck</value>
+  </data>
+  <data name="Steam_VirtualController_UpdateFailed" xml:space="preserve">
+    <value>Virtual Controller could not be updated.</value>
+  </data>
+  <data name="Steam_VirtualControllerCard.Description" xml:space="preserve">
+    <value>Overrides the Controller default for this Steam game.</value>
+  </data>
+  <data name="Steam_VirtualControllerCard.Header" xml:space="preserve">
+    <value>Virtual Controller</value>
+  </data>
+  <data name="MainNav_Xbox.Content" xml:space="preserve">
+    <value>XBOX</value>
+  </data>
+  <data name="Xbox_BackButton.Content" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="Xbox_BackMapping_InvalidTargets" xml:space="preserve">
+    <value>Choose valid M1 and M2 targets before saving the per-game mapping.</value>
+  </data>
+  <data name="Xbox_BackMapping_UpdateFailed" xml:space="preserve">
+    <value>M1 / M2 mapping could not be updated.</value>
+  </data>
+  <data name="Xbox_BackTarget_Disabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+  <data name="Xbox_BackTarget_A" xml:space="preserve">
+    <value>A</value>
+  </data>
+  <data name="Xbox_BackTarget_B" xml:space="preserve">
+    <value>B</value>
+  </data>
+  <data name="Xbox_BackTarget_X" xml:space="preserve">
+    <value>X</value>
+  </data>
+  <data name="Xbox_BackTarget_Y" xml:space="preserve">
+    <value>Y</value>
+  </data>
+  <data name="Xbox_BackTarget_DPadUp" xml:space="preserve">
+    <value>D-Pad Up</value>
+  </data>
+  <data name="Xbox_BackTarget_DPadRight" xml:space="preserve">
+    <value>D-Pad Right</value>
+  </data>
+  <data name="Xbox_BackTarget_DPadDown" xml:space="preserve">
+    <value>D-Pad Down</value>
+  </data>
+  <data name="Xbox_BackTarget_DPadLeft" xml:space="preserve">
+    <value>D-Pad Left</value>
+  </data>
+  <data name="Xbox_BackTarget_LeftBumper" xml:space="preserve">
+    <value>Left Bumper (LB)</value>
+  </data>
+  <data name="Xbox_BackTarget_RightBumper" xml:space="preserve">
+    <value>Right Bumper (RB)</value>
+  </data>
+  <data name="Xbox_BackTarget_LeftTrigger" xml:space="preserve">
+    <value>Left Trigger (LT)</value>
+  </data>
+  <data name="Xbox_BackTarget_RightTrigger" xml:space="preserve">
+    <value>Right Trigger (RT)</value>
+  </data>
+  <data name="Xbox_BackTarget_LeftStickClick" xml:space="preserve">
+    <value>Left Stick Click (L3)</value>
+  </data>
+  <data name="Xbox_BackTarget_RightStickClick" xml:space="preserve">
+    <value>Right Stick Click (R3)</value>
+  </data>
+  <data name="Xbox_BackTarget_View" xml:space="preserve">
+    <value>View</value>
+  </data>
+  <data name="Xbox_BackTarget_Menu" xml:space="preserve">
+    <value>Menu</value>
+  </data>
+  <data name="Xbox_BackTarget_XboxGuide" xml:space="preserve">
+    <value>Xbox Guide</value>
+  </data>
+  <data name="Xbox_Catalog_LoadFailed" xml:space="preserve">
+    <value>XBOX game catalog could not be loaded.</value>
+  </data>
+  <data name="Xbox_Catalog_NoGames" xml:space="preserve">
+    <value>No installed XBOX games were found.</value>
+  </data>
+  <data name="Xbox_Catalog_RefreshFailed" xml:space="preserve">
+    <value>XBOX game catalog could not be refreshed.</value>
+  </data>
+  <data name="Xbox_CatalogTitle.Text" xml:space="preserve">
+    <value>XBOX</value>
+  </data>
+  <data name="Xbox_ControllerMappingExpander.Description" xml:space="preserve">
+    <value>Enable a per-game M1 / M2 override for Xbox 360 output. Off uses the global mapping.</value>
+  </data>
+  <data name="Xbox_ControllerMappingExpander.Header" xml:space="preserve">
+    <value>M1 / M2 Button Mapping</value>
+  </data>
+  <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Xbox_CpuBoostDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Xbox_CpuBoostExpander.Description" xml:space="preserve">
+    <value>Processor performance boost mode.</value>
+  </data>
+  <data name="Xbox_CpuBoostExpander.Header" xml:space="preserve">
+    <value>CPU Boost</value>
+  </data>
+  <data name="Xbox_CpuBoost_Mode_Aggressive" xml:space="preserve">
+    <value>Aggressive</value>
+  </data>
+  <data name="Xbox_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve">
+    <value>Aggressive At Guaranteed</value>
+  </data>
+  <data name="Xbox_CpuBoost_Mode_Disabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+  <data name="Xbox_CpuBoost_Mode_EfficientAggressive" xml:space="preserve">
+    <value>Efficient Aggressive</value>
+  </data>
+  <data name="Xbox_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve">
+    <value>Efficient Aggressive At Guaranteed</value>
+  </data>
+  <data name="Xbox_CpuBoost_Mode_EfficientEnabled" xml:space="preserve">
+    <value>Efficient Enabled</value>
+  </data>
+  <data name="Xbox_CpuBoost_Mode_Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="Xbox_CpuBoost_UpdateFailed" xml:space="preserve">
+    <value>CPU Boost could not be updated.</value>
+  </data>
+  <data name="Xbox_Favorite_SaveFailed" xml:space="preserve">
+    <value>Favorite could not be saved.</value>
+  </data>
+  <data name="Xbox_FpsAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Xbox_FpsDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Xbox_GameSearchBox.PlaceholderText" xml:space="preserve">
+    <value>Search games...</value>
+  </data>
+  <data name="Xbox_GpuMinimumClockAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Xbox_GpuMinimumClockDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Xbox_GpuMinimumClockExpander.Description" xml:space="preserve">
+    <value>Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.</value>
+  </data>
+  <data name="Xbox_GpuMinimumClockExpander.Header" xml:space="preserve">
+    <value>Minimum GPU Clock</value>
+  </data>
+  <data name="Xbox_GpuMinimumClock_UpdateFailed" xml:space="preserve">
+    <value>Minimum GPU Clock could not be updated.</value>
+  </data>
+  <data name="Xbox_IntelFpsExpander.Description" xml:space="preserve">
+    <value>Uses Intel's official API. Some games may not support FPS limiting.</value>
+  </data>
+  <data name="Xbox_IntelFpsExpander.Header" xml:space="preserve">
+    <value>Intel FPS Limit</value>
+  </data>
+  <data name="Xbox_IntelFps_Unavailable" xml:space="preserve">
+    <value>Intel FPS Limit is unavailable.</value>
+  </data>
+  <data name="Xbox_IntelFps_UpdateFailed" xml:space="preserve">
+    <value>Intel FPS Limit could not be updated.</value>
+  </data>
+  <data name="Xbox_M1Card.Header" xml:space="preserve">
+    <value>M1</value>
+  </data>
+  <data name="Xbox_M2Card.Header" xml:space="preserve">
+    <value>M2</value>
+  </data>
+  <data name="Xbox_PowerModeAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Xbox_PowerModeDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Xbox_PowerModeExpander.Description" xml:space="preserve">
+    <value>Configured AC/DC Windows power mode.</value>
+  </data>
+  <data name="Xbox_PowerModeExpander.Header" xml:space="preserve">
+    <value>Windows Power Mode</value>
+  </data>
+  <data name="Xbox_PowerMode_Mode_Balanced" xml:space="preserve">
+    <value>Balanced</value>
+  </data>
+  <data name="Xbox_PowerMode_Mode_BestPerformance" xml:space="preserve">
+    <value>Best performance</value>
+  </data>
+  <data name="Xbox_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve">
+    <value>Best power efficiency</value>
+  </data>
+  <data name="Xbox_PowerMode_ToggleUpdateFailed" xml:space="preserve">
+    <value>Windows Power Mode could not be updated.</value>
+  </data>
+  <data name="Xbox_PowerMode_UpdateFailed" xml:space="preserve">
+    <value>Power Mode could not be updated.</value>
+  </data>
+  <data name="Xbox_Profile_LoadFailed" xml:space="preserve">
+    <value>XBOX profile settings could not be loaded.</value>
+  </data>
+  <data name="Xbox_Profile_RuntimeInterrupted" xml:space="preserve">
+    <value>Profile could not be updated because the Runtime connection was interrupted.</value>
+  </data>
+  <data name="Xbox_Profile_SettingsUnwritable" xml:space="preserve">
+    <value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value>
+  </data>
+  <data name="Xbox_Profile_UpdateFailed" xml:space="preserve">
+    <value>Profile could not be updated.</value>
+  </data>
+  <data name="Xbox_RefreshGamesButton.Content" xml:space="preserve">
+    <value>↻ 새로고침</value>
+  </data>
+  <data name="Xbox_Resolution_DoNotChange" xml:space="preserve">
+    <value>Do not change</value>
+  </data>
+  <data name="Xbox_Resolution_UpdateFailed" xml:space="preserve">
+    <value>Display resolution could not be updated.</value>
+  </data>
+  <data name="Xbox_ResolutionCard.Header" xml:space="preserve">
+    <value>Resolution</value>
+  </data>
+  <data name="Xbox_Tdp_Unavailable" xml:space="preserve">
+    <value>TDP Control is unavailable on this device.</value>
+  </data>
+  <data name="Xbox_Tdp_UpdateFailed" xml:space="preserve">
+    <value>TDP could not be updated.</value>
+  </data>
+  <data name="Xbox_TdpAcCard.Header" xml:space="preserve">
+    <value>Plugged in</value>
+  </data>
+  <data name="Xbox_TdpControl_ToggleUpdateFailed" xml:space="preserve">
+    <value>TDP Control could not be updated.</value>
+  </data>
+  <data name="Xbox_TdpDcCard.Header" xml:space="preserve">
+    <value>On battery</value>
+  </data>
+  <data name="Xbox_TdpExpander.Description" xml:space="preserve">
+    <value>Configure processor power limits for plugged-in and battery operation.</value>
+  </data>
+  <data name="Xbox_TdpExpander.Header" xml:space="preserve">
+    <value>TDP Control</value>
+  </data>
+  <data name="MainNav_ClawHud.Content" xml:space="preserve">
+    <value>ClawHUD</value>
+  </data>
+  <data name="ClawHud_PageTitle.Text" xml:space="preserve">
+    <value>Overlay</value>
+  </data>
+  <data name="ClawHud_PageSubtitle.Text" xml:space="preserve">
+    <value>Configure the performance overlay and display behavior.</value>
+  </data>
+  <data name="ClawHud_RetryButton.Content" xml:space="preserve">
+    <value>Retry</value>
+  </data>
+  <data name="ClawHud_EnableCard.Header" xml:space="preserve">
+    <value>Enable HUD</value>
+  </data>
+  <data name="ClawHud_DisplayModeCard.Header" xml:space="preserve">
+    <value>Display mode</value>
+  </data>
+  <data name="ClawHud_DisplayModeCard.Description" xml:space="preserve">
+    <value>Choose when the HUD is visible.</value>
+  </data>
+  <data name="ClawHud_DisplayMode_Option_InGameOnly.Content" xml:space="preserve">
+    <value>게임 중에만 표시</value>
+  </data>
+  <data name="ClawHud_DisplayMode_Option_Always.Content" xml:space="preserve">
+    <value>항상 표시</value>
+  </data>
+  <data name="ClawHud_SizeCard.Header" xml:space="preserve">
+    <value>HUD 크기</value>
+  </data>
+  <data name="ClawHud_SizeCard.Description" xml:space="preserve">
+    <value>Adjust the overall HUD scale.</value>
+  </data>
+  <data name="ClawHud_Size_Option_Default.Content" xml:space="preserve">
+    <value>Default</value>
+  </data>
+  <data name="ClawHud_FontCard.Header" xml:space="preserve">
+    <value>글꼴</value>
+  </data>
+  <data name="ClawHud_FontCard.Description" xml:space="preserve">
+    <value>Font used by the performance HUD.</value>
+  </data>
+  <data name="ClawHud_Font_Option_Unispace.Content" xml:space="preserve">
+    <value>Unispace</value>
+  </data>
+  <data name="ClawHud_Font_Option_SegoeUiVariable.Content" xml:space="preserve">
+    <value>Segoe UI Variable</value>
+  </data>
+  <data name="ClawHud_AlignmentCard.Header" xml:space="preserve">
+    <value>Alignment</value>
+  </data>
+  <data name="ClawHud_AlignmentCard.Description" xml:space="preserve">
+    <value>Horizontal alignment of HUD content.</value>
+  </data>
+  <data name="ClawHud_Alignment_Option_Left.Content" xml:space="preserve">
+    <value>왼쪽</value>
+  </data>
+  <data name="ClawHud_Alignment_Option_Center.Content" xml:space="preserve">
+    <value>가운데</value>
+  </data>
+  <data name="ClawHud_Alignment_Option_Right.Content" xml:space="preserve">
+    <value>오른쪽</value>
+  </data>
+  <data name="ClawHud_BackgroundWidthCard.Header" xml:space="preserve">
+    <value>Background width</value>
+  </data>
+  <data name="ClawHud_BackgroundWidthCard.Description" xml:space="preserve">
+    <value>Choose how far the HUD background extends.</value>
+  </data>
+  <data name="ClawHud_BackgroundWidth_Option_FullWidth.Content" xml:space="preserve">
+    <value>Full width</value>
+  </data>
+  <data name="ClawHud_BackgroundWidth_Option_ContentWidth.Content" xml:space="preserve">
+    <value>Content width</value>
+  </data>
+  <data name="ClawHud_OpacityCard.Header" xml:space="preserve">
+    <value>HUD 투명도</value>
+  </data>
+  <data name="ClawHud_IntelVrrCard.Header" xml:space="preserve">
+    <value>인텔 VRR 수정</value>
+  </data>
+  <data name="ClawHud_LocalStatus_Off" xml:space="preserve">
+    <value>Off</value>
+  </data>
+  <data name="ClawHud_LocalStatus_Starting" xml:space="preserve">
+    <value>Starting…</value>
+  </data>
+  <data name="ClawHud_Enable_ChangeFailed" xml:space="preserve">
+    <value>ClawHUD could not be changed.</value>
+  </data>
+  <data name="ClawHud_Setting_VerificationFailed" xml:space="preserve">
+    <value>HUD setting could not be verified.</value>
+  </data>
+  <data name="ClawHud_VrrStatus_Disabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+  <data name="ClawHud_VrrStatus_Unavailable" xml:space="preserve">
+    <value>Unavailable</value>
+  </data>
+  <data name="ClawHud_VrrStatus_UnsupportedPanel" xml:space="preserve">
+    <value>UnsupportedPanel</value>
+  </data>
+  <data name="ClawHud_VrrStatus_AmbiguousDisplay" xml:space="preserve">
+    <value>AmbiguousDisplay</value>
+  </data>
+  <data name="ClawHud_VrrStatus_AlreadyCorrect" xml:space="preserve">
+    <value>AlreadyCorrect</value>
+  </data>
+  <data name="ClawHud_VrrStatus_SkippedUserProfile" xml:space="preserve">
+    <value>SkippedUserProfile</value>
+  </data>
+  <data name="ClawHud_VrrStatus_Applied" xml:space="preserve">
+    <value>Applied</value>
+  </data>
+  <data name="ClawHud_VrrStatus_ApplyFailed" xml:space="preserve">
+    <value>ApplyFailed</value>
+  </data>
+  <data name="ClawHud_VrrStatus_VerificationFailed" xml:space="preserve">
+    <value>VerificationFailed</value>
+  </data>
+  <data name="MainNav_Shortcut.Content" xml:space="preserve">
+    <value>Shortcut</value>
+  </data>
+  <data name="MainNav_HowToUse.Content" xml:space="preserve">
+    <value>How to Use</value>
+  </data>
+  <data name="HowToUse_Failure.Text" xml:space="preserve">
+    <value>How to Use could not be loaded.</value>
+  </data>
+  <data name="HowToUse_Retry.Content" xml:space="preserve">
+    <value>Retry</value>
+  </data>
+  <data name="Shortcut_PageTitle.Text" xml:space="preserve">
+    <value>Shortcut</value>
+  </data>
+  <data name="Shortcut_PageSubtitle.Text" xml:space="preserve">
+    <value>Create and organize actions shown in the Shortcut overlay page.</value>
+  </data>
+  <data name="Shortcut_AddButton.Content" xml:space="preserve">
+    <value>＋ Add Shortcut</value>
+  </data>
+  <data name="Shortcut_EditButton.Content" xml:space="preserve">
+    <value>Edit</value>
+  </data>
+  <data name="Shortcut_DeleteButton.Content" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="Shortcut_EmptyTitle.Text" xml:space="preserve">
+    <value>No shortcuts yet.</value>
+  </data>
+  <data name="Shortcut_EmptySubtitle.Text" xml:space="preserve">
+    <value>Add a Shortcut to get started.</value>
+  </data>
+  <data name="Shortcut_Title_Header" xml:space="preserve">
+    <value>Title</value>
+  </data>
+  <data name="Shortcut_Title_Placeholder" xml:space="preserve">
+    <value>Shortcut name</value>
+  </data>
+  <data name="Shortcut_ActionPicker_Header" xml:space="preserve">
+    <value>Action type</value>
+  </data>
+  <data name="Shortcut_Icon_Label" xml:space="preserve">
+    <value>Icon</value>
+  </data>
+  <data name="Shortcut_Icon_Change" xml:space="preserve">
+    <value>Change icon</value>
+  </data>
+  <data name="Shortcut_Icon_UseDefault" xml:space="preserve">
+    <value>Use default</value>
+  </data>
+  <data name="Shortcut_Action_Application" xml:space="preserve">
+    <value>Application (.exe)</value>
+  </data>
+  <data name="Shortcut_Action_PowerShell" xml:space="preserve">
+    <value>PowerShell</value>
+  </data>
+  <data name="Shortcut_Action_Website" xml:space="preserve">
+    <value>Website (URL)</value>
+  </data>
+  <data name="Shortcut_Action_SteamBigPicture" xml:space="preserve">
+    <value>Steam Big Picture</value>
+  </data>
+  <data name="Shortcut_Action_Steam" xml:space="preserve">
+    <value>Steam</value>
+  </data>
+  <data name="Shortcut_Action_XboxApp" xml:space="preserve">
+    <value>XBOX</value>
+  </data>
+  <data name="Shortcut_Action_Screenshot" xml:space="preserve">
+    <value>Screenshot</value>
+  </data>
+  <data name="Shortcut_CloseOverlay_Header" xml:space="preserve">
+    <value>Close Overlay after launch</value>
+  </data>
+  <data name="Shortcut_CloseOverlay_Close" xml:space="preserve">
+    <value>Close Overlay</value>
+  </data>
+  <data name="Shortcut_CloseOverlay_KeepOpen" xml:space="preserve">
+    <value>Keep Overlay open</value>
+  </data>
+  <data name="Shortcut_Dialog_AddTitle" xml:space="preserve">
+    <value>Add Shortcut</value>
+  </data>
+  <data name="Shortcut_Dialog_EditTitle" xml:space="preserve">
+    <value>Edit Shortcut</value>
+  </data>
+  <data name="Shortcut_Dialog_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Shortcut_Dialog_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Shortcut_ExecutablePath_Header" xml:space="preserve">
+    <value>Executable path</value>
+  </data>
+  <data name="Shortcut_Browse" xml:space="preserve">
+    <value>Browse…</value>
+  </data>
+  <data name="Shortcut_Arguments_Header" xml:space="preserve">
+    <value>Arguments</value>
+  </data>
+  <data name="Shortcut_Arguments_Placeholder" xml:space="preserve">
+    <value>Optional arguments</value>
+  </data>
+  <data name="Shortcut_RunAsAdministrator" xml:space="preserve">
+    <value>Run as administrator</value>
+  </data>
+  <data name="Shortcut_RunAsAdministrator_Description" xml:space="preserve">
+    <value>Runs with administrator privileges; otherwise requests normal user privileges.</value>
+  </data>
+  <data name="Shortcut_PowerShellScript_Header" xml:space="preserve">
+    <value>Script</value>
+  </data>
+  <data name="Shortcut_PowerShellScript_Placeholder" xml:space="preserve">
+    <value>Enter a PowerShell script</value>
+  </data>
+  <data name="Shortcut_Url_Header" xml:space="preserve">
+    <value>URL</value>
+  </data>
+  <data name="Shortcut_Screenshot_UseDefault" xml:space="preserve">
+    <value>Use default</value>
+  </data>
+  <data name="Shortcut_Screenshot_OpenFolder" xml:space="preserve">
+    <value>Open folder</value>
+  </data>
+  <data name="Shortcut_Screenshot_Description" xml:space="preserve">
+    <value>Captures the primary display as JPEG.</value>
+  </data>
+  <data name="Shortcut_Screenshot_SaveFolder" xml:space="preserve">
+    <value>Save folder</value>
+  </data>
+  <data name="Shortcut_Description_SteamBigPicture" xml:space="preserve">
+    <value>Opens Steam Big Picture.</value>
+  </data>
+  <data name="Shortcut_Description_Steam" xml:space="preserve">
+    <value>Opens the Steam client.</value>
+  </data>
+  <data name="Shortcut_Description_XboxApp" xml:space="preserve">
+    <value>Opens the XBOX app.</value>
+  </data>
+  <data name="Shortcut_SettingsLoadFailed" xml:space="preserve">
+    <value>Shortcut settings could not be loaded.</value>
+  </data>
+  <data name="Shortcut_EditorUnavailable" xml:space="preserve">
+    <value>Shortcut editing is unavailable.</value>
+  </data>
+  <data name="Shortcut_TileNotFound" xml:space="preserve">
+    <value>Shortcut tile was not found.</value>
+  </data>
+  <data name="Shortcut_FolderPickerFailed" xml:space="preserve">
+    <value>The folder picker could not be opened.</value>
+  </data>
+  <data name="Shortcut_ScreenshotFolderUnavailable" xml:space="preserve">
+    <value>The effective Screenshot folder is unavailable.</value>
+  </data>
+  <data name="Shortcut_ScreenshotFolderOpenFailed" xml:space="preserve">
+    <value>The Screenshot folder could not be opened.</value>
+  </data>
+  <data name="Shortcut_ApplicationPickerFailed" xml:space="preserve">
+    <value>The application picker could not be opened.</value>
+  </data>
+  <data name="Shortcut_PayloadTooLarge" xml:space="preserve">
+    <value>One or more fields exceed the supported Shortcut editor size.</value>
+  </data>
+  <data name="Shortcut_SaveFailed" xml:space="preserve">
+    <value>Shortcut changes could not be saved.</value>
+  </data>
+  <data name="Shortcut_Delete_Title" xml:space="preserve">
+    <value>Delete Shortcut?</value>
+  </data>
+  <data name="Shortcut_Delete_ConfirmationBody" xml:space="preserve">
+    <value>Delete ‘{0}’? This cannot be undone.</value>
+  </data>
+  <data name="Shortcut_Delete_Confirm" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="Shortcut_Target_SteamBigPicture" xml:space="preserve">
+    <value>Steam Big Picture</value>
+  </data>
+  <data name="Shortcut_Target_SteamClient" xml:space="preserve">
+    <value>Steam client</value>
+  </data>
+  <data name="Shortcut_Target_XboxApp" xml:space="preserve">
+    <value>XBOX app</value>
+  </data>
+  <data name="Shortcut_Target_Screenshot" xml:space="preserve">
+    <value>Fullscreen screenshot</value>
+  </data>
+  <data name="Shortcut_Target_PowerShell" xml:space="preserve">
+    <value>PowerShell</value>
+  </data>
+  <data name="Shortcut_A11y_DragToReorder" xml:space="preserve">
+    <value>Drag to reorder this Shortcut</value>
+  </data>
+  <data name="Shortcut_A11y_Icon" xml:space="preserve">
+    <value>Shortcut icon</value>
+  </data>
+  <data name="Shortcut_IconPreview_A11y" xml:space="preserve">
+    <value>{0} Shortcut icon</value>
+  </data>
+  <data name="Shortcut_Icon_E71D" xml:space="preserve">
+    <value>All apps</value>
+  </data>
+  <data name="Shortcut_Icon_E713" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="Shortcut_Icon_E714" xml:space="preserve">
+    <value>Video</value>
+  </data>
+  <data name="Shortcut_Icon_E715" xml:space="preserve">
+    <value>Mail</value>
+  </data>
+  <data name="Shortcut_Icon_E719" xml:space="preserve">
+    <value>Shop</value>
+  </data>
+  <data name="Shortcut_Icon_E720" xml:space="preserve">
+    <value>Microphone</value>
+  </data>
+  <data name="Shortcut_Icon_E721" xml:space="preserve">
+    <value>Search</value>
+  </data>
+  <data name="Shortcut_Icon_E722" xml:space="preserve">
+    <value>Camera</value>
+  </data>
+  <data name="Shortcut_Icon_E71B" xml:space="preserve">
+    <value>Link</value>
+  </data>
+  <data name="Shortcut_Icon_E734" xml:space="preserve">
+    <value>Favorite</value>
+  </data>
+  <data name="Shortcut_Icon_E74E" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Shortcut_Icon_E753" xml:space="preserve">
+    <value>Cloud</value>
+  </data>
+  <data name="Shortcut_Icon_E756" xml:space="preserve">
+    <value>Command prompt</value>
+  </data>
+  <data name="Shortcut_Icon_E765" xml:space="preserve">
+    <value>Keyboard</value>
+  </data>
+  <data name="Shortcut_Icon_E768" xml:space="preserve">
+    <value>Play</value>
+  </data>
+  <data name="Shortcut_Icon_E770" xml:space="preserve">
+    <value>System</value>
+  </data>
+  <data name="Shortcut_Icon_E772" xml:space="preserve">
+    <value>Devices</value>
+  </data>
+  <data name="Shortcut_Icon_E774" xml:space="preserve">
+    <value>Globe</value>
+  </data>
+  <data name="Shortcut_Icon_E77B" xml:space="preserve">
+    <value>Contact</value>
+  </data>
+  <data name="Shortcut_Icon_E787" xml:space="preserve">
+    <value>Calendar</value>
+  </data>
+  <data name="Shortcut_Icon_E7AA" xml:space="preserve">
+    <value>Photo collection</value>
+  </data>
+  <data name="Shortcut_Icon_E7B8" xml:space="preserve">
+    <value>Package</value>
+  </data>
+  <data name="Shortcut_Icon_E7C4" xml:space="preserve">
+    <value>Task view</value>
+  </data>
+  <data name="Shortcut_Icon_E7C5" xml:space="preserve">
+    <value>Browse photos</value>
+  </data>
+  <data name="Shortcut_Icon_E7E8" xml:space="preserve">
+    <value>Power</value>
+  </data>
+  <data name="Shortcut_Icon_E7F4" xml:space="preserve">
+    <value>TV / monitor</value>
+  </data>
+  <data name="Shortcut_Icon_E7F5" xml:space="preserve">
+    <value>Speakers</value>
+  </data>
+  <data name="Shortcut_Icon_E7F6" xml:space="preserve">
+    <value>Headphones</value>
+  </data>
+  <data name="Shortcut_Icon_E7F8" xml:space="preserve">
+    <value>Laptop</value>
+  </data>
+  <data name="Shortcut_Icon_E7FC" xml:space="preserve">
+    <value>Game</value>
+  </data>
+  <data name="Shortcut_Icon_E838" xml:space="preserve">
+    <value>Folder open</value>
+  </data>
+  <data name="Shortcut_Icon_E990" xml:space="preserve">
+    <value>Xbox console</value>
+  </data>
   <data name="MainNav_Tweaks.Content" xml:space="preserve">
     <value>Tweaks</value>
   </data>
