@@ -159,9 +159,13 @@ public sealed class UiArchitectureTests
 
         var statusRender = ExtractMethod(mainWindow, "private void RenderSystemStatus(FrontendStatusSnapshot snapshot)");
         Assert.Contains("_latestSystemStatus = snapshot", statusRender, StringComparison.Ordinal);
-        Assert.Contains("_controllerContent?.SetSteamActivity(snapshot.Steam.Active)", statusRender, StringComparison.Ordinal);
+        Assert.DoesNotContain("_controllerContent?.SetSteamActivity(snapshot.Steam.Active)", statusRender, StringComparison.Ordinal);
         Assert.Contains("_profileContent?.SetSteamActivity(snapshot.Steam.Active)", statusRender, StringComparison.Ordinal);
         Assert.Contains("_settingsContent?.RenderRequiredComponents(snapshot)", statusRender, StringComparison.Ordinal);
+
+        var controllerPage = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml.cs"));
+        Assert.Contains("_frontend.StateInvalidated += OnFrontendStateInvalidated", controllerPage, StringComparison.Ordinal);
+        Assert.Contains("_ = RefreshControllerForSteamAsync()", controllerPage, StringComparison.Ordinal);
 
         var invalidation = ExtractMethod(mainWindow, "private void RefreshInvalidatedFrontendStateOnUiThread()");
         Assert.DoesNotContain("GetOrCreate", invalidation, StringComparison.Ordinal);

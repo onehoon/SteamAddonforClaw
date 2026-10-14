@@ -84,6 +84,35 @@ public sealed class OverlayValueRowTests
     }
 
     [Fact]
+    public void Editable_controller_choice_cannot_advance_from_DualSense_Edge_to_unavailable_sentinel()
+    {
+        var model = Model(out var requests);
+        model.ApplyState(isAvailable: true, minimum: 0, maximum: 1, step: 1, value: 1);
+
+        model.RequestAdjust(+1); // Controller Right
+        model.RequestSet(2);     // Pointer/touch request for the unavailable sentinel
+
+        Assert.Equal(1, model.PreviewValue);
+        Assert.False(model.CanIncrease);
+        Assert.Empty(requests);
+    }
+
+    [Fact]
+    public void Unavailable_controller_can_show_disabled_read_only_sentinel()
+    {
+        var model = Model(out var requests);
+        model.ApplyState(isAvailable: false, minimum: 0, maximum: 2, step: 1, value: 2);
+
+        model.RequestAdjust(-1);
+        model.RequestSet(1);
+
+        Assert.Equal(2, model.PreviewValue);
+        Assert.False(model.CanDecrease);
+        Assert.False(model.CanIncrease);
+        Assert.Empty(requests);
+    }
+
+    [Fact]
     public void ControllerAndArrowStepRaisesAndLowersExactlyOneStepFromPreview()
     {
         var model = Available(out var requests);

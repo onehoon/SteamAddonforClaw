@@ -186,7 +186,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 80: append the explicit Mixed state to the existing Windows Tweaks snapshot contract.
 // Version 81: retire Developer diagnostics and append Windows Widgets, Edge Background, and Startup App Delay tweak IDs.
 // Version 82: return only the updated Windows Tweak row from a mutation; no full-page recapture is included.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 82; }
+// Version 83: add the controller gyroscope preference mutation and settings projection.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 83; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -237,7 +238,7 @@ internal enum FrontendRpcMethod
     SetXboxGameProfileBackButtonMapping, SetGameProfileGpuMinimumClockEnabled, SetGameProfileGpuMinimumClockAc,
     SetGameProfileGpuMinimumClockDc, SetXboxGameProfileGpuMinimumClockEnabled, SetXboxGameProfileGpuMinimumClockAc,
     SetXboxGameProfileGpuMinimumClockDc, RunDeveloperRumbleRearm,
-    SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled,
+    SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled, SetGyroscopeEnabled,
     CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning
 }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
@@ -248,6 +249,7 @@ internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetQuickSettingsCurrentPowerSourceOnlyRequest(bool Enabled);
 internal sealed record SetSteamVirtualControllerRequest(SteamVirtualControllerPreference Preference);
 internal sealed record SetExperimentalVirtualTouchpadEnabledRequest(bool Enabled);
+internal sealed record SetGyroscopeEnabledRequest(bool Enabled);
 internal sealed record SetWindowsTweakRequest(FrontendWindowsTweakId Id, bool Enabled);
 internal sealed record AcknowledgeWindowsTweaksWarningRequest(DateOnly LocalDate);
 internal sealed record SetGamingHomeSelectionRequest(FrontendGamingHomeSelection Selection);

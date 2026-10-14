@@ -96,10 +96,14 @@
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
-  <data name="Controller_SteamVirtualControllerCard.Header" xml:space="preserve"><value>Steam Virtual Controller</value></data>
-  <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve"><value>Choose the virtual controller used by Steam.</value></data>
+  <data name="Controller_SteamVirtualControllerCard.Header" xml:space="preserve"><value>Controller for Steam</value></data>
+  <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve"><value>Choose the controller used by Steam and configure gyroscope input.</value></data>
   <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve"><value>Selection is disabled while a Steam game or Big Picture Mode is active.</value></data>
-  <data name="Controller_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck (Default)</value></data>
+  <data name="Controller_SteamControllerUnavailable.Content" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="Controller_SteamControllerRow.Text" xml:space="preserve"><value>Controller</value></data>
+  <data name="Controller_GyroscopeRow.Text" xml:space="preserve"><value>Gyroscope</value></data>
+  <data name="Controller_GyroscopeUpdateFailed" xml:space="preserve"><value>The Gyroscope setting could not be saved. The last confirmed value is shown.</value></data>
+  <data name="Controller_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
   <data name="Controller_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
   <data name="Controller_MappingUnavailable.Text" xml:space="preserve"><value>Unavailable</value></data>
   <data name="Controller_ButtonMappingHeader.Text" xml:space="preserve"><value>Button Mapping</value></data>
@@ -129,9 +133,9 @@
   <data name="Controller_RightMotorTestButton.Content" xml:space="preserve"><value>Test</value></data>
   <data name="Controller_VibrationRecoveryCard.Header" xml:space="preserve"><value>Vibration Recovery</value></data>
   <data name="Controller_RestoreVibrationButton.Content" xml:space="preserve"><value>Restore Vibration</value></data>
-  <data name="Controller_SteamActivity_Active" xml:space="preserve"><value>Steam or Big Picture is active. Selection is locked.</value></data>
-  <data name="Controller_SteamActivity_Idle" xml:space="preserve"><value>Selection is disabled while a Steam game or Big Picture Mode is active.</value></data>
-  <data name="Controller_SteamActivity_Unknown" xml:space="preserve"><value>Steam activity is unavailable. Selection is disabled.</value></data>
+  <data name="Controller_SteamActivity_Active" xml:space="preserve"><value>Steam is active. The applied controller is shown; controller selection is locked.</value></data>
+  <data name="Controller_SteamActivity_Idle" xml:space="preserve"><value>Controller selection can be changed outside Steam games and Big Picture Mode.</value></data>
+  <data name="Controller_SteamActivity_Unknown" xml:space="preserve"><value>Controller state is unavailable. Selection is locked.</value></data>
   <data name="Controller_SteamChoice_NotChanged" xml:space="preserve"><value>The saved controller choice was not changed.</value></data>
   <data name="Controller_SteamChoice_Uncertain" xml:space="preserve"><value>The change could not be confirmed. The last confirmed choice is selected.</value></data>
   <data name="Controller_Action_QuickSettingsOverlay" xml:space="preserve"><value>Quick Settings Overlay</value></data>

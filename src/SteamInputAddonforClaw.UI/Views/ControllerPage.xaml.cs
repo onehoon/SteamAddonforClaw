@@ -51,10 +51,14 @@ public sealed partial class ControllerPage : UserControl
     private bool _vibrationTestInProgress;
     private bool _vibrationRearmInProgress;
     private bool _vibrationPageUnloaded;
+    private bool _controllerPageActive;
     private bool _applyingSteamVirtualControllerState;
     private int _steamVirtualControllerMutationInProgress;
     private SteamVirtualControllerPreference _lastKnownSteamVirtualController = SteamVirtualControllerPreference.SteamDeck;
-    private bool? _steamActive;
+    private FrontendControllerForSteamSnapshot _controllerForSteam = FrontendControllerForSteamSnapshot.Unavailable(SteamVirtualControllerPreference.SteamDeck);
+    private bool _applyingGyroscopeState;
+    private int _gyroscopeMutationInProgress;
+    private bool _lastKnownGyroscopeEnabled = true;
     /// <summary>Suppresses change handlers while the page writes persisted state INTO the controls,
     /// so restoring the UI never looks like a user edit and re-saves.</summary>
     private bool _isLoading;
@@ -76,7 +80,6 @@ public sealed partial class ControllerPage : UserControl
     internal event EventHandler<FrontButtonMappingSettings>? MappingEditRequested;
     internal event EventHandler<BackButtonMappingSettings>? BackButtonMappingEditRequested;
     internal event EventHandler<ControllerLedSettings>? ControllerLedEditRequested;
-    internal event EventHandler? SteamActivityRefreshRequested;
 
     internal void Initialize(
         FrontendBootstrapSnapshot bootstrap,
@@ -88,9 +91,7 @@ public sealed partial class ControllerPage : UserControl
         _available = bootstrap.FrontButtonMappingAvailable;
         _backButtonAvailable = bootstrap.BackButtonMappingAvailable;
         _controllerLedAvailable = bootstrap.ControllerLedAvailable;
-        _steamActive = null;
-        _lastKnownSteamVirtualController = bootstrap.Settings.SteamVirtualController;
-        RenderSteamVirtualController(_lastKnownSteamVirtualController);
+        ApplyControllerForSteamSettings(bootstrap.Settings);
         FrontButtonMappingContent.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
         BackButtonMappingExpander.Visibility = _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
         ControllerSettingsHeader.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
@@ -125,55 +126,88 @@ public sealed partial class ControllerPage : UserControl
 
     internal void Activate()
     {
+        if (!_controllerPageActive && _frontend is not null)
+        {
+            _frontend.StateInvalidated += OnFrontendStateInvalidated;
+            _controllerPageActive = true;
+        }
         _vibrationPageUnloaded = false;
-        if (_frontend is not null)
-            _ = RefreshSteamVirtualControllerAsync();
+        if (_frontend is not null) _ = RefreshControllerForSteamAsync();
         if (_frontend is not null)
             _ = RefreshVibrationStrengthAsync();
     }
 
-    internal void SetSteamActivity(bool? active)
+    internal static bool CanEditSteamVirtualController(FrontendControllerForSteamSnapshot state, bool mutationInProgress) =>
+        state.Available && state.CanChangeController && !mutationInProgress;
+
+    internal void ApplyControllerForSteamSettings(FrontendSettingsSnapshot settings)
     {
-        _steamActive = active;
-        SteamVirtualControllerActivityText.Text = active switch
+        if (Volatile.Read(ref _steamVirtualControllerMutationInProgress) == 0)
         {
-            true => MainUiStrings.Get("Controller_SteamActivity_Active", "Steam or Big Picture is active. Selection is locked."),
-            false => MainUiStrings.Get("Controller_SteamActivity_Idle", "Selection is disabled while a Steam game or Big Picture Mode is active."),
-            _ => MainUiStrings.Get("Controller_SteamActivity_Unknown", "Steam activity is unavailable. Selection is disabled.")
-        };
-        UpdateSteamVirtualControllerControls();
+            _controllerForSteam = settings.ControllerForSteam;
+            _lastKnownSteamVirtualController = settings.SteamVirtualController;
+        }
+        if (Volatile.Read(ref _gyroscopeMutationInProgress) == 0)
+        {
+            _lastKnownGyroscopeEnabled = settings.GyroscopeEnabled;
+            ApplyGyroscopeEnabled(settings.GyroscopeEnabled);
+        }
+        RenderSteamVirtualController();
     }
 
-    internal static bool CanEditSteamVirtualController(bool? steamActive, bool mutationInProgress) =>
-        steamActive == false && !mutationInProgress;
-
-    private void RenderSteamVirtualController(SteamVirtualControllerPreference preference)
+    private void ApplyGyroscopeEnabled(bool enabled)
     {
+        _applyingGyroscopeState = true;
+        try { GyroscopeEnabledToggle.IsOn = enabled; }
+        finally { _applyingGyroscopeState = false; }
+        UpdateGyroscopeControls();
+    }
+
+    private void RenderSteamVirtualController()
+    {
+        var tag = !_controllerForSteam.Available
+            ? "Unavailable"
+            : (_controllerForSteam.ActiveSteamPreference ?? _controllerForSteam.SavedPreference).ToString();
         _applyingSteamVirtualControllerState = true;
         try
         {
             SteamVirtualControllerComboBox.SelectedItem = SteamVirtualControllerComboBox.Items
                 .OfType<ComboBoxItem>()
-                .FirstOrDefault(item => string.Equals(item.Tag as string, preference.ToString(), StringComparison.Ordinal));
+                .FirstOrDefault(item => string.Equals(item.Tag as string, tag, StringComparison.Ordinal));
         }
         finally { _applyingSteamVirtualControllerState = false; }
+        SteamVirtualControllerActivityText.Text = !_controllerForSteam.Available
+            ? MainUiStrings.Get("Controller_SteamActivity_Unknown", "Controller state is unavailable. Selection is locked.")
+            : _controllerForSteam.CanChangeController
+                ? MainUiStrings.Get("Controller_SteamActivity_Idle", "Controller selection can be changed outside Steam games and Big Picture Mode.")
+                : MainUiStrings.Get("Controller_SteamActivity_Active", "Steam is active. The applied controller is shown; controller selection is locked.");
         UpdateSteamVirtualControllerControls();
     }
 
     private void UpdateSteamVirtualControllerControls() =>
         SteamVirtualControllerComboBox.IsEnabled = CanEditSteamVirtualController(
-            _steamActive,
+            _controllerForSteam,
             Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0);
 
-    private async Task RefreshSteamVirtualControllerAsync()
+    private void UpdateGyroscopeControls() =>
+        GyroscopeEnabledToggle.IsEnabled = Volatile.Read(ref _gyroscopeMutationInProgress) == 0;
+
+    private void OnFrontendStateInvalidated(object? sender, EventArgs args)
     {
-        if (_frontend is null || Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0) return;
+        if (_controllerPageActive)
+            DispatcherQueue.TryEnqueue(() => _ = RefreshControllerForSteamAsync());
+    }
+
+    private async Task RefreshControllerForSteamAsync()
+    {
+        if (_frontend is null || Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0
+            || Volatile.Read(ref _gyroscopeMutationInProgress) != 0) return;
         try
         {
             var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
-            if (Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0) return;
-            _lastKnownSteamVirtualController = bootstrap.Settings.SteamVirtualController;
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+            if (Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0
+                || Volatile.Read(ref _gyroscopeMutationInProgress) != 0) return;
+            ApplyControllerForSteamSettings(bootstrap.Settings);
         }
         catch (Exception exception)
         {
@@ -189,56 +223,56 @@ public sealed partial class ControllerPage : UserControl
             || !Enum.IsDefined(requested))
             return;
 
-        if (!CanEditSteamVirtualController(_steamActive, Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0))
+        if (!CanEditSteamVirtualController(_controllerForSteam, Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0))
         {
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
-            SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+            RenderSteamVirtualController();
+            _ = RefreshControllerForSteamAsync();
             return;
         }
-        if (requested == _lastKnownSteamVirtualController) return;
+        if (requested == _controllerForSteam.SavedPreference) return;
         if (Interlocked.Exchange(ref _steamVirtualControllerMutationInProgress, 1) != 0)
         {
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+            RenderSteamVirtualController();
             return;
         }
 
-        RenderSteamVirtualController(_lastKnownSteamVirtualController);
+        RenderSteamVirtualController();
         SteamVirtualControllerInfoBar.IsOpen = false;
         UpdateSteamVirtualControllerControls();
         try
         {
             var settings = await _frontend.SetSteamVirtualControllerAsync(requested).ConfigureAwait(true);
+            _controllerForSteam = settings.ControllerForSteam;
             _lastKnownSteamVirtualController = settings.SteamVirtualController;
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+            RenderSteamVirtualController();
             if (_lastKnownSteamVirtualController != requested)
             {
                 SteamVirtualControllerInfoBar.Message = MainUiStrings.Get(
                     "Controller_SteamChoice_NotChanged",
                     "The saved controller choice was not changed.");
                 SteamVirtualControllerInfoBar.IsOpen = true;
-                SetSteamActivity(null);
-                SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+                _ = RefreshControllerForSteamAsync();
             }
         }
         catch (Exception exception)
         {
             AppLog.Warn("Controller", "Steam virtual controller preference update failed.", exception);
-            SetSteamActivity(null);
             try
             {
                 var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
+                _controllerForSteam = bootstrap.Settings.ControllerForSteam;
                 _lastKnownSteamVirtualController = bootstrap.Settings.SteamVirtualController;
             }
             catch (Exception refreshException)
             {
                 AppLog.Warn("Controller", "Steam virtual controller rollback could not refresh Runtime settings.", refreshException);
             }
-            RenderSteamVirtualController(_lastKnownSteamVirtualController);
+            RenderSteamVirtualController();
             SteamVirtualControllerInfoBar.Message = MainUiStrings.Get(
                 "Controller_SteamChoice_Uncertain",
                 "The change could not be confirmed. The last confirmed choice is selected.");
             SteamVirtualControllerInfoBar.IsOpen = true;
-            SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
+            _ = RefreshControllerForSteamAsync();
         }
         finally
         {
@@ -247,8 +281,60 @@ public sealed partial class ControllerPage : UserControl
         }
     }
 
+    private async void GyroscopeEnabledToggle_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_applyingGyroscopeState || _frontend is null
+            || Interlocked.Exchange(ref _gyroscopeMutationInProgress, 1) != 0)
+            return;
+
+        var requested = GyroscopeEnabledToggle.IsOn;
+        bool? confirmedValue = null;
+        SteamVirtualControllerInfoBar.IsOpen = false;
+        UpdateGyroscopeControls();
+        try
+        {
+            var settings = await _frontend.SetGyroscopeEnabledAsync(requested).ConfigureAwait(true);
+            confirmedValue = settings.GyroscopeEnabled;
+            ApplyControllerForSteamSettings(settings);
+            if (confirmedValue != requested) ShowGyroscopeUpdateFailure();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerMotion", "Gyroscope preference update failed.", exception);
+            ShowGyroscopeUpdateFailure();
+            try
+            {
+                var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
+                confirmedValue = bootstrap.Settings.GyroscopeEnabled;
+                ApplyControllerForSteamSettings(bootstrap.Settings);
+            }
+            catch (Exception refreshException)
+            {
+                AppLog.Warn("ControllerMotion", "Gyroscope preference rollback could not refresh Runtime settings.", refreshException);
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _gyroscopeMutationInProgress, 0);
+            if (confirmedValue is { } enabled) _lastKnownGyroscopeEnabled = enabled;
+            ApplyGyroscopeEnabled(confirmedValue ?? _lastKnownGyroscopeEnabled);
+            UpdateGyroscopeControls();
+        }
+    }
+
+    private void ShowGyroscopeUpdateFailure()
+    {
+        SteamVirtualControllerInfoBar.Message = MainUiStrings.Get(
+            "Controller_GyroscopeUpdateFailed",
+            "The Gyroscope setting could not be saved. The last confirmed value is shown.");
+        SteamVirtualControllerInfoBar.IsOpen = true;
+    }
+
     internal void Deactivate()
     {
+        if (_controllerPageActive && _frontend is not null)
+            _frontend.StateInvalidated -= OnFrontendStateInvalidated;
+        _controllerPageActive = false;
         if (_vibrationPageUnloaded)
             return;
 

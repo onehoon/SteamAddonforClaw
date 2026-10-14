@@ -199,12 +199,12 @@ public sealed partial class MainWindow : Window
         if (_systemUiSettings is not null)
             _systemUiSettings.ColorValuesChanged -= SystemUiSettings_ColorValuesChanged;
         _frontend.StateInvalidated -= OnFrontendStateInvalidated;
+        _controllerContent?.Deactivate();
         if (_controllerContent is not null)
         {
             _controllerContent.MappingEditRequested -= OnControllerMappingEditRequested;
             _controllerContent.BackButtonMappingEditRequested -= OnControllerBackButtonMappingEditRequested;
             _controllerContent.ControllerLedEditRequested -= OnControllerLedEditRequested;
-            _controllerContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
         }
         if (_profileContent is not null)
             _profileContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
@@ -234,11 +234,10 @@ public sealed partial class MainWindow : Window
         page.ApplyFrontButtonMapping(_frontButtonUiMapping);
         page.ApplyBackButtonMapping(_backButtonUiMapping);
         page.ApplyControllerLedSettings(_controllerLedUiSettings);
-        page.SetSteamActivity(_latestSystemStatus?.Steam.Active);
+        page.ApplyControllerForSteamSettings(_bootstrap.Settings);
         page.MappingEditRequested += OnControllerMappingEditRequested;
         page.BackButtonMappingEditRequested += OnControllerBackButtonMappingEditRequested;
         page.ControllerLedEditRequested += OnControllerLedEditRequested;
-        page.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
         ControllerPageHost.Content = page;
         return _controllerContent = page;
     }
@@ -414,7 +413,6 @@ public sealed partial class MainWindow : Window
 
     private void OnSteamActivityRefreshRequested(object? sender, EventArgs args)
     {
-        _controllerContent?.SetSteamActivity(null);
         _profileContent?.SetSteamActivity(null);
         _ = RefreshSystemStatusAsync();
     }
@@ -698,8 +696,7 @@ public sealed partial class MainWindow : Window
         if (page == MainNavigationPage.HowToUse) _howToUseContent!.Activate();
         if (page == MainNavigationPage.Controller)
         {
-            _controllerContent!.SetSteamActivity(null);
-            _controllerContent.Activate();
+            _controllerContent!.Activate();
             _ = RefreshSystemStatusAsync();
         }
         else if (wasController) _controllerContent?.Deactivate();
@@ -759,7 +756,6 @@ public sealed partial class MainWindow : Window
     {
         if (_prerequisiteSetupInProgress)
         {
-            _controllerContent?.SetSteamActivity(null);
             _profileContent?.SetSteamActivity(null);
             return;
         }
@@ -771,7 +767,6 @@ public sealed partial class MainWindow : Window
         try { RenderSystemStatus(await _frontend.CaptureStatusAsync()); }
         catch (Exception exception)
         {
-            _controllerContent?.SetSteamActivity(null);
             _profileContent?.SetSteamActivity(null);
             if (exception is FrontendTransportException
                 && exception is not FrontendProtocolException
@@ -802,7 +797,6 @@ public sealed partial class MainWindow : Window
     private void RenderSystemStatus(FrontendStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
-        _controllerContent?.SetSteamActivity(snapshot.Steam.Active);
         _profileContent?.SetSteamActivity(snapshot.Steam.Active);
         DeviceContent.RenderDeviceSummary(snapshot);
         _settingsContent?.RenderRequiredComponents(snapshot);

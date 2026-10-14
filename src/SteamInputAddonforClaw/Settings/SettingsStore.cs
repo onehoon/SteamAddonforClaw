@@ -77,6 +77,7 @@ public sealed class SettingsStore
                 ExperimentalVirtualTouchpadEnabled = experimentalVirtualTouchpadEnabled,
                 QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
                 SteamVirtualController = ReadSteamVirtualController(root),
+                GyroscopeEnabled = ReadGyroscopeEnabled(root),
                 FrontButtonMapping = ReadFrontButtonMapping(root, selectedFrontButtonMappingDefault),
                 BackButtonMapping = ReadBackButtonMapping(root),
                 ControllerLed = ReadControllerLedSettings(root),
@@ -136,6 +137,19 @@ public sealed class SettingsStore
         AppLog.Warn("Settings", "Steam virtual controller preference is malformed; using Steam Deck for this setting only.", null,
             ("Reason", "InvalidSteamVirtualController"));
         return SteamVirtualControllerPreference.SteamDeck;
+    }
+
+    private static bool ReadGyroscopeEnabled(JsonElement root)
+    {
+        if (!root.TryGetProperty("GyroscopeEnabled", out var property))
+            return true;
+
+        if (property.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            return property.GetBoolean();
+
+        AppLog.Warn("Settings", "Gyroscope preference is malformed; using Enabled for this setting only.", null,
+            ("Reason", "InvalidGyroscopeEnabled"));
+        return true;
     }
 
     /// <summary>Reads this optional feature in isolation; absent or malformed LED data uses Off defaults.</summary>
@@ -324,7 +338,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SteamVirtualController, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, WindowsTweaksWarningAcknowledgedLocalDate = settings.WindowsTweaksWarningAcknowledgedLocalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SteamVirtualController, settings.GyroscopeEnabled, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, WindowsTweaksWarningAcknowledgedLocalDate = settings.WindowsTweaksWarningAcknowledgedLocalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

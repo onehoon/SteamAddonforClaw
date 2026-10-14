@@ -8,20 +8,28 @@ namespace SteamInputAddonforClaw.UiTests;
 public sealed class OverlayControllerRendererTests
 {
     [Fact]
-    public void Controller_tab_keeps_two_runtime_owned_mapping_rows_and_adds_existing_shared_controls()
+    public void Controller_tab_starts_with_the_shared_Steam_controller_and_gyro_rows()
     {
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
 
         Assert.Contains("AddonQuickSettingsTabId.Controller => BuildControllerPage(rows)", shell);
         Assert.DoesNotContain("AddonQuickSettingsTabId.Controller => CreatePlaceholderPage", shell);
-        Assert.Equal(3, CountOccurrences(controller, "CreateOverlaySectionCard("));
+        Assert.Equal(4, CountOccurrences(controller, "CreateOverlaySectionCard("));
+        Assert.Contains("CreateControllerSection(\"Controller for Steam\")", controller);
         Assert.Contains("CreateControllerSection(\"M1 / M2\")", controller);
         Assert.Contains("CreateControllerSection(\"Vibration Strength\")", controller);
         Assert.DoesNotContain("CreateControllerSection(\"Joystick LED\")", controller);
+        Assert.Contains("new OverlayValueRow(\"Controller\", FormatSteamController", controller);
+        Assert.Contains("new OverlayToggleRow(\"Gyroscope\", RequestGyroscopeChange", controller);
+        Assert.Contains("var controllerAvailable = _frontendSettingsAvailable && _controllerForSteam.Available", controller);
+        Assert.Contains("_steamControllerRow?.ApplyState(controllerAvailable, 0, controllerAvailable ? 1 : 2, 1, displayValue);", controller);
+        Assert.Contains("_gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_controllerForSteamMutationInFlight", controller);
+        Assert.Contains("ControllerForSteamEditRequested?.Invoke(preference, null)", controller);
+        Assert.Contains("ControllerForSteamEditRequested?.Invoke(null, enabled)", controller);
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M1\""));
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M2\""));
-        Assert.Equal(2, CountOccurrences(controller, "OverlayValueButtonKind.DiscreteChoice"));
+        Assert.Equal(3, CountOccurrences(controller, "OverlayValueButtonKind.DiscreteChoice"));
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m1Row)", controller);
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m2Row)", controller);
         Assert.Contains("CreateOverlayDetailStack()", controller);
@@ -46,7 +54,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("_m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M1)", controller);
         Assert.Contains("_m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M2)", controller);
         Assert.Contains("var preferredIndex = _rowSelection.SelectedIndex;", controller);
-        Assert.Contains("if (!_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)", controller);
+        Assert.Contains("if (!_controllerForSteamMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
         Assert.Contains("HandleBackButtonMappingStateAsync", app);
         Assert.Contains("BackButtonMappingEditRequested", app);

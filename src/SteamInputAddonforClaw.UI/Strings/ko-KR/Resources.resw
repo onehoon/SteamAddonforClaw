@@ -96,10 +96,14 @@
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
-  <data name="Controller_SteamVirtualControllerCard.Header" xml:space="preserve"><value>Steam Virtual Controller</value></data>
-  <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve"><value>Choose the virtual controller used by Steam.</value></data>
-  <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve"><value>Selection is disabled while a Steam game or Big Picture Mode is active.</value></data>
-  <data name="Controller_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck (Default)</value></data>
+  <data name="Controller_SteamVirtualControllerCard.Header" xml:space="preserve"><value>Steam용 컨트롤러</value></data>
+  <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve"><value>Steam에서 사용할 컨트롤러와 자이로 입력을 설정합니다.</value></data>
+  <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve"><value>Steam 게임 또는 Big Picture가 활성 상태이면 컨트롤러 선택이 잠깁니다.</value></data>
+  <data name="Controller_SteamControllerUnavailable.Content" xml:space="preserve"><value>사용할 수 없음</value></data>
+  <data name="Controller_SteamControllerRow.Text" xml:space="preserve"><value>컨트롤러</value></data>
+  <data name="Controller_GyroscopeRow.Text" xml:space="preserve"><value>자이로스코프</value></data>
+  <data name="Controller_GyroscopeUpdateFailed" xml:space="preserve"><value>자이로스코프 설정을 저장하지 못했습니다. 마지막으로 확인된 값으로 복원했습니다.</value></data>
+  <data name="Controller_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
   <data name="Controller_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
   <data name="Controller_MappingUnavailable.Text" xml:space="preserve"><value>Unavailable</value></data>
   <data name="Controller_ButtonMappingHeader.Text" xml:space="preserve"><value>Button Mapping</value></data>
@@ -129,11 +133,11 @@
   <data name="Controller_RightMotorTestButton.Content" xml:space="preserve"><value>Test</value></data>
   <data name="Controller_VibrationRecoveryCard.Header" xml:space="preserve"><value>Vibration Recovery</value></data>
   <data name="Controller_RestoreVibrationButton.Content" xml:space="preserve"><value>Restore Vibration</value></data>
-  <data name="Controller_SteamActivity_Active" xml:space="preserve"><value>Steam or Big Picture is active. Selection is locked.</value></data>
-  <data name="Controller_SteamActivity_Idle" xml:space="preserve"><value>Selection is disabled while a Steam game or Big Picture Mode is active.</value></data>
-  <data name="Controller_SteamActivity_Unknown" xml:space="preserve"><value>Steam activity is unavailable. Selection is disabled.</value></data>
-  <data name="Controller_SteamChoice_NotChanged" xml:space="preserve"><value>The saved controller choice was not changed.</value></data>
-  <data name="Controller_SteamChoice_Uncertain" xml:space="preserve"><value>The change could not be confirmed. The last confirmed choice is selected.</value></data>
+  <data name="Controller_SteamActivity_Active" xml:space="preserve"><value>Steam이 활성 상태입니다. 실제 적용된 컨트롤러를 표시하며 선택은 잠깁니다.</value></data>
+  <data name="Controller_SteamActivity_Idle" xml:space="preserve"><value>Steam 게임이나 Big Picture가 아닐 때 컨트롤러를 변경할 수 있습니다.</value></data>
+  <data name="Controller_SteamActivity_Unknown" xml:space="preserve"><value>컨트롤러 상태를 확인할 수 없어 선택이 잠겼습니다.</value></data>
+  <data name="Controller_SteamChoice_NotChanged" xml:space="preserve"><value>저장된 컨트롤러 선택을 변경하지 못했습니다.</value></data>
+  <data name="Controller_SteamChoice_Uncertain" xml:space="preserve"><value>변경을 확인하지 못했습니다. 마지막으로 확인된 선택을 표시합니다.</value></data>
   <data name="Controller_Action_QuickSettingsOverlay" xml:space="preserve"><value>Quick Settings Overlay</value></data>
   <data name="Controller_Action_SteamBigPicture" xml:space="preserve"><value>Steam Big Picture</value></data>
   <data name="Controller_Action_SteamButton" xml:space="preserve"><value>Steam Button</value></data>

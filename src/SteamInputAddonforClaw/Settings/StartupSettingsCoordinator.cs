@@ -30,6 +30,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public ControllerLedSettings ControllerLed => Settings.ControllerLed;
     public ControllerVibrationSettings ControllerVibration => Settings.ControllerVibration;
     public SteamVirtualControllerPreference SteamVirtualController => Settings.SteamVirtualController;
+    public bool GyroscopeEnabled => Settings.GyroscopeEnabled;
     public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
     public DateOnly? WindowsTweaksWarningAcknowledgedLocalDate => Settings.WindowsTweaksWarningAcknowledgedLocalDate;
     public event EventHandler? FrontButtonMappingChanged;
@@ -174,6 +175,18 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
         Settings = next;
         SteamInputAddonforClaw.Diagnostics.AppLog.Info("Settings", "Steam virtual controller preference saved.",
             ("Preference", preference));
+        return true;
+    }
+
+    public bool ChangeGyroscopeEnabled(bool enabled)
+    {
+        if (Settings.GyroscopeEnabled == enabled) return true;
+
+        var next = Settings with { GyroscopeEnabled = enabled };
+        _settingsStore.Save(next);
+        Settings = next;
+        SteamInputAddonforClaw.Diagnostics.AppLog.Info("ControllerMotion", "Gyroscope preference saved.",
+            ("Enabled", enabled));
         return true;
     }
 

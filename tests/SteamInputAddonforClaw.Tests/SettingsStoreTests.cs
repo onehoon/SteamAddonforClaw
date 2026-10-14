@@ -70,6 +70,40 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Theory]
+    [InlineData("{}", true)]
+    [InlineData("{\"GyroscopeEnabled\":true}", true)]
+    [InlineData("{\"GyroscopeEnabled\":false}", false)]
+    public void Gyroscope_preference_defaults_on_and_round_trips_exact_boolean_values(string json, bool expected)
+    {
+        var path = Path.Combine(_testDirectory, "gyroscope-settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, json);
+
+        Assert.Equal(expected, new SettingsStore(path).Load().GyroscopeEnabled);
+
+        var store = new SettingsStore(path);
+        store.Save(new AppSettings { GyroscopeEnabled = expected });
+        Assert.Equal(expected, store.Load().GyroscopeEnabled);
+    }
+
+    [Theory]
+    [InlineData("\"false\"")]
+    [InlineData("0")]
+    [InlineData("null")]
+    public void Malformed_gyroscope_preference_falls_back_only_for_gyroscope(string value)
+    {
+        var path = Path.Combine(_testDirectory, "malformed-gyroscope-settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, $"{{\"LogLevel\":\"Debug\",\"SteamVirtualController\":\"DualSenseEdge\",\"GyroscopeEnabled\":{value}}}");
+
+        var loaded = new SettingsStore(path).Load();
+
+        Assert.True(loaded.GyroscopeEnabled);
+        Assert.Equal(AppLogPreference.Debug, loaded.LogLevel);
+        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, loaded.SteamVirtualController);
+    }
+
+    [Theory]
     [InlineData("\"Unknown\"")]
     [InlineData("99")]
     [InlineData("null")]

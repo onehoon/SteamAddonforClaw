@@ -254,6 +254,16 @@ public enum SteamVirtualControllerPreference
     DualSenseEdge = 1
 }
 
+public sealed record FrontendControllerForSteamSnapshot(
+    bool Available,
+    SteamVirtualControllerPreference SavedPreference,
+    SteamVirtualControllerPreference? ActiveSteamPreference,
+    bool CanChangeController)
+{
+    public static FrontendControllerForSteamSnapshot Unavailable(SteamVirtualControllerPreference savedPreference) =>
+        new(false, savedPreference, null, false);
+}
+
 /// <remarks><see cref="FrontButtonMapping"/> is the settings-layer projection of the one persisted
 /// front-button mapping. The frontend deliberately carries the SAME
 /// <see cref="FrontButtonMappingSettings"/> the runtime persists and the dispatcher validates
@@ -262,6 +272,9 @@ public enum SteamVirtualControllerPreference
 public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool SuppressDeveloperMenuWarning, FrontButtonMappingSettings FrontButtonMapping)
 {
     public SteamVirtualControllerPreference SteamVirtualController { get; init; } = SteamVirtualControllerPreference.SteamDeck;
+    public bool GyroscopeEnabled { get; init; } = true;
+    public FrontendControllerForSteamSnapshot ControllerForSteam { get; init; } =
+        FrontendControllerForSteamSnapshot.Unavailable(SteamVirtualControllerPreference.SteamDeck);
     public bool DeveloperMenuEnabled { get; init; }
     public bool ExperimentalVirtualTouchpadEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
@@ -522,6 +535,8 @@ public interface IAddonFrontendControl
     Task<FrontendSettingsSnapshot> SetSteamVirtualControllerAsync(
         SteamVirtualControllerPreference preference, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Steam virtual controller selection is not supported by this frontend.");
+    Task<FrontendSettingsSnapshot> SetGyroscopeEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Gyroscope settings are not supported by this frontend.");
     Task<FrontendSettingsSnapshot> SetExperimentalVirtualTouchpadEnabledAsync(
         bool enabled, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Experimental virtual touchpad settings are not supported by this frontend.");

@@ -16,38 +16,39 @@ public sealed class MsiClawMotionSourceTests
     [Fact]
     public void Motion_readers_are_off_without_healthy_live_Steam_facing_presentation()
     {
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(false, AddonPresentationKind.SteamDeck, false, true));
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false, true));
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, null, false, true));
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, true, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, false, AddonPresentationKind.SteamDeck, false, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, true, AddonPresentationKind.Xbox360, false, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, true, null, false, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, true, AddonPresentationKind.SteamDeck, true, true));
         // Overlay capture pauses Deck/Edge publication, so the shared motion readers must stop too.
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false, false));
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.DualSenseEdge, false, false));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, true, AddonPresentationKind.SteamDeck, false, false));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, true, AddonPresentationKind.DualSenseEdge, false, false));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(false, true, AddonPresentationKind.SteamDeck, false, true));
     }
 
     [Fact]
     public void Bpm_only_Steam_Deck_presentation_runs_motion_readers_without_a_running_game()
     {
         // BPM has RunningAppId == 0; the committed Steam Deck presentation is the activation fact.
-        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false, true));
+        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, true, AddonPresentationKind.SteamDeck, false, true));
     }
 
     [Fact]
     public void Active_Steam_game_Steam_Deck_presentation_runs_motion_readers()
     {
-        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.SteamDeck, false, true));
+        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, true, AddonPresentationKind.SteamDeck, false, true));
     }
 
     [Fact]
     public void Healthy_live_DualSense_Edge_presentation_runs_motion_readers()
     {
-        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.DualSenseEdge, false, true));
+        Assert.True(AddonProcessHost.ShouldRunMotionReaders(true, true, AddonPresentationKind.DualSenseEdge, false, true));
     }
 
     [Fact]
     public void Transition_back_to_Xbox360_disables_motion_readers()
     {
-        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, AddonPresentationKind.Xbox360, false, true));
+        Assert.False(AddonProcessHost.ShouldRunMotionReaders(true, true, AddonPresentationKind.Xbox360, false, true));
     }
 
     [Theory]
@@ -407,7 +408,8 @@ public sealed class MsiClawMotionSourceTests
         var firstPresentation = host.IndexOf("context.Presentation.AttachInitialAsync", sourceCreated, StringComparison.Ordinal);
         var motionReconcile = host.IndexOf("await ReconcileMotionReadersAsync(trigger == \"Startup\" ? \"StartupPresentation\"", firstPresentation, StringComparison.Ordinal);
         Assert.True(owned >= 0 && continuationCall > owned && continuation > continuationCall && live > continuation && sourceCreated > live && firstPresentation > sourceCreated && motionReconcile > firstPresentation);
-        Assert.Contains("motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable", host, StringComparison.Ordinal);
+        Assert.Contains("motionSnapshotProvider: () => _runtimeStartupSettings?.GyroscopeEnabled == false", host, StringComparison.Ordinal);
+        Assert.Contains("? MsiClawMotionState.Unavailable", host, StringComparison.Ordinal);
         Assert.DoesNotContain("await StartMotionSourceAsync(\"Startup\")", host, StringComparison.Ordinal);
         Assert.True(
             host.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal)

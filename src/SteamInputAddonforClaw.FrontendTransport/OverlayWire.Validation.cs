@@ -50,6 +50,7 @@ internal static class OverlayProductionControlsWireValidation
         message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
         && message.Kind == OverlayWireMessageKind.FrontendSettingsState
         && message.FrontendSettingsState is not null && message.ControllerLedAvailable is not null && message.FrontendSettingsAvailable is not null
+        && IsStructurallyValid(message.FrontendSettingsState.ControllerForSteam)
         && message.FrontendSettingsMutationRequest is null && message.FrontendSettingsMutationResponse is null
         && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
         && HasNoLegacyPayload(message);
@@ -59,9 +60,30 @@ internal static class OverlayProductionControlsWireValidation
         && message.Kind == (led ? OverlayWireMessageKind.ControllerLedMutationRequest : OverlayWireMessageKind.CurrentPowerSourceMutationRequest)
         && message.FrontendSettingsMutationRequest is { RequestId: > 0 } request
         && (led
-            ? request.ControllerLed is not null && request.CurrentPowerSourceOnly is null && ControllerLedSettingsValidation.Validate(request.ControllerLed) is null
-            : request.ControllerLed is null && request.CurrentPowerSourceOnly is not null)
+            ? request.ControllerLed is not null && request.CurrentPowerSourceOnly is null && request.SteamVirtualController is null && request.GyroscopeEnabled is null && ControllerLedSettingsValidation.Validate(request.ControllerLed) is null
+            : request.ControllerLed is null && request.CurrentPowerSourceOnly is not null && request.SteamVirtualController is null && request.GyroscopeEnabled is null)
         && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationResponse is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidControllerForSteamMutationRequest(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.ControllerForSteamMutationRequest
+        && message.FrontendSettingsMutationRequest is { RequestId: > 0 } request
+        && request.ControllerLed is null && request.CurrentPowerSourceOnly is null
+        && ((request.SteamVirtualController is { } preference && Enum.IsDefined(preference) && request.GyroscopeEnabled is null)
+            || (request.SteamVirtualController is null && request.GyroscopeEnabled is not null))
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationResponse is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidControllerForSteamMutationResult(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.ControllerForSteamMutationResult
+        && message.FrontendSettingsMutationResponse is { RequestId: > 0, Settings: not null } response
+        && ControllerLedSettingsValidation.Validate(response.Settings.ControllerLed) is null
+        && IsStructurallyValid(response.Settings.ControllerForSteam)
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null
         && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
         && HasNoLegacyPayload(message);
 
@@ -70,6 +92,7 @@ internal static class OverlayProductionControlsWireValidation
         && message.Kind == (led ? OverlayWireMessageKind.ControllerLedMutationResult : OverlayWireMessageKind.CurrentPowerSourceMutationResult)
         && message.FrontendSettingsMutationResponse is { RequestId: > 0, Settings: not null } response
         && ControllerLedSettingsValidation.Validate(response.Settings.ControllerLed) is null
+        && IsStructurallyValid(response.Settings.ControllerForSteam)
         && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null
         && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
         && HasNoLegacyPayload(message);
@@ -102,6 +125,13 @@ internal static class OverlayProductionControlsWireValidation
     private static bool IsStructurallyValid(FrontendControllerVibrationStrengthSnapshot? snapshot) =>
         snapshot is not null && snapshot.Status is not null
         && (!snapshot.Available || snapshot.LeftPercent is >= 0 and <= 100 && snapshot.RightPercent is >= 0 and <= 100);
+
+    private static bool IsStructurallyValid(FrontendControllerForSteamSnapshot? snapshot) =>
+        snapshot is not null && Enum.IsDefined(snapshot.SavedPreference)
+        && (snapshot.ActiveSteamPreference is null || Enum.IsDefined(snapshot.ActiveSteamPreference.Value))
+        && (snapshot.Available
+            ? snapshot.CanChangeController == (snapshot.ActiveSteamPreference is null)
+            : !snapshot.CanChangeController && snapshot.ActiveSteamPreference is null);
 
     private static bool HasNoLegacyPayload(OverlayWireMessage message) =>
         message.Command is null && message.Navigation is null && message.State is null && message.Error is null
