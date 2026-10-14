@@ -84,11 +84,12 @@ public sealed record FrontendControllerForSteamSnapshot(
     SteamVirtualControllerPreference SavedPreference,
     SteamVirtualControllerPreference? ActiveSteamPreference,
     bool CanChangeController,
+    SteamVirtualControllerPreference? DisplayPreference,
     bool GyroscopeEnabled,
     bool Available);
 ~~~
 
-The display value is ActiveSteamPreference while Steam/BPM is active and valid, otherwise SavedPreference while idle. When active selection is unavailable, render Unavailable and lock. The Runtime derives all policy from its current Steam snapshot, existing active presentation and one saved AppSettings record; the frontend never recomputes its own conflicting rule. An unknown session state must fail closed for controller mutation.
+The Runtime computes DisplayPreference: use ActiveSteamPreference while Steam/BPM is active and valid, or SavedPreference while idle. When active selection is unavailable, DisplayPreference is null: render Unavailable and lock. This avoids duplicating session-display branching in each UI. The Runtime derives all policy from its current Steam snapshot, existing active presentation and one saved AppSettings record; the frontend never recomputes its own conflicting rule. An unknown session state must fail closed for controller mutation.
 
 ## 4. UI composition — two native surfaces, identical contract
 
@@ -137,7 +138,7 @@ Vibration Strength
 - The **section/card title** is Controller for Steam, on both Main and Overlay.
 - The **row labels** are Controller and Gyroscope.
 - Update directly affected Main en-US/ko-KR RESW and UI tests; do not leave one culture saying Steam Deck (Default).
-- Update docs/howtouse/README_EN.md and docs/howtouse/README_KO.md (or the current actual canonical guide filenames after checking) for Controller for Steam, the Gyroscope global toggle, Overlay access and Steam Input's per-game gyro policy. Preserve the documented unresolved Steam Deck Gyro To Mouse smoothness caveat, with no invented hardware validation.
+- Update the actual canonical English root README.md and docs/howtouse/README_KO.md for Controller for Steam, the Gyroscope global toggle, Overlay access and Steam Input's per-game gyro policy. Preserve the documented unresolved Steam Deck Gyro To Mouse smoothness caveat, with no invented hardware validation.
 - The separate Steam game-profile Use default value is intentionally retained; its meaning is inherited global preference. Do not remove or relabel it merely because the global Steam Deck (Default) suffix was removed.
 
 ## 5. Global Gyroscope persistence and exact runtime behavior
