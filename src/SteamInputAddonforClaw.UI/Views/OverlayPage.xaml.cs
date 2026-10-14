@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.UI;
 using Windows.System;
 
 namespace SteamInputAddonforClaw.Views;
@@ -12,7 +13,7 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class OverlayPage : UserControl
 {
     private IAddonFrontendControl? _frontend;
-    private FrontendClawHudSnapshot _clawHudSnapshot = new(false, FrontendClawHudRuntimeState.Disabled, "Off", null, null, null);
+    private FrontendClawHudSnapshot _clawHudSnapshot = new(false, FrontendClawHudRuntimeState.Disabled, MainUiStrings.Get("ClawHud_LocalStatus_Off", "Off"), null, null, null);
     private int _clawHudOperationInProgress;
     private bool _applyingClawHudState;
     private Task _opacityPreviewTail = Task.CompletedTask;
@@ -129,7 +130,7 @@ public sealed partial class OverlayPage : UserControl
     {
         if (result is null) return string.Empty;
 
-        var summary = result.Status.ToString();
+        var summary = MainUiStrings.Get("ClawHud_VrrStatus_" + result.Status, result.Status.ToString());
         if (!string.IsNullOrWhiteSpace(result.RangeBefore) && !string.IsNullOrWhiteSpace(result.RangeAfter))
             summary += $" · {result.RangeBefore} → {result.RangeAfter}";
         if (!string.IsNullOrWhiteSpace(result.PanelName))
@@ -148,7 +149,9 @@ public sealed partial class OverlayPage : UserControl
         {
             DesiredEnabled = desired,
             RuntimeState = desired ? FrontendClawHudRuntimeState.Starting : FrontendClawHudRuntimeState.Disabled,
-            StatusMessage = desired ? "Starting…" : "Off",
+            StatusMessage = desired
+                ? MainUiStrings.Get("ClawHud_LocalStatus_Starting", "Starting…")
+                : MainUiStrings.Get("ClawHud_LocalStatus_Off", "Off"),
             Settings = null,
         });
 
@@ -169,7 +172,7 @@ public sealed partial class OverlayPage : UserControl
                 {
                     DesiredEnabled = desired,
                     RuntimeState = FrontendClawHudRuntimeState.Unavailable,
-                    StatusMessage = "ClawHUD could not be changed.",
+                    StatusMessage = MainUiStrings.Get("ClawHud_Enable_ChangeFailed", "ClawHUD could not be changed."),
                     Settings = null,
                 });
             }
@@ -360,7 +363,7 @@ public sealed partial class OverlayPage : UserControl
             }
             catch
             {
-                RenderClawHud(_clawHudSnapshot with { Settings = null, StatusMessage = "HUD setting could not be verified." });
+                RenderClawHud(_clawHudSnapshot with { Settings = null, StatusMessage = MainUiStrings.Get("ClawHud_Setting_VerificationFailed", "HUD setting could not be verified.") });
             }
         }
         finally

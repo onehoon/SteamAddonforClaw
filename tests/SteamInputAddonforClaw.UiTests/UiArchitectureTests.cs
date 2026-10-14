@@ -562,7 +562,12 @@ public sealed class UiArchitectureTests
         Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Shortcut\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Tag=\"Shortcut\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
-        Assert.Contains("<NavigationViewItem Content=\"ClawHUD\" Tag=\"Overlay\">", xaml, StringComparison.Ordinal);
+        var mainWindowDocument = XDocument.Parse(xaml);
+        var clawHudNavigationItem = Assert.Single(mainWindowDocument.Descendants(), element =>
+            element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == "Overlay");
+        Assert.Equal("MainNav_ClawHud", (string?)clawHudNavigationItem.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Uid"));
+        Assert.Equal("ClawHUD", (string?)clawHudNavigationItem.Attribute("Content"));
+        Assert.Equal("Overlay", (string?)clawHudNavigationItem.Attribute("Tag"));
         Assert.DoesNotContain("<NavigationViewItem Content=\"Overlay\" Tag=\"Overlay\">", xaml, StringComparison.Ordinal);
         Assert.Contains("MainNavigationPage.Overlay", navigationState, StringComparison.Ordinal);
         Assert.Contains("OverlayPageHost", mainWindow, StringComparison.Ordinal);
@@ -1190,17 +1195,20 @@ public sealed class UiArchitectureTests
         })
             Assert.Contains(icon, overlayXaml, StringComparison.Ordinal);
 
-        var vrrCardStart = overlayXaml.IndexOf("<ctcontrols:SettingsCard Header=\"Intel VRR Range Fix\"", StringComparison.Ordinal);
-        var vrrCardEnd = overlayXaml.IndexOf("</ctcontrols:SettingsCard>", vrrCardStart, StringComparison.Ordinal);
-        Assert.True(vrrCardStart >= 0 && vrrCardEnd > vrrCardStart);
-        var vrrCard = overlayXaml[vrrCardStart..(vrrCardEnd + "</ctcontrols:SettingsCard>".Length)];
-        Assert.DoesNotContain("Description=\"Restore the supported VRR range", vrrCard, StringComparison.Ordinal);
-        Assert.Contains("<ctcontrols:SettingsCard.Description>", vrrCard, StringComparison.Ordinal);
-        Assert.Contains("ClawHudVrrResultText", vrrCard, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment=\"Right\"", vrrCard, StringComparison.Ordinal);
-        Assert.Contains("OffContent=\"\"", vrrCard, StringComparison.Ordinal);
-        Assert.Contains("OnContent=\"\"", vrrCard, StringComparison.Ordinal);
-        Assert.DoesNotContain("<StackPanel", vrrCard, StringComparison.Ordinal);
+        var overlayDocument = XDocument.Parse(overlayXaml);
+        var vrrCard = Assert.Single(overlayDocument.Descendants(), element =>
+            element.Name.LocalName == "SettingsCard" &&
+            (string?)element.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Uid") == "ClawHud_IntelVrrCard");
+        Assert.Equal("Intel VRR Range Fix", (string?)vrrCard.Attribute("Header"));
+        Assert.Null(vrrCard.Attribute("Description"));
+        var vrrDescription = Assert.Single(vrrCard.Elements(), element => element.Name.LocalName == "SettingsCard.Description");
+        Assert.Single(vrrDescription.Elements(), element =>
+            element.Name.LocalName == "TextBlock" && (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "ClawHudVrrResultText");
+        var vrrToggle = Assert.Single(vrrCard.Elements(), element => element.Name.LocalName == "ToggleSwitch");
+        Assert.Equal("Right", (string?)vrrToggle.Attribute("HorizontalAlignment"));
+        Assert.Equal(string.Empty, (string?)vrrToggle.Attribute("OffContent"));
+        Assert.Equal(string.Empty, (string?)vrrToggle.Attribute("OnContent"));
+        Assert.DoesNotContain(vrrCard.DescendantsAndSelf(), element => element.Name.LocalName == "StackPanel");
 
         Assert.DoesNotContain("ClawHud", settingsXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ClawHud", settingsCodeBehind, StringComparison.Ordinal);

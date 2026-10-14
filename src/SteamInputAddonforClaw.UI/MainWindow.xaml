@@ -40,7 +40,7 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE990;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="ClawHUD" Tag="Overlay">
+            <NavigationViewItem x:Uid="MainNav_ClawHud" Content="ClawHUD" Tag="Overlay">
                 <NavigationViewItem.Icon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" />
                 </NavigationViewItem.Icon>

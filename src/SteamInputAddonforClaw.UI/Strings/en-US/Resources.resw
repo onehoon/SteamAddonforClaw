@@ -314,4 +314,44 @@
   <data name="Xbox_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
   <data name="Xbox_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
   <data name="Xbox_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
+  <data name="MainNav_ClawHud.Content" xml:space="preserve"><value>ClawHUD</value></data>
+  <data name="ClawHud_PageTitle.Text" xml:space="preserve"><value>Overlay</value></data>
+  <data name="ClawHud_PageSubtitle.Text" xml:space="preserve"><value>Configure the performance overlay and display behavior.</value></data>
+  <data name="ClawHud_RetryButton.Content" xml:space="preserve"><value>Retry</value></data>
+  <data name="ClawHud_EnableCard.Header" xml:space="preserve"><value>Enable HUD</value></data>
+  <data name="ClawHud_DisplayModeCard.Header" xml:space="preserve"><value>Display mode</value></data>
+  <data name="ClawHud_DisplayModeCard.Description" xml:space="preserve"><value>Choose when the HUD is visible.</value></data>
+  <data name="ClawHud_DisplayMode_Option_InGameOnly.Content" xml:space="preserve"><value>In game only</value></data>
+  <data name="ClawHud_DisplayMode_Option_Always.Content" xml:space="preserve"><value>Always</value></data>
+  <data name="ClawHud_SizeCard.Header" xml:space="preserve"><value>HUD size</value></data>
+  <data name="ClawHud_SizeCard.Description" xml:space="preserve"><value>Adjust the overall HUD scale.</value></data>
+  <data name="ClawHud_Size_Option_Default.Content" xml:space="preserve"><value>Default</value></data>
+  <data name="ClawHud_FontCard.Header" xml:space="preserve"><value>Font</value></data>
+  <data name="ClawHud_FontCard.Description" xml:space="preserve"><value>Font used by the performance HUD.</value></data>
+  <data name="ClawHud_Font_Option_Unispace.Content" xml:space="preserve"><value>Unispace</value></data>
+  <data name="ClawHud_Font_Option_SegoeUiVariable.Content" xml:space="preserve"><value>Segoe UI Variable</value></data>
+  <data name="ClawHud_AlignmentCard.Header" xml:space="preserve"><value>Alignment</value></data>
+  <data name="ClawHud_AlignmentCard.Description" xml:space="preserve"><value>Horizontal alignment of HUD content.</value></data>
+  <data name="ClawHud_Alignment_Option_Left.Content" xml:space="preserve"><value>Left</value></data>
+  <data name="ClawHud_Alignment_Option_Center.Content" xml:space="preserve"><value>Center</value></data>
+  <data name="ClawHud_Alignment_Option_Right.Content" xml:space="preserve"><value>Right</value></data>
+  <data name="ClawHud_BackgroundWidthCard.Header" xml:space="preserve"><value>Background width</value></data>
+  <data name="ClawHud_BackgroundWidthCard.Description" xml:space="preserve"><value>Choose how far the HUD background extends.</value></data>
+  <data name="ClawHud_BackgroundWidth_Option_FullWidth.Content" xml:space="preserve"><value>Full width</value></data>
+  <data name="ClawHud_BackgroundWidth_Option_ContentWidth.Content" xml:space="preserve"><value>Content width</value></data>
+  <data name="ClawHud_OpacityCard.Header" xml:space="preserve"><value>HUD opacity</value></data>
+  <data name="ClawHud_IntelVrrCard.Header" xml:space="preserve"><value>Intel VRR Range Fix</value></data>
+  <data name="ClawHud_LocalStatus_Off" xml:space="preserve"><value>Off</value></data>
+  <data name="ClawHud_LocalStatus_Starting" xml:space="preserve"><value>Starting…</value></data>
+  <data name="ClawHud_Enable_ChangeFailed" xml:space="preserve"><value>ClawHUD could not be changed.</value></data>
+  <data name="ClawHud_Setting_VerificationFailed" xml:space="preserve"><value>HUD setting could not be verified.</value></data>
+  <data name="ClawHud_VrrStatus_Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="ClawHud_VrrStatus_Unavailable" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="ClawHud_VrrStatus_UnsupportedPanel" xml:space="preserve"><value>UnsupportedPanel</value></data>
+  <data name="ClawHud_VrrStatus_AmbiguousDisplay" xml:space="preserve"><value>AmbiguousDisplay</value></data>
+  <data name="ClawHud_VrrStatus_AlreadyCorrect" xml:space="preserve"><value>AlreadyCorrect</value></data>
+  <data name="ClawHud_VrrStatus_SkippedUserProfile" xml:space="preserve"><value>SkippedUserProfile</value></data>
+  <data name="ClawHud_VrrStatus_Applied" xml:space="preserve"><value>Applied</value></data>
+  <data name="ClawHud_VrrStatus_ApplyFailed" xml:space="preserve"><value>ApplyFailed</value></data>
+  <data name="ClawHud_VrrStatus_VerificationFailed" xml:space="preserve"><value>VerificationFailed</value></data>
 </root>

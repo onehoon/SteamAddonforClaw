@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.UI;
 using Xunit;
 
@@ -583,6 +584,128 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Contains("RestoreSelectedAfterMutationFailureAsync(key, failureMessage, exception)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("MainUiStrings.Get(\"Xbox_CpuBoost_UpdateFailed\", MainUiStrings.Get(", source, StringComparison.Ordinal);
         Assert.Contains("SelectedGameNameText.Text = game.DisplayName", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clawhud_navigation_and_fixed_xaml_text_use_unique_resource_uids()
+    {
+        var root = FindRepositoryRoot();
+        var mainWindow = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var navigation = Assert.Single(mainWindow.Descendants(), element =>
+            element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == "Overlay");
+        Assert.Equal("MainNav_ClawHud", (string?)navigation.Attribute(XamlNamespace + "Uid"));
+        Assert.Equal("ClawHUD", (string?)navigation.Attribute("Content"));
+        Assert.Equal("Overlay", (string?)navigation.Attribute("Tag"));
+
+        var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        Assert.Equal("ClawHUD", english["MainNav_ClawHud.Content"]);
+        Assert.Contains("MainNav_ClawHud.Content", korean.Keys);
+        Assert.False(string.IsNullOrWhiteSpace(korean["MainNav_ClawHud.Content"]));
+
+        var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "OverlayPage.xaml"));
+        var expectedUids = new[]
+        {
+            "ClawHud_PageTitle", "ClawHud_PageSubtitle", "ClawHud_RetryButton", "ClawHud_EnableCard",
+            "ClawHud_DisplayModeCard", "ClawHud_DisplayMode_Option_InGameOnly", "ClawHud_DisplayMode_Option_Always",
+            "ClawHud_SizeCard", "ClawHud_Size_Option_Default", "ClawHud_FontCard",
+            "ClawHud_Font_Option_Unispace", "ClawHud_Font_Option_SegoeUiVariable", "ClawHud_AlignmentCard",
+            "ClawHud_Alignment_Option_Left", "ClawHud_Alignment_Option_Center", "ClawHud_Alignment_Option_Right",
+            "ClawHud_BackgroundWidthCard", "ClawHud_BackgroundWidth_Option_FullWidth",
+            "ClawHud_BackgroundWidth_Option_ContentWidth", "ClawHud_OpacityCard", "ClawHud_IntelVrrCard"
+        };
+        var uidElements = document.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        var actualUids = uidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!).ToArray();
+        Assert.Equal(expectedUids.OrderBy(value => value, StringComparer.Ordinal), actualUids.OrderBy(value => value, StringComparer.Ordinal));
+        Assert.Equal(actualUids.Length, actualUids.Distinct(StringComparer.Ordinal).Count());
+
+        foreach (var element in uidElements)
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            Assert.StartsWith("ClawHud_", uid, StringComparison.Ordinal);
+            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText" })
+            {
+                var sourceValue = (string?)element.Attribute(property);
+                if (sourceValue is null) continue;
+
+                var key = $"{uid}.{property}";
+                Assert.Contains(key, english.Keys);
+                Assert.Contains(key, korean.Keys);
+                Assert.Equal(sourceValue, english[key]);
+                Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+            }
+        }
+
+        string[] Options(string name)
+        {
+            var comboBox = Assert.Single(document.Descendants(), element =>
+                element.Name.LocalName == "ComboBox" && (string?)element.Attribute(XamlNamespace + "Name") == name);
+            return comboBox.Elements()
+                .Where(element => element.Name.LocalName == "ComboBoxItem")
+                .Select(element => (string?)element.Attribute("Content") ?? string.Empty)
+                .ToArray();
+        }
+
+        Assert.Equal(new[] { "In game only", "Always" }, Options("ClawHudDisplayModeComboBox"));
+        Assert.Equal(new[] { "-2", "-1", "Default", "+1", "+2" }, Options("ClawHudSizeComboBox"));
+        Assert.Equal(new[] { "Unispace", "Segoe UI Variable" }, Options("ClawHudFontComboBox"));
+        Assert.Equal(new[] { "Left", "Center", "Right" }, Options("ClawHudAlignmentComboBox"));
+        Assert.Equal(new[] { "Full width", "Content width" }, Options("ClawHudBackgroundComboBox"));
+
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "OverlayPage.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("ClawHudDisplayModeComboBox.SelectedIndex == 0", source, StringComparison.Ordinal);
+        Assert.Contains("ClawHudSizeComboBox.SelectedIndex - 2", source, StringComparison.Ordinal);
+        Assert.Contains("ClawHudFontComboBox.SelectedIndex == 0", source, StringComparison.Ordinal);
+        Assert.Contains("(FrontendClawHudAlignment)ClawHudAlignmentComboBox.SelectedIndex", source, StringComparison.Ordinal);
+        Assert.Contains("ClawHudBackgroundComboBox.SelectedIndex == 0", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clawhud_code_resources_cover_local_messages_and_vrr_status_without_translating_runtime_data()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "OverlayPage.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        var localMessages = new[]
+        {
+            ("ClawHud_LocalStatus_Off", "Off"),
+            ("ClawHud_LocalStatus_Starting", "Starting…"),
+            ("ClawHud_Enable_ChangeFailed", "ClawHUD could not be changed."),
+            ("ClawHud_Setting_VerificationFailed", "HUD setting could not be verified.")
+        };
+        foreach (var (key, fallback) in localMessages)
+        {
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.Equal(fallback, english[key]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+            Assert.Contains($"MainUiStrings.Get(\"{key}\", \"{fallback}\")", source, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("ClawHud_LocalStatus_Off", source, StringComparison.Ordinal);
+        Assert.Contains("StatusMessage = desired\n                ? MainUiStrings.Get(\"ClawHud_LocalStatus_Starting\", \"Starting…\")", source, StringComparison.Ordinal);
+
+        foreach (var status in Enum.GetNames<FrontendClawHudIntelVrrStatus>())
+        {
+            var key = $"ClawHud_VrrStatus_{status}";
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.Equal(status, english[key]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+        }
+        Assert.Equal(9, Enum.GetNames<FrontendClawHudIntelVrrStatus>().Length);
+        Assert.Contains("MainUiStrings.Get(\"ClawHud_VrrStatus_\" + result.Status, result.Status.ToString())", source, StringComparison.Ordinal);
+        Assert.Contains("ClawHudStatusText.Text = snapshot.StatusMessage;", source, StringComparison.Ordinal);
+        Assert.Contains("ClawHudInfoBar.Message = snapshot.StatusMessage;", source, StringComparison.Ordinal);
+        Assert.Contains("result.Succeeded ? result.Snapshot.StatusMessage : result.FailureMessage ?? result.Snapshot.StatusMessage", source, StringComparison.Ordinal);
+        Assert.Contains("result.RangeBefore} → {result.RangeAfter", source, StringComparison.Ordinal);
+        Assert.Contains("result.PanelName", source, StringComparison.Ordinal);
+        Assert.Contains("result.Message", source, StringComparison.Ordinal);
     }
 
     [Fact]
