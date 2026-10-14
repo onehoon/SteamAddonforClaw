@@ -499,7 +499,7 @@ src/SteamInputAddonforClaw.UI/Views/XboxPage.*
 src/SteamInputAddonforClaw.UI/Views/OverlayPage.*
 ```
 
-`scripts/verify-ui-localization-pri.ps1` should stay unchanged for normal x:Uid ``Text/Content/Header/Description/PlaceholderText` and direct C# string keys. Only change it if adding an attached `AutomationProperties.Name` x:Uid key requires a specific, **verified** special-property URI path; prefer a simple C# function binding if that is more reliable.
+`scripts/verify-ui-localization-pri.ps1` should stay unchanged for normal x:Uid `Text/Content/Header/Description/PlaceholderText` and direct C# string keys. Only change it if adding an attached `AutomationProperties.Name` x:Uid key requires a specific, **verified** special-property URI path; prefer a simple C# function binding if that is more reliable.
 
 Do not create new project or assembly references, introduce new localization resources outside the two files, or change public contracts.
 
