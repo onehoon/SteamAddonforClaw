@@ -93,7 +93,7 @@
   <data name="Device_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
   <data name="Device_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
   <data name="Device_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
-  <data name="MainNav_Controller.Content" xml:space="preserve"><value>Controller</value></data>
+  <data name="MainNav_Controller.Content" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
   <data name="Controller_SteamVirtualControllerExpander.Header" xml:space="preserve"><value>Steam용 컨트롤러</value></data>
@@ -357,8 +357,8 @@
   <data name="ClawHud_VrrStatus_Applied" xml:space="preserve"><value>Applied</value></data>
   <data name="ClawHud_VrrStatus_ApplyFailed" xml:space="preserve"><value>ApplyFailed</value></data>
   <data name="ClawHud_VrrStatus_VerificationFailed" xml:space="preserve"><value>VerificationFailed</value></data>
-  <data name="MainNav_Shortcut.Content" xml:space="preserve"><value>Shortcut</value></data>
-  <data name="MainNav_HowToUse.Content" xml:space="preserve"><value>How to Use</value></data>
+  <data name="MainNav_Shortcut.Content" xml:space="preserve"><value>바로가기</value></data>
+  <data name="MainNav_HowToUse.Content" xml:space="preserve"><value>사용안내</value></data>
   <data name="HowToUse_Failure.Text" xml:space="preserve"><value>How to Use could not be loaded.</value></data>
   <data name="HowToUse_Retry.Content" xml:space="preserve"><value>Retry</value></data>
   <data name="Shortcut_PageTitle.Text" xml:space="preserve"><value>Shortcut</value></data>
@@ -571,7 +571,7 @@
     <value>Some changes need a Windows restart or Explorer restart to become fully effective. This app will not restart either automatically.&#xA;&#xA;Memory Integrity strengthens kernel protection. Disabling it reduces protection. Enabling it can make incompatible drivers or apps malfunction and, rarely, prevent normal boot.&#xA;&#xA;Virtual Machine Platform may be required by virtualization-dependent software; disabling it can stop that software from working.&#xA;&#xA;Disabling password/sign-in on wake lets someone with physical access resume directly to the desktop.&#xA;&#xA;These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change. Registry policy controls may be restricted, and removing startup delay can make startup apps launch closer together.</value>
   </data>
   <data name="MainNav_Settings" xml:space="preserve">
-    <value>Settings</value>
+    <value>설정</value>
   </data>
   <data name="Settings_PageTitle.Text" xml:space="preserve">
     <value>Settings</value>
