@@ -5,43 +5,43 @@
     <ScrollViewer Padding="32">
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
-                <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
-                <TextBlock Opacity="0.7" Text="Configure controller buttons and controller-specific settings." TextWrapping="Wrap" />
+                <TextBlock x:Uid="Controller_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Controller" />
+                <TextBlock x:Uid="Controller_PageDescription" Opacity="0.7" Text="Configure controller buttons and controller-specific settings." TextWrapping="Wrap" />
             </StackPanel>
 
-            <ctcontrols:SettingsCard x:Name="SteamVirtualControllerCard" Header="Steam Virtual Controller">
+            <ctcontrols:SettingsCard x:Name="SteamVirtualControllerCard" x:Uid="Controller_SteamVirtualControllerCard" Header="Steam Virtual Controller">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ctcontrols:SettingsCard.Description>
                     <StackPanel Spacing="2">
-                        <TextBlock Text="Choose the virtual controller used by Steam." />
-                        <TextBlock x:Name="SteamVirtualControllerActivityText" Text="Selection is disabled while a Steam game or Big Picture Mode is active." />
+                        <TextBlock x:Uid="Controller_SteamVirtualControllerDescription" Text="Choose the virtual controller used by Steam." />
+                        <TextBlock x:Name="SteamVirtualControllerActivityText" x:Uid="Controller_SteamVirtualControllerActivity" Text="Selection is disabled while a Steam game or Big Picture Mode is active." />
                     </StackPanel>
                 </ctcontrols:SettingsCard.Description>
                 <ComboBox x:Name="SteamVirtualControllerComboBox" MinWidth="240" SelectionChanged="SteamVirtualControllerComboBox_SelectionChanged">
-                    <ComboBoxItem Content="Steam Deck (Default)" Tag="SteamDeck" />
-                    <ComboBoxItem Content="DualSense Edge" Tag="DualSenseEdge" />
+                    <ComboBoxItem x:Uid="Controller_SteamDeckOption" Content="Steam Deck (Default)" Tag="SteamDeck" />
+                    <ComboBoxItem x:Uid="Controller_DualSenseEdgeOption" Content="DualSense Edge" Tag="DualSenseEdge" />
                 </ComboBox>
             </ctcontrols:SettingsCard>
             <InfoBar x:Name="SteamVirtualControllerInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
 
-            <TextBlock x:Name="MappingUnavailableText" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
+            <TextBlock x:Name="MappingUnavailableText" x:Uid="Controller_MappingUnavailable" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
 
             <StackPanel x:Name="MappingContent" Spacing="12">
-                <TextBlock Text="Button Mapping" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock x:Uid="Controller_ButtonMappingHeader" Text="Button Mapping" FontSize="18" FontWeight="SemiBold" />
 
                 <StackPanel x:Name="FrontButtonMappingContent" Spacing="12">
-                <ctcontrols:SettingsExpander Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="False">
+                <ctcontrols:SettingsExpander x:Uid="Controller_GamebarExpander" Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="False">
                     <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE990;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
-                        <ctcontrols:SettingsCard Header="Normal">
+                        <ctcontrols:SettingsCard x:Uid="Controller_GamebarNormalCard" Header="Normal">
                             <ComboBox x:Name="GamebarNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="GamebarNormalConfigCard" ContentAlignment="Vertical">
                             <StackPanel x:Name="GamebarNormalConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
-                        <ctcontrols:SettingsCard Header="Steam Game / Big Picture">
+                        <ctcontrols:SettingsCard x:Uid="Controller_GamebarSteamCard" Header="Steam Game / Big Picture">
                             <ComboBox x:Name="GamebarSteamActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="GamebarSteamConfigCard" ContentAlignment="Vertical">
@@ -50,16 +50,16 @@
                     </ctcontrols:SettingsExpander.Items>
                 </ctcontrols:SettingsExpander>
 
-                <ctcontrols:SettingsExpander Header="Center M Button" Description="The action for the Center M button, per runtime presentation domain." IsExpanded="False">
+                <ctcontrols:SettingsExpander x:Uid="Controller_CenterMExpander" Header="Center M Button" Description="The action for the Center M button, per runtime presentation domain." IsExpanded="False">
                     <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8B0;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
-                        <ctcontrols:SettingsCard Header="Normal">
+                        <ctcontrols:SettingsCard x:Uid="Controller_CenterMNormalCard" Header="Normal">
                             <ComboBox x:Name="CenterMNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="CenterMNormalConfigCard" ContentAlignment="Vertical">
                             <StackPanel x:Name="CenterMNormalConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
-                        <ctcontrols:SettingsCard Header="Steam Game / Big Picture">
+                        <ctcontrols:SettingsCard x:Uid="Controller_CenterMSteamCard" Header="Steam Game / Big Picture">
                             <ComboBox x:Name="CenterMSteamActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="CenterMSteamConfigCard" ContentAlignment="Vertical">
@@ -71,18 +71,19 @@
 
                 <ctcontrols:SettingsExpander
                     x:Name="BackButtonMappingExpander"
+                    x:Uid="Controller_BackButtonMappingExpander"
                     Header="M1 / M2"
                     Description="Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4."
                     IsExpanded="False">
                     <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8AB;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
-                        <ctcontrols:SettingsCard Header="M1">
+                        <ctcontrols:SettingsCard x:Uid="Controller_M1Card" Header="M1">
                             <ComboBox
                                 x:Name="M1TargetComboBox"
                                 MinWidth="220"
                                 SelectionChanged="BackButtonTargetComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
-                        <ctcontrols:SettingsCard Header="M2">
+                        <ctcontrols:SettingsCard x:Uid="Controller_M2Card" Header="M2">
                             <ComboBox
                                 x:Name="M2TargetComboBox"
                                 MinWidth="220"
@@ -91,9 +92,10 @@
                     </ctcontrols:SettingsExpander.Items>
                 </ctcontrols:SettingsExpander>
 
-                <TextBlock x:Name="ControllerSettingsHeader" Text="Controller Settings" FontSize="18" Visibility="Collapsed" />
+                <TextBlock x:Name="ControllerSettingsHeader" x:Uid="Controller_SettingsHeader" Text="Controller Settings" FontSize="18" Visibility="Collapsed" />
                 <ctcontrols:SettingsExpander
                     x:Name="ControllerLedExpander"
+                    x:Uid="Controller_LedExpander"
                     Header="Joystick LED"
                     Description="Set one static color and global brightness for all controller LEDs."
                     IsExpanded="False"
@@ -101,13 +103,13 @@
                     <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE781;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ToggleSwitch x:Name="ControllerLedEnabledToggle" OffContent="" OnContent="" Toggled="ControllerLedEnabled_Toggled" />
                     <ctcontrols:SettingsExpander.Items>
-                        <ctcontrols:SettingsCard Header="Brightness">
+                        <ctcontrols:SettingsCard x:Uid="Controller_LedBrightnessCard" Header="Brightness">
                             <StackPanel MinWidth="260" Orientation="Horizontal" Spacing="12">
                                 <Slider x:Name="ControllerLedBrightnessSlider" Minimum="0" Maximum="100" Width="220" ValueChanged="ControllerLedBrightness_ValueChanged" />
                                 <TextBlock x:Name="ControllerLedBrightnessValue" MinWidth="28" VerticalAlignment="Center" />
                             </StackPanel>
                         </ctcontrols:SettingsCard>
-                        <ctcontrols:SettingsCard Header="Color">
+                        <ctcontrols:SettingsCard x:Uid="Controller_LedColorCard" Header="Color">
                             <Button x:Name="ControllerLedColorButton">
                                 <Button.Flyout>
                                     <Flyout>
@@ -117,7 +119,7 @@
                                 <Button.Content>
                                     <StackPanel Orientation="Horizontal" Spacing="10">
                                         <Border x:Name="ControllerLedColorSwatch" Width="28" Height="20" BorderBrush="Gray" BorderThickness="1" />
-                                        <TextBlock Text="Choose color" VerticalAlignment="Center" />
+                                        <TextBlock x:Uid="Controller_LedChooseColor" Text="Choose color" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button.Content>
                             </Button>
@@ -128,6 +130,7 @@
 
             <ctcontrols:SettingsExpander
                 x:Name="VibrationStrengthExpander"
+                x:Uid="Controller_VibrationStrengthExpander"
                 Header="Vibration Strength"
                 Description="Set the vibration strength applied while the Addon owns the controller."
                 IsExpanded="False">
@@ -135,7 +138,7 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE877;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard Header="Left Motor">
+                    <ctcontrols:SettingsCard x:Uid="Controller_LeftMotorCard" Header="Left Motor">
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -157,12 +160,13 @@
                                 HorizontalAlignment="Center" />
                             <Button
                                 x:Name="LeftVibrationTestButton"
+                                x:Uid="Controller_LeftMotorTestButton"
                                 Grid.Column="2"
                                 Content="Test"
                                 Click="LeftVibrationTestButton_Click" />
                         </Grid>
                     </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard Header="Right Motor">
+                    <ctcontrols:SettingsCard x:Uid="Controller_RightMotorCard" Header="Right Motor">
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -184,14 +188,16 @@
                                 HorizontalAlignment="Center" />
                             <Button
                                 x:Name="RightVibrationTestButton"
+                                x:Uid="Controller_RightMotorTestButton"
                                 Grid.Column="2"
                                 Content="Test"
                                 Click="RightVibrationTestButton_Click" />
                         </Grid>
                     </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard Header="Vibration Recovery">
+                    <ctcontrols:SettingsCard x:Uid="Controller_VibrationRecoveryCard" Header="Vibration Recovery">
                         <Button
                             x:Name="RestoreVibrationButton"
+                            x:Uid="Controller_RestoreVibrationButton"
                             Content="Restore Vibration"
                             HorizontalAlignment="Right"
                             ToolTipService.ToolTip="Temporarily disconnects virtual controller input. Save and close your game first."

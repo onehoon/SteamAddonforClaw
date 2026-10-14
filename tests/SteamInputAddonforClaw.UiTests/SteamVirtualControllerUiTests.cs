@@ -12,6 +12,8 @@ public sealed class SteamVirtualControllerUiTests
     {
         var controllerXaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml");
         var settingsXaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
+        var controllerDocument = XDocument.Parse(controllerXaml);
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
         var title = controllerXaml.IndexOf("Text=\"Controller\"", StringComparison.Ordinal);
         var card = controllerXaml.IndexOf("x:Name=\"SteamVirtualControllerCard\"", StringComparison.Ordinal);
         var unavailable = controllerXaml.IndexOf("x:Name=\"MappingUnavailableText\"", StringComparison.Ordinal);
@@ -21,8 +23,12 @@ public sealed class SteamVirtualControllerUiTests
         Assert.Contains("Header=\"Steam Virtual Controller\"", controllerXaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Choose the virtual controller used by Steam.\"", controllerXaml, StringComparison.Ordinal);
         Assert.Contains("SteamVirtualControllerActivityText", controllerXaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Steam Deck (Default)\" Tag=\"SteamDeck\"", controllerXaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"DualSense Edge\" Tag=\"DualSenseEdge\"", controllerXaml, StringComparison.Ordinal);
+        var steamDeckOption = Assert.Single(controllerDocument.Descendants(), element => (string?)element.Attribute("Tag") == "SteamDeck");
+        var dualSenseOption = Assert.Single(controllerDocument.Descendants(), element => (string?)element.Attribute("Tag") == "DualSenseEdge");
+        Assert.Equal("Steam Deck (Default)", (string?)steamDeckOption.Attribute("Content"));
+        Assert.Equal("DualSense Edge", (string?)dualSenseOption.Attribute("Content"));
+        Assert.Equal("Controller_SteamDeckOption", (string?)steamDeckOption.Attribute(x + "Uid"));
+        Assert.Equal("Controller_DualSenseEdgeOption", (string?)dualSenseOption.Attribute(x + "Uid"));
         Assert.DoesNotContain("SteamVirtualController", settingsXaml, StringComparison.Ordinal);
     }
 

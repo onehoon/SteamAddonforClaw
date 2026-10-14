@@ -25,7 +25,7 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE772;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Controller" Tag="Controller">
+            <NavigationViewItem x:Uid="MainNav_Controller" Content="Controller" Tag="Controller">
                 <NavigationViewItem.Icon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
                 </NavigationViewItem.Icon>
