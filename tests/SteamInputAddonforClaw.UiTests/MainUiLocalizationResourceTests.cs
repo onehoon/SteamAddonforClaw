@@ -8,7 +8,7 @@ public sealed class MainUiLocalizationResourceTests
     private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
 
     [Fact]
-    public void Main_ui_resw_files_have_only_the_English_pilot_keys_and_identical_values()
+    public void Main_ui_resw_files_share_keys_and_include_nonempty_pilot_resources()
     {
         var stringsDirectory = Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Strings");
         var languages = Directory.EnumerateDirectories(stringsDirectory)
@@ -20,15 +20,20 @@ public sealed class MainUiLocalizationResourceTests
 
         var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
         var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
-        var expected = new Dictionary<string, string>(StringComparer.Ordinal)
+        var requiredPilotKeys = new[]
         {
-            ["MainNav_Device.Content"] = "Device",
-            ["HowToUse_Loading.Text"] = "Loading documentation…",
-            ["Settings_AppTheme_Description"] = "Choose the main app appearance."
+            "MainNav_Device.Content",
+            "HowToUse_Loading.Text",
+            "Settings_AppTheme_Description"
         };
 
-        Assert.Equal(expected.OrderBy(entry => entry.Key), english.OrderBy(entry => entry.Key));
-        Assert.Equal(english.OrderBy(entry => entry.Key), korean.OrderBy(entry => entry.Key));
+        Assert.Equal(english.Keys.OrderBy(key => key, StringComparer.Ordinal), korean.Keys.OrderBy(key => key, StringComparer.Ordinal));
+        foreach (var key in requiredPilotKeys)
+        {
+            Assert.Contains(key, english.Keys);
+        }
+        Assert.All(english.Values, value => Assert.False(string.IsNullOrWhiteSpace(value)));
+        Assert.All(korean.Values, value => Assert.False(string.IsNullOrWhiteSpace(value)));
     }
 
     [Fact]

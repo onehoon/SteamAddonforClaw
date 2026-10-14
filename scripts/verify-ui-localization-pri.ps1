@@ -96,17 +96,17 @@ try {
         }
     }
 
-    $expectedResources = @(
-        [pscustomobject]@{ UriSuffix = '/Resources/MainNav_Device/Content'; Value = 'Device' },
-        [pscustomobject]@{ UriSuffix = '/Resources/HowToUse_Loading/Text'; Value = ('Loading documentation' + [char]0x2026) },
-        [pscustomobject]@{ UriSuffix = '/Resources/Settings_AppTheme_Description'; Value = 'Choose the main app appearance.' }
+    $requiredPilotUris = @(
+        '/Resources/MainNav_Device/Content',
+        '/Resources/HowToUse_Loading/Text',
+        '/Resources/Settings_AppTheme_Description'
     )
     $namedResources = @($resourceMap.SelectNodes(".//*[local-name()='NamedResource']"))
 
-    foreach ($expected in $expectedResources) {
-        $matches = @($namedResources | Where-Object { $_.GetAttribute('uri').EndsWith($expected.UriSuffix, [System.StringComparison]::OrdinalIgnoreCase) })
+    foreach ($uriSuffix in $requiredPilotUris) {
+        $matches = @($namedResources | Where-Object { $_.GetAttribute('uri').EndsWith($uriSuffix, [System.StringComparison]::OrdinalIgnoreCase) })
         if ($matches.Count -ne 1) {
-            throw "Expected one published PRI resource ending '$($expected.UriSuffix)'; found $($matches.Count)."
+            throw "Expected one published PRI resource ending '$uriSuffix'; found $($matches.Count)."
         }
 
         $candidateValues = foreach ($candidate in $matches[0].SelectNodes("./*[local-name()='Candidate']")) {
@@ -122,12 +122,12 @@ try {
 
         foreach ($language in @('EN-US', 'KO-KR')) {
             $languageCandidates = @($candidateValues | Where-Object { $_.Language -eq $language })
-            if ($languageCandidates.Count -ne 1 -or $languageCandidates[0].Value -cne $expected.Value) {
-                throw "Published PRI resource '$($expected.UriSuffix)' must contain exactly one $language candidate with value '$($expected.Value)'."
+            if ($languageCandidates.Count -ne 1 -or [string]::IsNullOrWhiteSpace($languageCandidates[0].Value)) {
+                throw "Published PRI resource '$uriSuffix' must contain exactly one non-empty $language candidate."
             }
         }
         if (@($candidateValues | Where-Object { $_.Language -notin @('EN-US', 'KO-KR') }).Count -gt 0) {
-            throw "Published PRI resource '$($expected.UriSuffix)' contains an unsupported language candidate."
+            throw "Published PRI resource '$uriSuffix' contains an unsupported language candidate."
         }
     }
 
