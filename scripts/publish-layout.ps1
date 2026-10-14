@@ -42,6 +42,8 @@ if ($NoRestore) { $uiArguments += '--no-restore' }
 dotnet publish $uiProject @uiArguments '--output' $uiOutput
 if ($LASTEXITCODE -ne 0) { throw "UI publish failed with exit code $LASTEXITCODE." }
 
+& (Join-Path $PSScriptRoot 'verify-ui-localization-pri.ps1') -UiPublishDirectory $uiOutput
+
 dotnet publish $overlayProject @commonArguments '--output' $overlayOutput
 if ($LASTEXITCODE -ne 0) { throw "Overlay publish failed with exit code $LASTEXITCODE." }
 

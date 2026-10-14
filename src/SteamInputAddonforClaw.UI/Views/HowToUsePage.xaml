@@ -10,7 +10,7 @@
                     VerticalAlignment="Center"
                     Spacing="12">
             <ProgressRing IsActive="True" />
-            <TextBlock Text="Loading documentation…" />
+            <TextBlock x:Uid="HowToUse_Loading" Text="Loading documentation…" />
         </StackPanel>
 
         <StackPanel x:Name="FailurePanel"

@@ -18,6 +18,7 @@
         <NavigationView.MenuItems>
             <NavigationViewItem
                 x:Name="DeviceNavigationItem"
+                x:Uid="MainNav_Device"
                 Content="Device"
                 Tag="Device">
                 <NavigationViewItem.Icon>
