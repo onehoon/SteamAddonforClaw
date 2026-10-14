@@ -1049,7 +1049,7 @@ public sealed partial class MainWindow : Window
 
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
     {
-        SetEnglishSettingsItemContent();
+        SetLocalizedSettingsItemContent();
         ApplyUpdateReadySettingsBadge();
         if (_prerequisiteSetupPendingActivation && _windowActivatedForUser)
             _ = RefreshSystemStatusAsync();
@@ -1066,11 +1066,11 @@ public sealed partial class MainWindow : Window
         MainNavigationView.OpenPaneLength = openPaneLength;
     }
 
-    private void SetEnglishSettingsItemContent()
+    private void SetLocalizedSettingsItemContent()
     {
         if (MainNavigationView.SettingsItem is NavigationViewItem settingsItem)
         {
-            settingsItem.Content = "Settings";
+            settingsItem.Content = MainUiStrings.Get("MainNav_Settings", "Settings");
         }
     }
 

@@ -53,17 +53,22 @@ public sealed class MainWindowTests
         Assert.True(subscribe >= 0 && initialize > subscribe);
 
         var loadedStart = code.IndexOf("private void MainNavigationView_Loaded", StringComparison.Ordinal);
-        var loadedEnd = code.IndexOf("private void SetEnglishSettingsItemContent", loadedStart, StringComparison.Ordinal);
+        var loadedEnd = code.IndexOf("private void SetLocalizedSettingsItemContent", loadedStart, StringComparison.Ordinal);
         Assert.True(loadedStart >= 0 && loadedEnd > loadedStart);
-        Assert.Contains("ApplyUpdateReadySettingsBadge();", code[loadedStart..loadedEnd], StringComparison.Ordinal);
+        var loadedMethod = code[loadedStart..loadedEnd];
+        var localizeSettings = loadedMethod.IndexOf("SetLocalizedSettingsItemContent();", StringComparison.Ordinal);
+        var applyBadge = loadedMethod.IndexOf("ApplyUpdateReadySettingsBadge();", StringComparison.Ordinal);
+        var measurePane = loadedMethod.IndexOf("MeasureDesiredWidth", StringComparison.Ordinal);
+        Assert.True(localizeSettings >= 0 && applyBadge > localizeSettings && measurePane > applyBadge);
         Assert.Contains("Loaded=\"MainNavigationView_Loaded\"", xamlText, StringComparison.Ordinal);
 
         var badgeStart = code.IndexOf("private void ApplyUpdateReadySettingsBadge", StringComparison.Ordinal);
-        var badgeEnd = code.IndexOf("private void SetEnglishSettingsItemContent", badgeStart, StringComparison.Ordinal);
+        var badgeEnd = code.IndexOf("private void SetLocalizedSettingsItemContent", badgeStart, StringComparison.Ordinal);
         Assert.True(badgeStart >= 0 && badgeEnd > badgeStart);
         var badgeMethod = code[badgeStart..badgeEnd];
         Assert.Contains("MainNavigationView.SettingsItem is NavigationViewItem settingsItem", badgeMethod, StringComparison.Ordinal);
         Assert.Contains("settingsItem.InfoBadge = _isUpdateReady ? _updateReadyDotBadge : null", badgeMethod, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"MainNav_Settings\", \"Settings\")", code, StringComparison.Ordinal);
 
         var menuItems = xaml.Descendants().Single(element => element.Name.LocalName == "NavigationView.MenuItems");
         Assert.DoesNotContain(menuItems.Elements().Where(element => element.Name.LocalName == "NavigationViewItem"), item =>
