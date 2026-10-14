@@ -94,7 +94,7 @@ public sealed partial class OverlayWindow
         SetOverlaySectionSeparator(steamCard, visible: false);
         page.Children.Add(steamCard);
         var mappingCard = CreateOverlaySectionCard(mappingSection);
-        SetOverlaySectionSeparator(mappingCard, visible: false);
+        SetOverlaySectionSeparator(mappingCard, visible: true);
         page.Children.Add(mappingCard);
         _controllerLedSectionCard = CreateOverlaySectionCard(ledSection);
         SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true);
