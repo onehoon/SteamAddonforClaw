@@ -62,7 +62,7 @@ public sealed class FrontButtonUiLayoutTests
     {
         var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
 
-        Assert.Contains("FrontButtonAction.XboxApp => \"Xbox\"", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("FrontButtonAction.XboxApp => MainUiStrings.Get(\"Controller_Action_Xbox\", \"Xbox\")", codeBehind, StringComparison.Ordinal);
         Assert.Contains("FrontButtonActionCapabilities.ActionsFor(domain)", codeBehind, StringComparison.Ordinal);
     }
 

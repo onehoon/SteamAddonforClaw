@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.UI;
 using Microsoft.UI;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
@@ -61,6 +62,11 @@ public sealed partial class ControllerPage : UserControl
     public ControllerPage()
     {
         InitializeComponent();
+        ToolTipService.SetToolTip(
+            RestoreVibrationButton,
+            MainUiStrings.Get(
+                "Controller_RestoreVibrationButton_Tooltip",
+                "Temporarily disconnects virtual controller input. Save and close your game first."));
         RegisterVibrationPointerHandlers(LeftVibrationStrengthSlider);
         RegisterVibrationPointerHandlers(RightVibrationStrengthSlider);
         Loaded += ControllerPage_Loaded;
@@ -131,9 +137,9 @@ public sealed partial class ControllerPage : UserControl
         _steamActive = active;
         SteamVirtualControllerActivityText.Text = active switch
         {
-            true => "Steam or Big Picture is active. Selection is locked.",
-            false => "Selection is disabled while a Steam game or Big Picture Mode is active.",
-            _ => "Steam activity is unavailable. Selection is disabled."
+            true => MainUiStrings.Get("Controller_SteamActivity_Active", "Steam or Big Picture is active. Selection is locked."),
+            false => MainUiStrings.Get("Controller_SteamActivity_Idle", "Selection is disabled while a Steam game or Big Picture Mode is active."),
+            _ => MainUiStrings.Get("Controller_SteamActivity_Unknown", "Steam activity is unavailable. Selection is disabled.")
         };
         UpdateSteamVirtualControllerControls();
     }
@@ -206,7 +212,9 @@ public sealed partial class ControllerPage : UserControl
             RenderSteamVirtualController(_lastKnownSteamVirtualController);
             if (_lastKnownSteamVirtualController != requested)
             {
-                SteamVirtualControllerInfoBar.Message = "The saved controller choice was not changed.";
+                SteamVirtualControllerInfoBar.Message = MainUiStrings.Get(
+                    "Controller_SteamChoice_NotChanged",
+                    "The saved controller choice was not changed.");
                 SteamVirtualControllerInfoBar.IsOpen = true;
                 SetSteamActivity(null);
                 SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
@@ -226,7 +234,9 @@ public sealed partial class ControllerPage : UserControl
                 AppLog.Warn("Controller", "Steam virtual controller rollback could not refresh Runtime settings.", refreshException);
             }
             RenderSteamVirtualController(_lastKnownSteamVirtualController);
-            SteamVirtualControllerInfoBar.Message = "The change could not be confirmed. The last confirmed choice is selected.";
+            SteamVirtualControllerInfoBar.Message = MainUiStrings.Get(
+                "Controller_SteamChoice_Uncertain",
+                "The change could not be confirmed. The last confirmed choice is selected.");
             SteamVirtualControllerInfoBar.IsOpen = true;
             SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
         }
@@ -341,6 +351,19 @@ public sealed partial class ControllerPage : UserControl
     {
         BackButtonMappingUiOptions.AddTargets(M1TargetComboBox);
         BackButtonMappingUiOptions.AddTargets(M2TargetComboBox);
+        LocalizeControllerBackTargets(M1TargetComboBox);
+        LocalizeControllerBackTargets(M2TargetComboBox);
+    }
+
+    private static void LocalizeControllerBackTargets(ComboBox comboBox)
+    {
+        foreach (var item in comboBox.Items.OfType<ComboBoxItem>())
+        {
+            if (item.Tag is not Xbox360BackButtonTarget target) continue;
+            item.Content = MainUiStrings.Get(
+                $"Controller_BackTarget_{target}",
+                BackButtonMappingLabels.GetDisplayName(target));
+        }
     }
 
     private void BackButtonTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
@@ -523,7 +546,7 @@ public sealed partial class ControllerPage : UserControl
             return;
 
         _vibrationRearmInProgress = true;
-        RestoreVibrationButton.Content = "Restoring…";
+        RestoreVibrationButton.Content = MainUiStrings.Get("Controller_RestoreVibrationButton_BusyContent", "Restoring…");
         UpdateVibrationControls();
         try
         {
@@ -543,24 +566,32 @@ public sealed partial class ControllerPage : UserControl
                     && VibrationStrengthInfoBar.Severity == InfoBarSeverity.Error;
                 await RefreshVibrationStrengthAsync(preserveFailure);
                 ShowRumbleRearmMessageUnlessFailure(
-                    "Controller restored. Test both motors to confirm vibration.",
+                    MainUiStrings.Get(
+                        "Controller_RumbleRearm_Succeeded",
+                        "Controller restored. Test both motors to confirm vibration."),
                     InfoBarSeverity.Informational);
             }
             else if (result.Outcome == FrontendDeveloperRumbleRearmOutcome.Unavailable)
-                ShowRumbleRearmMessageUnlessFailure("Vibration recovery is unavailable right now.", InfoBarSeverity.Warning);
+                ShowRumbleRearmMessageUnlessFailure(
+                    MainUiStrings.Get("Controller_RumbleRearm_Unavailable", "Vibration recovery is unavailable right now."),
+                    InfoBarSeverity.Warning);
             else
-                ShowRumbleRearmMessageUnlessFailure("Could not restore the controller. See the application log.", InfoBarSeverity.Error);
+                ShowRumbleRearmMessageUnlessFailure(
+                    MainUiStrings.Get("Controller_RumbleRearm_Failed", "Could not restore the controller. See the application log."),
+                    InfoBarSeverity.Error);
         }
         catch (Exception exception)
         {
             AppLog.Warn("ControllerOwnership", "Controller-page rumble recovery request failed.", exception,
                 ("Event", "ControllerRumbleRecoveryUiFailed"), ("Reason", exception.GetType().Name));
-            ShowRumbleRearmMessageUnlessFailure("Could not restore the controller. See the application log.", InfoBarSeverity.Error);
+            ShowRumbleRearmMessageUnlessFailure(
+                MainUiStrings.Get("Controller_RumbleRearm_Failed", "Could not restore the controller. See the application log."),
+                InfoBarSeverity.Error);
         }
         finally
         {
             _vibrationRearmInProgress = false;
-            RestoreVibrationButton.Content = "Restore Vibration";
+            RestoreVibrationButton.Content = MainUiStrings.Get("Controller_RestoreVibrationButton/Content", "Restore Vibration");
             UpdateVibrationControls();
         }
     }
@@ -614,7 +645,11 @@ public sealed partial class ControllerPage : UserControl
                     _vibrationDebounce?.HasPendingDraft == true));
             if (!result.Succeeded)
             {
-                ShowVibrationMessage(result.FailureMessage ?? "The saved vibration setting could not be applied now.", InfoBarSeverity.Error);
+                ShowVibrationMessage(
+                    result.FailureMessage ?? MainUiStrings.Get(
+                        "Controller_Vibration_ApplyFailed",
+                        "The saved vibration setting could not be applied now."),
+                    InfoBarSeverity.Error);
                 await RefreshVibrationStrengthAsync(preserveFailure: true);
                 return;
             }
@@ -633,7 +668,11 @@ public sealed partial class ControllerPage : UserControl
             AppLog.Warn("ControllerVibration", "Controller vibration setting update transport failed.", exception);
             if (ShouldClearSubmittedVibrationDraft(_vibrationDraft, submittedPair))
                 _vibrationDraft = null;
-            ShowVibrationMessage("The saved setting could not be confirmed. Refreshing the current setting.", InfoBarSeverity.Error);
+            ShowVibrationMessage(
+                MainUiStrings.Get(
+                    "Controller_Vibration_SaveUncertain",
+                    "The saved setting could not be confirmed. Refreshing the current setting."),
+                InfoBarSeverity.Error);
             await RefreshVibrationStrengthAsync(preserveFailure: true);
         }
         finally
@@ -676,13 +715,21 @@ public sealed partial class ControllerPage : UserControl
             if (result.Succeeded)
                 HideVibrationMessage();
             else
-                ShowVibrationMessage(result.FailureMessage ?? "The physical vibration test did not complete safely.", InfoBarSeverity.Error);
+                ShowVibrationMessage(
+                    result.FailureMessage ?? MainUiStrings.Get(
+                        "Controller_Vibration_TestFailed",
+                        "The physical vibration test did not complete safely."),
+                    InfoBarSeverity.Error);
         }
         catch (Exception exception)
         {
             AppLog.Warn("ControllerVibration", "Controller vibration test transport failed.", exception,
                 ("Motor", motor));
-            ShowVibrationMessage("The test result is uncertain. Refreshing the saved strength values.", InfoBarSeverity.Error);
+            ShowVibrationMessage(
+                MainUiStrings.Get(
+                    "Controller_Vibration_TestUncertain",
+                    "The test result is uncertain. Refreshing the saved strength values."),
+                InfoBarSeverity.Error);
             await RefreshVibrationStrengthAsync(preserveFailure: true);
         }
         finally
@@ -762,10 +809,14 @@ public sealed partial class ControllerPage : UserControl
             _vibrationPointerId = null;
             _vibrationPointerSlider = null;
             ApplyVibrationStrengthSnapshot(
-                FrontendControllerVibrationStrengthSnapshot.Unavailable("The saved vibration setting could not be loaded."),
+                FrontendControllerVibrationStrengthSnapshot.Unavailable(MainUiStrings.Get(
+                    "Controller_Vibration_LoadFailed",
+                    "The saved vibration setting could not be loaded.")),
                 preserveDraft: false);
             if (!preserveFailure)
-                ShowVibrationMessage("The saved vibration setting could not be loaded.", InfoBarSeverity.Error);
+                ShowVibrationMessage(
+                    MainUiStrings.Get("Controller_Vibration_LoadFailed", "The saved vibration setting could not be loaded."),
+                    InfoBarSeverity.Error);
         }
     }
 
@@ -957,13 +1008,13 @@ public sealed partial class ControllerPage : UserControl
 
     private static string DescribeAction(FrontButtonAction action) => action switch
     {
-        FrontButtonAction.QuickSettingsOverlay => "Quick Settings Overlay",
-        FrontButtonAction.SteamBigPicture => "Steam Big Picture",
-        FrontButtonAction.SteamButton => "Steam Button",
-        FrontButtonAction.SteamQuickAccess => "Steam Quick Access",
-        FrontButtonAction.KeyboardHotkey => "Keyboard / Hotkey",
-        FrontButtonAction.LaunchApplication => "Launch Application",
-        FrontButtonAction.XboxApp => "Xbox",
+        FrontButtonAction.QuickSettingsOverlay => MainUiStrings.Get("Controller_Action_QuickSettingsOverlay", "Quick Settings Overlay"),
+        FrontButtonAction.SteamBigPicture => MainUiStrings.Get("Controller_Action_SteamBigPicture", "Steam Big Picture"),
+        FrontButtonAction.SteamButton => MainUiStrings.Get("Controller_Action_SteamButton", "Steam Button"),
+        FrontButtonAction.SteamQuickAccess => MainUiStrings.Get("Controller_Action_SteamQuickAccess", "Steam Quick Access"),
+        FrontButtonAction.KeyboardHotkey => MainUiStrings.Get("Controller_Action_KeyboardHotkey", "Keyboard / Hotkey"),
+        FrontButtonAction.LaunchApplication => MainUiStrings.Get("Controller_Action_LaunchApplication", "Launch Application"),
+        FrontButtonAction.XboxApp => MainUiStrings.Get("Controller_Action_Xbox", "Xbox"),
         _ => action.ToString()
     };
 
@@ -980,9 +1031,20 @@ public sealed partial class ControllerPage : UserControl
         private readonly ComboBox _key = new() { MinWidth = 140 };
         private readonly StackPanel _hotkeyPanel;
         private readonly StackPanel _launchPanel;
-        private readonly TextBox _path = new() { PlaceholderText = "Application path", MinWidth = 320 };
-        private readonly TextBox _arguments = new() { PlaceholderText = "Arguments (optional)", MinWidth = 320 };
-        private readonly CheckBox _runAsAdministrator = new() { Content = "Run as administrator" };
+        private readonly TextBox _path = new()
+        {
+            PlaceholderText = MainUiStrings.Get("Controller_BindingEditor_ApplicationPath", "Application path"),
+            MinWidth = 320
+        };
+        private readonly TextBox _arguments = new()
+        {
+            PlaceholderText = MainUiStrings.Get("Controller_BindingEditor_Arguments", "Arguments (optional)"),
+            MinWidth = 320
+        };
+        private readonly CheckBox _runAsAdministrator = new()
+        {
+            Content = MainUiStrings.Get("Controller_BindingEditor_RunAsAdministrator", "Run as administrator")
+        };
 
         internal BindingEditor(FrontButtonKind kind, FrontButtonDomain domain, ComboBox actionComboBox, SettingsCard configCard, StackPanel configPanel, ControllerPage page, Func<nint> windowHandleProvider)
         {
@@ -1010,7 +1072,10 @@ public sealed partial class ControllerPage : UserControl
                 Children = { _control, _shift, _alt, _windows, _key }
             };
 
-            var browse = new Button { Content = "Browse…" };
+            var browse = new Button
+            {
+                Content = MainUiStrings.Get("Controller_BindingEditor_Browse", "Browse…")
+            };
             browse.Click += (_, _) => _ = page.BrowseForExecutableAsync(this, windowHandleProvider);
             _launchPanel = new StackPanel
             {
@@ -1021,7 +1086,13 @@ public sealed partial class ControllerPage : UserControl
                     new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _path, browse } },
                     _arguments,
                     _runAsAdministrator,
-                    new TextBlock { Text = "Runs with administrator privileges; otherwise requests normal user privileges.", TextWrapping = TextWrapping.Wrap }
+                    new TextBlock
+                    {
+                        Text = MainUiStrings.Get(
+                            "Controller_BindingEditor_PrivilegeExplanation",
+                            "Runs with administrator privileges; otherwise requests normal user privileges."),
+                        TextWrapping = TextWrapping.Wrap
+                    }
                 }
             };
 

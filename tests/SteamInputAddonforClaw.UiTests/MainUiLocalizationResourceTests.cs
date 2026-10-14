@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.UI;
 using Xunit;
 
@@ -139,6 +140,121 @@ public sealed class MainUiLocalizationResourceTests
             },
             summaryCard.DescendantsAndSelf().Select(element =>
                 $"{element.Name.LocalName}({string.Join(",", element.Attributes().Select(attribute => $"{attribute.Name.LocalName}={attribute.Value}"))})"));
+    }
+
+    [Fact]
+    public void Controller_navigation_and_fixed_xaml_prose_resolve_through_unique_resource_uids()
+    {
+        var root = FindRepositoryRoot();
+        var mainWindow = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var controllerNavigation = Assert.Single(mainWindow.Descendants(), element =>
+            element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == "Controller");
+        Assert.Equal("MainNav_Controller", (string?)controllerNavigation.Attribute(XamlNamespace + "Uid"));
+        Assert.Equal("Controller", (string?)controllerNavigation.Attribute("Content"));
+
+        var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml"));
+        var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        Assert.Contains("MainNav_Controller.Content", english.Keys);
+        Assert.Contains("MainNav_Controller.Content", korean.Keys);
+
+        var uidElements = document.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        var actualUids = uidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!).ToArray();
+        Assert.NotEmpty(actualUids);
+        Assert.Equal(actualUids.Length, actualUids.Distinct(StringComparer.Ordinal).Count());
+        foreach (var element in uidElements)
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            Assert.StartsWith("Controller_", uid, StringComparison.Ordinal);
+        }
+
+        var localizedProperties = new[] { "Text", "Content", "Header", "Description" };
+        foreach (var element in document.Descendants())
+        {
+            var visibleProperties = localizedProperties
+                .Where(property => !string.IsNullOrWhiteSpace((string?)element.Attribute(property))
+                    && !string.Equals((string?)element.Attribute(property), "—", StringComparison.Ordinal))
+                .ToArray();
+            if (visibleProperties.Length == 0) continue;
+
+            var uid = (string?)element.Attribute(XamlNamespace + "Uid");
+            Assert.False(string.IsNullOrWhiteSpace(uid), $"Visible Controller text has no x:Uid: {element}");
+            foreach (var property in visibleProperties)
+            {
+                var key = $"{uid}.{property}";
+                Assert.Contains(key, english.Keys);
+                Assert.Contains(key, korean.Keys);
+            }
+        }
+    }
+
+    [Fact]
+    public void Controller_code_display_resources_cover_actions_dynamic_back_targets_and_fallbacks()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        var literalKeys = Regex.Matches(source, "MainUiStrings\\.Get\\(\\\"(?<key>Controller_[^\\\"]+)\\\"")
+            .Select(match => match.Groups["key"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(literalKeys);
+        foreach (var key in literalKeys)
+        {
+            var resourceKey = key.Replace('/', '.');
+            Assert.Contains(resourceKey, english.Keys);
+            Assert.Contains(resourceKey, korean.Keys);
+        }
+
+        foreach (var (action, key, fallback) in new[]
+        {
+            ("QuickSettingsOverlay", "Controller_Action_QuickSettingsOverlay", "Quick Settings Overlay"),
+            ("SteamBigPicture", "Controller_Action_SteamBigPicture", "Steam Big Picture"),
+            ("SteamButton", "Controller_Action_SteamButton", "Steam Button"),
+            ("SteamQuickAccess", "Controller_Action_SteamQuickAccess", "Steam Quick Access"),
+            ("KeyboardHotkey", "Controller_Action_KeyboardHotkey", "Keyboard / Hotkey"),
+            ("LaunchApplication", "Controller_Action_LaunchApplication", "Launch Application"),
+            ("XboxApp", "Controller_Action_Xbox", "Xbox")
+        })
+        {
+            Assert.Contains($"FrontButtonAction.{action} => MainUiStrings.Get(\"{key}\", \"{fallback}\")", source, StringComparison.Ordinal);
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+        }
+        Assert.Contains("new ComboBoxItem { Content = DescribeAction(action), Tag = action }", source, StringComparison.Ordinal);
+        Assert.Contains("FrontButtonActionCapabilities.ActionsFor(domain)", source, StringComparison.Ordinal);
+
+        Assert.Contains("$\"Controller_BackTarget_{target}\"", source, StringComparison.Ordinal);
+        Assert.Contains("BackButtonMappingLabels.GetDisplayName(target)", source, StringComparison.Ordinal);
+        foreach (var target in Enum.GetValues<Xbox360BackButtonTarget>())
+        {
+            var key = $"Controller_BackTarget_{target}";
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+        }
+
+        var populateStart = source.IndexOf("private void PopulateBackButtonTargets()", StringComparison.Ordinal);
+        var populateEnd = source.IndexOf("private void BackButtonTargetComboBox_SelectionChanged", populateStart, StringComparison.Ordinal);
+        Assert.True(populateStart >= 0 && populateEnd > populateStart);
+        var populate = source[populateStart..populateEnd];
+        Assert.True(populate.IndexOf("AddTargets(M1TargetComboBox)", StringComparison.Ordinal)
+            < populate.IndexOf("LocalizeControllerBackTargets(M1TargetComboBox)", StringComparison.Ordinal));
+        Assert.True(populate.IndexOf("AddTargets(M2TargetComboBox)", StringComparison.Ordinal)
+            < populate.IndexOf("LocalizeControllerBackTargets(M2TargetComboBox)", StringComparison.Ordinal));
+        Assert.DoesNotContain("LocalizeControllerBackTargets", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs")), StringComparison.Ordinal);
+
+        Assert.Contains("private readonly CheckBox _control = new() { Content = \"Ctrl\" }", source, StringComparison.Ordinal);
+        Assert.Contains("new ComboBoxItem { Content = vkey.ToString(), Tag = vkey }", source, StringComparison.Ordinal);
+        Assert.Contains("_runAsAdministrator.IsChecked == true", source, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Controller_RestoreVibrationButton/Content\", \"Restore Vibration\")", source, StringComparison.Ordinal);
+        Assert.Contains("Controller_RestoreVibrationButton.Content", english.Keys);
+        Assert.Contains("Controller_RestoreVibrationButton.Content", korean.Keys);
+        Assert.Equal("safe fallback", MainUiStrings.Get("Missing_Controller_Test_Key", "safe fallback"));
     }
 
     [Fact]
