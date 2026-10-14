@@ -217,13 +217,70 @@ Verify **both language candidates of each pilot key**, using the actual names/UR
 
 **A positive dump showing one language, or only generic framework resources, is a failure.** Build success, a nonzero PRI size, and an existing generic asset verifier pass are necessary but insufficient.
 
-### 5.3 Make the verification repeatable in CI/release staging
+### 5.3 Wire the real PRI check into the existing CI/release publish path
 
-Introduce a small, dedicated script if needed, e.g. `scripts/verify-ui-localization-pri.ps1`, that checks the **real** generated/published UI PRI with `makepri dump` and fails for missing candidates. Call it from the normal **real UI publish path** (such as immediately after UI publish inside `scripts/publish-layout.ps1`) so both the existing CI publish job and `scripts/pack.ps1` release path execute it.
+Introduce a small dedicated script if needed, e.g. `scripts/verify-ui-localization-pri.ps1`, that checks the **actual published UI PRI** with `makepri dump` and fails if either language or any PR1 sentinel string is absent or wrong. Invoke it from the existing canonical publish path (prefer `scripts/publish-layout.ps1` immediately after the Main UI `dotnet publish`). This path is already used by both:
 
-Do not add multiple competing checks across CI/release/pack scripts if one canonical publish check covers both. Reuse existing Windows SDK tool-location/invocation conventions where practical; do not embed an absolute SDK version-specific path. Do not modify the pre-existing generic verifier's fake-PRI fixture semantics or require a new installer. An unavailable `makepri.exe` on a **build/publish developer machine** should produce a clear verification error; it is not a runtime dependency imposed on installed users.
+- `.github/workflows/ci.yml` -> `scripts/publish-layout.ps1`;
+- `.github/workflows/release.yml` -> `scripts/pack.ps1` -> `scripts/publish-layout.ps1`.
 
-The verification should be scoped to the tiny PR1 sentinel keys and two languages. It does **not** need to enumerate every future localization key, launch UI processes, read Windows registry language settings, or create elaborate resource-management abstractions.
+Confirm these paths by reading the current YAML and scripts. **Include any CI/release workflow adjustment needed to guarantee the new check runs, but do not modify YAML merely to add a redundant call** if the existing shared publish path is sufficient.
+
+Keep one authoritative check; do not run the same full PRI dump repeatedly through separate publish, verification, CI, and release steps. Reuse Windows SDK tool discovery conventions where practical, not a hard-coded SDK installation version. Missing `makepri.exe`, a dump error, or a missing/incorrect language candidate must produce a clear nonzero exit code in local verification and in the eventual GitHub CI/release execution; never skip verification silently.
+
+The generic `scripts/verify-publish-assets.ps1` tests intentionally use **fake PRI placeholder files**. Preserve those fixture tests and do not break them by parsing mock PRI files as real binary assets. No installation on the developer PC is needed.
+
+**The developer does not need to run an actual GitHub-hosted CI or Release job while implementing this work order.** The user will trigger/observe the real GitHub CI later. Implementation must make the shared verification reachable and fail-closed from both workflow call paths, then verify it locally.
+
+### 5.4 Mandatory local CI-equivalent validation before handing off PR1
+
+**Local Codex MUST run the non-installing, non-device-dependent portions of the checked-in GitHub CI workflow on the developer Windows PC**, not just `dotnet build`. Use the current `.github/workflows/ci.yml` as the source of truth if it changes.
+
+Run the following in the local repository root using the same release configuration as CI (adapt shell invocation to the actual PowerShell version):
+
+```powershell
+# CI preparation and dependency/tooling checks:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-viiper.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/verify-viiper.tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/update-viiper.tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/adopt-viiper.tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/viiper-existing-automation-check.tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/viiper-base-drift-check.tests.ps1
+
+dotnet restore SteamInputAddonforClaw.slnx
+dotnet restore tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj
+dotnet build SteamInputAddonforClaw.slnx -c Release --no-restore
+dotnet build tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj -c Release --no-restore
+
+# Run every test project in tests/, matching GitHub CI:
+$projects = @(Get-ChildItem -Path tests -Filter *.csproj -Recurse -File)
+foreach ($project in $projects) {
+    dotnet test $project.FullName -c Release --no-build --no-restore
+    if ($LASTEXITCODE -ne 0) { throw "Test failed: $($project.FullName)" }
+}
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/release-metadata.tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/verify-publish-assets.tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/report-publish-size.tests.ps1
+
+# Publish the same Runtime + UI + Overlay staging layout used by CI:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/publish-layout.ps1 -Version 0.1.0 -Configuration Release -PublishDirectory artifacts/publish -NoRestore
+
+# Preserve the existing asset verifier and size reporting:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-publish-assets.ps1 -PublishDirectory artifacts/publish
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/report-publish-size.ps1 -PublishDirectory artifacts/publish
+
+# The shared publish path must also automatically run the new real-PRI
+# en-US / ko-KR content verification from Section 5.3.
+```
+
+Check **each command's exit status**; do not continue treating a failed command as a pass. Use the existing project's CI commands for reference, but adjust control flow if the local shell would otherwise ignore a failure.
+
+**Important deliberate exception:** The existing GitHub CI `Startup process smoke test` invokes the privileged Runtime executable with `--background`. Do **not** run that process on the developer PC under this work order: it may exercise real controller/runtime initialization and is unnecessary for a Main UI RESW-only change. Also do **not** install Velopack output or execute any live HID/VIIPER/controller operations. The user's post-merge MSI Claw checks cover real application/device behavior.
+
+For a narrowly scoped failure unrelated to this PR, record the exact command and reason in the PR description. Do not silently report full local CI-equivalent success. The expected handoff includes a concise table/report: build PASS/FAIL, all relevant automated tests PASS/FAIL, local publish PASS/FAIL, generic published-asset verification PASS/FAIL, actual `makepri dump` both-language verification PASS/FAIL, and any justified omissions.
+
+**Running the actual GitHub Actions CI/Release workflow is NOT an implementation prerequisite here.** Later PR review/merge follows the project's normal CI policy; do not claim remote CI PASS based on local execution alone.
 
 ## 6. Focused tests
 
@@ -260,7 +317,8 @@ If the current test suite has literal expectations affected by the pilot change,
 - [ ] Existing Main UI entry point, navigation identity, page warmup, data binding, settings updates, and Theme event behavior remain intact.
 - [ ] Normal `dotnet build`, relevant tests, **`dotnet publish`**, and existing publish-asset verification pass.
 - [ ] `makepri dump` (or an equivalently concrete Windows SDK PRI inspection) proves all three pilot keys have **both** `en-US` and `ko-KR` candidates in the **final published** `SteamInputAddonforClaw.UI.pri`.
-- [ ] The same PRI-content verification runs on the real CI/Velopack publish path without breaking existing synthetic fake-PRI tests.
+- [ ] The shared publish script executes the real PRI-content verification and is referenced from **both** CI and Release workflow call paths, without breaking synthetic fake-PRI tests; any necessary workflow integration changes are included in PR1.
+- [ ] Local Codex has run the checked-in CI's non-installing, non-device-dependent restore/build/test/publish/verifier sequence and reported command outcomes. No real GitHub-hosted CI run or privileged Runtime startup smoke test is required from the developer PC.
 - [ ] UI remains framework-dependent; XBFs, application PRI, Overlay payload, fixed FSE MSIX, and Velopack staging layout remain intact.
 - [ ] No install instructions or field-device steps are required from Codex. Record commands/results for build, tests, publish, and PRI inspection in the PR description.
 - [ ] PR1 may be released **without** PR2, PR3, PR4, or PR5. Later PRs add independent RESW keys and bindings without forcing any simultaneous migration.
