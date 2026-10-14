@@ -60,7 +60,14 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("CanStartVibrationRearm(", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("_vibrationRearmInProgress = true", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("RestoreVibrationButton.Content = MainUiStrings.Get(\"Controller_RestoreVibrationButton_BusyContent\", \"Restoring…\")", rearmHandler, StringComparison.Ordinal);
-        Assert.Contains("RestoreVibrationButton.Content = MainUiStrings.Get(\"Controller_RestoreVibrationButton.Content\", \"Restore Vibration\")", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("RestoreVibrationButton.Content = MainUiStrings.Get(\"Controller_RestoreVibrationButton/Content\", \"Restore Vibration\")", rearmHandler, StringComparison.Ordinal);
+        var restoreResourceKey = "Controller_RestoreVibrationButton.Content";
+        foreach (var culture in new[] { "en-US", "ko-KR" })
+        {
+            var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", culture, "Resources.resw"));
+            Assert.Contains(resources.Root!.Elements("data"), element =>
+                (string?)element.Attribute("name") == restoreResourceKey);
+        }
         Assert.Contains("await RefreshVibrationStrengthAsync(preserveFailure)", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("(\"Status\", result.Status)", rearmHandler, StringComparison.Ordinal);
         Assert.DoesNotContain("result.Status;", rearmHandler, StringComparison.Ordinal);

@@ -206,8 +206,9 @@ public sealed class MainUiLocalizationResourceTests
         Assert.NotEmpty(literalKeys);
         foreach (var key in literalKeys)
         {
-            Assert.Contains(key, english.Keys);
-            Assert.Contains(key, korean.Keys);
+            var resourceKey = key.Replace('/', '.');
+            Assert.Contains(resourceKey, english.Keys);
+            Assert.Contains(resourceKey, korean.Keys);
         }
 
         foreach (var (action, key, fallback) in new[]
@@ -250,7 +251,9 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Contains("private readonly CheckBox _control = new() { Content = \"Ctrl\" }", source, StringComparison.Ordinal);
         Assert.Contains("new ComboBoxItem { Content = vkey.ToString(), Tag = vkey }", source, StringComparison.Ordinal);
         Assert.Contains("_runAsAdministrator.IsChecked == true", source, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Controller_RestoreVibrationButton.Content\", \"Restore Vibration\")", source, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Controller_RestoreVibrationButton/Content\", \"Restore Vibration\")", source, StringComparison.Ordinal);
+        Assert.Contains("Controller_RestoreVibrationButton.Content", english.Keys);
+        Assert.Contains("Controller_RestoreVibrationButton.Content", korean.Keys);
         Assert.Equal("safe fallback", MainUiStrings.Get("Missing_Controller_Test_Key", "safe fallback"));
     }
 

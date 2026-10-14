@@ -591,7 +591,7 @@ public sealed partial class ControllerPage : UserControl
         finally
         {
             _vibrationRearmInProgress = false;
-            RestoreVibrationButton.Content = MainUiStrings.Get("Controller_RestoreVibrationButton.Content", "Restore Vibration");
+            RestoreVibrationButton.Content = MainUiStrings.Get("Controller_RestoreVibrationButton/Content", "Restore Vibration");
             UpdateVibrationControls();
         }
     }
