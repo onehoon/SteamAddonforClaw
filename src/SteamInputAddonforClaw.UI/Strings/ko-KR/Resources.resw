@@ -355,7 +355,7 @@ Windows must restart to apply this change.</value>
   <data name="Controller_PageDescription.Text" xml:space="preserve">
     <value>Configure controller buttons and controller-specific settings.</value>
   </data>
-  <data name="Controller_SteamVirtualControllerCard.Header" xml:space="preserve">
+  <data name="Controller_SteamVirtualControllerExpander.Header" xml:space="preserve">
     <value>Steam용 컨트롤러</value>
   </data>
   <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve">
@@ -364,13 +364,10 @@ Windows must restart to apply this change.</value>
   <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve">
     <value>Steam 게임 또는 Big Picture가 활성 상태이면 컨트롤러 선택이 잠깁니다.</value>
   </data>
-  <data name="Controller_SteamControllerUnavailable.Content" xml:space="preserve">
+  <data name="Controller_SteamControllerUnavailable.Text" xml:space="preserve">
     <value>사용할 수 없음</value>
   </data>
-  <data name="Controller_SteamControllerRow.Text" xml:space="preserve">
-    <value>컨트롤러</value>
-  </data>
-  <data name="Controller_GyroscopeRow.Text" xml:space="preserve">
+  <data name="Controller_GyroscopeCard.Header" xml:space="preserve">
     <value>자이로스코프</value>
   </data>
   <data name="Controller_GyroscopeUpdateFailed" xml:space="preserve">

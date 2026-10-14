@@ -314,7 +314,10 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("_suppress = true", toggle);
         Assert.Contains("_model.RequestToggle", toggle);
         Assert.Contains("_model.RequestSet(_toggle.IsOn)", toggle);
+        Assert.Contains("if (_toggle.IsEnabled != isAvailable)", toggle);
         Assert.Contains("_toggle.IsEnabled = isAvailable", toggle);
+        Assert.Contains("if (_toggle.IsOn != isOn)", toggle);
+        Assert.Contains("_toggle.IsOn = isOn", toggle);
         Assert.Contains("slider.Resources[key] = brush", slider);
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", valueRow);
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);

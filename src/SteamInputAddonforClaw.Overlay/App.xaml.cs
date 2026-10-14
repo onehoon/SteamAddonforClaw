@@ -238,10 +238,13 @@ public partial class App : Application
     private void OnControllerLedEditRequested(ControllerLedSettings settings) => _ = SendFrontendSettingsMutationAsync(
         () => _client!.SendControllerLedMutationAsync(settings), led: true);
 
-    private void OnControllerForSteamEditRequested(SteamVirtualControllerPreference? preference, bool? gyroscopeEnabled) =>
+    private void OnControllerForSteamEditRequested(
+        SteamVirtualControllerPreference? preference,
+        bool? gyroscopeEnabled,
+        ControllerForSteamMutationKind mutationKind) =>
         _ = SendFrontendSettingsMutationAsync(
             () => _client!.SendControllerForSteamMutationAsync(preference, gyroscopeEnabled),
-            led: false, controllerForSteam: true);
+            led: false, controllerForSteamMutation: mutationKind);
 
     private void OnQuickSettingsCurrentPowerSourceOnlyRequested(bool enabled) => _ = SendFrontendSettingsMutationAsync(
         () => _client!.SendCurrentPowerSourceMutationAsync(enabled), led: false);
@@ -262,7 +265,10 @@ public partial class App : Application
         }
     }
 
-    private async Task SendFrontendSettingsMutationAsync(Func<Task<OverlayFrontendSettingsMutationResponse>> send, bool led, bool controllerForSteam = false)
+    private async Task SendFrontendSettingsMutationAsync(
+        Func<Task<OverlayFrontendSettingsMutationResponse>> send,
+        bool led,
+        ControllerForSteamMutationKind? controllerForSteamMutation = null)
     {
         try
         {
@@ -270,12 +276,12 @@ public partial class App : Application
             var result = await send().ConfigureAwait(false);
             if (!result.Succeeded)
                 OverlayLog.Warn("Controller", result.FailureMessage ?? "Frontend settings update was not accepted.");
-            await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationResult(result, led, controllerForSteam)).ConfigureAwait(false);
+            await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation)).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
             OverlayLog.Warn("Controller", "Frontend settings mutation failed.", null, ("ExceptionType", exception.GetType().Name));
-            try { await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationFailure(led, controllerForSteam)).ConfigureAwait(false); }
+            try { await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation)).ConfigureAwait(false); }
             catch { OverlayLog.Warn("Controller", "Could not enqueue frontend settings failure state."); }
         }
     }

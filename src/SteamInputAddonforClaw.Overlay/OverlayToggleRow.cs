@@ -105,8 +105,10 @@ internal sealed class OverlayToggleRow
         _suppress = true;
         try
         {
-            _toggle.IsEnabled = isAvailable;
-            _toggle.IsOn = isOn;
+            if (_toggle.IsEnabled != isAvailable)
+                _toggle.IsEnabled = isAvailable;
+            if (_toggle.IsOn != isOn)
+                _toggle.IsOn = isOn;
         }
         finally
         {

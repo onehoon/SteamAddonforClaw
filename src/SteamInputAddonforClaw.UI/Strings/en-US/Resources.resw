@@ -96,12 +96,11 @@
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
-  <data name="Controller_SteamVirtualControllerCard.Header" xml:space="preserve"><value>Controller for Steam</value></data>
+  <data name="Controller_SteamVirtualControllerExpander.Header" xml:space="preserve"><value>Controller for Steam</value></data>
   <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve"><value>Choose the controller used by Steam and configure gyroscope input.</value></data>
   <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve"><value>Selection is disabled while a Steam game or Big Picture Mode is active.</value></data>
-  <data name="Controller_SteamControllerUnavailable.Content" xml:space="preserve"><value>Unavailable</value></data>
-  <data name="Controller_SteamControllerRow.Text" xml:space="preserve"><value>Controller</value></data>
-  <data name="Controller_GyroscopeRow.Text" xml:space="preserve"><value>Gyroscope</value></data>
+  <data name="Controller_SteamControllerUnavailable.Text" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="Controller_GyroscopeCard.Header" xml:space="preserve"><value>Gyroscope</value></data>
   <data name="Controller_GyroscopeUpdateFailed" xml:space="preserve"><value>The Gyroscope setting could not be saved. The last confirmed value is shown.</value></data>
   <data name="Controller_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
   <data name="Controller_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>

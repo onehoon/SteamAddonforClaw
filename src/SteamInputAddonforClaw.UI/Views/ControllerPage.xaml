@@ -9,31 +9,29 @@
                 <TextBlock x:Uid="Controller_PageDescription" Opacity="0.7" Text="Configure controller buttons and controller-specific settings." TextWrapping="Wrap" />
             </StackPanel>
 
-            <ctcontrols:SettingsCard x:Name="SteamVirtualControllerCard" x:Uid="Controller_SteamVirtualControllerCard" Header="Controller for Steam">
-                <ctcontrols:SettingsCard.HeaderIcon>
+            <ctcontrols:SettingsExpander x:Name="SteamVirtualControllerExpander" x:Uid="Controller_SteamVirtualControllerExpander" Header="Controller for Steam" IsExpanded="False">
+                <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <ctcontrols:SettingsCard.Description>
+                </ctcontrols:SettingsExpander.HeaderIcon>
+                <ctcontrols:SettingsExpander.Description>
                     <StackPanel Spacing="2">
                         <TextBlock x:Uid="Controller_SteamVirtualControllerDescription" Text="Choose the controller used by Steam and configure gyroscope input." />
                         <TextBlock x:Name="SteamVirtualControllerActivityText" x:Uid="Controller_SteamVirtualControllerActivity" Text="Selection is disabled while a Steam game or Big Picture Mode is active." />
                     </StackPanel>
-                </ctcontrols:SettingsCard.Description>
-                <StackPanel Spacing="8">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <TextBlock x:Uid="Controller_SteamControllerRow" Text="Controller" Width="112" VerticalAlignment="Center" />
-                        <ComboBox x:Name="SteamVirtualControllerComboBox" MinWidth="240" SelectionChanged="SteamVirtualControllerComboBox_SelectionChanged">
-                            <ComboBoxItem x:Uid="Controller_SteamControllerUnavailable" Content="Unavailable" Tag="Unavailable" IsEnabled="False" />
-                            <ComboBoxItem x:Uid="Controller_SteamDeckOption" Content="Steam Deck" Tag="SteamDeck" />
-                            <ComboBoxItem x:Uid="Controller_DualSenseEdgeOption" Content="DualSense Edge" Tag="DualSenseEdge" />
-                        </ComboBox>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <TextBlock x:Uid="Controller_GyroscopeRow" Text="Gyroscope" Width="112" VerticalAlignment="Center" />
+                </ctcontrols:SettingsExpander.Description>
+                <Grid MinWidth="240" HorizontalAlignment="Right">
+                    <ComboBox x:Name="SteamVirtualControllerComboBox" MinWidth="240" SelectionChanged="SteamVirtualControllerComboBox_SelectionChanged">
+                        <ComboBoxItem x:Uid="Controller_SteamDeckOption" Content="Steam Deck" Tag="SteamDeck" />
+                        <ComboBoxItem x:Uid="Controller_DualSenseEdgeOption" Content="DualSense Edge" Tag="DualSenseEdge" />
+                    </ComboBox>
+                    <TextBlock x:Name="SteamVirtualControllerUnavailableText" x:Uid="Controller_SteamControllerUnavailable" Text="Unavailable" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+                </Grid>
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard x:Uid="Controller_GyroscopeCard" Header="Gyroscope">
                         <ToggleSwitch x:Name="GyroscopeEnabledToggle" x:Uid="Controller_GyroscopeToggle" IsOn="True" OffContent="" OnContent="" Toggled="GyroscopeEnabledToggle_Toggled" />
-                    </StackPanel>
-                </StackPanel>
-            </ctcontrols:SettingsCard>
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
             <InfoBar x:Name="SteamVirtualControllerInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
 
             <TextBlock x:Name="MappingUnavailableText" x:Uid="Controller_MappingUnavailable" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />

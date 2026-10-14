@@ -1293,13 +1293,13 @@ public sealed class UiArchitectureTests
         var expanders = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander").ToArray();
 
         Assert.Equal(16, cards.Length);
-        Assert.Equal(5, expanders.Length);
+        Assert.Equal(6, expanders.Length);
         Assert.All(expanders, expander => Assert.Single(
             expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon"));
-        var steamVirtualControllerCard = Assert.Single(cards, card =>
-            card.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == "SteamVirtualControllerCard");
-        Assert.Single(steamVirtualControllerCard.Elements(), element => element.Name.LocalName == "SettingsCard.HeaderIcon");
-        Assert.All(cards.Where(card => !ReferenceEquals(card, steamVirtualControllerCard)), card => Assert.DoesNotContain(
+        var steamVirtualControllerExpander = Assert.Single(expanders, expander =>
+            expander.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == "SteamVirtualControllerExpander");
+        Assert.Equal("Controller for Steam", (string?)steamVirtualControllerExpander.Attribute("Header"));
+        Assert.All(cards, card => Assert.DoesNotContain(
             card.Elements(), element => element.Name.LocalName == "SettingsCard.HeaderIcon"));
     }
 

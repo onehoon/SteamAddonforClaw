@@ -20,13 +20,19 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("CreateControllerSection(\"M1 / M2\")", controller);
         Assert.Contains("CreateControllerSection(\"Vibration Strength\")", controller);
         Assert.DoesNotContain("CreateControllerSection(\"Joystick LED\")", controller);
+        Assert.Contains("var steamDetails = CreateOverlayDetailStack();", controller);
+        Assert.Contains("AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities)", controller);
+        Assert.Contains("AddControllerRow(steamDetails, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities)", controller);
+        Assert.Contains("steamSection.Children.Add(steamDetails)", controller);
         Assert.Contains("new OverlayValueRow(\"Controller\", FormatSteamController", controller);
-        Assert.Contains("new OverlayToggleRow(\"Gyroscope\", RequestGyroscopeChange", controller);
+        Assert.Contains("new OverlayToggleRow(\"Gyroscope\", RequestGyroscopeChange);", controller);
+        Assert.DoesNotContain("new OverlayToggleRow(\"Gyroscope\", RequestGyroscopeChange, strongLabel: true)", controller);
         Assert.Contains("var controllerAvailable = _frontendSettingsAvailable && _controllerForSteam.Available", controller);
         Assert.Contains("_steamControllerRow?.ApplyState(controllerAvailable, 0, controllerAvailable ? 1 : 2, 1, displayValue);", controller);
-        Assert.Contains("_gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_controllerForSteamMutationInFlight", controller);
-        Assert.Contains("ControllerForSteamEditRequested?.Invoke(preference, null)", controller);
-        Assert.Contains("ControllerForSteamEditRequested?.Invoke(null, enabled)", controller);
+        Assert.Contains("_gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_gyroscopeMutationInFlight", controller);
+        Assert.Contains("ControllerForSteamEditRequested?.Invoke(preference, null, ControllerForSteamMutationKind.Controller)", controller);
+        Assert.Contains("ControllerForSteamEditRequested?.Invoke(null, enabled, ControllerForSteamMutationKind.Gyroscope)", controller);
+        Assert.DoesNotContain("_controllerForSteamMutationInFlight", controller);
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M1\""));
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M2\""));
         Assert.Equal(3, CountOccurrences(controller, "OverlayValueButtonKind.DiscreteChoice"));
@@ -36,6 +42,36 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("RegisterRowPointerSelection(row.Container)", controller);
         Assert.Contains("rows.Add(new(row.Container, row.Capabilities))", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
+    }
+
+    [Fact]
+    public void Controller_and_gyro_overlay_mutations_have_independent_pending_display_and_settlement()
+    {
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+
+        Assert.Contains("private bool _steamControllerMutationInFlight", controller);
+        Assert.Contains("private bool _gyroscopeMutationInFlight", controller);
+        Assert.Contains("_pendingSteamControllerPreference = preference", controller);
+        Assert.Contains("_pendingGyroscopeEnabled = enabled", controller);
+        Assert.Contains("? (int)pendingPreference", controller);
+        Assert.Contains("? pendingGyroscope", controller);
+        Assert.Contains("ControllerForSteamMutationKind? controllerForSteamMutation", controller);
+        Assert.Contains("_pendingSteamControllerPreference = null", controller);
+        Assert.Contains("_pendingGyroscopeEnabled = null", controller);
+        Assert.Contains("controllerForSteamMutation: mutationKind", app);
+        Assert.Contains("ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation)", app);
+        Assert.Contains("ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation)", app);
+
+        var gyroRequestStart = controller.IndexOf("private void RequestGyroscopeChange", StringComparison.Ordinal);
+        var gyroRequestEnd = controller.IndexOf("private void RenderControllerForSteamRows", gyroRequestStart, StringComparison.Ordinal);
+        var gyroRequest = controller[gyroRequestStart..gyroRequestEnd];
+        Assert.DoesNotContain("_steamControllerMutationInFlight", gyroRequest);
+        var renderStart = gyroRequestEnd;
+        var renderEnd = controller.IndexOf("private static StackPanel CreateControllerSection", renderStart, StringComparison.Ordinal);
+        var render = controller[renderStart..renderEnd];
+        Assert.Contains("&& !_steamControllerMutationInFlight", render);
+        Assert.Contains("&& !_gyroscopeMutationInFlight", render);
     }
 
     [Fact]
@@ -54,7 +90,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("_m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M1)", controller);
         Assert.Contains("_m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M2)", controller);
         Assert.Contains("var preferredIndex = _rowSelection.SelectedIndex;", controller);
-        Assert.Contains("if (!_controllerForSteamMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)", controller);
+        Assert.Contains("if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
         Assert.Contains("HandleBackButtonMappingStateAsync", app);
         Assert.Contains("BackButtonMappingEditRequested", app);
