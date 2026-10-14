@@ -10,6 +10,12 @@ using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw.Overlay;
 
+internal enum ControllerForSteamMutationKind
+{
+    Controller,
+    Gyroscope,
+}
+
 public sealed partial class OverlayWindow
 {
     private BackButtonMappingSettings _backButtonMapping = BackButtonMappingSettings.Default;
@@ -22,7 +28,10 @@ public sealed partial class OverlayWindow
     private FrontendSettingsSnapshot? _frontendSettingsSnapshot;
     private FrontendControllerForSteamSnapshot _controllerForSteam = FrontendControllerForSteamSnapshot.Unavailable(SteamVirtualControllerPreference.SteamDeck);
     private bool _frontendSettingsAvailable;
-    private bool _controllerForSteamMutationInFlight;
+    private bool _steamControllerMutationInFlight;
+    private bool _gyroscopeMutationInFlight;
+    private SteamVirtualControllerPreference? _pendingSteamControllerPreference;
+    private bool? _pendingGyroscopeEnabled;
     private bool _controllerLedAvailable;
     private bool _controllerLedMutationInFlight;
     private bool _controllerVibrationMutationInFlight;
@@ -45,13 +54,14 @@ public sealed partial class OverlayWindow
 
     internal event Action<BackButtonMappingSettings>? BackButtonMappingEditRequested;
     internal event Action<ControllerLedSettings>? ControllerLedEditRequested;
-    internal event Action<SteamVirtualControllerPreference?, bool?>? ControllerForSteamEditRequested;
+    internal event Action<SteamVirtualControllerPreference?, bool?, ControllerForSteamMutationKind>? ControllerForSteamEditRequested;
     internal event Action<int, int>? ControllerVibrationStrengthEditRequested;
 
     private FrameworkElement BuildControllerPage(List<OverlayRow> rows)
     {
         var page = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
         var steamSection = CreateControllerSection("Controller for Steam");
+        var steamDetails = CreateOverlayDetailStack();
         var mappingSection = CreateControllerSection("M1 / M2");
         var mappingDetails = CreateOverlayDetailStack();
         mappingSection.Children.Add(mappingDetails);
@@ -60,9 +70,10 @@ public sealed partial class OverlayWindow
 
         _steamControllerRow = new OverlayValueRow("Controller", FormatSteamController,
             RequestSteamControllerChange, OverlayValueButtonKind.DiscreteChoice);
-        AddControllerRow(steamSection, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities);
-        _gyroscopeRow = new OverlayToggleRow("Gyroscope", RequestGyroscopeChange, strongLabel: true);
-        AddControllerRow(steamSection, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities);
+        AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities);
+        _gyroscopeRow = new OverlayToggleRow("Gyroscope", RequestGyroscopeChange);
+        AddControllerRow(steamDetails, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities);
+        steamSection.Children.Add(steamDetails);
 
         var m1Row = new OverlayValueRow("M1", FormatBackButtonTarget,
             value => RequestBackButtonMappingChange(isM1: true, value),
@@ -106,43 +117,49 @@ public sealed partial class OverlayWindow
     private void RequestSteamControllerChange(double value)
     {
         if (!_frontendSettingsAvailable || !_controllerForSteam.Available || !_controllerForSteam.CanChangeController
-            || _controllerForSteamMutationInFlight || !double.IsFinite(value)
+            || _steamControllerMutationInFlight || !double.IsFinite(value)
             || value != Math.Truncate(value) || value is < 0 or > 1)
             return;
 
         var preference = (SteamVirtualControllerPreference)(int)value;
         if (preference == _controllerForSteam.SavedPreference) return;
-        _controllerForSteamMutationInFlight = true;
+        _steamControllerMutationInFlight = true;
+        _pendingSteamControllerPreference = preference;
         RenderControllerForSteamRows();
-        ControllerForSteamEditRequested?.Invoke(preference, null);
+        ControllerForSteamEditRequested?.Invoke(preference, null, ControllerForSteamMutationKind.Controller);
     }
 
     private void RequestGyroscopeChange(bool enabled)
     {
-        if (!_frontendSettingsAvailable || _controllerForSteamMutationInFlight || _frontendSettingsSnapshot is null
+        if (!_frontendSettingsAvailable || _gyroscopeMutationInFlight || _frontendSettingsSnapshot is null
             || _frontendSettingsSnapshot.GyroscopeEnabled == enabled)
             return;
 
-        _controllerForSteamMutationInFlight = true;
+        _gyroscopeMutationInFlight = true;
+        _pendingGyroscopeEnabled = enabled;
         RenderControllerForSteamRows();
-        ControllerForSteamEditRequested?.Invoke(null, enabled);
+        ControllerForSteamEditRequested?.Invoke(null, enabled, ControllerForSteamMutationKind.Gyroscope);
     }
 
     private void RenderControllerForSteamRows()
     {
         var controllerAvailable = _frontendSettingsAvailable && _controllerForSteam.Available
-            && _controllerForSteam.CanChangeController && !_controllerForSteamMutationInFlight;
-        var displayValue = !_controllerForSteam.Available
-            ? 2
-            : (int)(_controllerForSteam.ActiveSteamPreference ?? _controllerForSteam.SavedPreference);
+            && _controllerForSteam.CanChangeController && !_steamControllerMutationInFlight;
+        var displayValue = _steamControllerMutationInFlight && _pendingSteamControllerPreference is { } pendingPreference
+            ? (int)pendingPreference
+            : !_controllerForSteam.Available
+                ? 2
+                : (int)(_controllerForSteam.ActiveSteamPreference ?? _controllerForSteam.SavedPreference);
         _steamControllerRow?.ApplyState(controllerAvailable, 0, controllerAvailable ? 1 : 2, 1, displayValue);
-        _gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_controllerForSteamMutationInFlight,
-            _frontendSettingsSnapshot?.GyroscopeEnabled == true);
+        var gyroscopeValue = _gyroscopeMutationInFlight && _pendingGyroscopeEnabled is { } pendingGyroscope
+            ? pendingGyroscope
+            : _frontendSettingsSnapshot?.GyroscopeEnabled == true;
+        _gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_gyroscopeMutationInFlight, gyroscopeValue);
 
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_controllerForSteamMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)
+            if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)
                 _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }
@@ -283,7 +300,7 @@ public sealed partial class OverlayWindow
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_controllerForSteamMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)
+            if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)
                 _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }
@@ -301,18 +318,41 @@ public sealed partial class OverlayWindow
         ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
     }
 
-    internal void ApplyFrontendSettingsMutationResult(OverlayFrontendSettingsMutationResponse response, bool led, bool controllerForSteam = false)
+    internal void ApplyFrontendSettingsMutationResult(
+        OverlayFrontendSettingsMutationResponse response,
+        bool led,
+        ControllerForSteamMutationKind? controllerForSteamMutation = null)
     {
         if (led) _controllerLedMutationInFlight = false;
-        else if (controllerForSteam) _controllerForSteamMutationInFlight = false;
+        else if (controllerForSteamMutation == ControllerForSteamMutationKind.Controller)
+        {
+            _steamControllerMutationInFlight = false;
+            _pendingSteamControllerPreference = null;
+        }
+        else if (controllerForSteamMutation == ControllerForSteamMutationKind.Gyroscope)
+        {
+            _gyroscopeMutationInFlight = false;
+            _pendingGyroscopeEnabled = null;
+        }
         else SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
         ApplyFrontendSettingsState(response.Settings, response.ControllerLedAvailable, response.SettingsAvailable);
     }
 
-    internal void ApplyFrontendSettingsMutationFailure(bool led, bool controllerForSteam = false)
+    internal void ApplyFrontendSettingsMutationFailure(
+        bool led,
+        ControllerForSteamMutationKind? controllerForSteamMutation = null)
     {
         if (led) _controllerLedMutationInFlight = false;
-        else if (controllerForSteam) _controllerForSteamMutationInFlight = false;
+        else if (controllerForSteamMutation == ControllerForSteamMutationKind.Controller)
+        {
+            _steamControllerMutationInFlight = false;
+            _pendingSteamControllerPreference = null;
+        }
+        else if (controllerForSteamMutation == ControllerForSteamMutationKind.Gyroscope)
+        {
+            _gyroscopeMutationInFlight = false;
+            _pendingGyroscopeEnabled = null;
+        }
         else SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
         RenderControllerForSteamRows();
         RenderControllerLedRows();
@@ -368,7 +408,7 @@ public sealed partial class OverlayWindow
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_controllerForSteamMutationInFlight && !_controllerLedMutationInFlight && !_backButtonMutationInFlight && !_controllerVibrationMutationInFlight)
+            if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_controllerLedMutationInFlight && !_backButtonMutationInFlight && !_controllerVibrationMutationInFlight)
                 _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }
@@ -501,7 +541,7 @@ public sealed partial class OverlayWindow
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_controllerForSteamMutationInFlight && !_controllerVibrationMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight)
+            if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_controllerVibrationMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight)
                 _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }

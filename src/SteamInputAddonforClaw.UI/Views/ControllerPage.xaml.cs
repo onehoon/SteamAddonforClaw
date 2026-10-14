@@ -165,15 +165,18 @@ public sealed partial class ControllerPage : UserControl
 
     private void RenderSteamVirtualController()
     {
-        var tag = !_controllerForSteam.Available
-            ? "Unavailable"
-            : (_controllerForSteam.ActiveSteamPreference ?? _controllerForSteam.SavedPreference).ToString();
+        var available = _controllerForSteam.Available;
+        var tag = (_controllerForSteam.ActiveSteamPreference ?? _controllerForSteam.SavedPreference).ToString();
         _applyingSteamVirtualControllerState = true;
         try
         {
-            SteamVirtualControllerComboBox.SelectedItem = SteamVirtualControllerComboBox.Items
-                .OfType<ComboBoxItem>()
-                .FirstOrDefault(item => string.Equals(item.Tag as string, tag, StringComparison.Ordinal));
+            SteamVirtualControllerComboBox.SelectedItem = available
+                ? SteamVirtualControllerComboBox.Items
+                    .OfType<ComboBoxItem>()
+                    .FirstOrDefault(item => string.Equals(item.Tag as string, tag, StringComparison.Ordinal))
+                : null;
+            SteamVirtualControllerComboBox.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+            SteamVirtualControllerUnavailableText.Visibility = available ? Visibility.Collapsed : Visibility.Visible;
         }
         finally { _applyingSteamVirtualControllerState = false; }
         SteamVirtualControllerActivityText.Text = !_controllerForSteam.Available
