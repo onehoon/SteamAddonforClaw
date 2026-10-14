@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using Microsoft.UI.Xaml;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.UI;
 using SteamInputAddonforClaw.Views;
 using SteamInputAddonforClaw.Windowing;
 using Xunit;
@@ -151,9 +152,25 @@ public sealed class WindowsTweaksUiContractTests
         var pending = new FrontendWindowsTweakSnapshot(
             FrontendWindowsTweakId.VirtualMachinePlatform, FrontendWindowsTweakState.EnablePendingRestart, true, false, true, null);
 
-        Assert.Equal("Mixed — turn On to apply", WindowsTweaksPage.FormatState(mixed));
+        Assert.Equal(
+            MainUiStrings.Get("Tweaks_State_MixedApply", "Mixed — turn On to apply"),
+            WindowsTweaksPage.FormatState(mixed));
         Assert.Null(WindowsTweaksPage.FormatState(enabled));
-        Assert.Equal("Restart required", WindowsTweaksPage.FormatState(pending));
+        Assert.Equal(
+            MainUiStrings.Get("Tweaks_State_RestartRequired", "Restart required"),
+            WindowsTweaksPage.FormatState(pending));
+
+        var configuredNotRunning = new FrontendWindowsTweakSnapshot(
+            FrontendWindowsTweakId.MemoryIntegrity, FrontendWindowsTweakState.EnablePendingRestart, true, false, true, null);
+        var explorerRestart = new FrontendWindowsTweakSnapshot(
+            FrontendWindowsTweakId.DisableEdgeBackground, FrontendWindowsTweakState.ExplorerRestartPending, true, false, true, null);
+
+        Assert.Equal(
+            MainUiStrings.Get("Tweaks_State_ConfiguredNotRunning", "Configured — not running"),
+            WindowsTweaksPage.FormatState(configuredNotRunning));
+        Assert.Equal(
+            MainUiStrings.Get("Tweaks_State_ExplorerRestartRequired", "Explorer restart required"),
+            WindowsTweaksPage.FormatState(explorerRestart));
     }
 
     [Fact]

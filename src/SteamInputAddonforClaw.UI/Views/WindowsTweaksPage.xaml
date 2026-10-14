@@ -5,79 +5,79 @@
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
         <StackPanel Spacing="16">
-            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Tweaks" />
-            <TextBlock x:Name="EntryPromptText" Text="Review the safety notice to open these controls." TextWrapping="Wrap" Visibility="Collapsed" />
+            <TextBlock x:Uid="Tweaks_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Tweaks" />
+            <TextBlock x:Name="EntryPromptText" x:Uid="Tweaks_EntryPrompt" Text="Review the safety notice to open these controls." TextWrapping="Wrap" Visibility="Collapsed" />
             <TextBlock x:Name="OperationMessageText" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
             <StackPanel x:Name="TweaksPanel" Spacing="12" Visibility="Collapsed">
-                <TextBlock Text="Gaming Performance" FontWeight="SemiBold" Margin="0,8,0,0" />
-                <ctcontrols:SettingsCard x:Name="MemoryIntegrityCard" Header="Memory Integrity" MinHeight="84">
+                <TextBlock x:Uid="Tweaks_GamingPerformanceHeader" Text="Gaming Performance" FontWeight="SemiBold" Margin="0,8,0,0" />
+                <ctcontrols:SettingsCard x:Name="MemoryIntegrityCard" x:Uid="Tweaks_MemoryIntegrityCard" Header="Memory Integrity" MinHeight="84">
                     <ctcontrols:SettingsCard.Description>
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Configure Windows kernel memory protection." MaxLines="1" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Uid="Tweaks_MemoryIntegrityDescription" Text="Configure Windows kernel memory protection." MaxLines="1" TextTrimming="CharacterEllipsis" />
                             <TextBlock x:Name="MemoryIntegrityState" Height="18" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </ctcontrols:SettingsCard.Description>
                     <ToggleSwitch x:Name="MemoryIntegritySwitch" VerticalAlignment="Center" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                 </ctcontrols:SettingsCard>
-                <ctcontrols:SettingsCard x:Name="VirtualMachinePlatformCard" Header="Virtual Machine Platform" MinHeight="84">
+                <ctcontrols:SettingsCard x:Name="VirtualMachinePlatformCard" x:Uid="Tweaks_VirtualMachinePlatformCard" Header="Virtual Machine Platform" MinHeight="84">
                     <ctcontrols:SettingsCard.Description>
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Enable or disable the Windows virtualization platform feature." MaxLines="1" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Uid="Tweaks_VirtualMachinePlatformDescription" Text="Enable or disable the Windows virtualization platform feature." MaxLines="1" TextTrimming="CharacterEllipsis" />
                             <TextBlock x:Name="VirtualMachinePlatformState" Height="18" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </ctcontrols:SettingsCard.Description>
                     <ToggleSwitch x:Name="VirtualMachinePlatformSwitch" VerticalAlignment="Center" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                 </ctcontrols:SettingsCard>
-                <TextBlock Text="Registry Tweaks" FontWeight="SemiBold" Margin="0,12,0,0" />
-                <ctcontrols:SettingsCard x:Name="InstantContextMenusCard" Header="Faster Menus" MinHeight="84">
+                <TextBlock x:Uid="Tweaks_RegistryTweaksHeader" Text="Registry Tweaks" FontWeight="SemiBold" Margin="0,12,0,0" />
+                <ctcontrols:SettingsCard x:Name="InstantContextMenusCard" x:Uid="Tweaks_InstantContextMenusCard" Header="Faster Menus" MinHeight="84">
                     <ctcontrols:SettingsCard.Description>
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Disable menu animation and reduce submenu delay to 10 ms." MaxLines="1" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Uid="Tweaks_InstantContextMenusDescription" Text="Disable menu animation and reduce submenu delay to 10 ms." MaxLines="1" TextTrimming="CharacterEllipsis" />
                             <TextBlock x:Name="InstantContextMenusState" Height="18" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </ctcontrols:SettingsCard.Description>
                     <ToggleSwitch x:Name="InstantContextMenusSwitch" VerticalAlignment="Center" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                 </ctcontrols:SettingsCard>
-                <ctcontrols:SettingsCard x:Name="ClassicContextMenuCard" Header="Classic Context Menu" MinHeight="84">
+                <ctcontrols:SettingsCard x:Name="ClassicContextMenuCard" x:Uid="Tweaks_ClassicContextMenuCard" Header="Classic Context Menu" MinHeight="84">
                     <ctcontrols:SettingsCard.Description>
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Use the classic Windows 11 context menu for this user." MaxLines="1" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Uid="Tweaks_ClassicContextMenuDescription" Text="Use the classic Windows 11 context menu for this user." MaxLines="1" TextTrimming="CharacterEllipsis" />
                             <TextBlock x:Name="ClassicContextMenuState" Height="18" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </ctcontrols:SettingsCard.Description>
                     <ToggleSwitch x:Name="ClassicContextMenuSwitch" VerticalAlignment="Center" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                 </ctcontrols:SettingsCard>
-                <ctcontrols:SettingsCard x:Name="DisablePasswordOnWakeCard" Header="Disable Password on Wake" MinHeight="84">
+                <ctcontrols:SettingsCard x:Name="DisablePasswordOnWakeCard" x:Uid="Tweaks_DisablePasswordOnWakeCard" Header="Disable Password on Wake" MinHeight="84">
                     <ctcontrols:SettingsCard.Description>
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Return from sleep without requiring sign-in." MaxLines="1" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Uid="Tweaks_DisablePasswordOnWakeDescription" Text="Return from sleep without requiring sign-in." MaxLines="1" TextTrimming="CharacterEllipsis" />
                             <TextBlock x:Name="DisablePasswordOnWakeState" Height="18" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </ctcontrols:SettingsCard.Description>
                     <ToggleSwitch x:Name="DisablePasswordOnWakeSwitch" VerticalAlignment="Center" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                 </ctcontrols:SettingsCard>
-                <ctcontrols:SettingsCard x:Name="DisableWindowsWidgetsCard" Header="Disable Windows Widgets" MinHeight="84">
+                <ctcontrols:SettingsCard x:Name="DisableWindowsWidgetsCard" x:Uid="Tweaks_DisableWindowsWidgetsCard" Header="Disable Windows Widgets" MinHeight="84">
                     <ctcontrols:SettingsCard.Description>
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Block the Windows Widgets experience where supported by Windows policy." MaxLines="1" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Uid="Tweaks_DisableWindowsWidgetsDescription" Text="Block the Windows Widgets experience where supported by Windows policy." MaxLines="1" TextTrimming="CharacterEllipsis" />
                             <TextBlock x:Name="DisableWindowsWidgetsState" Height="18" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </ctcontrols:SettingsCard.Description>
                     <ToggleSwitch x:Name="DisableWindowsWidgetsSwitch" VerticalAlignment="Center" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                 </ctcontrols:SettingsCard>
-                <ctcontrols:SettingsCard x:Name="DisableEdgeBackgroundCard" Header="Disable Edge Background" MinHeight="84">
+                <ctcontrols:SettingsCard x:Name="DisableEdgeBackgroundCard" x:Uid="Tweaks_DisableEdgeBackgroundCard" Header="Disable Edge Background" MinHeight="84">
                     <ctcontrols:SettingsCard.Description>
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Disable Edge Startup Boost and background mode; existing processes may continue until closed." MaxLines="1" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="Disable Edge Startup Boost and background mode; existing processes may continue until closed." />
+                            <TextBlock x:Name="DisableEdgeBackgroundDescriptionText" x:Uid="Tweaks_DisableEdgeBackgroundDescription" Text="Disable Edge Startup Boost and background mode; existing processes may continue until closed." MaxLines="1" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="Disable Edge Startup Boost and background mode; existing processes may continue until closed." />
                             <TextBlock x:Name="DisableEdgeBackgroundState" Height="18" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </ctcontrols:SettingsCard.Description>
                     <ToggleSwitch x:Name="DisableEdgeBackgroundSwitch" VerticalAlignment="Center" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                 </ctcontrols:SettingsCard>
-                <ctcontrols:SettingsCard x:Name="DisableStartupAppDelayCard" Header="Disable Startup App Delay" MinHeight="84">
+                <ctcontrols:SettingsCard x:Name="DisableStartupAppDelayCard" x:Uid="Tweaks_DisableStartupAppDelayCard" Header="Disable Startup App Delay" MinHeight="84">
                     <ctcontrols:SettingsCard.Description>
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Remove configured Explorer startup-app launch delays; actual startup gains may vary." MaxLines="1" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Uid="Tweaks_DisableStartupAppDelayDescription" Text="Remove configured Explorer startup-app launch delays; actual startup gains may vary." MaxLines="1" TextTrimming="CharacterEllipsis" />
                             <TextBlock x:Name="DisableStartupAppDelayState" Height="18" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </ctcontrols:SettingsCard.Description>
