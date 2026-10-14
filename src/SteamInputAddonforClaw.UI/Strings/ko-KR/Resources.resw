@@ -234,4 +234,84 @@
   <data name="Steam_VirtualController_UpdateFailed" xml:space="preserve"><value>Virtual Controller could not be updated.</value></data>
   <data name="Steam_VirtualControllerCard.Description" xml:space="preserve"><value>Overrides the Controller default for this Steam game.</value></data>
   <data name="Steam_VirtualControllerCard.Header" xml:space="preserve"><value>Virtual Controller</value></data>
+
+  <data name="MainNav_Xbox.Content" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Xbox_BackButton.Content" xml:space="preserve"><value>Back</value></data>
+  <data name="Xbox_BackMapping_InvalidTargets" xml:space="preserve"><value>Choose valid M1 and M2 targets before saving the per-game mapping.</value></data>
+  <data name="Xbox_BackMapping_UpdateFailed" xml:space="preserve"><value>M1 / M2 mapping could not be updated.</value></data>
+  <data name="Xbox_BackTarget_Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Xbox_BackTarget_A" xml:space="preserve"><value>A</value></data>
+  <data name="Xbox_BackTarget_B" xml:space="preserve"><value>B</value></data>
+  <data name="Xbox_BackTarget_X" xml:space="preserve"><value>X</value></data>
+  <data name="Xbox_BackTarget_Y" xml:space="preserve"><value>Y</value></data>
+  <data name="Xbox_BackTarget_DPadUp" xml:space="preserve"><value>D-Pad Up</value></data>
+  <data name="Xbox_BackTarget_DPadRight" xml:space="preserve"><value>D-Pad Right</value></data>
+  <data name="Xbox_BackTarget_DPadDown" xml:space="preserve"><value>D-Pad Down</value></data>
+  <data name="Xbox_BackTarget_DPadLeft" xml:space="preserve"><value>D-Pad Left</value></data>
+  <data name="Xbox_BackTarget_LeftBumper" xml:space="preserve"><value>Left Bumper (LB)</value></data>
+  <data name="Xbox_BackTarget_RightBumper" xml:space="preserve"><value>Right Bumper (RB)</value></data>
+  <data name="Xbox_BackTarget_LeftTrigger" xml:space="preserve"><value>Left Trigger (LT)</value></data>
+  <data name="Xbox_BackTarget_RightTrigger" xml:space="preserve"><value>Right Trigger (RT)</value></data>
+  <data name="Xbox_BackTarget_LeftStickClick" xml:space="preserve"><value>Left Stick Click (L3)</value></data>
+  <data name="Xbox_BackTarget_RightStickClick" xml:space="preserve"><value>Right Stick Click (R3)</value></data>
+  <data name="Xbox_BackTarget_View" xml:space="preserve"><value>View</value></data>
+  <data name="Xbox_BackTarget_Menu" xml:space="preserve"><value>Menu</value></data>
+  <data name="Xbox_BackTarget_XboxGuide" xml:space="preserve"><value>Xbox Guide</value></data>
+  <data name="Xbox_Catalog_LoadFailed" xml:space="preserve"><value>XBOX game catalog could not be loaded.</value></data>
+  <data name="Xbox_Catalog_NoGames" xml:space="preserve"><value>No installed XBOX games were found.</value></data>
+  <data name="Xbox_Catalog_RefreshFailed" xml:space="preserve"><value>XBOX game catalog could not be refreshed.</value></data>
+  <data name="Xbox_CatalogTitle.Text" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Xbox_ControllerMappingExpander.Description" xml:space="preserve"><value>Enable a per-game M1 / M2 override for Xbox 360 output. Off uses the global mapping.</value></data>
+  <data name="Xbox_ControllerMappingExpander.Header" xml:space="preserve"><value>M1 / M2 Button Mapping</value></data>
+  <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Xbox_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
+  <data name="Xbox_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
+  <data name="Xbox_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
+  <data name="Xbox_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
+  <data name="Xbox_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Xbox_CpuBoost_Mode_EfficientAggressive" xml:space="preserve"><value>Efficient Aggressive</value></data>
+  <data name="Xbox_CpuBoost_Mode_EfficientAggressiveAtGuaranteed" xml:space="preserve"><value>Efficient Aggressive At Guaranteed</value></data>
+  <data name="Xbox_CpuBoost_Mode_EfficientEnabled" xml:space="preserve"><value>Efficient Enabled</value></data>
+  <data name="Xbox_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="Xbox_CpuBoost_UpdateFailed" xml:space="preserve"><value>CPU Boost could not be updated.</value></data>
+  <data name="Xbox_Favorite_SaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
+  <data name="Xbox_FpsAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Xbox_FpsDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_GameSearchBox.PlaceholderText" xml:space="preserve"><value>Search games...</value></data>
+  <data name="Xbox_GpuMinimumClockAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Xbox_GpuMinimumClockDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_GpuMinimumClockExpander.Description" xml:space="preserve"><value>Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.</value></data>
+  <data name="Xbox_GpuMinimumClockExpander.Header" xml:space="preserve"><value>Minimum GPU Clock</value></data>
+  <data name="Xbox_GpuMinimumClock_UpdateFailed" xml:space="preserve"><value>Minimum GPU Clock could not be updated.</value></data>
+  <data name="Xbox_IntelFpsExpander.Description" xml:space="preserve"><value>Uses Intel&apos;s official API. Some games may not support FPS limiting.</value></data>
+  <data name="Xbox_IntelFpsExpander.Header" xml:space="preserve"><value>Intel FPS Limit</value></data>
+  <data name="Xbox_IntelFps_Unavailable" xml:space="preserve"><value>Intel FPS Limit is unavailable.</value></data>
+  <data name="Xbox_IntelFps_UpdateFailed" xml:space="preserve"><value>Intel FPS Limit could not be updated.</value></data>
+  <data name="Xbox_M1Card.Header" xml:space="preserve"><value>M1</value></data>
+  <data name="Xbox_M2Card.Header" xml:space="preserve"><value>M2</value></data>
+  <data name="Xbox_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Xbox_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
+  <data name="Xbox_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
+  <data name="Xbox_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>
+  <data name="Xbox_PowerMode_Mode_BestPerformance" xml:space="preserve"><value>Best performance</value></data>
+  <data name="Xbox_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve"><value>Best power efficiency</value></data>
+  <data name="Xbox_PowerMode_ToggleUpdateFailed" xml:space="preserve"><value>Windows Power Mode could not be updated.</value></data>
+  <data name="Xbox_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
+  <data name="Xbox_Profile_LoadFailed" xml:space="preserve"><value>XBOX profile settings could not be loaded.</value></data>
+  <data name="Xbox_Profile_RuntimeInterrupted" xml:space="preserve"><value>Profile could not be updated because the Runtime connection was interrupted.</value></data>
+  <data name="Xbox_Profile_SettingsUnwritable" xml:space="preserve"><value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
+  <data name="Xbox_Profile_UpdateFailed" xml:space="preserve"><value>Profile could not be updated.</value></data>
+  <data name="Xbox_RefreshGamesButton.Content" xml:space="preserve"><value>↻ Refresh</value></data>
+  <data name="Xbox_Resolution_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
+  <data name="Xbox_Resolution_UpdateFailed" xml:space="preserve"><value>Display resolution could not be updated.</value></data>
+  <data name="Xbox_ResolutionCard.Header" xml:space="preserve"><value>Resolution</value></data>
+  <data name="Xbox_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
+  <data name="Xbox_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
+  <data name="Xbox_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Xbox_TdpControl_ToggleUpdateFailed" xml:space="preserve"><value>TDP Control could not be updated.</value></data>
+  <data name="Xbox_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
+  <data name="Xbox_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
 </root>

@@ -35,7 +35,7 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8F1;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="XBOX" Tag="Xbox">
+            <NavigationViewItem x:Uid="MainNav_Xbox" Content="XBOX" Tag="Xbox">
                 <NavigationViewItem.Icon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE990;" />
                 </NavigationViewItem.Icon>
