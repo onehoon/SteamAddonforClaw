@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.UI;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -39,13 +40,13 @@ public sealed partial class DevicePage : UserControl
 
     private static readonly CpuBoostModeItem[] Modes =
     [
-        new(CpuBoostMode.Disabled, "Disabled"),
-        new(CpuBoostMode.Enabled, "Enabled"),
-        new(CpuBoostMode.Aggressive, "Aggressive"),
-        new(CpuBoostMode.EfficientEnabled, "Efficient Enabled"),
-        new(CpuBoostMode.EfficientAggressive, "Efficient Aggressive"),
-        new(CpuBoostMode.AggressiveAtGuaranteed, "Aggressive At Guaranteed"),
-        new(CpuBoostMode.EfficientAggressiveAtGuaranteed, "Efficient Aggressive At Guaranteed"),
+        new(CpuBoostMode.Disabled, MainUiStrings.Get("Device_CpuBoost_Mode_Disabled", "Disabled")),
+        new(CpuBoostMode.Enabled, MainUiStrings.Get("Device_CpuBoost_Mode_Enabled", "Enabled")),
+        new(CpuBoostMode.Aggressive, MainUiStrings.Get("Device_CpuBoost_Mode_Aggressive", "Aggressive")),
+        new(CpuBoostMode.EfficientEnabled, MainUiStrings.Get("Device_CpuBoost_Mode_EfficientEnabled", "Efficient Enabled")),
+        new(CpuBoostMode.EfficientAggressive, MainUiStrings.Get("Device_CpuBoost_Mode_EfficientAggressive", "Efficient Aggressive")),
+        new(CpuBoostMode.AggressiveAtGuaranteed, MainUiStrings.Get("Device_CpuBoost_Mode_AggressiveAtGuaranteed", "Aggressive At Guaranteed")),
+        new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Device_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed")),
     ];
 
     public DevicePage()
@@ -149,23 +150,26 @@ public sealed partial class DevicePage : UserControl
         BatteryChargeLimitEnabledToggleSwitch.IsEnabled = editable && snapshot.Initialized;
         BatteryChargeLimitSlider.IsEnabled = editable;
         var current = snapshot.CurrentLimitPercent is { } currentPercent
-            ? $"Current hardware: {currentPercent}%"
-            : "Current hardware: unavailable";
+            ? MainUiStrings.Format("Device_Battery_CurrentKnown", "Current hardware: {0}%", currentPercent)
+            : MainUiStrings.Get("Device_Battery_CurrentUnavailable", "Current hardware: unavailable");
         var desired = snapshot.Initialized
-            ? $"Desired: {snapshot.DesiredLimitPercent}% ({(snapshot.DesiredEnabled == true ? "enabled" : "disabled")})"
-            : "Desired: not initialized; choose a supported 60–100% value to take ownership.";
+            ? MainUiStrings.Format("Device_Battery_DesiredKnown", "Desired: {0}% ({1})",
+                snapshot.DesiredLimitPercent,
+                MainUiStrings.Get(snapshot.DesiredEnabled == true ? "Device_Battery_EnabledWord" : "Device_Battery_DisabledWord",
+                    snapshot.DesiredEnabled == true ? "enabled" : "disabled"))
+            : MainUiStrings.Get("Device_Battery_DesiredNotInitialized", "Desired: not initialized; choose a supported 60–100% value to take ownership.");
         BatteryChargeLimitStatusText.Text = $"{current} · {desired}";
 
         BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Warning;
         if (!snapshot.Available)
         {
-            BatteryChargeLimitInfoBar.Message = "Battery charge-limit control is unavailable on this device.";
+            BatteryChargeLimitInfoBar.Message = MainUiStrings.Get("Device_Battery_Unavailable", "Battery charge-limit control is unavailable on this device.");
             SetInfoBarOpen(BatteryChargeLimitInfoBar, true);
         }
         else if (!snapshot.PersistenceWritable)
         {
             BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Error;
-            BatteryChargeLimitInfoBar.Message = "Battery settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.";
+            BatteryChargeLimitInfoBar.Message = MainUiStrings.Get("Device_Battery_SettingsUnwritable", "Battery settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.");
             SetInfoBarOpen(BatteryChargeLimitInfoBar, true);
         }
         else if (snapshot.LastFailure is { } failure)
@@ -175,7 +179,7 @@ public sealed partial class DevicePage : UserControl
         }
         else if (snapshot.Initialized && (snapshot.CurrentEnabled != snapshot.DesiredEnabled || snapshot.CurrentLimitPercent != snapshot.DesiredLimitPercent))
         {
-            BatteryChargeLimitInfoBar.Message = "Current hardware does not match the saved desired battery charge limit; it will be reconciled on the next lifecycle event.";
+            BatteryChargeLimitInfoBar.Message = MainUiStrings.Get("Device_Battery_MismatchToDesired", "Current hardware does not match the saved desired battery charge limit; it will be reconciled on the next lifecycle event.");
             SetInfoBarOpen(BatteryChargeLimitInfoBar, true);
         }
         else SetInfoBarOpen(BatteryChargeLimitInfoBar, false);
@@ -211,7 +215,7 @@ public sealed partial class DevicePage : UserControl
             if (!result.Succeeded)
             {
                 BatteryChargeLimitInfoBar.Severity = result.Outcome == FrontendBatteryChargeLimitMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning;
-                BatteryChargeLimitInfoBar.Message = result.FailureMessage ?? "Battery charge limit could not be updated.";
+                BatteryChargeLimitInfoBar.Message = result.FailureMessage ?? MainUiStrings.Get("Device_Battery_UpdateFailed", "Battery charge limit could not be updated.");
                 SetInfoBarOpen(BatteryChargeLimitInfoBar, true);
             }
         }
@@ -219,7 +223,7 @@ public sealed partial class DevicePage : UserControl
         {
             AppLog.Warn("Device", "Battery charge-limit mutation failed.", exception, ("Reason", exception.GetType().Name));
             BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Error;
-            BatteryChargeLimitInfoBar.Message = "Battery charge limit could not be updated because the Runtime connection was interrupted.";
+            BatteryChargeLimitInfoBar.Message = MainUiStrings.Get("Device_Battery_RuntimeInterrupted", "Battery charge limit could not be updated because the Runtime connection was interrupted.");
             SetInfoBarOpen(BatteryChargeLimitInfoBar, true);
             await RefreshAsync();
         }
@@ -242,7 +246,7 @@ public sealed partial class DevicePage : UserControl
             if (!result.Succeeded)
             {
                 BatteryChargeLimitInfoBar.Severity = result.Outcome == FrontendBatteryChargeLimitMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning;
-                BatteryChargeLimitInfoBar.Message = result.FailureMessage ?? "Battery charge limit could not be updated.";
+                BatteryChargeLimitInfoBar.Message = result.FailureMessage ?? MainUiStrings.Get("Device_Battery_UpdateFailed", "Battery charge limit could not be updated.");
                 SetInfoBarOpen(BatteryChargeLimitInfoBar, true);
             }
         }
@@ -250,7 +254,7 @@ public sealed partial class DevicePage : UserControl
         {
             AppLog.Warn("Device", "Battery charge-limit enable mutation failed.", exception, ("Reason", exception.GetType().Name));
             BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Error;
-            BatteryChargeLimitInfoBar.Message = "Battery charge limit could not be updated because the Runtime connection was interrupted.";
+            BatteryChargeLimitInfoBar.Message = MainUiStrings.Get("Device_Battery_RuntimeInterrupted", "Battery charge limit could not be updated because the Runtime connection was interrupted.");
             SetInfoBarOpen(BatteryChargeLimitInfoBar, true);
             await RefreshAsync();
         }
@@ -274,7 +278,12 @@ public sealed partial class DevicePage : UserControl
             dirty && !busy && desiredPercent != draftPercent;
     }
 
-    private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];
+    private static readonly PowerModeItem[] PowerModes =
+    [
+        new(WindowsPowerMode.BestPowerEfficiency, MainUiStrings.Get("Device_PowerMode_Mode_BestPowerEfficiency", "Best power efficiency")),
+        new(WindowsPowerMode.Balanced, MainUiStrings.Get("Device_PowerMode_Mode_Balanced", "Balanced")),
+        new(WindowsPowerMode.BestPerformance, MainUiStrings.Get("Device_PowerMode_Mode_BestPerformance", "Best performance")),
+    ];
     private void RenderPowerMode(FrontendPowerModeSnapshot snapshot)
     {
         _powerModeSnapshot = snapshot; _suppressSelectionEvents = true;
@@ -283,7 +292,9 @@ public sealed partial class DevicePage : UserControl
         var editable = snapshot.PersistenceWritable && snapshot.Ac.Desired is not null && snapshot.Dc.Desired is not null;
         PowerModeEnabledToggleSwitch.IsEnabled = editable; PowerModeAcComboBox.IsEnabled = editable && snapshot.Enabled; PowerModeDcComboBox.IsEnabled = editable && snapshot.Enabled;
         SetInfoBarOpen(PowerModeInfoBar, !editable || snapshot.LastFailure is not null);
-        PowerModeInfoBar.Message = snapshot.LastFailure ?? (editable ? "Power Mode settings are unavailable." : "Windows Power Mode could not be initialized.");
+        PowerModeInfoBar.Message = snapshot.LastFailure ?? (editable
+            ? MainUiStrings.Get("Device_PowerMode_SettingsUnavailable", "Power Mode settings are unavailable.")
+            : MainUiStrings.Get("Device_PowerMode_InitializationFailed", "Windows Power Mode could not be initialized."));
     }
     private static PowerModeItem? PowerModeItemFor(FrontendPowerModeSideSnapshot side) => PowerModes.FirstOrDefault(x => x.Mode == (side.Desired ?? side.Current));
     private async void PowerModeAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (_suppressSelectionEvents || _frontend is null || PowerModeAcComboBox.SelectedItem is not PowerModeItem item) return; await RunPowerModeMutationAsync(() => _frontend.SetDevicePowerModeAcAsync(item.Mode)); }
@@ -297,13 +308,13 @@ public sealed partial class DevicePage : UserControl
             if (!result.Succeeded)
             {
                 PowerModeInfoBar.Severity = result.Outcome == FrontendPowerModeMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning;
-                PowerModeInfoBar.Message = result.FailureMessage ?? "Power Mode could not be updated."; SetInfoBarOpen(PowerModeInfoBar, true);
+                PowerModeInfoBar.Message = result.FailureMessage ?? MainUiStrings.Get("Device_PowerMode_UpdateFailed", "Power Mode could not be updated."); SetInfoBarOpen(PowerModeInfoBar, true);
             }
         }
         catch (Exception exception)
         {
             AppLog.Warn("Device", "Power Mode mutation failed.", exception);
-            PowerModeInfoBar.Severity = InfoBarSeverity.Error; PowerModeInfoBar.Message = "Power Mode could not be updated because the Runtime connection was interrupted."; SetInfoBarOpen(PowerModeInfoBar, true);
+            PowerModeInfoBar.Severity = InfoBarSeverity.Error; PowerModeInfoBar.Message = MainUiStrings.Get("Device_PowerMode_RuntimeInterrupted", "Power Mode could not be updated because the Runtime connection was interrupted."); SetInfoBarOpen(PowerModeInfoBar, true);
             await RefreshAsync();
         }
     }
@@ -332,13 +343,13 @@ public sealed partial class DevicePage : UserControl
         if (!snapshot.PersistenceWritable)
         {
             CpuBoostInfoBar.Severity = InfoBarSeverity.Error;
-            CpuBoostInfoBar.Message = "CPU Boost settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.";
+            CpuBoostInfoBar.Message = MainUiStrings.Get("Device_CpuBoost_SettingsUnwritable", "CPU Boost settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.");
             SetInfoBarOpen(CpuBoostInfoBar, true);
         }
         else if (snapshot.LastFailure is { } failure)
         {
             CpuBoostInfoBar.Severity = InfoBarSeverity.Warning;
-            CpuBoostInfoBar.Message = $"The last CPU Boost change could not be applied to Windows: {failure}";
+            CpuBoostInfoBar.Message = MainUiStrings.Format("Device_CpuBoost_LastChangeFailed", "The last CPU Boost change could not be applied to Windows: {0}", failure);
             SetInfoBarOpen(CpuBoostInfoBar, true);
         }
         else
@@ -393,7 +404,7 @@ public sealed partial class DevicePage : UserControl
                 CpuBoostInfoBar.Severity = result.Outcome == FrontendCpuBoostMutationOutcome.PersistenceFailed
                     ? InfoBarSeverity.Error
                     : InfoBarSeverity.Warning;
-                CpuBoostInfoBar.Message = result.FailureMessage ?? "The CPU Boost change failed.";
+                CpuBoostInfoBar.Message = result.FailureMessage ?? MainUiStrings.Get("Device_CpuBoost_ChangeFailed", "The CPU Boost change failed.");
                 SetInfoBarOpen(CpuBoostInfoBar, true);
             }
         }
@@ -401,7 +412,7 @@ public sealed partial class DevicePage : UserControl
         {
             AppLog.Warn("Device", "CPU Boost mutation failed.", exception, ("Reason", exception.GetType().Name));
             CpuBoostInfoBar.Severity = InfoBarSeverity.Error;
-            CpuBoostInfoBar.Message = "CPU Boost could not be updated because the Runtime connection was interrupted.";
+            CpuBoostInfoBar.Message = MainUiStrings.Get("Device_CpuBoost_RuntimeInterrupted", "CPU Boost could not be updated because the Runtime connection was interrupted.");
             SetInfoBarOpen(CpuBoostInfoBar, true);
 
             // Restore controls from Runtime authority when the connection is still usable.
@@ -455,8 +466,8 @@ public sealed partial class DevicePage : UserControl
         foreach (var slider in new[] { TdpAcPl1Slider, TdpAcPl2Slider, TdpDcPl1Slider, TdpDcPl2Slider }) slider.IsEnabled = editable;
         SetTdpValueText(TdpAcPl1ValueText, _acPl1Draft); SetTdpValueText(TdpAcPl2ValueText, _acPl2Draft);
         SetTdpValueText(TdpDcPl1ValueText, _dcPl1Draft); SetTdpValueText(TdpDcPl2ValueText, _dcPl2Draft);
-        if (!snapshot.Available) { TdpInfoBar.Message = "TDP Control is unavailable on this device."; SetInfoBarOpen(TdpInfoBar, true); }
-        else if (!snapshot.PersistenceWritable) { TdpInfoBar.Message = "TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."; TdpInfoBar.Severity = InfoBarSeverity.Error; SetInfoBarOpen(TdpInfoBar, true); }
+        if (!snapshot.Available) { TdpInfoBar.Message = MainUiStrings.Get("Device_Tdp_Unavailable", "TDP Control is unavailable on this device."); SetInfoBarOpen(TdpInfoBar, true); }
+        else if (!snapshot.PersistenceWritable) { TdpInfoBar.Message = MainUiStrings.Get("Device_Tdp_SettingsUnwritable", "TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."); TdpInfoBar.Severity = InfoBarSeverity.Error; SetInfoBarOpen(TdpInfoBar, true); }
         else if (snapshot.Available) SetInfoBarOpen(TdpInfoBar, false);
     }
 
@@ -513,11 +524,11 @@ public sealed partial class DevicePage : UserControl
             RenderTdp(result.Snapshot, preserveDirtyDraft: false);
             if (!result.Succeeded)
             {
-                TdpInfoBar.Message = result.FailureMessage ?? "TDP could not be updated.";
+                TdpInfoBar.Message = result.FailureMessage ?? MainUiStrings.Get("Device_Tdp_UpdateFailed", "TDP could not be updated.");
                 SetInfoBarOpen(TdpInfoBar, true);
             }
         }
-        catch (Exception exception) { AppLog.Warn("Device", "TDP enable mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; SetInfoBarOpen(TdpInfoBar, true); await RefreshAsync(); }
+        catch (Exception exception) { AppLog.Warn("Device", "TDP enable mutation failed.", exception); TdpInfoBar.Message = MainUiStrings.Get("Device_Tdp_RuntimeInterrupted", "TDP could not be updated because the Runtime connection was interrupted."); SetInfoBarOpen(TdpInfoBar, true); await RefreshAsync(); }
         finally { SetTdpMutationBusy(false); }
     }
 
@@ -558,8 +569,8 @@ public sealed partial class DevicePage : UserControl
         TdpDraftPolicy.TryBuildToggleConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft, _tdpSnapshot.Configuration);
     private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration, long submittedGeneration, bool editedAc)
     {
-        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!newerEditExists && result.HardwareApply is { Attempted: true } hardware && TdpDraftPolicy.ShouldShowHardwareResult(editedAc, hardware)) SetTdpResult(editedAc, hardware.Succeeded ? "Success" : "Fail"); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; SetInfoBarOpen(TdpInfoBar, true); } }
-        catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; TdpInfoBar.Severity = InfoBarSeverity.Error; SetInfoBarOpen(TdpInfoBar, true); await RefreshAsync(); }
+        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!newerEditExists && result.HardwareApply is { Attempted: true } hardware && TdpDraftPolicy.ShouldShowHardwareResult(editedAc, hardware)) SetTdpResult(editedAc, MainUiStrings.Get(hardware.Succeeded ? "Device_Tdp_ResultSuccess" : "Device_Tdp_ResultFail", hardware.Succeeded ? "Success" : "Fail")); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? MainUiStrings.Get("Device_Tdp_ChangeFailed", "The TDP change failed."); TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; SetInfoBarOpen(TdpInfoBar, true); } }
+        catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = MainUiStrings.Get("Device_Tdp_RuntimeInterrupted", "TDP could not be updated because the Runtime connection was interrupted."); TdpInfoBar.Severity = InfoBarSeverity.Error; SetInfoBarOpen(TdpInfoBar, true); await RefreshAsync(); }
     }
     private void SetTdpResult(bool ac, string? result)
     {
@@ -669,10 +680,10 @@ public sealed partial class DevicePage : UserControl
         CenterMStartupCard.Visibility = Visibility.Visible;
         CenterMStartupStatusText.Text = snapshot.State switch
         {
-            FrontendCenterMStartupState.Enabled => "Status: Enabled",
-            FrontendCenterMStartupState.Disabled => "Status: Disabled",
-            FrontendCenterMStartupState.Partial => "Status: Needs attention",
-            _ => "Status: Unavailable",
+            FrontendCenterMStartupState.Enabled => MainUiStrings.Get("Device_CenterM_StatusEnabled", "Status: Enabled"),
+            FrontendCenterMStartupState.Disabled => MainUiStrings.Get("Device_CenterM_StatusDisabled", "Status: Disabled"),
+            FrontendCenterMStartupState.Partial => MainUiStrings.Get("Device_CenterM_StatusNeedsAttention", "Status: Needs attention"),
+            _ => MainUiStrings.Get("Device_CenterM_StatusUnavailable", "Status: Unavailable"),
         };
 
         var operable = !_centerMStartupBusy && snapshot.State != FrontendCenterMStartupState.Unavailable;
@@ -683,12 +694,12 @@ public sealed partial class DevicePage : UserControl
         {
             case CenterMStartupInfoBarKind.Partial:
                 CenterMStartupInfoBar.Severity = InfoBarSeverity.Warning;
-                CenterMStartupInfoBar.Message = "MSI Center M startup configuration is inconsistent. Choose Enable or Disable to repair it.";
+                CenterMStartupInfoBar.Message = MainUiStrings.Get("Device_CenterM_Inconsistent", "MSI Center M startup configuration is inconsistent. Choose Enable or Disable to repair it.");
                 SetInfoBarOpen(CenterMStartupInfoBar, true);
                 break;
             case CenterMStartupInfoBarKind.Unavailable:
                 CenterMStartupInfoBar.Severity = InfoBarSeverity.Warning;
-                CenterMStartupInfoBar.Message = snapshot.FailureMessage ?? "MSI Center M controller authority control is unavailable.";
+                CenterMStartupInfoBar.Message = snapshot.FailureMessage ?? MainUiStrings.Get("Device_CenterM_Unavailable", "MSI Center M controller authority control is unavailable.");
                 SetInfoBarOpen(CenterMStartupInfoBar, true);
                 break;
             default:
@@ -727,16 +738,19 @@ public sealed partial class DevicePage : UserControl
         // transition always restarts immediately -- there is no deferred-restart choice.
         var dialog = new ContentDialog
         {
-            Title = centerMEnabled ? "Enable MSI Center M" : "Disable MSI Center M",
+            Title = MainUiStrings.Get(centerMEnabled ? "Device_CenterM_EnableTitle" : "Device_CenterM_DisableTitle",
+                centerMEnabled ? "Enable MSI Center M" : "Disable MSI Center M"),
             Content = new TextBlock
             {
                 TextWrapping = TextWrapping.Wrap,
-                Text = centerMEnabled
-                    ? "Restore MSI Center M controller authority.\n\nWindows must restart to apply this change."
-                    : "Disable MSI Center M and switch controller authority to Steam Addon for Claw.\n\nWindows must restart to apply this change.",
+                Text = MainUiStrings.Get(centerMEnabled ? "Device_CenterM_EnableConfirmation" : "Device_CenterM_DisableConfirmation",
+                    centerMEnabled
+                        ? "Restore MSI Center M controller authority.\n\nWindows must restart to apply this change."
+                        : "Disable MSI Center M and switch controller authority to Steam Addon for Claw.\n\nWindows must restart to apply this change."),
             },
-            PrimaryButtonText = centerMEnabled ? "Enable and Restart" : "Disable and Restart",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = MainUiStrings.Get(centerMEnabled ? "Device_CenterM_EnableAndRestart" : "Device_CenterM_DisableAndRestart",
+                centerMEnabled ? "Enable and Restart" : "Disable and Restart"),
+            CloseButtonText = MainUiStrings.Get("Device_CenterM_Cancel", "Cancel"),
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot,
         };
@@ -756,7 +770,7 @@ public sealed partial class DevicePage : UserControl
                 CenterMStartupEnableButton.IsEnabled = false;
                 CenterMStartupDisableButton.IsEnabled = false;
                 CenterMStartupInfoBar.Severity = InfoBarSeverity.Success;
-                CenterMStartupInfoBar.Message = "Controller authority updated. Restarting Windows…";
+                CenterMStartupInfoBar.Message = MainUiStrings.Get("Device_CenterM_RestartingWindows", "Controller authority updated. Restarting Windows…");
                 SetInfoBarOpen(CenterMStartupInfoBar, true);
             }
             else
@@ -776,8 +790,8 @@ public sealed partial class DevicePage : UserControl
                 // does not imply that no persistent state changed.
                 CenterMStartupInfoBar.Message = result.FailureMessage
                     ?? (result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
-                        ? "The controller authority change was cancelled."
-                        : "The controller authority change could not be completed.");
+                        ? MainUiStrings.Get("Device_CenterM_ChangeCancelled", "The controller authority change was cancelled.")
+                        : MainUiStrings.Get("Device_CenterM_ChangeFailed", "The controller authority change could not be completed."));
                 SetInfoBarOpen(CenterMStartupInfoBar, true);
             }
         }
@@ -786,7 +800,7 @@ public sealed partial class DevicePage : UserControl
             _centerMStartupBusy = false;
             AppLog.Warn("Device", "MSI Center M authority transition failed.", exception, ("Reason", exception.GetType().Name));
             CenterMStartupInfoBar.Severity = InfoBarSeverity.Error;
-            CenterMStartupInfoBar.Message = "The controller authority change could not be completed because the Runtime connection was interrupted.";
+            CenterMStartupInfoBar.Message = MainUiStrings.Get("Device_CenterM_RuntimeInterrupted", "The controller authority change could not be completed because the Runtime connection was interrupted.");
             SetInfoBarOpen(CenterMStartupInfoBar, true);
             await RefreshCenterMStartupAsync();
         }

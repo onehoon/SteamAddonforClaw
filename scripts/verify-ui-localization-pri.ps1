@@ -14,6 +14,51 @@ if (-not (Test-Path -LiteralPath $applicationPri -PathType Leaf)) {
     throw "Published Main UI application PRI was not found: $applicationPri"
 }
 
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$stringsDirectory = Join-Path $repositoryRoot 'src\SteamInputAddonforClaw.UI\Strings'
+
+function Read-SourceResources {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $document = [System.Xml.XmlDocument]::new()
+    try { $document.Load($Path) }
+    catch { throw "Source RESW is invalid XML '$Path': $($_.Exception.Message)" }
+
+    $resources = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::Ordinal)
+    foreach ($data in $document.SelectNodes("/*[local-name()='root']/*[local-name()='data']")) {
+        $key = $data.GetAttribute('name')
+        $valueNode = $data.SelectSingleNode("./*[local-name()='value']")
+        $value = if ($null -ne $valueNode) { $valueNode.InnerText } else { $null }
+        if ([string]::IsNullOrWhiteSpace($key) -or [string]::IsNullOrWhiteSpace($value)) {
+            throw "Source RESW '$Path' contains an empty key or value."
+        }
+        if ($resources.ContainsKey($key)) {
+            throw "Source RESW '$Path' contains duplicate key '$key'."
+        }
+        $resources.Add($key, $value)
+    }
+    return ,$resources
+}
+
+$englishResources = Read-SourceResources -Path (Join-Path $stringsDirectory 'en-US\Resources.resw')
+$koreanResources = Read-SourceResources -Path (Join-Path $stringsDirectory 'ko-KR\Resources.resw')
+$englishKeys = @($englishResources.Keys | Sort-Object -CaseSensitive)
+$koreanKeys = @($koreanResources.Keys | Sort-Object -CaseSensitive)
+if (@(Compare-Object -ReferenceObject $englishKeys -DifferenceObject $koreanKeys -CaseSensitive).Count -ne 0) {
+    throw 'The en-US and ko-KR source RESW files must contain the same distinct key set.'
+}
+
+$requiredPilotKeys = @(
+    'MainNav_Device.Content',
+    'HowToUse_Loading.Text',
+    'Settings_AppTheme_Description'
+)
+foreach ($key in $requiredPilotKeys) {
+    if (-not $englishResources.ContainsKey($key)) {
+        throw "Required PR1 localization key '$key' is missing from the source RESW files."
+    }
+}
+
 function Get-MakePriPath {
     $candidates = [System.Collections.Generic.List[string]]::new()
     $pathCommand = Get-Command 'makepri.exe' -ErrorAction SilentlyContinue
@@ -82,6 +127,9 @@ try {
         throw "Expected exactly one primary resource map in '$applicationPri'; found $($primaryMaps.Count)."
     }
     $resourceMap = $primaryMaps[0]
+    if ($resourceMap.GetAttribute('name') -cne 'SteamInputAddonforClaw.UI') {
+        throw "Expected the published Main UI primary resource map 'SteamInputAddonforClaw.UI'; found '$($resourceMap.GetAttribute('name'))'."
+    }
 
     $defaultLanguageQualifiers = @($dump.SelectNodes("/*[local-name()='PriInfo']/*[local-name()='QualifierInfo']/*[local-name()='Qualifiers']/*[local-name()='Qualifier'][@name='Language' and number(@scoreAsDefault) > 0]"))
     if ($defaultLanguageQualifiers.Count -ne 1 -or $defaultLanguageQualifiers[0].GetAttribute('value') -ine 'en-US') {
@@ -96,14 +144,15 @@ try {
         }
     }
 
-    $requiredPilotUris = @(
-        '/Resources/MainNav_Device/Content',
-        '/Resources/HowToUse_Loading/Text',
-        '/Resources/Settings_AppTheme_Description'
-    )
     $namedResources = @($resourceMap.SelectNodes(".//*[local-name()='NamedResource']"))
 
-    foreach ($uriSuffix in $requiredPilotUris) {
+    foreach ($key in $englishKeys) {
+        if ($key -match '^(?<uid>.+)\.(?<property>Text|Content|Header|Description)$') {
+            $uriSuffix = "/Resources/$($Matches.uid)/$($Matches.property)"
+        }
+        else {
+            $uriSuffix = "/Resources/$key"
+        }
         $matches = @($namedResources | Where-Object { $_.GetAttribute('uri').EndsWith($uriSuffix, [System.StringComparison]::OrdinalIgnoreCase) })
         if ($matches.Count -ne 1) {
             throw "Expected one published PRI resource ending '$uriSuffix'; found $($matches.Count)."
@@ -131,7 +180,7 @@ try {
         }
     }
 
-    Write-Host "Published Main UI PRI verified: $($resourceMap.GetAttribute('name')); en-US default and all three en-US/ko-KR pilot candidates are present."
+    Write-Host "Published Main UI PRI verified: $($resourceMap.GetAttribute('name')); en-US default and $($englishKeys.Count) resources have non-empty en-US/ko-KR candidates."
 }
 finally {
     if (Test-Path -LiteralPath $dumpPath -PathType Leaf) {
