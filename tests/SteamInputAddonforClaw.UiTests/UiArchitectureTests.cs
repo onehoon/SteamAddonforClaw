@@ -364,7 +364,7 @@ public sealed class UiArchitectureTests
         // separately -- a whole-transport failure renders all three children Unavailable and
         // RenderPowerMode itself is responsible for the concise per-feature failure message.
         Assert.Contains("RenderPowerMode(FrontendPowerModeSnapshot.Unavailable)", devicePage, StringComparison.Ordinal);
-        Assert.Contains("\"Windows Power Mode could not be initialized.\"", devicePage, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Device_PowerMode_InitializationFailed\", \"Windows Power Mode could not be initialized.\")", devicePage, StringComparison.Ordinal);
         Assert.Contains("PowerModeAcComboBox.SelectedItem = null", profilePage, StringComparison.Ordinal);
         Assert.Contains("PowerModeDcComboBox.SelectedItem = null", profilePage, StringComparison.Ordinal);
     }
