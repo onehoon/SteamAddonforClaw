@@ -30,7 +30,7 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Steam" Tag="Profile">
+            <NavigationViewItem x:Uid="MainNav_Steam" Content="Steam" Tag="Profile">
                 <NavigationViewItem.Icon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8F1;" />
                 </NavigationViewItem.Icon>

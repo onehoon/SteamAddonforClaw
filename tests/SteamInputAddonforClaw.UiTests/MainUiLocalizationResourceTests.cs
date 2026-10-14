@@ -27,6 +27,7 @@ public sealed class MainUiLocalizationResourceTests
         var requiredPilotKeys = new[]
         {
             "MainNav_Device.Content",
+            "MainNav_Steam.Content",
             "HowToUse_Loading.Text",
             "Settings_AppTheme_Description"
         };
@@ -51,6 +52,19 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Equal("MainNav_Device", (string?)device.Attribute(XamlNamespace + "Uid"));
         Assert.Equal("Device", (string?)device.Attribute("Content"));
         Assert.Equal("Device", (string?)device.Attribute("Tag"));
+    }
+
+    [Fact]
+    public void Steam_navigation_localizes_only_content_and_keeps_Profile_identity()
+    {
+        var root = FindRepositoryRoot();
+        var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var steam = Assert.Single(document.Descendants(), element =>
+            element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == "Profile");
+
+        Assert.Equal("MainNav_Steam", (string?)steam.Attribute(XamlNamespace + "Uid"));
+        Assert.Equal("Steam", (string?)steam.Attribute("Content"));
+        Assert.Equal("Profile", (string?)steam.Attribute("Tag"));
     }
 
     [Fact]
@@ -255,6 +269,149 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Contains("Controller_RestoreVibrationButton.Content", english.Keys);
         Assert.Contains("Controller_RestoreVibrationButton.Content", korean.Keys);
         Assert.Equal("safe fallback", MainUiStrings.Get("Missing_Controller_Test_Key", "safe fallback"));
+    }
+
+    [Fact]
+    public void Steam_xaml_text_uses_unique_resource_uids_and_preserves_dynamic_identity()
+    {
+        var root = FindRepositoryRoot();
+        var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml"));
+        var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        var expectedUids = new[]
+        {
+            "Steam_CatalogTitle", "Steam_RefreshGamesButton", "Steam_GameSearchBox", "Steam_BackButton",
+            "Steam_VirtualControllerCard", "Steam_VirtualController_DefaultOption",
+            "Steam_VirtualController_SteamDeckOption", "Steam_VirtualController_DualSenseEdgeOption",
+            "Steam_TdpExpander", "Steam_TdpAcCard", "Steam_TdpDcCard",
+            "Steam_CpuBoostExpander", "Steam_CpuBoostAcCard", "Steam_CpuBoostDcCard",
+            "Steam_PowerModeExpander", "Steam_PowerModeAcCard", "Steam_PowerModeDcCard",
+            "Steam_GpuMinimumClockExpander", "Steam_GpuMinimumClockAcCard", "Steam_GpuMinimumClockDcCard",
+            "Steam_IntelFpsExpander", "Steam_FpsAcCard", "Steam_FpsDcCard", "Steam_ResolutionCard"
+        };
+        var uidElements = document.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        var actualUids = uidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!).ToArray();
+
+        Assert.Equal(expectedUids.OrderBy(value => value, StringComparer.Ordinal), actualUids.OrderBy(value => value, StringComparer.Ordinal));
+        Assert.Equal(actualUids.Length, actualUids.Distinct(StringComparer.Ordinal).Count());
+        foreach (var element in uidElements)
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText" })
+            {
+                var sourceValue = (string?)element.Attribute(property);
+                if (sourceValue is null) continue;
+
+                var key = $"{uid}.{property}";
+                Assert.Contains(key, english.Keys);
+                Assert.Contains(key, korean.Keys);
+                Assert.Equal(sourceValue, english[key]);
+            }
+        }
+
+        var selector = Assert.Single(document.Descendants(), element =>
+            element.Name.LocalName == "ComboBox" && (string?)element.Attribute(XamlNamespace + "Name") == "SteamVirtualControllerComboBox");
+        Assert.Equal(new[] { "Default", "SteamDeck", "DualSenseEdge" }, selector.Elements()
+            .Where(element => element.Name.LocalName == "ComboBoxItem")
+            .Select(element => (string)element.Attribute("Tag")!));
+        var selectedGameName = Assert.Single(document.Descendants(), element =>
+            (string?)element.Attribute(XamlNamespace + "Name") == "SelectedGameNameText");
+        Assert.Null(selectedGameName.Attribute(XamlNamespace + "Uid"));
+    }
+
+    [Fact]
+    public void Steam_code_resources_cover_modes_errors_and_runtime_message_precedence()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        var literalKeys = Regex.Matches(source, "MainUiStrings\\.Get\\(\\\"(?<key>Steam_[^\\\"]+)\\\"")
+            .Select(match => match.Groups["key"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(literalKeys);
+        foreach (var key in literalKeys)
+        {
+            var resourceKey = key.Replace('/', '.');
+            Assert.Contains(resourceKey, english.Keys);
+            Assert.Contains(resourceKey, korean.Keys);
+        }
+
+        var cpuModes = Regex.Matches(source, "new\\(CpuBoostMode\\.(?<mode>\\w+),\\s*MainUiStrings\\.Get\\(\\\"(?<key>Steam_CpuBoost_Mode_[^\\\"]+)\\\"")
+            .Select(match => (Mode: match.Groups["mode"].Value, Key: match.Groups["key"].Value))
+            .ToArray();
+        Assert.Equal(
+            new[]
+            {
+                ("Disabled", "Steam_CpuBoost_Mode_Disabled"),
+                ("Enabled", "Steam_CpuBoost_Mode_Enabled"),
+                ("Aggressive", "Steam_CpuBoost_Mode_Aggressive"),
+                ("EfficientEnabled", "Steam_CpuBoost_Mode_EfficientEnabled"),
+                ("EfficientAggressive", "Steam_CpuBoost_Mode_EfficientAggressive"),
+                ("AggressiveAtGuaranteed", "Steam_CpuBoost_Mode_AggressiveAtGuaranteed"),
+                ("EfficientAggressiveAtGuaranteed", "Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed")
+            },
+            cpuModes);
+
+        var powerModes = Regex.Matches(source, "new\\(WindowsPowerMode\\.(?<mode>\\w+),\\s*MainUiStrings\\.Get\\(\\\"(?<key>Steam_PowerMode_Mode_[^\\\"]+)\\\"")
+            .Select(match => (Mode: match.Groups["mode"].Value, Key: match.Groups["key"].Value))
+            .ToArray();
+        Assert.Equal(
+            new[]
+            {
+                ("BestPowerEfficiency", "Steam_PowerMode_Mode_BestPowerEfficiency"),
+                ("Balanced", "Steam_PowerMode_Mode_Balanced"),
+                ("BestPerformance", "Steam_PowerMode_Mode_BestPerformance")
+            },
+            powerModes);
+        Assert.Contains("new(null, null, MainUiStrings.Get(\"Steam_Resolution_DoNotChange\", \"Do not change\")), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", source, StringComparison.Ordinal);
+        Assert.Contains("x => x.Width == snapshot.Resolution?.Width && x.Height == snapshot.Resolution?.Height", source, StringComparison.Ordinal);
+
+        var localErrors = new[]
+        {
+            ("Steam_Catalog_NoGames", "No installed Steam games were found."),
+            ("Steam_Catalog_RefreshFailed", "Game catalog could not be refreshed."),
+            ("Steam_Favorite_SaveFailed", "Favorite could not be saved."),
+            ("Steam_Profile_LoadFailed", "Profile settings could not be loaded."),
+            ("Steam_Profile_SettingsUnwritable", "Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."),
+            ("Steam_Tdp_Unavailable", "TDP Control is unavailable on this device."),
+            ("Steam_VirtualController_UpdateFailed", "Virtual Controller could not be updated."),
+            ("Steam_IntelFps_Unavailable", "Intel FPS Limit is unavailable."),
+            ("Steam_GpuMinimumClock_UpdateFailed", "Minimum GPU Clock could not be updated."),
+            ("Steam_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."),
+            ("Steam_CpuBoost_UpdateFailed", "CPU Boost could not be updated."),
+            ("Steam_TdpControl_ToggleUpdateFailed", "TDP Control could not be updated."),
+            ("Steam_PowerMode_ToggleUpdateFailed", "Windows Power Mode could not be updated."),
+            ("Steam_Tdp_UpdateFailed", "TDP could not be updated."),
+            ("Steam_PowerMode_UpdateFailed", "Power Mode could not be updated."),
+            ("Steam_Profile_UpdateFailed", "Profile could not be updated."),
+            ("Steam_Profile_RuntimeInterrupted", "Profile could not be updated because the Runtime connection was interrupted."),
+            ("Steam_Resolution_UpdateFailed", "Display resolution could not be updated.")
+        };
+        foreach (var (key, fallback) in localErrors)
+        {
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.Equal(fallback, english[key]);
+            Assert.Contains($"MainUiStrings.Get(\"{key}\", \"{fallback}\")", source, StringComparison.Ordinal);
+        }
+
+        Assert.Equal("Uses Intel's official API. Some games may not support FPS limiting.", english["Steam_IntelFpsExpander.Description"]);
+        Assert.Equal("Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.", english["Steam_GpuMinimumClockExpander.Description"]);
+        Assert.Contains("snapshot.FpsLimit?.UnavailableReason ?? MainUiStrings.Get(\"Steam_IntelFps_Unavailable\"", source, StringComparison.Ordinal);
+        Assert.Contains("gpu?.UnavailableReason ?? string.Empty", source, StringComparison.Ordinal);
+        Assert.Contains("gpu?.UnavailableReason is { Length: > 0 } warning", source, StringComparison.Ordinal);
+        Assert.Contains("result.FailureMessage ?? failureMessage", source, StringComparison.Ordinal);
+        Assert.Contains("RestoreSelectedAfterMutationFailureAsync(appId, failureMessage, exception)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("${feature} could not be updated.", source, StringComparison.Ordinal);
+
+        var verifier = File.ReadAllText(Path.Combine(root, "scripts", "verify-ui-localization-pri.ps1"));
+        Assert.Contains("Text|Content|Header|Description|PlaceholderText", verifier, StringComparison.Ordinal);
     }
 
     [Fact]

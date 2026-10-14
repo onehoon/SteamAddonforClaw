@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.UI;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -23,8 +24,8 @@ public sealed partial class ProfilePage : UserControl
     private bool _tdpDraftDirty;
     private CancellationTokenSource? _acFpsDebounce, _dcFpsDebounce; private long _acFpsGeneration, _dcFpsGeneration; private int? _acFpsDraft, _dcFpsDraft;
     private CancellationTokenSource? _acGpuDebounce, _dcGpuDebounce; private long _acGpuGeneration, _dcGpuGeneration, _gpuDraftGeneration; private int? _acGpuDraftIndex, _dcGpuDraftIndex; private bool _gpuDraftDirty;
-    private static readonly CpuBoostModeItem[] Modes = [new(CpuBoostMode.Disabled, "Disabled"), new(CpuBoostMode.Enabled, "Enabled"), new(CpuBoostMode.Aggressive, "Aggressive"), new(CpuBoostMode.EfficientEnabled, "Efficient Enabled"), new(CpuBoostMode.EfficientAggressive, "Efficient Aggressive"), new(CpuBoostMode.AggressiveAtGuaranteed, "Aggressive At Guaranteed"), new(CpuBoostMode.EfficientAggressiveAtGuaranteed, "Efficient Aggressive At Guaranteed")];
-    private static readonly ResolutionItem[] ResolutionItems = [new(null, null, "Do not change"), new(1920, 1200, "1920 × 1200"), new(1920, 1080, "1920 × 1080"), new(1680, 1050, "1680 × 1050"), new(1440, 900, "1440 × 900")];
+    private static readonly CpuBoostModeItem[] Modes = [new(CpuBoostMode.Disabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Disabled", "Disabled")), new(CpuBoostMode.Enabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Enabled", "Enabled")), new(CpuBoostMode.Aggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_Aggressive", "Aggressive")), new(CpuBoostMode.EfficientEnabled, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientEnabled", "Efficient Enabled")), new(CpuBoostMode.EfficientAggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressive", "Efficient Aggressive")), new(CpuBoostMode.AggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_AggressiveAtGuaranteed", "Aggressive At Guaranteed")), new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed"))];
+    private static readonly ResolutionItem[] ResolutionItems = [new(null, null, MainUiStrings.Get("Steam_Resolution_DoNotChange", "Do not change")), new(1920, 1200, "1920 × 1200"), new(1920, 1080, "1920 × 1080"), new(1680, 1050, "1680 × 1050"), new(1440, 900, "1440 × 900")];
 
     public ProfilePage()
     {
@@ -74,7 +75,7 @@ public sealed partial class ProfilePage : UserControl
             _catalogLoaded = true;
             ApplyCatalogFilter();
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
-            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo("No installed Steam games were found."); else ClearError(); } else { await CaptureSelectedAsync(_selectedGame.AppId); }
+            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo(MainUiStrings.Get("Steam_Catalog_NoGames", "No installed Steam games were found.")); else ClearError(); } else { await CaptureSelectedAsync(_selectedGame.AppId); }
             AppLog.Info("Profiles.Catalog", "Steam profile catalog scan completed.",
                 ("GameCount", _catalog.Count),
                 ("DurationMs", scanTimer.Elapsed.TotalMilliseconds));
@@ -84,7 +85,7 @@ public sealed partial class ProfilePage : UserControl
             AppLog.Warn("Profiles.Catalog", "Steam profile catalog scan failed.", exception,
                 ("DurationMs", scanTimer.Elapsed.TotalMilliseconds),
                 ("CatalogWasLoaded", _catalogLoaded));
-            ShowError("Game catalog could not be refreshed.", exception);
+            ShowError(MainUiStrings.Get("Steam_Catalog_RefreshFailed", "Game catalog could not be refreshed."), exception);
         }
         finally
         {
@@ -113,15 +114,15 @@ public sealed partial class ProfilePage : UserControl
         try
         {
             var result = await _frontend.SetGameProfileFavoriteAsync(game.AppId, !game.Favorite, game.Name);
-            if (!result.Succeeded) { ShowError(result.FailureMessage ?? "Favorite could not be saved.", null); return; }
+            if (!result.Succeeded) { ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_Favorite_SaveFailed", "Favorite could not be saved."), null); return; }
             _catalog = _catalog.Select(x => x.AppId == game.AppId ? x with { Favorite = !game.Favorite } : x).ToArray(); ApplyCatalogFilter();
         }
-        catch (Exception exception) { ShowError("Favorite could not be saved.", exception); }
+        catch (Exception exception) { ShowError(MainUiStrings.Get("Steam_Favorite_SaveFailed", "Favorite could not be saved."), exception); }
     }
 
     private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
     private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = true; CancelFpsDebounce(); try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = false; } SetEditorsEnabled(false); }
-    private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty, _gpuDraftDirty); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) ShowError("Profile settings could not be loaded.", exception); } }
+    private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty, _gpuDraftDirty); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) ShowError(MainUiStrings.Get("Steam_Profile_LoadFailed", "Profile settings could not be loaded."), exception); } }
     private void ClearSelection() { CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressEvents = true; try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; } finally { _suppressEvents = false; } ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false, bool preserveDirtyGpuDraft = false)
@@ -129,7 +130,7 @@ public sealed partial class ProfilePage : UserControl
         _snapshot = snapshot; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressFeatureEvents = true;
         try
         {
-            ProfileEnabledToggle.IsOn = snapshot.Enabled; ProfileEnabledToggle.IsEnabled = snapshot.PersistenceWritable; CpuBoostEnabledToggle.IsOn = snapshot.CpuBoost.Enabled; TdpEnabledToggle.IsOn = snapshot.Tdp.Enabled; PowerModeEnabledToggle.IsOn = snapshot.PowerMode?.Enabled == true; FpsEnabledToggle.IsOn = snapshot.FpsLimit?.Enabled == true; CpuBoostEnabledToggle.IsEnabled = TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; PowerModeEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.PowerMode is not null; FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true; _acFpsDraft = snapshot.FpsLimit?.AcFps ?? 60; _dcFpsDraft = snapshot.FpsLimit?.DcFps ?? 60; AcFpsSlider.Value = _acFpsDraft.Value; DcFpsSlider.Value = _dcFpsDraft.Value; AcFpsText.Text = $"{_acFpsDraft} FPS"; DcFpsText.Text = $"{_dcFpsDraft} FPS"; IntelFpsExpander.Description = snapshot.FpsLimit?.Available == true ? "Uses Intel's official API. Some games may not support FPS limiting." : snapshot.FpsLimit?.UnavailableReason ?? "Intel FPS Limit is unavailable.";
+            ProfileEnabledToggle.IsOn = snapshot.Enabled; ProfileEnabledToggle.IsEnabled = snapshot.PersistenceWritable; CpuBoostEnabledToggle.IsOn = snapshot.CpuBoost.Enabled; TdpEnabledToggle.IsOn = snapshot.Tdp.Enabled; PowerModeEnabledToggle.IsOn = snapshot.PowerMode?.Enabled == true; FpsEnabledToggle.IsOn = snapshot.FpsLimit?.Enabled == true; CpuBoostEnabledToggle.IsEnabled = TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; PowerModeEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.PowerMode is not null; FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true; _acFpsDraft = snapshot.FpsLimit?.AcFps ?? 60; _dcFpsDraft = snapshot.FpsLimit?.DcFps ?? 60; AcFpsSlider.Value = _acFpsDraft.Value; DcFpsSlider.Value = _dcFpsDraft.Value; AcFpsText.Text = $"{_acFpsDraft} FPS"; DcFpsText.Text = $"{_dcFpsDraft} FPS"; IntelFpsExpander.Description = snapshot.FpsLimit?.Available == true ? MainUiStrings.Get("Steam_IntelFpsExpander/Description", "Uses Intel's official API. Some games may not support FPS limiting.") : snapshot.FpsLimit?.UnavailableReason ?? MainUiStrings.Get("Steam_IntelFps_Unavailable", "Intel FPS Limit is unavailable.");
             CpuBoostAcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Ac); CpuBoostDcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Dc); PowerModeAcComboBox.SelectedItem = snapshot.PowerMode is { } power ? PowerModes.FirstOrDefault(x => x.Mode == power.Ac) : null; PowerModeDcComboBox.SelectedItem = snapshot.PowerMode is { } powerDc ? PowerModes.FirstOrDefault(x => x.Mode == powerDc.Dc) : null;
             RenderSteamVirtualController(snapshot.SteamVirtualController);
             ResolutionComboBox.SelectedItem = ResolutionItems.FirstOrDefault(x => x.Width == snapshot.Resolution?.Width && x.Height == snapshot.Resolution?.Height);
@@ -145,7 +146,7 @@ public sealed partial class ProfilePage : UserControl
         CpuBoostAcCard.Visibility = CpuBoostDcCard.Visibility = snapshot.CpuBoost.Enabled ? Visibility.Visible : Visibility.Collapsed; TdpAcCard.Visibility = TdpDcCard.Visibility = snapshot.Tdp.Enabled ? Visibility.Visible : Visibility.Collapsed; PowerModeAcCard.Visibility = PowerModeDcCard.Visibility = snapshot.PowerMode?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; GpuMinimumClockAcCard.Visibility = GpuMinimumClockDcCard.Visibility = snapshot.GpuMinimumClock?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; FpsAcCard.Visibility = FpsDcCard.Visibility = snapshot.FpsLimit?.Enabled == true ? Visibility.Visible : Visibility.Collapsed;
         SetEditorsEnabled(snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable); ResolutionComboBox.IsEnabled = snapshot.PersistenceWritable; RenderProfileStatus(snapshot);
     }
-    private void RenderProfileStatus(FrontendGameProfileSnapshot snapshot) { if (!snapshot.PersistenceWritable) { ShowError("Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.", null); return; } if (snapshot.Exists && snapshot.Enabled && snapshot.Limits is null) { ProfileInfoBar.Severity = InfoBarSeverity.Warning; ProfileInfoBar.Message = "TDP Control is unavailable on this device."; ProfileInfoBar.IsOpen = true; return; } ClearError(); }
+    private void RenderProfileStatus(FrontendGameProfileSnapshot snapshot) { if (!snapshot.PersistenceWritable) { ShowError(MainUiStrings.Get("Steam_Profile_SettingsUnwritable", "Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."), null); return; } if (snapshot.Exists && snapshot.Enabled && snapshot.Limits is null) { ProfileInfoBar.Severity = InfoBarSeverity.Warning; ProfileInfoBar.Message = MainUiStrings.Get("Steam_Tdp_Unavailable", "TDP Control is unavailable on this device."); ProfileInfoBar.IsOpen = true; return; } ClearError(); }
     private void SetEditorsEnabled(bool enabled) { var cpu = enabled && _snapshot?.CpuBoost.Enabled == true; CpuBoostAcComboBox.IsEnabled = CpuBoostDcComboBox.IsEnabled = cpu; var powerModeEditable = enabled && _snapshot?.PowerMode is { Enabled: true }; PowerModeAcComboBox.IsEnabled = PowerModeDcComboBox.IsEnabled = powerModeEditable; var tdp = enabled && _snapshot?.Tdp.Enabled == true && _snapshot.Limits is not null; foreach (var slider in new[] { AcPl1Slider, AcPl2Slider, DcPl1Slider, DcPl2Slider }) slider.IsEnabled = tdp; var fps = enabled && _snapshot?.FpsLimit?.Available == true && FpsEnabledToggle.IsOn; AcFpsSlider.IsEnabled = DcFpsSlider.IsEnabled = fps; var gpu = enabled && _snapshot?.GpuMinimumClock is { Available: true, Enabled: true }; GpuMinimumClockAcSlider.IsEnabled = GpuMinimumClockDcSlider.IsEnabled = gpu; GpuMinimumClockEnabledToggle.IsEnabled = enabled && _snapshot?.GpuMinimumClock?.Available == true && !_gpuDraftDirty; ProfileEnabledToggle.IsEnabled = _snapshot?.PersistenceWritable == true && !_gpuDraftDirty; SteamVirtualControllerComboBox.IsEnabled = CanEditGameSteamVirtualController(_steamActive, _snapshot, Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0); }
 
     internal void SetSteamActivity(bool? active)
@@ -213,7 +214,7 @@ public sealed partial class ProfilePage : UserControl
             RenderControllerMutationSnapshot(result.Snapshot);
             if (!result.Succeeded)
             {
-                ShowError(result.FailureMessage ?? "Virtual Controller could not be updated.", null);
+                ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_VirtualController_UpdateFailed", "Virtual Controller could not be updated."), null);
                 SetSteamActivity(null);
                 SteamActivityRefreshRequested?.Invoke(this, EventArgs.Empty);
             }
@@ -222,7 +223,7 @@ public sealed partial class ProfilePage : UserControl
         {
             await RestoreSelectedAfterMutationFailureAsync(
                 appId,
-                "Virtual Controller could not be updated.",
+                MainUiStrings.Get("Steam_VirtualController_UpdateFailed", "Virtual Controller could not be updated."),
                 exception,
                 preservePendingProfileDrafts: true);
             SetSteamActivity(null);
@@ -287,7 +288,7 @@ public sealed partial class ProfilePage : UserControl
             GpuMinimumClockInfoBar.IsOpen = !string.IsNullOrWhiteSpace(gpu?.UnavailableReason);
             GpuMinimumClockExpander.Description = gpu?.UnavailableReason is { Length: > 0 } warning
                 ? warning
-                : "Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.";
+                : MainUiStrings.Get("Steam_GpuMinimumClockExpander/Description", "Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.");
         }
         finally { _suppressGpuEvents = false; }
     }
@@ -314,9 +315,9 @@ public sealed partial class ProfilePage : UserControl
             var result = await _frontend.SetGameProfileGpuMinimumClockEnabledAsync(appId, GpuMinimumClockEnabledToggle.IsOn);
             if (!IsCurrentProfileResponse(_selectedGame?.AppId, result.Snapshot.AppId)) return;
             Render(result.Snapshot);
-            if (!result.Succeeded) ShowError(result.FailureMessage ?? "Minimum GPU Clock could not be updated.", null);
+            if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_GpuMinimumClock_UpdateFailed", "Minimum GPU Clock could not be updated."), null);
         }
-        catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "Minimum GPU Clock could not be updated.", exception); }
+        catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, MainUiStrings.Get("Steam_GpuMinimumClock_UpdateFailed", "Minimum GPU Clock could not be updated."), exception); }
     }
 
     private void GpuMinimumClockSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -364,7 +365,7 @@ public sealed partial class ProfilePage : UserControl
             var preserveDraft = _gpuDraftDirty && draftGeneration != _gpuDraftGeneration;
             if (!preserveDraft) _gpuDraftDirty = false;
             Render(result.Snapshot, preserveDirtyGpuDraft: preserveDraft);
-            if (!result.Succeeded) ShowError(result.FailureMessage ?? "Minimum GPU Clock could not be updated.", null);
+            if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_GpuMinimumClock_UpdateFailed", "Minimum GPU Clock could not be updated."), null);
         }
         catch (OperationCanceledException) { }
         catch (Exception exception)
@@ -373,7 +374,7 @@ public sealed partial class ProfilePage : UserControl
             {
                 var preserveDraft = GpuMinimumClockUiPolicy.ResolveFailedCommit(
                     ref _gpuDraftDirty, draftGeneration, _gpuDraftGeneration);
-                await RestoreSelectedAfterMutationFailureAsync(appId, "Minimum GPU Clock could not be updated.", exception,
+                await RestoreSelectedAfterMutationFailureAsync(appId, MainUiStrings.Get("Steam_GpuMinimumClock_UpdateFailed", "Minimum GPU Clock could not be updated."), exception,
                     preserveDirtyGpuDraft: preserveDraft);
             }
         }
@@ -386,19 +387,19 @@ public sealed partial class ProfilePage : UserControl
         _acGpuDebounce = _dcGpuDebounce = null;
         _gpuDraftDirty = false;
     }
-    private async void FpsEnabledToggle_Toggled(object sender, RoutedEventArgs e) { if (_suppressFpsEvents || _frontend is null || _selectedGame is null) return; try { var result = await _frontend.SetGameProfileFpsLimitEnabledAsync(_selectedGame.AppId, FpsEnabledToggle.IsOn); if (IsCurrentProfileResponse(_selectedGame?.AppId, result.Snapshot.AppId)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Intel FPS Limit could not be updated.", null); } catch (Exception ex) { await RestoreSelectedAfterMutationFailureAsync(_selectedGame.AppId, "Intel FPS Limit could not be updated.", ex); } }
-    private async void CpuBoostEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync("CPU Boost", CpuBoostEnabledToggle.IsOn, (id, value) => _frontend!.SetGameProfileCpuBoostEnabledAsync(id, value));
-    private async void TdpEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync("TDP Control", TdpEnabledToggle.IsOn, (id, value) => _frontend!.SetGameProfileTdpEnabledAsync(id, value));
-    private async void PowerModeEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync("Windows Power Mode", PowerModeEnabledToggle.IsOn, (id, value) => _frontend!.SetGameProfilePowerModeEnabledAsync(id, value));
-    private async Task MutateFeatureEnabledAsync(string feature, bool enabled, Func<uint, bool, Task<FrontendGameProfileMutationResult>> mutation)
+    private async void FpsEnabledToggle_Toggled(object sender, RoutedEventArgs e) { if (_suppressFpsEvents || _frontend is null || _selectedGame is null) return; try { var result = await _frontend.SetGameProfileFpsLimitEnabledAsync(_selectedGame.AppId, FpsEnabledToggle.IsOn); if (IsCurrentProfileResponse(_selectedGame?.AppId, result.Snapshot.AppId)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), null); } catch (Exception ex) { await RestoreSelectedAfterMutationFailureAsync(_selectedGame.AppId, MainUiStrings.Get("Steam_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), ex); } }
+    private async void CpuBoostEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync(MainUiStrings.Get("Steam_CpuBoost_UpdateFailed", "CPU Boost could not be updated."), CpuBoostEnabledToggle.IsOn, (id, value) => _frontend!.SetGameProfileCpuBoostEnabledAsync(id, value));
+    private async void TdpEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync(MainUiStrings.Get("Steam_TdpControl_ToggleUpdateFailed", "TDP Control could not be updated."), TdpEnabledToggle.IsOn, (id, value) => _frontend!.SetGameProfileTdpEnabledAsync(id, value));
+    private async void PowerModeEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync(MainUiStrings.Get("Steam_PowerMode_ToggleUpdateFailed", "Windows Power Mode could not be updated."), PowerModeEnabledToggle.IsOn, (id, value) => _frontend!.SetGameProfilePowerModeEnabledAsync(id, value));
+    private async Task MutateFeatureEnabledAsync(string failureMessage, bool enabled, Func<uint, bool, Task<FrontendGameProfileMutationResult>> mutation)
     {
         if (_suppressFeatureEvents || _frontend is null || _selectedGame is null || _snapshot?.Enabled != true) return;
         var appId = _selectedGame.AppId;
-        try { var result = await mutation(appId, enabled); if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? $"{feature} could not be updated.", null); }
-        catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, $"{feature} could not be updated.", exception); }
+        try { var result = await mutation(appId, enabled); if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? failureMessage, null); }
+        catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, failureMessage, exception); }
     }
     private void FpsSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e) { if (_suppressFpsEvents || _frontend is null || _selectedGame is null) return; var value = Math.Clamp((int)Math.Round(e.NewValue), 40, 120); var ac = ReferenceEquals(sender, AcFpsSlider); if (ac) { _acFpsDraft = value; AcFpsText.Text = $"{value} FPS"; _acFpsGeneration++; _acFpsDebounce?.Cancel(); _acFpsDebounce = new(); _ = SubmitFpsAfterDelayAsync(true, value, _acFpsGeneration, _acFpsDebounce.Token); } else { _dcFpsDraft = value; DcFpsText.Text = $"{value} FPS"; _dcFpsGeneration++; _dcFpsDebounce?.Cancel(); _dcFpsDebounce = new(); _ = SubmitFpsAfterDelayAsync(false, value, _dcFpsGeneration, _dcFpsDebounce.Token); } }
-    private async Task SubmitFpsAfterDelayAsync(bool ac, int value, long generation, CancellationToken token) { try { await Task.Delay(300, token); if ((ac ? generation != _acFpsGeneration : generation != _dcFpsGeneration) || _frontend is null || _selectedGame is null) return; var id = _selectedGame.AppId; var result = ac ? await _frontend.SetGameProfileFpsLimitAcAsync(id, value) : await _frontend.SetGameProfileFpsLimitDcAsync(id, value); if (IsCurrentProfileResponse(_selectedGame?.AppId, id)) { Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Intel FPS Limit could not be updated.", null); } } catch (OperationCanceledException) { } catch (Exception ex) { if (_selectedGame is not null) await RestoreSelectedAfterMutationFailureAsync(_selectedGame.AppId, "Intel FPS Limit could not be updated.", ex); } }
+    private async Task SubmitFpsAfterDelayAsync(bool ac, int value, long generation, CancellationToken token) { try { await Task.Delay(300, token); if ((ac ? generation != _acFpsGeneration : generation != _dcFpsGeneration) || _frontend is null || _selectedGame is null) return; var id = _selectedGame.AppId; var result = ac ? await _frontend.SetGameProfileFpsLimitAcAsync(id, value) : await _frontend.SetGameProfileFpsLimitDcAsync(id, value); if (IsCurrentProfileResponse(_selectedGame?.AppId, id)) { Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), null); } } catch (OperationCanceledException) { } catch (Exception ex) { if (_selectedGame is not null) await RestoreSelectedAfterMutationFailureAsync(_selectedGame.AppId, MainUiStrings.Get("Steam_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), ex); } }
     private void CancelFpsDebounce() { _acFpsGeneration++; _dcFpsGeneration++; _acFpsDebounce?.Cancel(); _dcFpsDebounce?.Cancel(); _acFpsDebounce = _dcFpsDebounce = null; }
     private static void ConfigureSlider(Slider slider, int? minimum, int? maximum, int value) { if (minimum is not { } min || maximum is not { } max) { slider.IsEnabled = false; return; } slider.Minimum = min; slider.Maximum = max; slider.StepFrequency = 1; slider.Value = Math.Clamp(value, min, max); }
 
@@ -407,7 +408,7 @@ public sealed partial class ProfilePage : UserControl
         if (_suppressEvents || _frontend is null || _selectedGame is null) return;
         var appId = _selectedGame.AppId;
         CancelTdpDebounce();
-        try { var result = await _frontend.SetGameProfileEnabledAsync(appId, ProfileEnabledToggle.IsOn, _selectedGame.Name); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Profile could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "Profile could not be updated because the Runtime connection was interrupted.", exception); }
+        try { var result = await _frontend.SetGameProfileEnabledAsync(appId, ProfileEnabledToggle.IsOn, _selectedGame.Name); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_Profile_UpdateFailed", "Profile could not be updated."), null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, MainUiStrings.Get("Steam_Profile_RuntimeInterrupted", "Profile could not be updated because the Runtime connection was interrupted."), exception); }
     }
     private async void CpuBoostAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(true);
     private async void CpuBoostDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(false);
@@ -417,14 +418,14 @@ public sealed partial class ProfilePage : UserControl
     {
         if (_suppressEvents || _frontend is null || _selectedGame is null) return;
         var item = (ac ? PowerModeAcComboBox : PowerModeDcComboBox).SelectedItem as PowerModeItem; if (item is null) return;
-        try { var appId = _selectedGame.AppId; var result = ac ? await _frontend.SetGameProfilePowerModeAcAsync(appId, item.Mode) : await _frontend.SetGameProfilePowerModeDcAsync(appId, item.Mode); if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Power Mode could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(_selectedGame.AppId, "Power Mode could not be updated.", exception); }
+        try { var appId = _selectedGame.AppId; var result = ac ? await _frontend.SetGameProfilePowerModeAcAsync(appId, item.Mode) : await _frontend.SetGameProfilePowerModeDcAsync(appId, item.Mode); if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_PowerMode_UpdateFailed", "Power Mode could not be updated."), null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(_selectedGame.AppId, MainUiStrings.Get("Steam_PowerMode_UpdateFailed", "Power Mode could not be updated."), exception); }
     }
     private async void ResolutionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressEvents || _frontend is null || _selectedGame is null || ResolutionComboBox.SelectedItem is not ResolutionItem item) return;
         var appId = _selectedGame.AppId;
-        try { var result = await _frontend.SetGameProfileResolutionAsync(appId, item.Width is { } w && item.Height is { } h ? new(w, h) : null, _selectedGame.Name); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Display resolution could not be updated.", null); }
-        catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "Display resolution could not be updated.", exception); }
+        try { var result = await _frontend.SetGameProfileResolutionAsync(appId, item.Width is { } w && item.Height is { } h ? new(w, h) : null, _selectedGame.Name); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_Resolution_UpdateFailed", "Display resolution could not be updated."), null); }
+        catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, MainUiStrings.Get("Steam_Resolution_UpdateFailed", "Display resolution could not be updated."), exception); }
     }
     private async Task MutateCpuAsync(bool acSide)
     {
@@ -432,7 +433,7 @@ public sealed partial class ProfilePage : UserControl
         var mode = (acSide ? CpuBoostAcComboBox : CpuBoostDcComboBox).SelectedItem as CpuBoostModeItem;
         if (mode is null) return;
         var appId = _selectedGame.AppId;
-        try { var result = acSide ? await _frontend.SetGameProfileCpuBoostAcAsync(appId, mode.Mode) : await _frontend.SetGameProfileCpuBoostDcAsync(appId, mode.Mode); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "CPU Boost could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "CPU Boost could not be updated.", exception); }
+        try { var result = acSide ? await _frontend.SetGameProfileCpuBoostAcAsync(appId, mode.Mode) : await _frontend.SetGameProfileCpuBoostDcAsync(appId, mode.Mode); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_CpuBoost_UpdateFailed", "CPU Boost could not be updated."), null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, MainUiStrings.Get("Steam_CpuBoost_UpdateFailed", "CPU Boost could not be updated."), exception); }
     }
     private void TdpSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
@@ -443,7 +444,7 @@ public sealed partial class ProfilePage : UserControl
     private async Task SubmitTdpAfterDelayAsync(long generation, CancellationToken token)
     {
         uint? appId = null;
-        try { await Task.Delay(300, token); if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), ProfileEnabledToggle.IsOn) || _frontend is null || _selectedGame is null || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2) return; appId = _selectedGame.AppId; var result = await _frontend.SetGameProfileTdpAsync(appId.Value, new(true, new(ac1, ac2), new(dc1, dc2))); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId.Value)) return; var preserveDraft = ShouldPreserveDirtyTdpDraft(_tdpDraftDirty, generation, _tdpGeneration); if (!preserveDraft) _tdpDraftDirty = false; Render(result.Snapshot, preserveDraft); if (!result.Succeeded) ShowError(result.FailureMessage ?? "TDP could not be updated.", null); } catch (OperationCanceledException) { } catch (Exception exception) { if (appId is { } targetAppId) await RestoreSelectedAfterMutationFailureAsync(targetAppId, "TDP could not be updated.", exception); }
+        try { await Task.Delay(300, token); if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), ProfileEnabledToggle.IsOn) || _frontend is null || _selectedGame is null || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2) return; appId = _selectedGame.AppId; var result = await _frontend.SetGameProfileTdpAsync(appId.Value, new(true, new(ac1, ac2), new(dc1, dc2))); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId.Value)) return; var preserveDraft = ShouldPreserveDirtyTdpDraft(_tdpDraftDirty, generation, _tdpGeneration); if (!preserveDraft) _tdpDraftDirty = false; Render(result.Snapshot, preserveDraft); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_Tdp_UpdateFailed", "TDP could not be updated."), null); } catch (OperationCanceledException) { } catch (Exception exception) { if (appId is { } targetAppId) await RestoreSelectedAfterMutationFailureAsync(targetAppId, MainUiStrings.Get("Steam_Tdp_UpdateFailed", "TDP could not be updated."), exception); }
     }
     private void SetTdpText() { AcPl1Value.Text = _acPl1 is { } x ? $"{x} W" : "— W"; AcPl2Value.Text = _acPl2 is { } y ? $"{y} W" : "— W"; DcPl1Value.Text = _dcPl1 is { } z ? $"{z} W" : "— W"; DcPl2Value.Text = _dcPl2 is { } w ? $"{w} W" : "— W"; }
     private void CancelTdpDebounce() { _tdpGeneration++; _tdpDebounce?.Cancel(); _tdpDebounce = null; }
@@ -464,7 +465,7 @@ public sealed partial class ProfilePage : UserControl
         try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (_selectedGame?.AppId == appId) { if (preservePendingProfileDrafts) RenderControllerMutationSnapshot(snapshot); else Render(snapshot, preserveDirtyGpuDraft: preserveDirtyGpuDraft); ShowError(message, null); } } catch { }
     }
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
-    private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];
+    private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, MainUiStrings.Get("Steam_PowerMode_Mode_BestPowerEfficiency", "Best power efficiency")), new(WindowsPowerMode.Balanced, MainUiStrings.Get("Steam_PowerMode_Mode_Balanced", "Balanced")), new(WindowsPowerMode.BestPerformance, MainUiStrings.Get("Steam_PowerMode_Mode_BestPerformance", "Best performance"))];
     private sealed record PowerModeItem(WindowsPowerMode Mode, string Label);
     private sealed record ResolutionItem(int? Width, int? Height, string Label);
     private sealed record GameCardItem(FrontendProfileGameCatalogEntry Game)
