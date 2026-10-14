@@ -18,10 +18,10 @@
                     VerticalAlignment="Center"
                     Spacing="12"
                     Visibility="Collapsed">
-            <TextBlock Text="How to Use could not be loaded."
+            <TextBlock x:Uid="HowToUse_Failure" Text="How to Use could not be loaded."
                        TextAlignment="Center"
                        TextWrapping="Wrap" />
-            <Button Content="Retry" Click="RetryButton_Click" />
+            <Button x:Uid="HowToUse_Retry" Content="Retry" Click="RetryButton_Click" />
         </StackPanel>
     </Grid>
 </UserControl>

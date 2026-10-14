@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.Windows.Storage.Pickers;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.UI;
 using WinRT.Interop;
 using Windows.Foundation;
 
@@ -83,7 +84,7 @@ public sealed partial class ShortcutPage : UserControl
         }
         catch
         {
-            ShowMessage("Shortcut settings could not be loaded.", InfoBarSeverity.Error);
+            ShowMessage(MainUiStrings.Get("Shortcut_SettingsLoadFailed", "Shortcut settings could not be loaded."), InfoBarSeverity.Error);
         }
         finally
         {
@@ -107,7 +108,7 @@ public sealed partial class ShortcutPage : UserControl
         UpdateShortcutItemWidth();
 
         if (!snapshot.Available)
-            ShowMessage(snapshot.FailureMessage ?? "Shortcut editing is unavailable.", InfoBarSeverity.Warning);
+            ShowMessage(snapshot.FailureMessage ?? MainUiStrings.Get("Shortcut_EditorUnavailable", "Shortcut editing is unavailable."), InfoBarSeverity.Warning);
         else if (ShortcutInfoBar.Severity == InfoBarSeverity.Warning)
             ShortcutInfoBar.IsOpen = false;
     }
@@ -136,7 +137,7 @@ public sealed partial class ShortcutPage : UserControl
         catch
         {
             _dialogOpen = false;
-            ShowMessage("Shortcut settings could not be loaded.", InfoBarSeverity.Error);
+            ShowMessage(MainUiStrings.Get("Shortcut_SettingsLoadFailed", "Shortcut settings could not be loaded."), InfoBarSeverity.Error);
             return;
         }
 
@@ -154,18 +155,18 @@ public sealed partial class ShortcutPage : UserControl
         if (existingTileId is not null && existing is null)
         {
             _dialogOpen = false;
-            ShowMessage("Shortcut tile was not found.", InfoBarSeverity.Warning);
+            ShowMessage(MainUiStrings.Get("Shortcut_TileNotFound", "Shortcut tile was not found."), InfoBarSeverity.Warning);
             return;
         }
 
         var titleBox = new TextBox
         {
-            Header = "Title",
-            PlaceholderText = "Shortcut name",
+            Header = MainUiStrings.Get("Shortcut_Title_Header", "Title"),
+            PlaceholderText = MainUiStrings.Get("Shortcut_Title_Placeholder", "Shortcut name"),
             Text = existing?.Title ?? string.Empty,
             Margin = new Thickness(0, 0, 0, 12)
         };
-        var actionPicker = new ComboBox { Header = "Action type", MinWidth = 280 };
+        var actionPicker = new ComboBox { Header = MainUiStrings.Get("Shortcut_ActionPicker_Header", "Action type"), MinWidth = 280 };
         string? stagedIconGlyphOverride = existing?.IconGlyphOverride;
         var iconPreview = new FontIcon
         {
@@ -193,13 +194,15 @@ public sealed partial class ShortcutPage : UserControl
         void RenderIconPreview(FrontendShortcutEditorActionKind kind)
         {
             iconPreview.Glyph = ShortcutIconCatalog.GetEffectiveGlyph(kind, stagedIconGlyphOverride);
-            iconName.Text = ShortcutIconCatalog.GetEffectiveName(kind, stagedIconGlyphOverride);
-            AutomationProperties.SetName(iconPreview, $"{iconName.Text} Shortcut icon");
+            iconName.Text = GetEffectiveLocalizedIconName(kind, stagedIconGlyphOverride);
+            AutomationProperties.SetName(iconPreview,
+                MainUiStrings.Format("Shortcut_IconPreview_A11y", "{0} Shortcut icon", iconName.Text));
         }
 
         for (var index = 0; index < ShortcutIconCatalog.Choices.Count; index++)
         {
             var choice = ShortcutIconCatalog.Choices[index];
+            var localizedName = GetLocalizedIconName(choice);
             var choiceButton = new Button
             {
                 Width = 96,
@@ -220,7 +223,7 @@ public sealed partial class ShortcutPage : UserControl
                         },
                         new TextBlock
                         {
-                            Text = choice.Name,
+                            Text = localizedName,
                             FontSize = 12,
                             TextAlignment = TextAlignment.Center,
                             TextWrapping = TextWrapping.Wrap,
@@ -229,8 +232,8 @@ public sealed partial class ShortcutPage : UserControl
                     }
                 }
             };
-            AutomationProperties.SetName(choiceButton, choice.Name);
-            ToolTipService.SetToolTip(choiceButton, choice.Name);
+            AutomationProperties.SetName(choiceButton, localizedName);
+            ToolTipService.SetToolTip(choiceButton, localizedName);
             choiceButton.Click += (_, _) =>
             {
                 stagedIconGlyphOverride = choice.Glyph;
@@ -247,7 +250,7 @@ public sealed partial class ShortcutPage : UserControl
 
         var useDefaultIconButton = new Button
         {
-            Content = "Use default",
+            Content = MainUiStrings.Get("Shortcut_Icon_UseDefault", "Use default"),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Margin = new Thickness(0, 8, 0, 0)
         };
@@ -269,7 +272,7 @@ public sealed partial class ShortcutPage : UserControl
                 useDefaultIconButton
             }
         };
-        var changeIconButton = new Button { Content = "Change icon", VerticalAlignment = VerticalAlignment.Center };
+        var changeIconButton = new Button { Content = MainUiStrings.Get("Shortcut_Icon_Change", "Change icon"), VerticalAlignment = VerticalAlignment.Center };
         changeIconButton.Click += (_, _) => iconFlyout.ShowAt(changeIconButton);
         var iconRow = new StackPanel
         {
@@ -277,7 +280,7 @@ public sealed partial class ShortcutPage : UserControl
             Margin = new Thickness(0, 0, 0, 12),
             Children =
             {
-                new TextBlock { Text = "Icon", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                new TextBlock { Text = MainUiStrings.Get("Shortcut_Icon_Label", "Icon"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
@@ -286,33 +289,33 @@ public sealed partial class ShortcutPage : UserControl
                 }
             }
         };
-        AddActionChoice(actionPicker, "Application (.exe)", FrontendShortcutEditorActionKind.Executable);
-        AddActionChoice(actionPicker, "PowerShell", FrontendShortcutEditorActionKind.PowerShell);
-        AddActionChoice(actionPicker, "Website (URL)", FrontendShortcutEditorActionKind.Url);
-        AddActionChoice(actionPicker, "Steam Big Picture", FrontendShortcutEditorActionKind.SteamBigPicture);
-        AddActionChoice(actionPicker, "Steam", FrontendShortcutEditorActionKind.SteamClient);
-        AddActionChoice(actionPicker, "XBOX", FrontendShortcutEditorActionKind.XboxApp);
+        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_Application", "Application (.exe)"), FrontendShortcutEditorActionKind.Executable);
+        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_PowerShell", "PowerShell"), FrontendShortcutEditorActionKind.PowerShell);
+        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_Website", "Website (URL)"), FrontendShortcutEditorActionKind.Url);
+        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_SteamBigPicture", "Steam Big Picture"), FrontendShortcutEditorActionKind.SteamBigPicture);
+        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_Steam", "Steam"), FrontendShortcutEditorActionKind.SteamClient);
+        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_XboxApp", "XBOX"), FrontendShortcutEditorActionKind.XboxApp);
         var existingScreenshot = existing?.Action.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen;
         var screenshotAlreadyExists = authoritativeSnapshot.Tiles.Any(tile =>
             tile.Action.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen
             && tile.TileId != existing?.TileId);
         if (existingScreenshot || !screenshotAlreadyExists)
-            AddActionChoice(actionPicker, "Screenshot", FrontendShortcutEditorActionKind.ScreenshotFullscreen);
+            AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_Screenshot", "Screenshot"), FrontendShortcutEditorActionKind.ScreenshotFullscreen);
         var closeOverlayToggle = new ToggleSwitch
         {
-            Header = "Close Overlay after launch",
-            OnContent = "Close Overlay",
-            OffContent = "Keep Overlay open",
+            Header = MainUiStrings.Get("Shortcut_CloseOverlay_Header", "Close Overlay after launch"),
+            OnContent = MainUiStrings.Get("Shortcut_CloseOverlay_Close", "Close Overlay"),
+            OffContent = MainUiStrings.Get("Shortcut_CloseOverlay_KeepOpen", "Keep Overlay open"),
             IsOn = existing?.CloseOverlayAfterLaunch ?? false,
             Margin = new Thickness(0, 0, 0, 8)
         };
 
-        var executablePath = new TextBox { Header = "Executable path", PlaceholderText = @"C:\Path\Application.exe" };
-        var executableBrowse = new Button { Content = "Browse…", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
-        var executableArguments = new TextBox { Header = "Arguments", PlaceholderText = "Optional arguments" };
+        var executablePath = new TextBox { Header = MainUiStrings.Get("Shortcut_ExecutablePath_Header", "Executable path"), PlaceholderText = @"C:\Path\Application.exe" };
+        var executableBrowse = new Button { Content = MainUiStrings.Get("Shortcut_Browse", "Browse…"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
+        var executableArguments = new TextBox { Header = MainUiStrings.Get("Shortcut_Arguments_Header", "Arguments"), PlaceholderText = MainUiStrings.Get("Shortcut_Arguments_Placeholder", "Optional arguments") };
         var executableRunAsAdministrator = new CheckBox
         {
-            Content = "Run as administrator",
+            Content = MainUiStrings.Get("Shortcut_RunAsAdministrator", "Run as administrator"),
             IsChecked = existing?.Action.Kind == FrontendShortcutEditorActionKind.Executable
                 && existing.Action.RunAsAdministrator
         };
@@ -322,20 +325,20 @@ public sealed partial class ShortcutPage : UserControl
             Children =
             {
                 executablePath, executableBrowse, executableArguments, executableRunAsAdministrator,
-                new TextBlock { Text = "Runs with administrator privileges; otherwise requests normal user privileges.", TextWrapping = TextWrapping.Wrap }
+                new TextBlock { Text = MainUiStrings.Get("Shortcut_RunAsAdministrator_Description", "Runs with administrator privileges; otherwise requests normal user privileges."), TextWrapping = TextWrapping.Wrap }
             }
         };
 
         var powerShellRunAsAdministrator = new CheckBox
         {
-            Content = "Run as administrator",
+            Content = MainUiStrings.Get("Shortcut_RunAsAdministrator", "Run as administrator"),
             IsChecked = existing?.Action.Kind == FrontendShortcutEditorActionKind.PowerShell
                 && existing.Action.RunAsAdministrator
         };
         var script = new TextBox
         {
-            Header = "Script",
-            PlaceholderText = "Enter a PowerShell script",
+            Header = MainUiStrings.Get("Shortcut_PowerShellScript_Header", "Script"),
+            PlaceholderText = MainUiStrings.Get("Shortcut_PowerShellScript_Placeholder", "Enter a PowerShell script"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 180,
@@ -347,17 +350,17 @@ public sealed partial class ShortcutPage : UserControl
             Children =
             {
                 script, powerShellRunAsAdministrator,
-                new TextBlock { Text = "Runs with administrator privileges; otherwise requests normal user privileges.", TextWrapping = TextWrapping.Wrap }
+                new TextBlock { Text = MainUiStrings.Get("Shortcut_RunAsAdministrator_Description", "Runs with administrator privileges; otherwise requests normal user privileges."), TextWrapping = TextWrapping.Wrap }
             }
         };
 
-        var url = new TextBox { Header = "URL", PlaceholderText = "https://…", Text = existing?.Action.Url ?? string.Empty };
+        var url = new TextBox { Header = MainUiStrings.Get("Shortcut_Url_Header", "URL"), PlaceholderText = "https://…", Text = existing?.Action.Url ?? string.Empty };
         var urlPanel = new StackPanel { Spacing = 8, Children = { url } };
         string? stagedScreenshotFolder = existingScreenshot ? existing?.Action.ScreenshotFolder : null;
         var screenshotFolderPath = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var browseScreenshotFolderButton = new Button { Content = "Browse…", HorizontalAlignment = HorizontalAlignment.Left };
-        var useDefaultFolderButton = new Button { Content = "Use default", HorizontalAlignment = HorizontalAlignment.Left };
-        var openScreenshotFolderButton = new Button { Content = "Open folder", HorizontalAlignment = HorizontalAlignment.Left };
+        var browseScreenshotFolderButton = new Button { Content = MainUiStrings.Get("Shortcut_Browse", "Browse…"), HorizontalAlignment = HorizontalAlignment.Left };
+        var useDefaultFolderButton = new Button { Content = MainUiStrings.Get("Shortcut_Screenshot_UseDefault", "Use default"), HorizontalAlignment = HorizontalAlignment.Left };
+        var openScreenshotFolderButton = new Button { Content = MainUiStrings.Get("Shortcut_Screenshot_OpenFolder", "Open folder"), HorizontalAlignment = HorizontalAlignment.Left };
         void RenderScreenshotFolder()
         {
             screenshotFolderPath.Text = ResolveScreenshotFolder(stagedScreenshotFolder);
@@ -379,7 +382,7 @@ public sealed partial class ShortcutPage : UserControl
             }
             catch
             {
-                ShowMessage("The folder picker could not be opened.", InfoBarSeverity.Error);
+                ShowMessage(MainUiStrings.Get("Shortcut_FolderPickerFailed", "The folder picker could not be opened."), InfoBarSeverity.Error);
             }
         };
         useDefaultFolderButton.Click += (_, _) =>
@@ -392,7 +395,7 @@ public sealed partial class ShortcutPage : UserControl
             var folder = ResolveScreenshotFolder(stagedScreenshotFolder);
             if (string.IsNullOrWhiteSpace(folder))
             {
-                ShowMessage("The effective Screenshot folder is unavailable.", InfoBarSeverity.Warning);
+                ShowMessage(MainUiStrings.Get("Shortcut_ScreenshotFolderUnavailable", "The effective Screenshot folder is unavailable."), InfoBarSeverity.Warning);
                 return;
             }
 
@@ -403,7 +406,7 @@ public sealed partial class ShortcutPage : UserControl
             }
             catch
             {
-                ShowMessage("The Screenshot folder could not be opened.", InfoBarSeverity.Error);
+                ShowMessage(MainUiStrings.Get("Shortcut_ScreenshotFolderOpenFailed", "The Screenshot folder could not be opened."), InfoBarSeverity.Error);
             }
         };
         RenderScreenshotFolder();
@@ -412,8 +415,8 @@ public sealed partial class ShortcutPage : UserControl
             Spacing = 8,
             Children =
             {
-                new TextBlock { Text = "Captures the primary display as JPEG.", TextWrapping = TextWrapping.Wrap },
-                new TextBlock { Text = "Save folder", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                new TextBlock { Text = MainUiStrings.Get("Shortcut_Screenshot_Description", "Captures the primary display as JPEG."), TextWrapping = TextWrapping.Wrap },
+                new TextBlock { Text = MainUiStrings.Get("Shortcut_Screenshot_SaveFolder", "Save folder"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
                 screenshotFolderPath,
                 new StackPanel
                 {
@@ -423,9 +426,9 @@ public sealed partial class ShortcutPage : UserControl
                 }
             }
         };
-        var steamBigPicturePanel = CreateBuiltInActionPanel("Opens Steam Big Picture.");
-        var steamClientPanel = CreateBuiltInActionPanel("Opens the Steam client.");
-        var xboxAppPanel = CreateBuiltInActionPanel("Opens the XBOX app.");
+        var steamBigPicturePanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_SteamBigPicture", "Opens Steam Big Picture."));
+        var steamClientPanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_Steam", "Opens the Steam client."));
+        var xboxAppPanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_XboxApp", "Opens the XBOX app."));
 
         var panels = new Dictionary<FrontendShortcutEditorActionKind, UIElement>
         {
@@ -488,10 +491,12 @@ public sealed partial class ShortcutPage : UserControl
         };
         var dialog = new ContentDialog
         {
-            Title = existing is null ? "Add Shortcut" : "Edit Shortcut",
+            Title = existing is null
+                ? MainUiStrings.Get("Shortcut_Dialog_AddTitle", "Add Shortcut")
+                : MainUiStrings.Get("Shortcut_Dialog_EditTitle", "Edit Shortcut"),
             Content = content,
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = MainUiStrings.Get("Shortcut_Dialog_Save", "Save"),
+            CloseButtonText = MainUiStrings.Get("Shortcut_Dialog_Cancel", "Cancel"),
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = XamlRoot
         };
@@ -553,6 +558,33 @@ public sealed partial class ShortcutPage : UserControl
         FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Screenshot",
         _ => null
     };
+
+    public static string GetDisplayTargetSummary(FrontendShortcutEditorActionKind kind, string sourceSummary) => kind switch
+    {
+        FrontendShortcutEditorActionKind.SteamBigPicture => MainUiStrings.Get("Shortcut_Target_SteamBigPicture", "Steam Big Picture"),
+        FrontendShortcutEditorActionKind.SteamClient => MainUiStrings.Get("Shortcut_Target_SteamClient", "Steam client"),
+        FrontendShortcutEditorActionKind.XboxApp => MainUiStrings.Get("Shortcut_Target_XboxApp", "XBOX app"),
+        FrontendShortcutEditorActionKind.ScreenshotFullscreen => MainUiStrings.Get("Shortcut_Target_Screenshot", "Fullscreen screenshot"),
+        FrontendShortcutEditorActionKind.PowerShell => MainUiStrings.Get("Shortcut_Target_PowerShell", "PowerShell"),
+        _ => sourceSummary
+    };
+
+    public static string GetDragReorderAutomationName() =>
+        MainUiStrings.Get("Shortcut_A11y_DragToReorder", "Drag to reorder this Shortcut");
+
+    public static string GetShortcutIconAutomationName() =>
+        MainUiStrings.Get("Shortcut_A11y_Icon", "Shortcut icon");
+
+    private static string GetLocalizedIconName(ShortcutIconChoice choice) =>
+        MainUiStrings.Get($"Shortcut_Icon_{Convert.ToInt32(choice.Glyph[0]):X4}", choice.Name);
+
+    private static string GetEffectiveLocalizedIconName(FrontendShortcutEditorActionKind kind, string? iconGlyphOverride)
+    {
+        var glyph = ShortcutIconCatalog.GetEffectiveGlyph(kind, iconGlyphOverride);
+        return ShortcutIconCatalog.TryGetChoice(glyph, out var choice)
+            ? GetLocalizedIconName(choice)
+            : MainUiStrings.Get("Shortcut_Icon_E71D", "All apps");
+    }
 
     internal static bool DefaultCloseOverlayAfterLaunch(FrontendShortcutEditorActionKind kind) => kind is
         FrontendShortcutEditorActionKind.SteamBigPicture or
@@ -1099,7 +1131,7 @@ public sealed partial class ShortcutPage : UserControl
         }
         catch
         {
-            ShowMessage("The application picker could not be opened.", InfoBarSeverity.Error);
+            ShowMessage(MainUiStrings.Get("Shortcut_ApplicationPickerFailed", "The application picker could not be opened."), InfoBarSeverity.Error);
         }
     }
 
@@ -1111,10 +1143,10 @@ public sealed partial class ShortcutPage : UserControl
         if (tile is null) return;
         var dialog = new ContentDialog
         {
-            Title = "Delete Shortcut?",
-            Content = $"Delete ‘{tile.Title}’? This cannot be undone.",
-            PrimaryButtonText = "Delete",
-            CloseButtonText = "Cancel",
+            Title = MainUiStrings.Get("Shortcut_Delete_Title", "Delete Shortcut?"),
+            Content = MainUiStrings.Format("Shortcut_Delete_ConfirmationBody", "Delete ‘{0}’? This cannot be undone.", tile.Title),
+            PrimaryButtonText = MainUiStrings.Get("Shortcut_Delete_Confirm", "Delete"),
+            CloseButtonText = MainUiStrings.Get("Shortcut_Dialog_Cancel", "Cancel"),
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot
         };
@@ -1131,7 +1163,7 @@ public sealed partial class ShortcutPage : UserControl
         if (_frontend is null || _operationInProgress) return;
         if (!FrontendShortcutEditorPayloadPolicy.IsMutationWithinLimit(intent))
         {
-            ShowMessage("One or more fields exceed the supported Shortcut editor size.", InfoBarSeverity.Warning);
+            ShowMessage(MainUiStrings.Get("Shortcut_PayloadTooLarge", "One or more fields exceed the supported Shortcut editor size."), InfoBarSeverity.Warning);
             return;
         }
 
@@ -1155,7 +1187,7 @@ public sealed partial class ShortcutPage : UserControl
             }
             Render(result.Snapshot);
             if (!result.Succeeded)
-                ShowMessage(result.FailureMessage ?? "Shortcut changes could not be saved.", InfoBarSeverity.Error);
+                ShowMessage(result.FailureMessage ?? MainUiStrings.Get("Shortcut_SaveFailed", "Shortcut changes could not be saved."), InfoBarSeverity.Error);
             else
                 ShortcutInfoBar.IsOpen = false;
         }
@@ -1165,7 +1197,7 @@ public sealed partial class ShortcutPage : UserControl
                 AppLog.Warn("Shortcut", "Runtime Shortcut move request failed.", null,
                     ("Stage", "RuntimeMutation"), ("TileId", intent.TileId),
                     ("TargetIndex", intent.TargetIndex), ("Outcome", "Exception"));
-            ShowMessage("Shortcut changes could not be saved.", InfoBarSeverity.Error);
+            ShowMessage(MainUiStrings.Get("Shortcut_SaveFailed", "Shortcut changes could not be saved."), InfoBarSeverity.Error);
         }
         finally
         {

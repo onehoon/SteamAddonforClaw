@@ -4,6 +4,7 @@ using System.Xml.Linq;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.UI;
+using SteamInputAddonforClaw.Views;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -30,6 +31,8 @@ public sealed class MainUiLocalizationResourceTests
             "MainNav_Device.Content",
             "MainNav_Steam.Content",
             "MainNav_Xbox.Content",
+            "MainNav_Shortcut.Content",
+            "MainNav_HowToUse.Content",
             "HowToUse_Loading.Text",
             "Settings_AppTheme_Description"
         };
@@ -79,6 +82,148 @@ public sealed class MainUiLocalizationResourceTests
 
         Assert.Equal("HowToUse_Loading", (string?)loading.Attribute(XamlNamespace + "Uid"));
         Assert.Equal("Loading documentation…", (string?)loading.Attribute("Text"));
+    }
+
+    [Fact]
+    public void Shortcut_and_how_to_use_shell_resources_preserve_action_data_and_localize_all_icon_names()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var mainWindow = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var shortcutDocument = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "ShortcutPage.xaml"));
+        var howToUseDocument = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "HowToUsePage.xaml"));
+        var shortcutCode = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "ShortcutPage.xaml.cs"));
+
+        foreach (var expected in new[]
+        {
+            (Tag: "Shortcut", Uid: "MainNav_Shortcut", Content: "Shortcut"),
+            (Tag: "HowToUse", Uid: "MainNav_HowToUse", Content: "How to Use")
+        })
+        {
+            var item = Assert.Single(mainWindow.Descendants(), element =>
+                element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == expected.Tag);
+            Assert.Equal(expected.Uid, (string?)item.Attribute(XamlNamespace + "Uid"));
+            Assert.Equal(expected.Content, (string?)item.Attribute("Content"));
+            Assert.Equal(expected.Tag, (string?)item.Attribute("Tag"));
+            Assert.Equal(expected.Content, english[$"{expected.Uid}.Content"]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[$"{expected.Uid}.Content"]));
+        }
+
+        var expectedShortcutUidProperties = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Shortcut_PageTitle"] = "Text",
+            ["Shortcut_PageSubtitle"] = "Text",
+            ["Shortcut_AddButton"] = "Content",
+            ["Shortcut_EditButton"] = "Content",
+            ["Shortcut_DeleteButton"] = "Content",
+            ["Shortcut_EmptyTitle"] = "Text",
+            ["Shortcut_EmptySubtitle"] = "Text"
+        };
+        var shortcutUidElements = shortcutDocument.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        Assert.Equal(expectedShortcutUidProperties.Keys.OrderBy(key => key, StringComparer.Ordinal),
+            shortcutUidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!)
+                .OrderBy(key => key, StringComparer.Ordinal));
+        foreach (var element in shortcutUidElements)
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            var property = expectedShortcutUidProperties[uid];
+            var key = $"{uid}.{property}";
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.False(string.IsNullOrWhiteSpace(english[key]));
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+            Assert.Equal(english[key], (string?)element.Attribute(property));
+        }
+
+        var expectedHowToUseUidProperties = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["HowToUse_Failure"] = "Text",
+            ["HowToUse_Retry"] = "Content"
+        };
+        var howToUseUidElements = howToUseDocument.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        Assert.Equal(new[] { "HowToUse_Failure", "HowToUse_Loading", "HowToUse_Retry" },
+            howToUseUidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!)
+                .OrderBy(value => value, StringComparer.Ordinal));
+        foreach (var element in howToUseUidElements.Where(element => expectedHowToUseUidProperties.ContainsKey(
+                     (string)element.Attribute(XamlNamespace + "Uid")!)))
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            var key = $"{uid}.{expectedHowToUseUidProperties[uid]}";
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.Equal(english[key], (string?)element.Attribute(expectedHowToUseUidProperties[uid]));
+        }
+
+        var cardTemplate = shortcutDocument.Descendants().Single(element => element.Name.LocalName == "DataTemplate"
+            && (string?)element.Attribute(XamlNamespace + "Key") == "ShortcutCardTemplate");
+        Assert.Equal("{x:Bind Title}", (string?)cardTemplate.Descendants().Single(element =>
+            element.Name.LocalName == "TextBlock" && (string?)element.Attribute("Text") == "{x:Bind Title}").Attribute("Text"));
+        Assert.Equal("{x:Bind Action.ValidationMessage}", (string?)cardTemplate.Descendants().Single(element =>
+            element.Name.LocalName == "TextBlock" && (string?)element.Attribute("Text") == "{x:Bind Action.ValidationMessage}").Attribute("Text"));
+        var targetSummary = Assert.Single(cardTemplate.Descendants(), element => element.Name.LocalName == "TextBlock"
+            && ((string?)element.Attribute("Text"))?.Contains("GetDisplayTargetSummary", StringComparison.Ordinal) == true);
+        Assert.Equal("{x:Bind views:ShortcutPage.GetDisplayTargetSummary(Action.Kind, TargetSummary)}",
+            (string?)targetSummary.Attribute("Text"));
+
+        var catalog = ShortcutIconCatalog.Choices;
+        Assert.Equal(32, catalog.Count);
+        Assert.Equal(catalog.Count, catalog.Select(choice => choice.Glyph).Distinct(StringComparer.Ordinal).Count());
+        foreach (var choice in catalog)
+        {
+            var key = $"Shortcut_Icon_{Convert.ToInt32(choice.Glyph[0]):X4}";
+            Assert.Equal(choice.Name, english[key]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+        }
+        Assert.Contains("Convert.ToInt32(choice.Glyph[0]):X4", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.SetName(choiceButton, localizedName)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.SetToolTip(choiceButton, localizedName)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Format(\"Shortcut_IconPreview_A11y\", \"{0} Shortcut icon\", iconName.Text)", shortcutCode, StringComparison.Ordinal);
+
+        var codeResourceKeys = Regex.Matches(shortcutCode, "MainUiStrings\\.(?:Get|Format)\\(\\\"(?<key>Shortcut_[^\\\"]+)\\\"")
+            .Select(match => match.Groups["key"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        Assert.NotEmpty(codeResourceKeys);
+        foreach (var key in codeResourceKeys)
+        {
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+        }
+        var codeResourceFallbacks = Regex.Matches(shortcutCode,
+                "MainUiStrings\\.(?:Get|Format)\\(\"(?<key>Shortcut_[^\"]+)\"\\s*,\\s*\"(?<fallback>[^\"]*)\"")
+            .Cast<Match>();
+        foreach (var call in codeResourceFallbacks)
+        {
+            Assert.Equal(call.Groups["fallback"].Value, english[call.Groups["key"].Value]);
+        }
+
+        Assert.Equal("Steam Big Picture", ShortcutPage.GetDisplayTargetSummary(
+            FrontendShortcutEditorActionKind.SteamBigPicture, "runtime value"));
+        Assert.Equal("Steam client", ShortcutPage.GetDisplayTargetSummary(
+            FrontendShortcutEditorActionKind.SteamClient, "runtime value"));
+        Assert.Equal("XBOX app", ShortcutPage.GetDisplayTargetSummary(
+            FrontendShortcutEditorActionKind.XboxApp, "runtime value"));
+        Assert.Equal("Fullscreen screenshot", ShortcutPage.GetDisplayTargetSummary(
+            FrontendShortcutEditorActionKind.ScreenshotFullscreen, "runtime value"));
+        Assert.Equal("PowerShell", ShortcutPage.GetDisplayTargetSummary(
+            FrontendShortcutEditorActionKind.PowerShell, "runtime value"));
+        Assert.Equal("game.exe", ShortcutPage.GetDisplayTargetSummary(
+            FrontendShortcutEditorActionKind.Executable, "game.exe"));
+        Assert.Equal("example.com", ShortcutPage.GetDisplayTargetSummary(
+            FrontendShortcutEditorActionKind.Url, "example.com"));
+        Assert.Equal("Unsupported in this version · vendor.action", ShortcutPage.GetDisplayTargetSummary(
+            FrontendShortcutEditorActionKind.Unsupported, "Unsupported in this version · vendor.action"));
+        Assert.Contains("snapshot.FailureMessage ?? MainUiStrings.Get(\"Shortcut_EditorUnavailable\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("result.FailureMessage ?? MainUiStrings.Get(\"Shortcut_SaveFailed\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Format(\"Shortcut_Delete_ConfirmationBody\", \"Delete ‘{0}’? This cannot be undone.\", tile.Title)", shortcutCode, StringComparison.Ordinal);
+        Assert.Equal("Loading documentation…", english["HowToUse_Loading.Text"]);
+        Assert.Contains("RetryButton_Click", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "HowToUsePage.xaml")), StringComparison.Ordinal);
     }
 
     [Fact]

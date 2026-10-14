@@ -45,7 +45,7 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Shortcut" Tag="Shortcut">
+            <NavigationViewItem x:Uid="MainNav_Shortcut" Content="Shortcut" Tag="Shortcut">
                 <NavigationViewItem.Icon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71B;" />
                 </NavigationViewItem.Icon>
@@ -55,7 +55,7 @@
                     <SymbolIcon Symbol="Repair" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="How to Use" Tag="HowToUse">
+            <NavigationViewItem x:Uid="MainNav_HowToUse" Content="How to Use" Tag="HowToUse">
                 <NavigationViewItem.Icon>
                     <SymbolIcon Symbol="Help" />
                 </NavigationViewItem.Icon>
