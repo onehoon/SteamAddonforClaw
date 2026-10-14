@@ -5,17 +5,18 @@
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
         <StackPanel Spacing="16">
-            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Settings" />
+            <TextBlock x:Uid="Settings_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Settings" />
 
-            <ctcontrols:SettingsCard x:Name="UpdateCard" Header="Application updates">
+            <ctcontrols:SettingsCard x:Name="UpdateCard" x:Uid="Settings_UpdateCard" Header="Application updates">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE777;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
-                <Button x:Name="UpdateButton" Content="Check" Click="UpdateButton_Click" />
+                <Button x:Name="UpdateButton" x:Uid="Settings_UpdateButton" Content="Check" Click="UpdateButton_Click" />
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsCard
                 x:Name="AppThemeCard"
+                x:Uid="Settings_AppThemeCard"
                 Header="App theme"
                 Description="Choose the main app appearance.">
                 <ctcontrols:SettingsCard.HeaderIcon>
@@ -25,14 +26,15 @@
                     x:Name="AppThemeComboBox"
                     Width="140"
                     SelectionChanged="AppThemeComboBox_SelectionChanged">
-                    <ComboBoxItem Content="System" Tag="System" />
-                    <ComboBoxItem Content="Light" Tag="Light" />
-                    <ComboBoxItem Content="Dark" Tag="Dark" />
+                    <ComboBoxItem x:Uid="Settings_AppTheme_System" Content="System" Tag="System" />
+                    <ComboBoxItem x:Uid="Settings_AppTheme_Light" Content="Light" Tag="Light" />
+                    <ComboBoxItem x:Uid="Settings_AppTheme_Dark" Content="Dark" Tag="Dark" />
                 </ComboBox>
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsExpander
                 x:Name="GamingHomeExpander"
+                x:Uid="Settings_GamingHomeExpander"
                 Description="Choose the home app used by Windows gaming full screen experience."
                 Header="Windows Gaming Full Screen Experience"
                 IsExpanded="False">
@@ -40,14 +42,15 @@
                     <SymbolIcon Symbol="FullScreen" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ComboBox x:Name="GamingHomeComboBox" SelectionChanged="GamingHomeComboBox_SelectionChanged">
-                    <ComboBoxItem Content="Off" Tag="None" />
-                    <ComboBoxItem Content="Xbox" Tag="Xbox" />
-                    <ComboBoxItem Content="Steam Big Picture" Tag="SteamBigPicture" />
-                    <ComboBoxItem x:Name="GamingHomeOtherSelectionItem" Content="Other Windows app" Tag="Other" />
+                    <ComboBoxItem x:Uid="Settings_GamingHome_Off" Content="Off" Tag="None" />
+                    <ComboBoxItem x:Uid="Settings_GamingHome_Xbox" Content="Xbox" Tag="Xbox" />
+                    <ComboBoxItem x:Uid="Settings_GamingHome_SteamBigPicture" Content="Steam Big Picture" Tag="SteamBigPicture" />
+                    <ComboBoxItem x:Name="GamingHomeOtherSelectionItem" x:Uid="Settings_GamingHome_Other" Content="Other Windows app" Tag="Other" />
                 </ComboBox>
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard
                         x:Name="GamingHomeStartupCard"
+                        x:Uid="Settings_GamingHomeStartupCard"
                         Description="Start Windows directly in the selected gaming home."
                         Header="Start on Windows startup">
                         <ToggleSwitch x:Name="GamingHomeStartupToggleSwitch" OffContent="" OnContent="" Toggled="GamingHomeStartupToggleSwitch_Toggled" />
@@ -57,6 +60,7 @@
 
             <ctcontrols:SettingsCard
                 x:Name="QuickSettingsPowerSourceCard"
+                x:Uid="Settings_QuickSettingsPowerSourceCard"
                 Description="Show only the controls for the currently connected power source in Quick Settings Overlay."
                 Header="Show only current power source">
                 <ctcontrols:SettingsCard.HeaderIcon>
@@ -65,7 +69,7 @@
                 <ToggleSwitch x:Name="QuickSettingsPowerSourceToggleSwitch" OffContent="" OnContent="" Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard Header="Logging" Description="Choose log detail.">
+            <ctcontrols:SettingsCard x:Uid="Settings_LoggingCard" Header="Logging" Description="Choose log detail.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="List" />
                 </ctcontrols:SettingsCard.HeaderIcon>
@@ -78,11 +82,11 @@
                         <ComboBoxItem Content="Info" />
                         <ComboBoxItem Content="Debug" />
                     </ComboBox>
-                    <Button Content="Open folder" Click="OpenLogFolderButton_Click" />
+                    <Button x:Uid="Settings_OpenLogFolderButton" Content="Open folder" Click="OpenLogFolderButton_Click" />
                 </StackPanel>
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsExpander x:Name="RequiredComponentsExpander" Header="Required Components" IsExpanded="False">
+            <ctcontrols:SettingsExpander x:Name="RequiredComponentsExpander" x:Uid="Settings_RequiredComponentsExpander" Header="Required Components" IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <SymbolIcon Symbol="Repair" />
                 </ctcontrols:SettingsExpander.HeaderIcon>

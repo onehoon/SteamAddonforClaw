@@ -14,7 +14,8 @@ public sealed partial class SettingsPage : UserControl
     private IAddonFrontendControl? _frontend;
     private FrontendUpdateSnapshot _updateSnapshot = FrontendUpdateSnapshot.Unavailable;
     private int _updateOperationInProgress;
-    private FrontendGamingHomeSnapshot _gamingHomeSnapshot = FrontendGamingHomeSnapshot.Unavailable("Windows Gaming Full Screen Experience is unavailable.");
+    private FrontendGamingHomeSnapshot _gamingHomeSnapshot = FrontendGamingHomeSnapshot.Unavailable(
+        MainUiStrings.Get("Settings_GamingHome_InitiallyUnavailable", "Windows Gaming Full Screen Experience is unavailable."));
     private int _gamingHomeMutationInProgress;
     private bool _applyingGamingHomeState;
     private bool _applyingQuickSettingsPowerSourcePreference;
@@ -112,7 +113,9 @@ public sealed partial class SettingsPage : UserControl
     {
         _updateSnapshot = snapshot;
         UpdateCard.Description = snapshot.Message;
-        UpdateButton.Content = snapshot.CanInstall ? "Install update" : "Check";
+        UpdateButton.Content = snapshot.CanInstall
+            ? MainUiStrings.Get("Settings_Update_InstallAction", "Install update")
+            : MainUiStrings.Get("Settings_UpdateButton/Content", "Check");
         UpdateButton.IsEnabled = snapshot.CanCheck || snapshot.CanInstall;
         AppUpdateSnapshotRendered?.Invoke(snapshot);
     }
@@ -134,7 +137,8 @@ public sealed partial class SettingsPage : UserControl
             {
                 AppLog.Warn("GamingHome", "Main UI Gaming Home state refresh failed.", exception);
             }
-            RenderGamingHome(FrontendGamingHomeSnapshot.Unavailable("Windows Gaming Full Screen Experience could not be verified."));
+            RenderGamingHome(FrontendGamingHomeSnapshot.Unavailable(
+                MainUiStrings.Get("Settings_GamingHome_VerifyFailed", "Windows Gaming Full Screen Experience could not be verified.")));
         }
     }
 
@@ -156,12 +160,22 @@ public sealed partial class SettingsPage : UserControl
 
         GamingHomeExpander.Description = snapshot.Available
             ? snapshot.Selection == FrontendGamingHomeSelection.Other
-                ? "The current Windows app is outside Addon control. Choose Off, Xbox, or Steam Big Picture to replace it."
-                : "Choose the home app used by Windows gaming full screen experience."
-            : snapshot.UnavailableReason ?? "The current Windows setting could not be verified.";
+                ? MainUiStrings.Get(
+                    "Settings_GamingHome_OtherDescription",
+                    "The current Windows app is outside Addon control. Choose Off, Xbox, or Steam Big Picture to replace it.")
+                : MainUiStrings.Get(
+                    "Settings_GamingHomeExpander/Description",
+                    "Choose the home app used by Windows gaming full screen experience.")
+            : snapshot.UnavailableReason ?? MainUiStrings.Get(
+                "Settings_GamingHome_UnavailableDescription",
+                "The current Windows setting could not be verified.");
         GamingHomeStartupCard.Description = snapshot.Available && snapshot.Selection == FrontendGamingHomeSelection.Other
-            ? "The current value is shown but startup behavior for this app is not managed by the Addon."
-            : "Start Windows directly in the selected gaming home.";
+            ? MainUiStrings.Get(
+                "Settings_GamingHome_OtherStartupDescription",
+                "The current value is shown but startup behavior for this app is not managed by the Addon.")
+            : MainUiStrings.Get(
+                "Settings_GamingHomeStartupCard/Description",
+                "Start Windows directly in the selected gaming home.");
         UpdateGamingHomeControlStates();
     }
 
@@ -202,7 +216,7 @@ public sealed partial class SettingsPage : UserControl
         UpdateGamingHomeControlStates();
         await RunGamingHomeMutationAsync(
             () => _frontend.SetGamingHomeSelectionAsync(selection),
-            "The Gaming Home selection could not be changed.",
+            MainUiStrings.Get("Settings_GamingHome_SelectionChangeFailed", "The Gaming Home selection could not be changed."),
             startupMutation: false);
     }
 
@@ -219,7 +233,7 @@ public sealed partial class SettingsPage : UserControl
         UpdateGamingHomeControlStates();
         await RunGamingHomeMutationAsync(
             () => _frontend.SetGamingHomeStartupAsync(GamingHomeStartupToggleSwitch.IsOn),
-            "The Gaming Home startup setting could not be changed.",
+            MainUiStrings.Get("Settings_GamingHome_StartupChangeFailed", "The Gaming Home startup setting could not be changed."),
             startupMutation: true);
     }
 
@@ -245,7 +259,8 @@ public sealed partial class SettingsPage : UserControl
             catch (Exception refreshException)
             {
                 AppLog.Warn("GamingHome", "Main UI Gaming Home state refresh after mutation failure failed.", refreshException);
-                RenderGamingHome(FrontendGamingHomeSnapshot.Unavailable("Windows Gaming Full Screen Experience could not be verified."));
+                RenderGamingHome(FrontendGamingHomeSnapshot.Unavailable(
+                    MainUiStrings.Get("Settings_GamingHome_VerifyFailed", "Windows Gaming Full Screen Experience could not be verified.")));
             }
             SetGamingHomeFailureDescription(startupMutation, fallbackFailureMessage);
         }
@@ -278,13 +293,17 @@ public sealed partial class SettingsPage : UserControl
                 return;
             }
 
-            RenderAppUpdate(new(FrontendUpdateState.Checking, "Checking for updates…"));
+            RenderAppUpdate(new(
+                FrontendUpdateState.Checking,
+                MainUiStrings.Get("Settings_Update_Checking", "Checking for updates…")));
             RenderAppUpdate(await _frontend.CheckAndDownloadAppUpdateAsync().ConfigureAwait(true));
         }
         catch (Exception exception)
         {
             AppLog.Warn("Update", "Main UI update action failed.", exception);
-            RenderAppUpdate(new(FrontendUpdateState.Failed, "The update operation failed. Try again."));
+            RenderAppUpdate(new(
+                FrontendUpdateState.Failed,
+                MainUiStrings.Get("Settings_Update_OperationFailed", "The update operation failed. Try again.")));
         }
         finally
         {
@@ -418,7 +437,11 @@ public sealed partial class SettingsPage : UserControl
         var readyCount = components.Count(item => string.Equals(item.Status, "Ready", StringComparison.OrdinalIgnoreCase));
         RequiredComponentsExpander.Description = new TextBlock
         {
-            Text = $"{readyCount} of {components.Length} ready",
+            Text = MainUiStrings.Format(
+                "Settings_RequiredComponents_ReadyCount",
+                "{0} of {1} ready",
+                readyCount,
+                components.Length),
             FontSize = 14,
             FontWeight = FontWeights.SemiBold,
         };

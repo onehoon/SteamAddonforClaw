@@ -361,6 +361,142 @@ public sealed class MainUiLocalizationResourceTests
     }
 
     [Fact]
+    public void Settings_general_xaml_uses_unique_resources_and_preserves_excluded_controls()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var xamlPath = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
+        var document = XDocument.Load(xamlPath);
+        var uidElements = document.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        var actualUids = uidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!).ToArray();
+        var expectedUids = new[]
+        {
+            "Settings_PageTitle", "Settings_UpdateCard", "Settings_UpdateButton", "Settings_AppThemeCard",
+            "Settings_AppTheme_System", "Settings_AppTheme_Light", "Settings_AppTheme_Dark", "Settings_GamingHomeExpander",
+            "Settings_GamingHome_Off", "Settings_GamingHome_Xbox", "Settings_GamingHome_SteamBigPicture",
+            "Settings_GamingHome_Other", "Settings_GamingHomeStartupCard", "Settings_QuickSettingsPowerSourceCard",
+            "Settings_LoggingCard", "Settings_OpenLogFolderButton", "Settings_RequiredComponentsExpander"
+        };
+
+        Assert.Equal(expectedUids.OrderBy(uid => uid, StringComparer.Ordinal), actualUids.OrderBy(uid => uid, StringComparer.Ordinal));
+        Assert.Equal(actualUids.Length, actualUids.Distinct(StringComparer.Ordinal).Count());
+        foreach (var element in uidElements)
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            foreach (var property in new[] { "Text", "Header", "Description", "Content" })
+            {
+                var sourceValue = (string?)element.Attribute(property);
+                if (sourceValue is null) continue;
+
+                var key = $"{uid}.{property}";
+                if (uid == "Settings_AppThemeCard" && property == "Description")
+                {
+                    Assert.DoesNotContain(key, english.Keys);
+                    Assert.DoesNotContain(key, korean.Keys);
+                    continue;
+                }
+
+                Assert.Contains(key, english.Keys);
+                Assert.Contains(key, korean.Keys);
+                Assert.Equal(sourceValue, english[key]);
+                Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+            }
+        }
+
+        Assert.Equal("Settings", english["MainNav_Settings"]);
+        Assert.False(string.IsNullOrWhiteSpace(korean["MainNav_Settings"]));
+        Assert.DoesNotContain("MainNav_Settings.Content", english.Keys);
+        var appThemeCard = document.Descendants().Single(element =>
+            element.Name.LocalName == "SettingsCard" && (string?)element.Attribute(XamlNamespace + "Name") == "AppThemeCard");
+        Assert.Equal("Choose the main app appearance.", (string?)appThemeCard.Attribute("Description"));
+        Assert.Equal("Choose the main app appearance.", english["Settings_AppTheme_Description"]);
+        Assert.False(string.IsNullOrWhiteSpace(korean["Settings_AppTheme_Description"]));
+
+        var developerCard = document.Descendants().Single(element =>
+            element.Name.LocalName == "SettingsCard" && (string?)element.Attribute(XamlNamespace + "Name") == "DeveloperMenuCard");
+        Assert.Null(developerCard.Attribute(XamlNamespace + "Uid"));
+        Assert.Equal("Developer Menu", (string?)developerCard.Attribute("Header"));
+        Assert.Equal("Developer-only diagnostics. General users should not use this menu.", (string?)developerCard.Attribute("Description"));
+        Assert.DoesNotContain(english.Keys, key => key.Contains("Developer", StringComparison.OrdinalIgnoreCase));
+
+        var loggingChoices = document.Descendants().Single(element =>
+            element.Name.LocalName == "ComboBox" && (string?)element.Attribute(XamlNamespace + "Name") == "LogLevelComboBox")
+            .Elements().Where(element => element.Name.LocalName == "ComboBoxItem").ToArray();
+        Assert.Equal(new[] { "Off", "Info", "Debug" }, loggingChoices.Select(item => (string?)item.Attribute("Content")));
+        Assert.All(loggingChoices, item => Assert.Null(item.Attribute(XamlNamespace + "Uid")));
+        foreach (var key in new[] { "Settings_Logging_Off.Content", "Settings_Logging_Info.Content", "Settings_Logging_Debug.Content" })
+        {
+            Assert.DoesNotContain(key, english.Keys);
+            Assert.DoesNotContain(key, korean.Keys);
+        }
+    }
+
+    [Fact]
+    public void Settings_dynamic_ui_messages_are_resourced_and_preserve_producer_data()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var localMessages = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Settings_Update_InstallAction"] = "Install update",
+            ["Settings_Update_Checking"] = "Checking for updates…",
+            ["Settings_Update_OperationFailed"] = "The update operation failed. Try again.",
+            ["Settings_GamingHome_InitiallyUnavailable"] = "Windows Gaming Full Screen Experience is unavailable.",
+            ["Settings_GamingHome_VerifyFailed"] = "Windows Gaming Full Screen Experience could not be verified.",
+            ["Settings_GamingHome_OtherDescription"] = "The current Windows app is outside Addon control. Choose Off, Xbox, or Steam Big Picture to replace it.",
+            ["Settings_GamingHome_UnavailableDescription"] = "The current Windows setting could not be verified.",
+            ["Settings_GamingHome_OtherStartupDescription"] = "The current value is shown but startup behavior for this app is not managed by the Addon.",
+            ["Settings_GamingHome_SelectionChangeFailed"] = "The Gaming Home selection could not be changed.",
+            ["Settings_GamingHome_StartupChangeFailed"] = "The Gaming Home startup setting could not be changed."
+        };
+
+        foreach (var (key, fallback) in localMessages)
+        {
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.Equal(fallback, english[key]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+            Assert.Matches($"MainUiStrings\\.Get\\(\\s*\"{Regex.Escape(key)}\"", source);
+        }
+
+        Assert.Contains("MainUiStrings.Get(\"Settings_UpdateButton/Content\", \"Check\")", source, StringComparison.Ordinal);
+        Assert.Contains("UpdateButton.Content = snapshot.CanInstall\n            ? MainUiStrings.Get(\"Settings_Update_InstallAction\", \"Install update\")\n            : MainUiStrings.Get(\"Settings_UpdateButton/Content\", \"Check\");", source, StringComparison.Ordinal);
+        Assert.Matches("MainUiStrings\\.Get\\(\\s*\"Settings_GamingHomeExpander/Description\"", source);
+        Assert.Matches("MainUiStrings\\.Get\\(\\s*\"Settings_GamingHomeStartupCard/Description\"", source);
+        Assert.DoesNotContain("MainUiStrings.Get(\"Settings_GamingHomeExpander.Description\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("MainUiStrings.Get(\"Settings_GamingHomeStartupCard.Description\"", source, StringComparison.Ordinal);
+        Assert.Contains("snapshot.UnavailableReason ?? MainUiStrings.Get(", source, StringComparison.Ordinal);
+        Assert.Contains("result.FailureMessage ?? fallbackFailureMessage", source, StringComparison.Ordinal);
+        Assert.Contains("UpdateCard.Description = snapshot.Message", source, StringComparison.Ordinal);
+        Assert.Contains("UpdateCard.Description = result.FailureMessage", source, StringComparison.Ordinal);
+
+        const string readyCountKey = "Settings_RequiredComponents_ReadyCount";
+        const string readyCountFormat = "{0} of {1} ready";
+        Assert.Equal(readyCountFormat, english[readyCountKey]);
+        Assert.False(string.IsNullOrWhiteSpace(korean[readyCountKey]));
+        Assert.Equal(new[] { 0, 1 }, PlaceholderIndexes(english[readyCountKey]));
+        Assert.Equal(PlaceholderIndexes(english[readyCountKey]), PlaceholderIndexes(korean[readyCountKey]));
+        Assert.Equal("2 of 3 ready", MainUiStrings.Format(readyCountKey, readyCountFormat, 2, 3));
+        Assert.Contains("MainUiStrings.Format(\n                \"Settings_RequiredComponents_ReadyCount\",", source, StringComparison.Ordinal);
+        Assert.Contains("components.Count(item => string.Equals(item.Status, \"Ready\", StringComparison.OrdinalIgnoreCase))", source, StringComparison.Ordinal);
+        Assert.Contains("(\"HidHide\", snapshot.Prerequisites.HidHideStatus.ToString(), snapshot.Prerequisites.HidHideReason)", source, StringComparison.Ordinal);
+        Assert.Contains("(\"usbip-win2\", snapshot.Prerequisites.UsbIpStatus.ToString(), snapshot.Prerequisites.UsbIpReason)", source, StringComparison.Ordinal);
+        Assert.Contains("(\"VIIPER\", snapshot.Prerequisites.ViiperStatus.ToString(), snapshot.Prerequisites.ViiperReason)", source, StringComparison.Ordinal);
+        Assert.Contains("RequiredComponentsExpander.Items.Clear();", source, StringComparison.Ordinal);
+        Assert.Contains("Header = name,", source, StringComparison.Ordinal);
+        Assert.Contains("Description = reason,", source, StringComparison.Ordinal);
+        Assert.Contains("Text = status,", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Device_xaml_text_uses_unique_resource_uids_and_excludes_the_summary_card()
     {
         var root = FindRepositoryRoot();

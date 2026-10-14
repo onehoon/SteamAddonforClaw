@@ -1557,4 +1557,103 @@ Disabling password/sign-in on wake lets someone with physical access resume dire
 
 These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change. Registry policy controls may be restricted, and removing startup delay can make startup apps launch closer together.</value>
   </data>
+  <data name="MainNav_Settings" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="Settings_PageTitle.Text" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="Settings_UpdateCard.Header" xml:space="preserve">
+    <value>Application updates</value>
+  </data>
+  <data name="Settings_UpdateButton.Content" xml:space="preserve">
+    <value>Check</value>
+  </data>
+  <data name="Settings_Update_InstallAction" xml:space="preserve">
+    <value>Install update</value>
+  </data>
+  <data name="Settings_Update_Checking" xml:space="preserve">
+    <value>Checking for updates…</value>
+  </data>
+  <data name="Settings_Update_OperationFailed" xml:space="preserve">
+    <value>The update operation failed. Try again.</value>
+  </data>
+  <data name="Settings_AppThemeCard.Header" xml:space="preserve">
+    <value>App theme</value>
+  </data>
+  <data name="Settings_AppTheme_System.Content" xml:space="preserve">
+    <value>System</value>
+  </data>
+  <data name="Settings_AppTheme_Light.Content" xml:space="preserve">
+    <value>Light</value>
+  </data>
+  <data name="Settings_AppTheme_Dark.Content" xml:space="preserve">
+    <value>Dark</value>
+  </data>
+  <data name="Settings_GamingHomeExpander.Header" xml:space="preserve">
+    <value>Windows Gaming Full Screen Experience</value>
+  </data>
+  <data name="Settings_GamingHomeExpander.Description" xml:space="preserve">
+    <value>Choose the home app used by Windows gaming full screen experience.</value>
+  </data>
+  <data name="Settings_GamingHome_Off.Content" xml:space="preserve">
+    <value>Off</value>
+  </data>
+  <data name="Settings_GamingHome_Xbox.Content" xml:space="preserve">
+    <value>Xbox</value>
+  </data>
+  <data name="Settings_GamingHome_SteamBigPicture.Content" xml:space="preserve">
+    <value>Steam Big Picture</value>
+  </data>
+  <data name="Settings_GamingHome_Other.Content" xml:space="preserve">
+    <value>Other Windows app</value>
+  </data>
+  <data name="Settings_GamingHomeStartupCard.Header" xml:space="preserve">
+    <value>Start on Windows startup</value>
+  </data>
+  <data name="Settings_GamingHomeStartupCard.Description" xml:space="preserve">
+    <value>Start Windows directly in the selected gaming home.</value>
+  </data>
+  <data name="Settings_QuickSettingsPowerSourceCard.Header" xml:space="preserve">
+    <value>Show only current power source</value>
+  </data>
+  <data name="Settings_QuickSettingsPowerSourceCard.Description" xml:space="preserve">
+    <value>Show only the controls for the currently connected power source in Quick Settings Overlay.</value>
+  </data>
+  <data name="Settings_LoggingCard.Header" xml:space="preserve">
+    <value>Logging</value>
+  </data>
+  <data name="Settings_LoggingCard.Description" xml:space="preserve">
+    <value>Choose log detail.</value>
+  </data>
+  <data name="Settings_OpenLogFolderButton.Content" xml:space="preserve">
+    <value>Open folder</value>
+  </data>
+  <data name="Settings_RequiredComponentsExpander.Header" xml:space="preserve">
+    <value>Required Components</value>
+  </data>
+  <data name="Settings_GamingHome_InitiallyUnavailable" xml:space="preserve">
+    <value>Windows Gaming Full Screen Experience is unavailable.</value>
+  </data>
+  <data name="Settings_GamingHome_VerifyFailed" xml:space="preserve">
+    <value>Windows Gaming Full Screen Experience could not be verified.</value>
+  </data>
+  <data name="Settings_GamingHome_OtherDescription" xml:space="preserve">
+    <value>The current Windows app is outside Addon control. Choose Off, Xbox, or Steam Big Picture to replace it.</value>
+  </data>
+  <data name="Settings_GamingHome_UnavailableDescription" xml:space="preserve">
+    <value>The current Windows setting could not be verified.</value>
+  </data>
+  <data name="Settings_GamingHome_OtherStartupDescription" xml:space="preserve">
+    <value>The current value is shown but startup behavior for this app is not managed by the Addon.</value>
+  </data>
+  <data name="Settings_GamingHome_SelectionChangeFailed" xml:space="preserve">
+    <value>The Gaming Home selection could not be changed.</value>
+  </data>
+  <data name="Settings_GamingHome_StartupChangeFailed" xml:space="preserve">
+    <value>The Gaming Home startup setting could not be changed.</value>
+  </data>
+  <data name="Settings_RequiredComponents_ReadyCount" xml:space="preserve">
+    <value>{0} of {1} ready</value>
+  </data>
 </root>
