@@ -161,7 +161,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m1Row)", build);
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m2Row)", build);
         Assert.DoesNotContain("AddBackButtonMappingRow(mappingSection, rows,", build);
-        Assert.Contains("SetOverlaySectionSeparator(mappingCard, visible: false)", build);
+        Assert.Contains("SetOverlaySectionSeparator(mappingCard, visible: true)", build);
         Assert.Contains("SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true)", build);
         Assert.Contains("SetOverlaySectionSeparator(vibrationCard, visible: true)", build);
         Assert.DoesNotContain("_backButtonStatusText", controller);
