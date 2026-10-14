@@ -33,7 +33,7 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.Equal(5, (int)FrontendWindowsTweakId.DisableWindowsWidgets);
         Assert.Equal(6, (int)FrontendWindowsTweakId.DisableEdgeBackground);
         Assert.Equal(7, (int)FrontendWindowsTweakId.DisableStartupAppDelay);
-        Assert.Equal(82, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(83, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(7, (int)FrontendWindowsTweakState.Unknown);
         Assert.Equal(8, (int)FrontendWindowsTweakState.Mixed);
     }

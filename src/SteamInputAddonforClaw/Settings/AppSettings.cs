@@ -15,6 +15,9 @@ public sealed record AppSettings(
     /// <summary>Saved Steam/Big Picture virtual output choice. Normal Windows remains Xbox360.</summary>
     public SteamVirtualControllerPreference SteamVirtualController { get; init; } = SteamVirtualControllerPreference.SteamDeck;
 
+    /// <summary>Global desired state for the controller gyroscope input path.</summary>
+    public bool GyroscopeEnabled { get; init; } = true;
+
     /// <summary>Top-level desired state for the optional ClawHUD Managed Runtime.</summary>
     public bool ClawHudEnabled { get; init; }
 

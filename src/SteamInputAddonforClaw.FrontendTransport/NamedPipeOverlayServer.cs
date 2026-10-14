@@ -477,6 +477,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
             if (OverlayProductionControlsWireValidation.HasPayload(message) && message.Kind is not (
                     OverlayWireMessageKind.ControllerLedMutationRequest or OverlayWireMessageKind.ControllerLedMutationResult
                     or OverlayWireMessageKind.CurrentPowerSourceMutationRequest or OverlayWireMessageKind.CurrentPowerSourceMutationResult
+                    or OverlayWireMessageKind.ControllerForSteamMutationRequest or OverlayWireMessageKind.ControllerForSteamMutationResult
                     or OverlayWireMessageKind.ControllerVibrationMutationRequest or OverlayWireMessageKind.ControllerVibrationMutationResult
                     or OverlayWireMessageKind.FrontendSettingsState or OverlayWireMessageKind.ControllerVibrationState))
                 throw new FrontendProtocolException("Unexpected Overlay production-controls payload.");
@@ -555,12 +556,15 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 continue;
             }
 
-            if (message.Kind == OverlayWireMessageKind.ControllerLedMutationRequest || message.Kind == OverlayWireMessageKind.CurrentPowerSourceMutationRequest)
+            if (message.Kind is OverlayWireMessageKind.ControllerLedMutationRequest or OverlayWireMessageKind.CurrentPowerSourceMutationRequest or OverlayWireMessageKind.ControllerForSteamMutationRequest)
             {
                 var led = message.Kind == OverlayWireMessageKind.ControllerLedMutationRequest;
-                if (!OverlayProductionControlsWireValidation.IsValidSettingsMutationRequest(message, led))
+                var controllerForSteam = message.Kind == OverlayWireMessageKind.ControllerForSteamMutationRequest;
+                if (controllerForSteam
+                    ? !OverlayProductionControlsWireValidation.IsValidControllerForSteamMutationRequest(message)
+                    : !OverlayProductionControlsWireValidation.IsValidSettingsMutationRequest(message, led))
                     throw new FrontendProtocolException("Invalid Overlay frontend settings mutation request.");
-                _ = HandleFrontendSettingsMutationRequestAsync(pipe, message.FrontendSettingsMutationRequest!, led, connection.Token);
+                _ = HandleFrontendSettingsMutationRequestAsync(pipe, message.FrontendSettingsMutationRequest!, led, connection.Token, controllerForSteam);
                 continue;
             }
 
@@ -608,7 +612,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
-    private async Task HandleFrontendSettingsMutationRequestAsync(Stream pipe, OverlayFrontendSettingsMutationRequest request, bool led, CancellationToken token)
+    private async Task HandleFrontendSettingsMutationRequestAsync(Stream pipe, OverlayFrontendSettingsMutationRequest request, bool led, CancellationToken token, bool controllerForSteam = false)
     {
         try
         {
@@ -629,6 +633,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 (true, _) => OverlayWireMessageKind.ControllerLedMutationResult,
                 (false, _) => OverlayWireMessageKind.CurrentPowerSourceMutationResult,
             };
+            if (controllerForSteam) kind = OverlayWireMessageKind.ControllerForSteamMutationResult;
             await OverlayWireCodec.WriteAsync(pipe,
                 new(OverlayTransportProtocol.CurrentVersion, kind, FrontendSettingsMutationResponse: response), _writeGate, token).ConfigureAwait(false);
         }

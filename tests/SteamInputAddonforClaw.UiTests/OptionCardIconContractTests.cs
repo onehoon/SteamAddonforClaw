@@ -13,7 +13,7 @@ public sealed class OptionCardIconContractTests
         ("DevicePage.xaml", "Windows Power Mode", "FontIcon:E7E8"),
         ("DevicePage.xaml", "Battery charge limit", "FontIcon:E86B"),
 
-        ("ControllerPage.xaml", "Steam Virtual Controller", "FontIcon:E7FC"),
+        ("ControllerPage.xaml", "Controller for Steam", "FontIcon:E7FC"),
         ("ControllerPage.xaml", "Gamebar Button", "FontIcon:E990"),
         ("ControllerPage.xaml", "Center M Button", "FontIcon:E8B0"),
         ("ControllerPage.xaml", "M1 / M2", "FontIcon:E8AB"),

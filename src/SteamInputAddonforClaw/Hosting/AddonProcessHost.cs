@@ -734,6 +734,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             capturePresentationSnapshot: () => _runtimeHost?.CapturePresentationSnapshot()
                 ?? new SteamPresentationSnapshot(_runtimeHost?.ActualRunningAppId ?? 0, false),
             reconcileExperimentalVirtualTouchpad: token => ReconcileTouchpadCaptureAsync("DeveloperPreferenceChanged", token),
+            activePresentationSource: () => _presentationOwnership?.ActivePresentation,
+            reconcileMotionReaders: trigger => ReconcileMotionReadersAsync(trigger),
             windowsTweaksRuntime: new WindowsTweaksRuntime(
                 new WindowsTweaksOperatingSystem(),
                 startupResult.HardwareDeviceModel is { } tweaksModel
@@ -847,11 +849,33 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         try
         {
-            FrontendSettingsSnapshot settings = request.ControllerLed is { } led
-                ? await control.SetControllerLedSettingsAsync(led, token).ConfigureAwait(false)
-                : await control.SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value, token).ConfigureAwait(false);
+            FrontendSettingsSnapshot settings;
+            bool succeeded;
+            if (request.ControllerLed is { } led)
+            {
+                settings = await control.SetControllerLedSettingsAsync(led, token).ConfigureAwait(false);
+                succeeded = settings.ControllerLed == led;
+            }
+            else if (request.SteamVirtualController is { } preference)
+            {
+                var before = await control.GetBootstrapAsync(token).ConfigureAwait(false);
+                var controllerCanChange = before.Settings.ControllerForSteam.Available
+                    && before.Settings.ControllerForSteam.CanChangeController;
+                settings = await control.SetSteamVirtualControllerAsync(preference, token).ConfigureAwait(false);
+                succeeded = controllerCanChange && settings.SteamVirtualController == preference;
+            }
+            else if (request.GyroscopeEnabled is { } gyroscopeEnabled)
+            {
+                settings = await control.SetGyroscopeEnabledAsync(gyroscopeEnabled, token).ConfigureAwait(false);
+                succeeded = settings.GyroscopeEnabled == gyroscopeEnabled;
+            }
+            else
+            {
+                settings = await control.SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value, token).ConfigureAwait(false);
+                succeeded = settings.QuickSettingsCurrentPowerSourceOnly == request.CurrentPowerSourceOnly.Value;
+            }
             var bootstrap = await control.GetBootstrapAsync(token).ConfigureAwait(false);
-            return new(request.RequestId, true, null, settings, bootstrap.ControllerLedAvailable);
+            return new(request.RequestId, succeeded, succeeded ? null : "Settings change was not accepted.", settings, bootstrap.ControllerLedAvailable);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch
@@ -987,7 +1011,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     Volatile.Read(ref _activeNonSteamBackButtonMappingOverride) ?? startupSettings.BackButtonMapping,
                 physicalRumbleTestAvailabilityProvider: () =>
                     owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null,
-                motionSnapshotProvider: () => _motionSource?.LatestState ?? MsiClawMotionState.Unavailable,
+                motionSnapshotProvider: () => _runtimeStartupSettings?.GyroscopeEnabled == false
+                    ? MsiClawMotionState.Unavailable
+                    : _motionSource?.LatestState ?? MsiClawMotionState.Unavailable,
                 requires250Hz: RequiresController250Hz,
                 steamVirtualControllerPreferenceProvider: () => startupSettings.SteamVirtualController,
                 steamGameControllerPreferenceProvider: appId => _gameProfileMutations?.CaptureSteamVirtualController(appId) ?? (false, null),
@@ -1542,6 +1568,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         var presentation = _presentationOwnership;
         return ShouldRunMotionReaders(
+            _runtimeStartupSettings?.GyroscopeEnabled != false,
             IsHealthyOwnedMotionSession(),
             presentation?.ActivePresentation,
             presentation?.IsSuspendPaused ?? false,
@@ -1549,11 +1576,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     internal static bool ShouldRunMotionReaders(
+        bool gyroscopeEnabled,
         bool hasHealthyOwnedMotionSession,
         Devices.MSI.Claw.AddonPresentationKind? activePresentation,
         bool isSuspendPaused,
         bool activePresentationLive) =>
-        hasHealthyOwnedMotionSession
+        gyroscopeEnabled
+        && hasHealthyOwnedMotionSession
         && !isSuspendPaused
         && activePresentationLive
         && activePresentation is Devices.MSI.Claw.AddonPresentationKind.SteamDeck or Devices.MSI.Claw.AddonPresentationKind.DualSenseEdge;
@@ -3851,6 +3880,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         Task<bool>? reconcile = null;
         FrontendControllerBadgeState previousBadge = default;
+        Devices.MSI.Claw.AddonPresentationKind? previousPresentation = null;
         var deferredForDeveloperRearm = false;
         lock (_controllerOwnershipOperationSync)
         {
@@ -3866,6 +3896,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     || presentation.ActivePresentation is not null))
             {
                 previousBadge = CaptureCurrentControllerBadge();
+                previousPresentation = presentation.ActivePresentation;
                 reconcile = Task.Run(() => ReconcileControllerPresentationAsync(
                     presentation,
                     physical,
@@ -3889,6 +3920,29 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             previousBadge,
             CaptureCurrentControllerBadge,
             NotifyControllerBadgeStateInvalidated);
+        _ = NotifyControllerPresentationIfChangedAfterAsync(
+            reconcile,
+            previousPresentation,
+            () => _presentationOwnership?.ActivePresentation,
+            NotifyControllerBadgeStateInvalidated);
+    }
+
+    internal static async Task NotifyControllerPresentationIfChangedAfterAsync(
+        Task operation,
+        Devices.MSI.Claw.AddonPresentationKind? previousPresentation,
+        Func<Devices.MSI.Claw.AddonPresentationKind?> capturePresentation,
+        Action invalidate)
+    {
+        try { await operation.ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            AppLog.Debug("ControllerPresentation", "Controller settings projection lifecycle operation completed with an exception.",
+                ("Reason", exception.GetType().Name));
+        }
+
+        if (capturePresentation() != previousPresentation)
+            invalidate();
     }
 
     private async Task<bool> ReconcileControllerPresentationAsync(

@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class SteamVirtualControllerUiTests
 {
     [Fact]
-    public void Global_selector_is_at_the_top_of_Controller_with_a_two_line_description()
+    public void Global_selector_and_gyro_are_labeled_rows_with_the_exact_display_names()
     {
         var controllerXaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml");
         var settingsXaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
@@ -20,32 +20,49 @@ public sealed class SteamVirtualControllerUiTests
         var mapping = controllerXaml.IndexOf("x:Name=\"MappingContent\"", StringComparison.Ordinal);
 
         Assert.True(title >= 0 && card > title && unavailable > card && mapping > card);
-        Assert.Contains("Header=\"Steam Virtual Controller\"", controllerXaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"Choose the virtual controller used by Steam.\"", controllerXaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Controller for Steam\"", controllerXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Choose the controller used by Steam and configure gyroscope input.\"", controllerXaml, StringComparison.Ordinal);
+        Assert.Contains("Controller_SteamControllerRow", controllerXaml, StringComparison.Ordinal);
+        Assert.Contains("Controller_GyroscopeRow", controllerXaml, StringComparison.Ordinal);
+        Assert.Contains("Controller_GyroscopeToggle", controllerXaml, StringComparison.Ordinal);
         Assert.Contains("SteamVirtualControllerActivityText", controllerXaml, StringComparison.Ordinal);
         var steamDeckOption = Assert.Single(controllerDocument.Descendants(), element => (string?)element.Attribute("Tag") == "SteamDeck");
         var dualSenseOption = Assert.Single(controllerDocument.Descendants(), element => (string?)element.Attribute("Tag") == "DualSenseEdge");
-        Assert.Equal("Steam Deck (Default)", (string?)steamDeckOption.Attribute("Content"));
+        Assert.Equal("Steam Deck", (string?)steamDeckOption.Attribute("Content"));
         Assert.Equal("DualSense Edge", (string?)dualSenseOption.Attribute("Content"));
         Assert.Equal("Controller_SteamDeckOption", (string?)steamDeckOption.Attribute(x + "Uid"));
         Assert.Equal("Controller_DualSenseEdgeOption", (string?)dualSenseOption.Attribute(x + "Uid"));
         Assert.DoesNotContain("SteamVirtualController", settingsXaml, StringComparison.Ordinal);
+        foreach (var culture in new[] { "en-US", "ko-KR" })
+        {
+            var resources = ReadSource("src", "SteamInputAddonforClaw.UI", "Strings", culture, "Resources.resw");
+            Assert.DoesNotContain("Steam Deck (Default)", resources, StringComparison.Ordinal);
+            Assert.Contains("Controller_SteamControllerRow.Text", resources, StringComparison.Ordinal);
+            Assert.Contains("Controller_GyroscopeRow.Text", resources, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
-    public void Global_selector_requires_known_idle_Steam_state_and_no_pending_save()
+    public void Global_selector_uses_the_runtime_projection_and_gyro_mutation_is_independent()
     {
-        Assert.True(ControllerPage.CanEditSteamVirtualController(false, mutationInProgress: false));
-        Assert.False(ControllerPage.CanEditSteamVirtualController(true, mutationInProgress: false));
-        Assert.False(ControllerPage.CanEditSteamVirtualController(null, mutationInProgress: false));
-        Assert.False(ControllerPage.CanEditSteamVirtualController(false, mutationInProgress: true));
+        var idle = new FrontendControllerForSteamSnapshot(true, SteamVirtualControllerPreference.SteamDeck, null, true);
+        var activeGameProfileOverride = new FrontendControllerForSteamSnapshot(true, SteamVirtualControllerPreference.SteamDeck, SteamVirtualControllerPreference.DualSenseEdge, false);
+        var unavailable = FrontendControllerForSteamSnapshot.Unavailable(SteamVirtualControllerPreference.SteamDeck);
+        Assert.True(ControllerPage.CanEditSteamVirtualController(idle, mutationInProgress: false));
+        Assert.False(ControllerPage.CanEditSteamVirtualController(activeGameProfileOverride, mutationInProgress: false));
+        Assert.False(ControllerPage.CanEditSteamVirtualController(unavailable, mutationInProgress: false));
+        Assert.False(ControllerPage.CanEditSteamVirtualController(idle, mutationInProgress: true));
 
         var controller = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml.cs");
         Assert.Contains("_frontend.SetSteamVirtualControllerAsync(requested)", controller, StringComparison.Ordinal);
+        Assert.Contains("settings.ControllerForSteam", controller, StringComparison.Ordinal);
         Assert.Contains("settings.SteamVirtualController", controller, StringComparison.Ordinal);
         Assert.Contains("GetBootstrapAsync()", controller, StringComparison.Ordinal);
-        Assert.Contains("SteamActivityRefreshRequested?.Invoke", controller, StringComparison.Ordinal);
-        Assert.Contains("_steamActive = null", controller, StringComparison.Ordinal);
+        Assert.Contains("_frontend.SetGyroscopeEnabledAsync(requested)", controller, StringComparison.Ordinal);
+        Assert.Contains("ShowGyroscopeUpdateFailure()", controller, StringComparison.Ordinal);
+        Assert.Contains("confirmedValue ?? _lastKnownGyroscopeEnabled", controller, StringComparison.Ordinal);
+        Assert.Contains("_frontend.StateInvalidated += OnFrontendStateInvalidated", controller, StringComparison.Ordinal);
+        Assert.Contains("_ = RefreshControllerForSteamAsync()", controller, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -107,23 +124,11 @@ public sealed class SteamVirtualControllerUiTests
     }
 
     [Fact]
-    public void Main_window_propagates_status_and_keeps_both_selectors_locked_when_status_is_unknown()
+    public void Main_window_materializes_and_refreshes_the_runtime_owned_controller_projection()
     {
         var mainWindow = ReadSource("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs");
-        var renderStart = mainWindow.IndexOf("private void RenderSystemStatus(FrontendStatusSnapshot snapshot)", StringComparison.Ordinal);
-        var renderEnd = mainWindow.IndexOf("private void RequestPrerequisiteSetupActivation()", renderStart, StringComparison.Ordinal);
-        Assert.True(renderStart >= 0 && renderEnd > renderStart);
-        var render = mainWindow[renderStart..renderEnd];
-        Assert.Contains("_controllerContent?.SetSteamActivity(snapshot.Steam.Active)", render, StringComparison.Ordinal);
-        Assert.Contains("_profileContent?.SetSteamActivity(snapshot.Steam.Active)", render, StringComparison.Ordinal);
-
-        var refreshStart = mainWindow.IndexOf("private async Task RefreshSystemStatusAsync()", StringComparison.Ordinal);
-        var refreshEnd = mainWindow.IndexOf("private void RenderSystemStatus(", refreshStart, StringComparison.Ordinal);
-        Assert.True(refreshStart >= 0 && refreshEnd > refreshStart);
-        var refresh = mainWindow[refreshStart..refreshEnd];
-        Assert.Contains("_controllerContent?.SetSteamActivity(null)", refresh, StringComparison.Ordinal);
-        Assert.Contains("_profileContent?.SetSteamActivity(null)", refresh, StringComparison.Ordinal);
-        Assert.Contains("_controllerContent.Activate()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("page.ApplyControllerForSteamSettings(_bootstrap.Settings)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_controllerContent!.Activate()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_profileContent.Activate()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshSystemStatusAsync()", mainWindow, StringComparison.Ordinal);
     }
@@ -139,8 +144,10 @@ public sealed class SteamVirtualControllerUiTests
             Assert.DoesNotContain("실험", guide, StringComparison.Ordinal);
             Assert.DoesNotContain("Settings → Steam / Big Picture Controller", guide, StringComparison.Ordinal);
             Assert.DoesNotContain("#### Steam / Big Picture Controller", guide, StringComparison.Ordinal);
-            Assert.Contains("Controller → Steam Virtual Controller", guide, StringComparison.Ordinal);
+            Assert.Contains("Controller → Controller for Steam", guide, StringComparison.Ordinal);
             Assert.Contains("Use default", guide, StringComparison.Ordinal);
+            Assert.Contains("Gyroscope", guide, StringComparison.Ordinal);
+            Assert.Contains("Quick Settings Overlay", guide, StringComparison.Ordinal);
         }
     }
 

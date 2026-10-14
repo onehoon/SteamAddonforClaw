@@ -232,6 +232,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.AcknowledgeWindowsTweaksWarningAsync(FrontendWireCodec.Decode<AcknowledgeWindowsTweaksWarningRequest>(p).LocalDate, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetExperimentalVirtualTouchpadEnabled
         ? FrontendWireCodec.Payload(await _inner.SetExperimentalVirtualTouchpadEnabledAsync(FrontendWireCodec.Decode<SetExperimentalVirtualTouchpadEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGyroscopeEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetGyroscopeEnabledAsync(FrontendWireCodec.Decode<SetGyroscopeEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureAppUpdate
         ? FrontendWireCodec.Payload(await _inner.CaptureAppUpdateAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CheckAndDownloadAppUpdate

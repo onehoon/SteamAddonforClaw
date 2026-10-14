@@ -42,11 +42,12 @@ internal static class OverlayTransportProtocol
     // Version 17 adds the XBOX-only Profile Controller section/rows/commit group to that contract.
     // Version 18 adds the shared Profile Minimum GPU Clock section and AC/DC driver-clock indexes.
     // Version 19 adds a payload-free conditional no-running-game Profile recheck request.
-    internal const int CurrentVersion = 19;
+    // Version 20 adds correlated Controller for Steam / gyroscope mutations.
+    internal const int CurrentVersion = 20;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerForSteamMutationRequest, ControllerForSteamMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest }
 internal enum OverlayCommand { Show, Hide, Shutdown, ShowActiveProfile }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
@@ -94,7 +95,7 @@ internal sealed record OverlayBackButtonMappingMutationResponse(
     string? FailureMessage,
     OverlayBackButtonMappingState State);
 
-internal sealed record OverlayFrontendSettingsMutationRequest(long RequestId, ControllerLedSettings? ControllerLed = null, bool? CurrentPowerSourceOnly = null);
+internal sealed record OverlayFrontendSettingsMutationRequest(long RequestId, ControllerLedSettings? ControllerLed = null, bool? CurrentPowerSourceOnly = null, SteamVirtualControllerPreference? SteamVirtualController = null, bool? GyroscopeEnabled = null);
 internal sealed record OverlayFrontendSettingsMutationResponse(long RequestId, bool Succeeded, string? FailureMessage, FrontendSettingsSnapshot Settings, bool ControllerLedAvailable, bool SettingsAvailable = true);
 internal sealed record OverlayControllerVibrationMutationRequest(long RequestId, int LeftPercent, int RightPercent);
 internal sealed record OverlayControllerVibrationMutationResponse(long RequestId, FrontendControllerVibrationStrengthMutationResult Result);

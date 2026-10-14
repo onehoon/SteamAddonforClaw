@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -30,10 +31,94 @@ public sealed class SteamVirtualControllerFrontendTests : IDisposable
         var same = await control.SetSteamVirtualControllerAsync(SteamVirtualControllerPreference.DualSenseEdge);
 
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, changed.SteamVirtualController);
+        Assert.True(changed.ControllerForSteam.Available);
+        Assert.True(changed.ControllerForSteam.CanChangeController);
+        Assert.Null(changed.ControllerForSteam.ActiveSteamPreference);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, same.SteamVirtualController);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, new SettingsStore(path).Load().SteamVirtualController);
         Assert.Equal(["SteamVirtualControllerPreferenceChanged"], reconciles);
         Assert.Equal(1, invalidations);
+    }
+
+    [Fact]
+    public async Task Active_Steam_session_displays_the_applied_controller_and_keeps_the_saved_global_choice_unchanged()
+    {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        var coordinator = new StartupSettingsCoordinator(
+            new AppSettings { SteamVirtualController = SteamVirtualControllerPreference.SteamDeck },
+            new SettingsStore(Path.Combine(_directory, "active-projection.json")), new NoOpStartupManager());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null,
+            capturePresentationSnapshot: () => new SteamPresentationSnapshot(12345, false),
+            activePresentationSource: () => AddonPresentationKind.DualSenseEdge);
+
+        var current = await control.GetBootstrapAsync();
+        var rejected = await control.SetSteamVirtualControllerAsync(SteamVirtualControllerPreference.DualSenseEdge);
+
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, current.Settings.SteamVirtualController);
+        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, current.Settings.ControllerForSteam.ActiveSteamPreference);
+        Assert.False(current.Settings.ControllerForSteam.CanChangeController);
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, rejected.SteamVirtualController);
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, coordinator.SteamVirtualController);
+    }
+
+    [Fact]
+    public async Task Active_session_with_unknown_applied_controller_fails_closed_for_selection()
+    {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(),
+            new SettingsStore(Path.Combine(_directory, "unknown-active-projection.json")), new NoOpStartupManager());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null,
+            capturePresentationSnapshot: () => new SteamPresentationSnapshot(0, true),
+            activePresentationSource: () => AddonPresentationKind.Xbox360);
+
+        var snapshot = await control.GetBootstrapAsync();
+
+        Assert.False(snapshot.Settings.ControllerForSteam.Available);
+        Assert.False(snapshot.Settings.ControllerForSteam.CanChangeController);
+        Assert.Null(snapshot.Settings.ControllerForSteam.ActiveSteamPreference);
+    }
+
+    [Fact]
+    public async Task Gyroscope_off_persists_and_reconciles_only_motion_readers()
+    {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        var path = Path.Combine(_directory, "gyro-mutation.json");
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(path), new NoOpStartupManager());
+        var reconciles = new List<string>();
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null,
+            reconcileMotionReaders: trigger => { reconciles.Add(trigger); return Task.CompletedTask; });
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        var result = await control.SetGyroscopeEnabledAsync(false);
+
+        Assert.False(result.GyroscopeEnabled);
+        Assert.False(new SettingsStore(path).Load().GyroscopeEnabled);
+        Assert.Equal(["GyroscopePreferenceChanged"], reconciles);
+        Assert.Equal(1, invalidations);
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck, result.SteamVirtualController);
+    }
+
+    [Fact]
+    public async Task Failed_gyroscope_persistence_keeps_the_last_effective_value_and_does_not_reconcile()
+    {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        Directory.CreateDirectory(_directory);
+        var blocker = Path.Combine(_directory, "not-a-directory");
+        File.WriteAllText(blocker, "blocked");
+        var coordinator = new StartupSettingsCoordinator(new AppSettings { GyroscopeEnabled = true },
+            new SettingsStore(Path.Combine(blocker, "settings.json")), new NoOpStartupManager());
+        var reconciles = 0;
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null,
+            reconcileMotionReaders: _ => { reconciles++; return Task.CompletedTask; });
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        await Assert.ThrowsAnyAsync<IOException>(() => control.SetGyroscopeEnabledAsync(false));
+
+        Assert.True(coordinator.GyroscopeEnabled);
+        Assert.Equal(0, reconciles);
+        Assert.Equal(0, invalidations);
     }
 
     [Fact]

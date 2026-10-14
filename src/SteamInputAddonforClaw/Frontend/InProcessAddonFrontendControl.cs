@@ -104,6 +104,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
     private readonly ShortcutRuntime? _shortcutRuntime;
     private readonly Action<string>? _requestControllerPresentationReconcile;
+    private readonly Func<AddonPresentationKind?>? _activePresentationSource;
+    private readonly Func<string, Task>? _reconcileMotionReaders;
     private readonly WindowsTweaksRuntime? _windowsTweaksRuntime;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
@@ -158,6 +160,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Action<string>? requestControllerPresentationReconcile = null,
         Func<SteamPresentationSnapshot>? capturePresentationSnapshot = null,
         Func<CancellationToken, Task<bool>>? reconcileExperimentalVirtualTouchpad = null,
+        Func<AddonPresentationKind?>? activePresentationSource = null,
+        Func<string, Task>? reconcileMotionReaders = null,
         WindowsTweaksRuntime? windowsTweaksRuntime = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
@@ -197,6 +201,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _testControllerVibrationMotor = testControllerVibrationMotor;
         _runDeveloperRumbleRearm = runDeveloperRumbleRearm;
         _requestControllerPresentationReconcile = requestControllerPresentationReconcile;
+        _activePresentationSource = activePresentationSource;
+        _reconcileMotionReaders = reconcileMotionReaders;
         _reconcileExperimentalVirtualTouchpad = reconcileExperimentalVirtualTouchpad;
         _windowsTweaksRuntime = windowsTweaksRuntime;
         _settings = settings;
@@ -628,7 +634,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
-        if (IsSteamGameOrBigPictureActive())
+        if (!CaptureControllerForSteam().CanChangeController)
             return Task.FromResult(new FrontendGameProfileMutationResult(
                 FrontendGameProfileMutationOutcome.Unavailable,
                 "Controller selection cannot be changed while a Steam game or Big Picture is active.",
@@ -977,6 +983,22 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
+    public async Task<FrontendSettingsSnapshot> SetGyroscopeEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var previous = _settings.GyroscopeEnabled;
+        if (!_settings.ChangeGyroscopeEnabled(enabled) || previous == enabled)
+            return MapSettings();
+
+        // The persisted desired value gates publisher snapshots immediately. Reader reconciliation
+        // then invalidates/cancels the existing source before awaiting its bounded shutdown.
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        if (_reconcileMotionReaders is not null)
+            await _reconcileMotionReaders("GyroscopePreferenceChanged").ConfigureAwait(false);
+        return MapSettings();
+    }
+
     public Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -1042,6 +1064,34 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             AppLog.Warn("ControllerPresentation", "Steam virtual controller preference mutation rejected because session state could not be captured.", exception,
                 ("Event", "SteamVirtualControllerMutationRejectedUnknownSession"));
             return true;
+        }
+    }
+
+    private FrontendControllerForSteamSnapshot CaptureControllerForSteam()
+    {
+        var saved = _settings.SteamVirtualController;
+        try
+        {
+            var session = _capturePresentationSnapshot?.Invoke()
+                ?? new SteamPresentationSnapshot(_actualRunningAppIdSource(), false);
+            if (session.RunningAppId == 0 && !session.BigPictureActive)
+                return new(true, saved, null, true);
+
+            var active = _activePresentationSource?.Invoke() switch
+            {
+                AddonPresentationKind.SteamDeck => SteamVirtualControllerPreference.SteamDeck,
+                AddonPresentationKind.DualSenseEdge => SteamVirtualControllerPreference.DualSenseEdge,
+                _ => (SteamVirtualControllerPreference?)null,
+            };
+            return active is { } preference
+                ? new(true, saved, preference, false)
+                : FrontendControllerForSteamSnapshot.Unavailable(saved);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerPresentation", "Controller for Steam state is unavailable; controller selection remains locked.", exception,
+                ("Event", "ControllerForSteamStateUnavailable"));
+            return FrontendControllerForSteamSnapshot.Unavailable(saved);
         }
     }
 
@@ -1624,7 +1674,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1
