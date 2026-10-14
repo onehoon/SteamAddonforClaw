@@ -28,6 +28,7 @@ public sealed class MainUiLocalizationResourceTests
         {
             "MainNav_Device.Content",
             "MainNav_Steam.Content",
+            "MainNav_Xbox.Content",
             "HowToUse_Loading.Text",
             "Settings_AppTheme_Description"
         };
@@ -412,6 +413,176 @@ public sealed class MainUiLocalizationResourceTests
 
         var verifier = File.ReadAllText(Path.Combine(root, "scripts", "verify-ui-localization-pri.ps1"));
         Assert.Contains("Text|Content|Header|Description|PlaceholderText", verifier, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Xbox_navigation_and_fixed_xaml_text_use_unique_resource_uids()
+    {
+        var root = FindRepositoryRoot();
+        var mainWindow = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var xboxNavigation = Assert.Single(mainWindow.Descendants(), element =>
+            element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == "Xbox");
+        Assert.Equal("MainNav_Xbox", (string?)xboxNavigation.Attribute(XamlNamespace + "Uid"));
+        Assert.Equal("XBOX", (string?)xboxNavigation.Attribute("Content"));
+        Assert.Equal("Xbox", (string?)xboxNavigation.Attribute("Tag"));
+
+        var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml"));
+        var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        Assert.Contains("MainNav_Xbox.Content", english.Keys);
+        Assert.Contains("MainNav_Xbox.Content", korean.Keys);
+        Assert.Equal("XBOX", english["MainNav_Xbox.Content"]);
+        var expectedUids = new[]
+        {
+            "Xbox_CatalogTitle", "Xbox_RefreshGamesButton", "Xbox_GameSearchBox", "Xbox_BackButton",
+            "Xbox_ControllerMappingExpander", "Xbox_M1Card", "Xbox_M2Card",
+            "Xbox_TdpExpander", "Xbox_TdpAcCard", "Xbox_TdpDcCard",
+            "Xbox_CpuBoostExpander", "Xbox_CpuBoostAcCard", "Xbox_CpuBoostDcCard",
+            "Xbox_PowerModeExpander", "Xbox_PowerModeAcCard", "Xbox_PowerModeDcCard",
+            "Xbox_GpuMinimumClockExpander", "Xbox_GpuMinimumClockAcCard", "Xbox_GpuMinimumClockDcCard",
+            "Xbox_IntelFpsExpander", "Xbox_FpsAcCard", "Xbox_FpsDcCard", "Xbox_ResolutionCard"
+        };
+        var uidElements = document.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        var actualUids = uidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!).ToArray();
+
+        Assert.Equal(expectedUids.OrderBy(value => value, StringComparer.Ordinal), actualUids.OrderBy(value => value, StringComparer.Ordinal));
+        Assert.Equal(actualUids.Length, actualUids.Distinct(StringComparer.Ordinal).Count());
+        foreach (var element in uidElements)
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            Assert.StartsWith("Xbox_", uid, StringComparison.Ordinal);
+            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText" })
+            {
+                var sourceValue = (string?)element.Attribute(property);
+                if (string.IsNullOrWhiteSpace(sourceValue)) continue;
+
+                var key = $"{uid}.{property}";
+                Assert.Contains(key, english.Keys);
+                Assert.Contains(key, korean.Keys);
+                Assert.Equal(sourceValue, english[key]);
+            }
+        }
+    }
+
+    [Fact]
+    public void Xbox_code_resources_cover_modes_targets_errors_and_runtime_message_precedence()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        var literalKeys = Regex.Matches(source, "MainUiStrings\\.Get\\(\\\"(?<key>Xbox_[^\\\"]+)\\\"")
+            .Select(match => match.Groups["key"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(literalKeys);
+        foreach (var key in literalKeys)
+        {
+            var resourceKey = key.Replace('/', '.');
+            Assert.Contains(resourceKey, english.Keys);
+            Assert.Contains(resourceKey, korean.Keys);
+        }
+
+        var cpuModes = Regex.Matches(source, "new\\(CpuBoostMode\\.(?<mode>\\w+),\\s*MainUiStrings\\.Get\\(\\\"(?<key>Xbox_CpuBoost_Mode_[^\\\"]+)\\\"")
+            .Select(match => (Mode: match.Groups["mode"].Value, Key: match.Groups["key"].Value))
+            .ToArray();
+        Assert.Equal(
+            new[]
+            {
+                ("Disabled", "Xbox_CpuBoost_Mode_Disabled"),
+                ("Enabled", "Xbox_CpuBoost_Mode_Enabled"),
+                ("Aggressive", "Xbox_CpuBoost_Mode_Aggressive"),
+                ("EfficientEnabled", "Xbox_CpuBoost_Mode_EfficientEnabled"),
+                ("EfficientAggressive", "Xbox_CpuBoost_Mode_EfficientAggressive"),
+                ("AggressiveAtGuaranteed", "Xbox_CpuBoost_Mode_AggressiveAtGuaranteed"),
+                ("EfficientAggressiveAtGuaranteed", "Xbox_CpuBoost_Mode_EfficientAggressiveAtGuaranteed")
+            },
+            cpuModes);
+
+        var powerModes = Regex.Matches(source, "new\\(WindowsPowerMode\\.(?<mode>\\w+),\\s*MainUiStrings\\.Get\\(\\\"(?<key>Xbox_PowerMode_Mode_[^\\\"]+)\\\"")
+            .Select(match => (Mode: match.Groups["mode"].Value, Key: match.Groups["key"].Value))
+            .ToArray();
+        Assert.Equal(
+            new[]
+            {
+                ("BestPowerEfficiency", "Xbox_PowerMode_Mode_BestPowerEfficiency"),
+                ("Balanced", "Xbox_PowerMode_Mode_Balanced"),
+                ("BestPerformance", "Xbox_PowerMode_Mode_BestPerformance")
+            },
+            powerModes);
+        Assert.Contains("new(null, null, MainUiStrings.Get(\"Xbox_Resolution_DoNotChange\", \"Do not change\")), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", source, StringComparison.Ordinal);
+
+        var mapping = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "BackButtonMappingUiOptions.cs"));
+        Assert.Contains("comboBox.Items.Add(new ComboBoxItem { Content = Describe(target), Tag = target })", mapping, StringComparison.Ordinal);
+        Assert.Contains("item.Tag is not Xbox360BackButtonTarget target", source, StringComparison.Ordinal);
+        Assert.Contains("item.Content = MainUiStrings.Get(", source, StringComparison.Ordinal);
+        Assert.Contains("\"Xbox_BackTarget_\" + target", source, StringComparison.Ordinal);
+        Assert.Contains("BackButtonMappingLabels.GetDisplayName(target)", source, StringComparison.Ordinal);
+        var addM1 = source.IndexOf("BackButtonMappingUiOptions.AddTargets(M1BackButtonTargetComboBox)", StringComparison.Ordinal);
+        var localizeM1 = source.IndexOf("LocalizeXboxBackTargets(M1BackButtonTargetComboBox)", addM1, StringComparison.Ordinal);
+        var addM2 = source.IndexOf("BackButtonMappingUiOptions.AddTargets(M2BackButtonTargetComboBox)", StringComparison.Ordinal);
+        var localizeM2 = source.IndexOf("LocalizeXboxBackTargets(M2BackButtonTargetComboBox)", addM2, StringComparison.Ordinal);
+        Assert.True(addM1 >= 0 && localizeM1 > addM1);
+        Assert.True(addM2 >= 0 && localizeM2 > addM2);
+        Assert.DoesNotContain("LocalizeControllerBackTargets", source, StringComparison.Ordinal);
+        Assert.Contains("new BackButtonMappingSettings(m1, m2)", source, StringComparison.Ordinal);
+        Assert.Contains("var mapping = perGameEnabled ? ReadSelectedBackButtonMapping() : null;", source, StringComparison.Ordinal);
+        var targets = Enum.GetValues<Xbox360BackButtonTarget>();
+        Assert.Equal(18, targets.Length);
+        foreach (var target in targets)
+        {
+            var key = $"Xbox_BackTarget_{target}";
+            var fallback = BackButtonMappingLabels.GetDisplayName(target);
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.Equal(fallback, english[key]);
+        }
+
+        var localErrors = new[]
+        {
+            ("Xbox_Catalog_LoadFailed", "XBOX game catalog could not be loaded."),
+            ("Xbox_Catalog_NoGames", "No installed XBOX games were found."),
+            ("Xbox_Catalog_RefreshFailed", "XBOX game catalog could not be refreshed."),
+            ("Xbox_Favorite_SaveFailed", "Favorite could not be saved."),
+            ("Xbox_Profile_LoadFailed", "XBOX profile settings could not be loaded."),
+            ("Xbox_Profile_SettingsUnwritable", "Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."),
+            ("Xbox_Tdp_Unavailable", "TDP Control is unavailable on this device."),
+            ("Xbox_IntelFps_Unavailable", "Intel FPS Limit is unavailable."),
+            ("Xbox_GpuMinimumClock_UpdateFailed", "Minimum GPU Clock could not be updated."),
+            ("Xbox_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."),
+            ("Xbox_CpuBoost_UpdateFailed", "CPU Boost could not be updated."),
+            ("Xbox_TdpControl_ToggleUpdateFailed", "TDP Control could not be updated."),
+            ("Xbox_PowerMode_ToggleUpdateFailed", "Windows Power Mode could not be updated."),
+            ("Xbox_Profile_UpdateFailed", "Profile could not be updated."),
+            ("Xbox_Profile_RuntimeInterrupted", "Profile could not be updated because the Runtime connection was interrupted."),
+            ("Xbox_BackMapping_InvalidTargets", "Choose valid M1 and M2 targets before saving the per-game mapping."),
+            ("Xbox_BackMapping_UpdateFailed", "M1 / M2 mapping could not be updated."),
+            ("Xbox_PowerMode_UpdateFailed", "Power Mode could not be updated."),
+            ("Xbox_Resolution_UpdateFailed", "Display resolution could not be updated."),
+            ("Xbox_Tdp_UpdateFailed", "TDP could not be updated.")
+        };
+        foreach (var (key, fallback) in localErrors)
+        {
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.Equal(fallback, english[key]);
+            Assert.Contains($"MainUiStrings.Get(\"{key}\", \"{fallback}\")", source, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("snapshot.FailureMessage ?? MainUiStrings.Get(\"Xbox_Catalog_LoadFailed\", \"XBOX game catalog could not be loaded.\")", source, StringComparison.Ordinal);
+        Assert.Contains("snapshot.FpsLimit?.UnavailableReason ?? MainUiStrings.Get(\"Xbox_IntelFps_Unavailable\", \"Intel FPS Limit is unavailable.\")", source, StringComparison.Ordinal);
+        Assert.Contains("gpu?.UnavailableReason ?? string.Empty", source, StringComparison.Ordinal);
+        Assert.Contains("gpu?.UnavailableReason is { Length: > 0 } warning", source, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Xbox_IntelFpsExpander/Description\"", source, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Xbox_GpuMinimumClockExpander/Description\"", source, StringComparison.Ordinal);
+        Assert.Contains("result.FailureMessage ?? failureMessage", source, StringComparison.Ordinal);
+        Assert.Contains("RestoreSelectedAfterMutationFailureAsync(key, failureMessage, exception)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("MainUiStrings.Get(\"Xbox_CpuBoost_UpdateFailed\", MainUiStrings.Get(", source, StringComparison.Ordinal);
+        Assert.Contains("SelectedGameNameText.Text = game.DisplayName", source, StringComparison.Ordinal);
     }
 
     [Fact]
