@@ -47,6 +47,130 @@ public sealed class MainUiLocalizationResourceTests
     }
 
     [Fact]
+    public void Tweaks_navigation_and_fixed_page_text_resolve_through_unique_resource_uids()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var mainWindow = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var navigation = Assert.Single(mainWindow.Descendants(), element =>
+            element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == "Tweaks");
+
+        Assert.Equal("MainNav_Tweaks", (string?)navigation.Attribute(XamlNamespace + "Uid"));
+        Assert.Equal("Tweaks", (string?)navigation.Attribute("Content"));
+        Assert.Equal("Tweaks", (string?)navigation.Attribute("Tag"));
+        Assert.Equal("Repair", (string?)navigation.Descendants().Single(element => element.Name.LocalName == "SymbolIcon").Attribute("Symbol"));
+        Assert.Equal("Tweaks", english["MainNav_Tweaks.Content"]);
+        Assert.False(string.IsNullOrWhiteSpace(korean["MainNav_Tweaks.Content"]));
+
+        var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml"));
+        var uidElements = document.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        var expectedUids = new[]
+        {
+            "Tweaks_PageTitle", "Tweaks_EntryPrompt", "Tweaks_GamingPerformanceHeader", "Tweaks_RegistryTweaksHeader",
+            "Tweaks_MemoryIntegrityCard", "Tweaks_MemoryIntegrityDescription",
+            "Tweaks_VirtualMachinePlatformCard", "Tweaks_VirtualMachinePlatformDescription",
+            "Tweaks_InstantContextMenusCard", "Tweaks_InstantContextMenusDescription",
+            "Tweaks_ClassicContextMenuCard", "Tweaks_ClassicContextMenuDescription",
+            "Tweaks_DisablePasswordOnWakeCard", "Tweaks_DisablePasswordOnWakeDescription",
+            "Tweaks_DisableWindowsWidgetsCard", "Tweaks_DisableWindowsWidgetsDescription",
+            "Tweaks_DisableEdgeBackgroundCard", "Tweaks_DisableEdgeBackgroundDescription",
+            "Tweaks_DisableStartupAppDelayCard", "Tweaks_DisableStartupAppDelayDescription"
+        };
+        var actualUids = uidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!).ToArray();
+        Assert.Equal(expectedUids.OrderBy(value => value, StringComparer.Ordinal), actualUids.OrderBy(value => value, StringComparer.Ordinal));
+        Assert.Equal(actualUids.Length, actualUids.Distinct(StringComparer.Ordinal).Count());
+
+        foreach (var element in uidElements)
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            foreach (var property in new[] { "Text", "Header" })
+            {
+                var sourceValue = (string?)element.Attribute(property);
+                if (sourceValue is null) continue;
+
+                var key = $"{uid}.{property}";
+                Assert.Contains(key, english.Keys);
+                Assert.Contains(key, korean.Keys);
+                Assert.Equal(sourceValue, english[key]);
+                Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+            }
+        }
+
+        var dynamicMessages = document.Descendants().Where(element =>
+            (string?)element.Attribute(XamlNamespace + "Name") == "OperationMessageText"
+            || ((string?)element.Attribute(XamlNamespace + "Name"))?.EndsWith("State", StringComparison.Ordinal) == true);
+        Assert.All(dynamicMessages, element => Assert.Null(element.Attribute(XamlNamespace + "Uid")));
+    }
+
+    [Fact]
+    public void Tweaks_code_resources_cover_owned_messages_typed_states_and_complete_safety_notice()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        var localMessages = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Tweaks_Loading"] = "Reading current Windows settings…",
+            ["Tweaks_AcceptSafetyPrompt"] = "Review and accept the Windows Tweaks safety notice to view these controls.",
+            ["Tweaks_AcknowledgementSaveFailed"] = "The notice was accepted, but its date could not be saved. It may be shown again after the app restarts.",
+            ["Tweaks_LoadFailed"] = "Windows Tweaks could not be loaded. Select this tab again to retry.",
+            ["Tweaks_Updating"] = "Updating…",
+            ["Tweaks_ChangeUnconfirmed"] = "The change could not be confirmed. Reopen the Tweaks tab to refresh Windows state.",
+            ["Tweaks_State_ConfiguredNotRunning"] = "Configured — not running",
+            ["Tweaks_State_RestartRequired"] = "Restart required",
+            ["Tweaks_State_ExplorerRestartRequired"] = "Explorer restart required",
+            ["Tweaks_State_Unsupported"] = "Unsupported",
+            ["Tweaks_State_Managed"] = "Managed",
+            ["Tweaks_State_MixedApply"] = "Mixed — turn On to apply",
+            ["Tweaks_State_Unavailable"] = "Unavailable",
+            ["Tweaks_SafetyNotice_Title"] = "Windows Tweaks safety notice",
+            ["Tweaks_SafetyNotice_Accept"] = "I understand",
+            ["Tweaks_SafetyNotice_Cancel"] = "Cancel"
+        };
+        foreach (var (key, fallback) in localMessages)
+        {
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.Equal(fallback, english[key]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+            Assert.Contains($"\"{key}\"", source, StringComparison.Ordinal);
+        }
+
+        var safetyBody = string.Join("\n\n", new[]
+        {
+            "Some changes need a Windows restart or Explorer restart to become fully effective. This app will not restart either automatically.",
+            "Memory Integrity strengthens kernel protection. Disabling it reduces protection. Enabling it can make incompatible drivers or apps malfunction and, rarely, prevent normal boot.",
+            "Virtual Machine Platform may be required by virtualization-dependent software; disabling it can stop that software from working.",
+            "Disabling password/sign-in on wake lets someone with physical access resume directly to the desktop.",
+            "These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change. Registry policy controls may be restricted, and removing startup delay can make startup apps launch closer together."
+        });
+        Assert.Equal(safetyBody, english["Tweaks_SafetyNotice_Body"]);
+        Assert.Equal(5, english["Tweaks_SafetyNotice_Body"].Split("\n\n", StringSplitOptions.None).Length);
+        Assert.Equal(4, Regex.Matches(english["Tweaks_SafetyNotice_Body"], "\\n\\n").Count);
+        Assert.Equal(5, korean["Tweaks_SafetyNotice_Body"].Split("\n\n", StringSplitOptions.None).Length);
+        Assert.Equal(4, Regex.Matches(korean["Tweaks_SafetyNotice_Body"], "\\n\\n").Count);
+        Assert.Contains("MainUiStrings.Get(\n            \"Tweaks_SafetyNotice_Body\",", source, StringComparison.Ordinal);
+        Assert.Contains("Content = new TextBlock { Text = content,", source, StringComparison.Ordinal);
+        Assert.Contains("DefaultButton = ContentDialogButton.Primary", source, StringComparison.Ordinal);
+        Assert.Contains("if (!await ShowDailyWarningAsync()) return;", source, StringComparison.Ordinal);
+        Assert.Contains("AcknowledgeWindowsTweaksWarningAsync(today)", source, StringComparison.Ordinal);
+        Assert.Contains("SetOperationMessage(result.Succeeded ? null : result.FailureMessage)", source, StringComparison.Ordinal);
+
+        Assert.Contains("Tweaks_DisableEdgeBackgroundDescription/Text", source, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.SetToolTip(", source, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.ToolTip=\"Disable Edge Startup Boost and background mode; existing processes may continue until closed.\"",
+            File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Device_navigation_localizes_only_content_and_keeps_its_stable_identity()
     {
         var root = FindRepositoryRoot();

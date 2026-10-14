@@ -50,7 +50,7 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71B;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Tweaks" Tag="Tweaks">
+            <NavigationViewItem x:Uid="MainNav_Tweaks" Content="Tweaks" Tag="Tweaks">
                 <NavigationViewItem.Icon>
                     <SymbolIcon Symbol="Repair" />
                 </NavigationViewItem.Icon>

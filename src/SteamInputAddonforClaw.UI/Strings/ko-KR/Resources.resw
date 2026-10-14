@@ -457,4 +457,126 @@
   <data name="Shortcut_Icon_E7FC" xml:space="preserve"><value>Game</value></data>
   <data name="Shortcut_Icon_E838" xml:space="preserve"><value>Folder open</value></data>
   <data name="Shortcut_Icon_E990" xml:space="preserve"><value>Xbox console</value></data>
+  <data name="MainNav_Tweaks.Content" xml:space="preserve">
+    <value>Tweaks</value>
+  </data>
+  <data name="Tweaks_PageTitle.Text" xml:space="preserve">
+    <value>Tweaks</value>
+  </data>
+  <data name="Tweaks_EntryPrompt.Text" xml:space="preserve">
+    <value>Review the safety notice to open these controls.</value>
+  </data>
+  <data name="Tweaks_GamingPerformanceHeader.Text" xml:space="preserve">
+    <value>Gaming Performance</value>
+  </data>
+  <data name="Tweaks_RegistryTweaksHeader.Text" xml:space="preserve">
+    <value>Registry Tweaks</value>
+  </data>
+  <data name="Tweaks_MemoryIntegrityCard.Header" xml:space="preserve">
+    <value>Memory Integrity</value>
+  </data>
+  <data name="Tweaks_MemoryIntegrityDescription.Text" xml:space="preserve">
+    <value>Configure Windows kernel memory protection.</value>
+  </data>
+  <data name="Tweaks_VirtualMachinePlatformCard.Header" xml:space="preserve">
+    <value>Virtual Machine Platform</value>
+  </data>
+  <data name="Tweaks_VirtualMachinePlatformDescription.Text" xml:space="preserve">
+    <value>Enable or disable the Windows virtualization platform feature.</value>
+  </data>
+  <data name="Tweaks_InstantContextMenusCard.Header" xml:space="preserve">
+    <value>Faster Menus</value>
+  </data>
+  <data name="Tweaks_InstantContextMenusDescription.Text" xml:space="preserve">
+    <value>Disable menu animation and reduce submenu delay to 10 ms.</value>
+  </data>
+  <data name="Tweaks_ClassicContextMenuCard.Header" xml:space="preserve">
+    <value>Classic Context Menu</value>
+  </data>
+  <data name="Tweaks_ClassicContextMenuDescription.Text" xml:space="preserve">
+    <value>Use the classic Windows 11 context menu for this user.</value>
+  </data>
+  <data name="Tweaks_DisablePasswordOnWakeCard.Header" xml:space="preserve">
+    <value>Disable Password on Wake</value>
+  </data>
+  <data name="Tweaks_DisablePasswordOnWakeDescription.Text" xml:space="preserve">
+    <value>Return from sleep without requiring sign-in.</value>
+  </data>
+  <data name="Tweaks_DisableWindowsWidgetsCard.Header" xml:space="preserve">
+    <value>Disable Windows Widgets</value>
+  </data>
+  <data name="Tweaks_DisableWindowsWidgetsDescription.Text" xml:space="preserve">
+    <value>Block the Windows Widgets experience where supported by Windows policy.</value>
+  </data>
+  <data name="Tweaks_DisableEdgeBackgroundCard.Header" xml:space="preserve">
+    <value>Disable Edge Background</value>
+  </data>
+  <data name="Tweaks_DisableEdgeBackgroundDescription.Text" xml:space="preserve">
+    <value>Disable Edge Startup Boost and background mode; existing processes may continue until closed.</value>
+  </data>
+  <data name="Tweaks_DisableStartupAppDelayCard.Header" xml:space="preserve">
+    <value>Disable Startup App Delay</value>
+  </data>
+  <data name="Tweaks_DisableStartupAppDelayDescription.Text" xml:space="preserve">
+    <value>Remove configured Explorer startup-app launch delays; actual startup gains may vary.</value>
+  </data>
+  <data name="Tweaks_Loading" xml:space="preserve">
+    <value>Reading current Windows settings…</value>
+  </data>
+  <data name="Tweaks_AcceptSafetyPrompt" xml:space="preserve">
+    <value>Review and accept the Windows Tweaks safety notice to view these controls.</value>
+  </data>
+  <data name="Tweaks_AcknowledgementSaveFailed" xml:space="preserve">
+    <value>The notice was accepted, but its date could not be saved. It may be shown again after the app restarts.</value>
+  </data>
+  <data name="Tweaks_LoadFailed" xml:space="preserve">
+    <value>Windows Tweaks could not be loaded. Select this tab again to retry.</value>
+  </data>
+  <data name="Tweaks_Updating" xml:space="preserve">
+    <value>Updating…</value>
+  </data>
+  <data name="Tweaks_ChangeUnconfirmed" xml:space="preserve">
+    <value>The change could not be confirmed. Reopen the Tweaks tab to refresh Windows state.</value>
+  </data>
+  <data name="Tweaks_State_ConfiguredNotRunning" xml:space="preserve">
+    <value>Configured — not running</value>
+  </data>
+  <data name="Tweaks_State_RestartRequired" xml:space="preserve">
+    <value>Restart required</value>
+  </data>
+  <data name="Tweaks_State_ExplorerRestartRequired" xml:space="preserve">
+    <value>Explorer restart required</value>
+  </data>
+  <data name="Tweaks_State_Unsupported" xml:space="preserve">
+    <value>Unsupported</value>
+  </data>
+  <data name="Tweaks_State_Managed" xml:space="preserve">
+    <value>Managed</value>
+  </data>
+  <data name="Tweaks_State_MixedApply" xml:space="preserve">
+    <value>Mixed — turn On to apply</value>
+  </data>
+  <data name="Tweaks_State_Unavailable" xml:space="preserve">
+    <value>Unavailable</value>
+  </data>
+  <data name="Tweaks_SafetyNotice_Title" xml:space="preserve">
+    <value>Windows Tweaks safety notice</value>
+  </data>
+  <data name="Tweaks_SafetyNotice_Accept" xml:space="preserve">
+    <value>I understand</value>
+  </data>
+  <data name="Tweaks_SafetyNotice_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Tweaks_SafetyNotice_Body" xml:space="preserve">
+    <value>Some changes need a Windows restart or Explorer restart to become fully effective. This app will not restart either automatically.
+
+Memory Integrity strengthens kernel protection. Disabling it reduces protection. Enabling it can make incompatible drivers or apps malfunction and, rarely, prevent normal boot.
+
+Virtual Machine Platform may be required by virtualization-dependent software; disabling it can stop that software from working.
+
+Disabling password/sign-in on wake lets someone with physical access resume directly to the desktop.
+
+These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change. Registry policy controls may be restricted, and removing startup delay can make startup apps launch closer together.</value>
+  </data>
 </root>

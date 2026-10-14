@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.UI;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -17,7 +18,15 @@ public sealed partial class WindowsTweaksPage : UserControl
     private bool _refreshInProgress;
     private bool _refreshQueued;
 
-    public WindowsTweaksPage() => InitializeComponent();
+    public WindowsTweaksPage()
+    {
+        InitializeComponent();
+        ToolTipService.SetToolTip(
+            DisableEdgeBackgroundDescriptionText,
+            MainUiStrings.Get(
+                "Tweaks_DisableEdgeBackgroundDescription/Text",
+                "Disable Edge Startup Boost and background mode; existing processes may continue until closed."));
+    }
 
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
 
@@ -55,21 +64,25 @@ public sealed partial class WindowsTweaksPage : UserControl
         try
         {
             SetOperationMessage(null);
-            EntryPromptText.Text = "Reading current Windows settings…";
+            EntryPromptText.Text = MainUiStrings.Get("Tweaks_Loading", "Reading current Windows settings…");
             EntryPromptText.Visibility = Visibility.Visible;
             var today = DateOnly.FromDateTime(DateTime.Now);
             var snapshot = await CaptureAsync();
             if (ShouldShowWarning(today, snapshot.WarningAcknowledgedLocalDate, _acceptedWarningDateThisProcess))
             {
                 TweaksPanel.Visibility = Visibility.Collapsed;
-                EntryPromptText.Text = "Review and accept the Windows Tweaks safety notice to view these controls.";
+                EntryPromptText.Text = MainUiStrings.Get(
+                    "Tweaks_AcceptSafetyPrompt",
+                    "Review and accept the Windows Tweaks safety notice to view these controls.");
                 EntryPromptText.Visibility = Visibility.Visible;
                 if (!await ShowDailyWarningAsync()) return;
 
                 _acceptedWarningDateThisProcess = today;
                 var saved = await _frontend!.AcknowledgeWindowsTweaksWarningAsync(today);
                 if (!saved)
-                    SetOperationMessage("The notice was accepted, but its date could not be saved. It may be shown again after the app restarts.");
+                    SetOperationMessage(MainUiStrings.Get(
+                        "Tweaks_AcknowledgementSaveFailed",
+                        "The notice was accepted, but its date could not be saved. It may be shown again after the app restarts."));
                 snapshot = await CaptureAsync();
             }
 
@@ -79,7 +92,9 @@ public sealed partial class WindowsTweaksPage : UserControl
         }
         catch
         {
-            EntryPromptText.Text = "Windows Tweaks could not be loaded. Select this tab again to retry.";
+            EntryPromptText.Text = MainUiStrings.Get(
+                "Tweaks_LoadFailed",
+                "Windows Tweaks could not be loaded. Select this tab again to retry.");
             EntryPromptText.Visibility = Visibility.Visible;
             TweaksPanel.Visibility = Visibility.Collapsed;
         }
@@ -92,17 +107,19 @@ public sealed partial class WindowsTweaksPage : UserControl
 
     private async Task<bool> ShowDailyWarningAsync()
     {
-        var content = "Some changes need a Windows restart or Explorer restart to become fully effective. This app will not restart either automatically.\n\n"
+        var content = MainUiStrings.Get(
+            "Tweaks_SafetyNotice_Body",
+            "Some changes need a Windows restart or Explorer restart to become fully effective. This app will not restart either automatically.\n\n"
             + "Memory Integrity strengthens kernel protection. Disabling it reduces protection. Enabling it can make incompatible drivers or apps malfunction and, rarely, prevent normal boot.\n\n"
             + "Virtual Machine Platform may be required by virtualization-dependent software; disabling it can stop that software from working.\n\n"
             + "Disabling password/sign-in on wake lets someone with physical access resume directly to the desktop.\n\n"
-            + "These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change. Registry policy controls may be restricted, and removing startup delay can make startup apps launch closer together.";
+            + "These settings are reversible where Windows and policy permit. Windows policy or firmware locks can prevent a requested change. Registry policy controls may be restricted, and removing startup delay can make startup apps launch closer together.");
         var dialog = new ContentDialog
         {
-            Title = "Windows Tweaks safety notice",
+            Title = MainUiStrings.Get("Tweaks_SafetyNotice_Title", "Windows Tweaks safety notice"),
             Content = new TextBlock { Text = content, TextWrapping = TextWrapping.Wrap, MaxWidth = 600 },
-            PrimaryButtonText = "I understand",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = MainUiStrings.Get("Tweaks_SafetyNotice_Accept", "I understand"),
+            CloseButtonText = MainUiStrings.Get("Tweaks_SafetyNotice_Cancel", "Cancel"),
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = XamlRoot,
         };
@@ -199,7 +216,7 @@ public sealed partial class WindowsTweaksPage : UserControl
         toggle.IsEnabled = false;
         _applyingSnapshot = false;
         var controls = GetControls(id);
-        controls.State.Text = "Updating…";
+        controls.State.Text = MainUiStrings.Get("Tweaks_Updating", "Updating…");
         try
         {
             var result = await _frontend.SetWindowsTweakAsync(id, requested);
@@ -214,7 +231,9 @@ public sealed partial class WindowsTweaksPage : UserControl
             _applyingSnapshot = true;
             ApplyTweakRow(current);
             _applyingSnapshot = false;
-            SetOperationMessage("The change could not be confirmed. Reopen the Tweaks tab to refresh Windows state.");
+            SetOperationMessage(MainUiStrings.Get(
+                "Tweaks_ChangeUnconfirmed",
+                "The change could not be confirmed. Reopen the Tweaks tab to refresh Windows state."));
         }
         finally
         {
@@ -238,13 +257,17 @@ public sealed partial class WindowsTweaksPage : UserControl
             FrontendWindowsTweakState.EnablePendingRestart
                 when row.Id == FrontendWindowsTweakId.MemoryIntegrity
                     && row.ConfiguredEnabled == true
-                    && row.EffectiveEnabled == false => "Configured — not running",
-            FrontendWindowsTweakState.EnablePendingRestart or FrontendWindowsTweakState.DisablePendingRestart => "Restart required",
-            FrontendWindowsTweakState.ExplorerRestartPending => "Explorer restart required",
-            FrontendWindowsTweakState.Unsupported => "Unsupported",
-            FrontendWindowsTweakState.Managed => "Managed",
-            FrontendWindowsTweakState.Mixed => "Mixed — turn On to apply",
-            _ => "Unavailable",
+                    && row.EffectiveEnabled == false => MainUiStrings.Get(
+                        "Tweaks_State_ConfiguredNotRunning",
+                        "Configured — not running"),
+            FrontendWindowsTweakState.EnablePendingRestart or FrontendWindowsTweakState.DisablePendingRestart =>
+                MainUiStrings.Get("Tweaks_State_RestartRequired", "Restart required"),
+            FrontendWindowsTweakState.ExplorerRestartPending =>
+                MainUiStrings.Get("Tweaks_State_ExplorerRestartRequired", "Explorer restart required"),
+            FrontendWindowsTweakState.Unsupported => MainUiStrings.Get("Tweaks_State_Unsupported", "Unsupported"),
+            FrontendWindowsTweakState.Managed => MainUiStrings.Get("Tweaks_State_Managed", "Managed"),
+            FrontendWindowsTweakState.Mixed => MainUiStrings.Get("Tweaks_State_MixedApply", "Mixed — turn On to apply"),
+            _ => MainUiStrings.Get("Tweaks_State_Unavailable", "Unavailable"),
         };
     }
 
