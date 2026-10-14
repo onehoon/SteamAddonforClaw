@@ -354,4 +354,103 @@
   <data name="ClawHud_VrrStatus_Applied" xml:space="preserve"><value>Applied</value></data>
   <data name="ClawHud_VrrStatus_ApplyFailed" xml:space="preserve"><value>ApplyFailed</value></data>
   <data name="ClawHud_VrrStatus_VerificationFailed" xml:space="preserve"><value>VerificationFailed</value></data>
+  <data name="MainNav_Shortcut.Content" xml:space="preserve"><value>Shortcut</value></data>
+  <data name="MainNav_HowToUse.Content" xml:space="preserve"><value>How to Use</value></data>
+  <data name="HowToUse_Failure.Text" xml:space="preserve"><value>How to Use could not be loaded.</value></data>
+  <data name="HowToUse_Retry.Content" xml:space="preserve"><value>Retry</value></data>
+  <data name="Shortcut_PageTitle.Text" xml:space="preserve"><value>Shortcut</value></data>
+  <data name="Shortcut_PageSubtitle.Text" xml:space="preserve"><value>Create and organize actions shown in the Shortcut overlay page.</value></data>
+  <data name="Shortcut_AddButton.Content" xml:space="preserve"><value>＋ Add Shortcut</value></data>
+  <data name="Shortcut_EditButton.Content" xml:space="preserve"><value>Edit</value></data>
+  <data name="Shortcut_DeleteButton.Content" xml:space="preserve"><value>Delete</value></data>
+  <data name="Shortcut_EmptyTitle.Text" xml:space="preserve"><value>No shortcuts yet.</value></data>
+  <data name="Shortcut_EmptySubtitle.Text" xml:space="preserve"><value>Add a Shortcut to get started.</value></data>
+  <data name="Shortcut_Title_Header" xml:space="preserve"><value>Title</value></data>
+  <data name="Shortcut_Title_Placeholder" xml:space="preserve"><value>Shortcut name</value></data>
+  <data name="Shortcut_ActionPicker_Header" xml:space="preserve"><value>Action type</value></data>
+  <data name="Shortcut_Icon_Label" xml:space="preserve"><value>Icon</value></data>
+  <data name="Shortcut_Icon_Change" xml:space="preserve"><value>Change icon</value></data>
+  <data name="Shortcut_Icon_UseDefault" xml:space="preserve"><value>Use default</value></data>
+  <data name="Shortcut_Action_Application" xml:space="preserve"><value>Application (.exe)</value></data>
+  <data name="Shortcut_Action_PowerShell" xml:space="preserve"><value>PowerShell</value></data>
+  <data name="Shortcut_Action_Website" xml:space="preserve"><value>Website (URL)</value></data>
+  <data name="Shortcut_Action_SteamBigPicture" xml:space="preserve"><value>Steam Big Picture</value></data>
+  <data name="Shortcut_Action_Steam" xml:space="preserve"><value>Steam</value></data>
+  <data name="Shortcut_Action_XboxApp" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Shortcut_Action_Screenshot" xml:space="preserve"><value>Screenshot</value></data>
+  <data name="Shortcut_CloseOverlay_Header" xml:space="preserve"><value>Close Overlay after launch</value></data>
+  <data name="Shortcut_CloseOverlay_Close" xml:space="preserve"><value>Close Overlay</value></data>
+  <data name="Shortcut_CloseOverlay_KeepOpen" xml:space="preserve"><value>Keep Overlay open</value></data>
+  <data name="Shortcut_Dialog_AddTitle" xml:space="preserve"><value>Add Shortcut</value></data>
+  <data name="Shortcut_Dialog_EditTitle" xml:space="preserve"><value>Edit Shortcut</value></data>
+  <data name="Shortcut_Dialog_Save" xml:space="preserve"><value>Save</value></data>
+  <data name="Shortcut_Dialog_Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Shortcut_ExecutablePath_Header" xml:space="preserve"><value>Executable path</value></data>
+  <data name="Shortcut_Browse" xml:space="preserve"><value>Browse…</value></data>
+  <data name="Shortcut_Arguments_Header" xml:space="preserve"><value>Arguments</value></data>
+  <data name="Shortcut_Arguments_Placeholder" xml:space="preserve"><value>Optional arguments</value></data>
+  <data name="Shortcut_RunAsAdministrator" xml:space="preserve"><value>Run as administrator</value></data>
+  <data name="Shortcut_RunAsAdministrator_Description" xml:space="preserve"><value>Runs with administrator privileges; otherwise requests normal user privileges.</value></data>
+  <data name="Shortcut_PowerShellScript_Header" xml:space="preserve"><value>Script</value></data>
+  <data name="Shortcut_PowerShellScript_Placeholder" xml:space="preserve"><value>Enter a PowerShell script</value></data>
+  <data name="Shortcut_Url_Header" xml:space="preserve"><value>URL</value></data>
+  <data name="Shortcut_Screenshot_UseDefault" xml:space="preserve"><value>Use default</value></data>
+  <data name="Shortcut_Screenshot_OpenFolder" xml:space="preserve"><value>Open folder</value></data>
+  <data name="Shortcut_Screenshot_Description" xml:space="preserve"><value>Captures the primary display as JPEG.</value></data>
+  <data name="Shortcut_Screenshot_SaveFolder" xml:space="preserve"><value>Save folder</value></data>
+  <data name="Shortcut_Description_SteamBigPicture" xml:space="preserve"><value>Opens Steam Big Picture.</value></data>
+  <data name="Shortcut_Description_Steam" xml:space="preserve"><value>Opens the Steam client.</value></data>
+  <data name="Shortcut_Description_XboxApp" xml:space="preserve"><value>Opens the XBOX app.</value></data>
+  <data name="Shortcut_SettingsLoadFailed" xml:space="preserve"><value>Shortcut settings could not be loaded.</value></data>
+  <data name="Shortcut_EditorUnavailable" xml:space="preserve"><value>Shortcut editing is unavailable.</value></data>
+  <data name="Shortcut_TileNotFound" xml:space="preserve"><value>Shortcut tile was not found.</value></data>
+  <data name="Shortcut_FolderPickerFailed" xml:space="preserve"><value>The folder picker could not be opened.</value></data>
+  <data name="Shortcut_ScreenshotFolderUnavailable" xml:space="preserve"><value>The effective Screenshot folder is unavailable.</value></data>
+  <data name="Shortcut_ScreenshotFolderOpenFailed" xml:space="preserve"><value>The Screenshot folder could not be opened.</value></data>
+  <data name="Shortcut_ApplicationPickerFailed" xml:space="preserve"><value>The application picker could not be opened.</value></data>
+  <data name="Shortcut_PayloadTooLarge" xml:space="preserve"><value>One or more fields exceed the supported Shortcut editor size.</value></data>
+  <data name="Shortcut_SaveFailed" xml:space="preserve"><value>Shortcut changes could not be saved.</value></data>
+  <data name="Shortcut_Delete_Title" xml:space="preserve"><value>Delete Shortcut?</value></data>
+  <data name="Shortcut_Delete_ConfirmationBody" xml:space="preserve"><value>Delete ‘{0}’? This cannot be undone.</value></data>
+  <data name="Shortcut_Delete_Confirm" xml:space="preserve"><value>Delete</value></data>
+  <data name="Shortcut_Target_SteamBigPicture" xml:space="preserve"><value>Steam Big Picture</value></data>
+  <data name="Shortcut_Target_SteamClient" xml:space="preserve"><value>Steam client</value></data>
+  <data name="Shortcut_Target_XboxApp" xml:space="preserve"><value>XBOX app</value></data>
+  <data name="Shortcut_Target_Screenshot" xml:space="preserve"><value>Fullscreen screenshot</value></data>
+  <data name="Shortcut_Target_PowerShell" xml:space="preserve"><value>PowerShell</value></data>
+  <data name="Shortcut_A11y_DragToReorder" xml:space="preserve"><value>Drag to reorder this Shortcut</value></data>
+  <data name="Shortcut_A11y_Icon" xml:space="preserve"><value>Shortcut icon</value></data>
+  <data name="Shortcut_IconPreview_A11y" xml:space="preserve"><value>{0} Shortcut icon</value></data>
+  <data name="Shortcut_Icon_E71D" xml:space="preserve"><value>All apps</value></data>
+  <data name="Shortcut_Icon_E713" xml:space="preserve"><value>Settings</value></data>
+  <data name="Shortcut_Icon_E714" xml:space="preserve"><value>Video</value></data>
+  <data name="Shortcut_Icon_E715" xml:space="preserve"><value>Mail</value></data>
+  <data name="Shortcut_Icon_E719" xml:space="preserve"><value>Shop</value></data>
+  <data name="Shortcut_Icon_E720" xml:space="preserve"><value>Microphone</value></data>
+  <data name="Shortcut_Icon_E721" xml:space="preserve"><value>Search</value></data>
+  <data name="Shortcut_Icon_E722" xml:space="preserve"><value>Camera</value></data>
+  <data name="Shortcut_Icon_E71B" xml:space="preserve"><value>Link</value></data>
+  <data name="Shortcut_Icon_E734" xml:space="preserve"><value>Favorite</value></data>
+  <data name="Shortcut_Icon_E74E" xml:space="preserve"><value>Save</value></data>
+  <data name="Shortcut_Icon_E753" xml:space="preserve"><value>Cloud</value></data>
+  <data name="Shortcut_Icon_E756" xml:space="preserve"><value>Command prompt</value></data>
+  <data name="Shortcut_Icon_E765" xml:space="preserve"><value>Keyboard</value></data>
+  <data name="Shortcut_Icon_E768" xml:space="preserve"><value>Play</value></data>
+  <data name="Shortcut_Icon_E770" xml:space="preserve"><value>System</value></data>
+  <data name="Shortcut_Icon_E772" xml:space="preserve"><value>Devices</value></data>
+  <data name="Shortcut_Icon_E774" xml:space="preserve"><value>Globe</value></data>
+  <data name="Shortcut_Icon_E77B" xml:space="preserve"><value>Contact</value></data>
+  <data name="Shortcut_Icon_E787" xml:space="preserve"><value>Calendar</value></data>
+  <data name="Shortcut_Icon_E7AA" xml:space="preserve"><value>Photo collection</value></data>
+  <data name="Shortcut_Icon_E7B8" xml:space="preserve"><value>Package</value></data>
+  <data name="Shortcut_Icon_E7C4" xml:space="preserve"><value>Task view</value></data>
+  <data name="Shortcut_Icon_E7C5" xml:space="preserve"><value>Browse photos</value></data>
+  <data name="Shortcut_Icon_E7E8" xml:space="preserve"><value>Power</value></data>
+  <data name="Shortcut_Icon_E7F4" xml:space="preserve"><value>TV / monitor</value></data>
+  <data name="Shortcut_Icon_E7F5" xml:space="preserve"><value>Speakers</value></data>
+  <data name="Shortcut_Icon_E7F6" xml:space="preserve"><value>Headphones</value></data>
+  <data name="Shortcut_Icon_E7F8" xml:space="preserve"><value>Laptop</value></data>
+  <data name="Shortcut_Icon_E7FC" xml:space="preserve"><value>Game</value></data>
+  <data name="Shortcut_Icon_E838" xml:space="preserve"><value>Folder open</value></data>
+  <data name="Shortcut_Icon_E990" xml:space="preserve"><value>Xbox console</value></data>
 </root>

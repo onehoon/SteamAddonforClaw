@@ -715,8 +715,8 @@ public sealed class UiArchitectureTests
         Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerMoved")));
         Assert.All(actionButtons, button => Assert.NotNull(button.Attribute("Click")));
         var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon"
-            && (string?)element.Attribute("AutomationProperties.Name") == "Drag to reorder this Shortcut");
-        Assert.Equal("Drag to reorder this Shortcut", (string?)dragGlyph.Attribute("AutomationProperties.Name"));
+            && (string?)element.Attribute("Glyph") == "\uE7C3");
+        Assert.Equal("{x:Bind views:ShortcutPage.GetDragReorderAutomationName()}", (string?)dragGlyph.Attribute("AutomationProperties.Name"));
         Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("private const double ShortcutCardHorizontalGap = 12;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("itemsPanel.ItemWidth = itemWidth", shortcutCode, StringComparison.Ordinal);
@@ -972,12 +972,29 @@ public sealed class UiArchitectureTests
         var panelHelperEnd = shortcutCode.IndexOf("internal static string? GetDefaultTitle", panelHelperStart, StringComparison.Ordinal);
         var builtInPanelHelper = shortcutCode[panelHelperStart..panelHelperEnd];
 
-        Assert.Contains("AddActionChoice(actionPicker, \"Steam Big Picture\"", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("AddActionChoice(actionPicker, \"Steam\"", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("AddActionChoice(actionPicker, \"XBOX\"", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("CreateBuiltInActionPanel(\"Opens the XBOX app.\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_Application\", \"Application (.exe)\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_PowerShell\", \"PowerShell\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_Website\", \"Website (URL)\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_SteamBigPicture\", \"Steam Big Picture\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_Steam\", \"Steam\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_XboxApp\", \"XBOX\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_Screenshot\", \"Screenshot\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("CreateBuiltInActionPanel(MainUiStrings.Get(\"Shortcut_Description_XboxApp\", \"Opens the XBOX app.\"))", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("Text = existing?.Title ?? string.Empty", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("AddActionChoice(actionPicker, \"Screenshot\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Screenshot\", \"Screenshot\"), FrontendShortcutEditorActionKind.ScreenshotFullscreen)", shortcutCode, StringComparison.Ordinal);
+        var expectedActionChoiceCalls = new[]
+        {
+            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Application\", \"Application (.exe)\"), FrontendShortcutEditorActionKind.Executable)",
+            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_PowerShell\", \"PowerShell\"), FrontendShortcutEditorActionKind.PowerShell)",
+            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Website\", \"Website (URL)\"), FrontendShortcutEditorActionKind.Url)",
+            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_SteamBigPicture\", \"Steam Big Picture\"), FrontendShortcutEditorActionKind.SteamBigPicture)",
+            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Steam\", \"Steam\"), FrontendShortcutEditorActionKind.SteamClient)",
+            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_XboxApp\", \"XBOX\"), FrontendShortcutEditorActionKind.XboxApp)",
+            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Screenshot\", \"Screenshot\"), FrontendShortcutEditorActionKind.ScreenshotFullscreen)"
+        };
+        var actionChoicePositions = expectedActionChoiceCalls.Select(call => shortcutCode.IndexOf(call, StringComparison.Ordinal)).ToArray();
+        Assert.All(actionChoicePositions, position => Assert.True(position >= 0));
+        Assert.Equal(actionChoicePositions.Order(), actionChoicePositions);
         Assert.Contains("[FrontendShortcutEditorActionKind.SteamBigPicture] = steamBigPicturePanel", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("[FrontendShortcutEditorActionKind.SteamClient] = steamClientPanel", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("[FrontendShortcutEditorActionKind.XboxApp] = xboxAppPanel", shortcutCode, StringComparison.Ordinal);
@@ -1020,7 +1037,7 @@ public sealed class UiArchitectureTests
         var titleRowChildren = titleRow.Elements().ToArray();
         var titleGlyph = titleRowChildren[0];
         var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon"
-            && (string?)element.Attribute("AutomationProperties.Name") == "Drag to reorder this Shortcut");
+            && (string?)element.Attribute("Glyph") == "\uE7C3");
 
         Assert.Contains("Glyph=\"{x:Bind IconGlyph}\"", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE7C3;\"", shortcutXaml, StringComparison.Ordinal);
@@ -1030,10 +1047,13 @@ public sealed class UiArchitectureTests
         Assert.Same(titleGlyph, titleRow.Elements().First());
         Assert.NotSame(dragGlyph, titleGlyph);
         Assert.Contains("ShortcutIconCatalog.Choices", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("Content = \"Change icon\"", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("Content = \"Use default\"", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("ToolTipService.SetToolTip(choiceButton, choice.Name)", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("AutomationProperties.SetName(choiceButton, choice.Name)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Icon_Change\", \"Change icon\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Shortcut_Icon_UseDefault\", \"Use default\")", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.SetToolTip(choiceButton, localizedName)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.SetName(choiceButton, localizedName)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("var localizedName = GetLocalizedIconName(choice);", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ShortcutIconCatalog.TryGetChoice(glyph, out var choice)", shortcutCode, StringComparison.Ordinal);
+        Assert.Equal("{x:Bind views:ShortcutPage.GetDragReorderAutomationName()}", (string?)dragGlyph.Attribute("AutomationProperties.Name"));
         Assert.Contains("iconFlyout.ShowAt(changeIconButton)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("RenderIconPreview(selectedKind)", selectionHandler, StringComparison.Ordinal);
         Assert.Contains("stagedIconGlyphOverride = choice.Glyph", shortcutCode, StringComparison.Ordinal);
