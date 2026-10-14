@@ -23,6 +23,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("new OverlayValueRow(\"Controller\", FormatSteamController", controller);
         Assert.Contains("new OverlayToggleRow(\"Gyroscope\", RequestGyroscopeChange", controller);
         Assert.Contains("var controllerAvailable = _frontendSettingsAvailable && _controllerForSteam.Available", controller);
+        Assert.Contains("_steamControllerRow?.ApplyState(controllerAvailable, 0, controllerAvailable ? 1 : 2, 1, displayValue);", controller);
         Assert.Contains("_gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_controllerForSteamMutationInFlight", controller);
         Assert.Contains("ControllerForSteamEditRequested?.Invoke(preference, null)", controller);
         Assert.Contains("ControllerForSteamEditRequested?.Invoke(null, enabled)", controller);

@@ -135,7 +135,7 @@ public sealed partial class OverlayWindow
         var displayValue = !_controllerForSteam.Available
             ? 2
             : (int)(_controllerForSteam.ActiveSteamPreference ?? _controllerForSteam.SavedPreference);
-        _steamControllerRow?.ApplyState(controllerAvailable, 0, 2, 1, displayValue);
+        _steamControllerRow?.ApplyState(controllerAvailable, 0, controllerAvailable ? 1 : 2, 1, displayValue);
         _gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_controllerForSteamMutationInFlight,
             _frontendSettingsSnapshot?.GyroscopeEnabled == true);
 
