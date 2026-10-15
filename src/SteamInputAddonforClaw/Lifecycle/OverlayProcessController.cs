@@ -9,7 +9,7 @@ namespace SteamInputAddonforClaw.Lifecycle;
 
 internal sealed class OverlayProcessController : IAsyncDisposable
 {
-    private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(3);
     private readonly object _sync = new();
     private readonly SemaphoreSlim _transition = new(1, 1);

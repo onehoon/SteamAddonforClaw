@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Linq;
+using System.Reflection;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -13,6 +14,18 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class OverlayTransportTests
 {
+    [Fact]
+    public void Cold_overlay_ready_timeout_is_twelve_seconds_without_changing_shutdown_timeout()
+    {
+        var readyTimeout = typeof(OverlayProcessController).GetField("ReadyTimeout", BindingFlags.NonPublic | BindingFlags.Static);
+        var shutdownTimeout = typeof(OverlayProcessController).GetField("ShutdownTimeout", BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(readyTimeout);
+        Assert.NotNull(shutdownTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(12), readyTimeout.GetValue(null));
+        Assert.Equal(TimeSpan.FromSeconds(3), shutdownTimeout.GetValue(null));
+    }
+
     [Fact]
     public void Overlay_endpoint_is_distinct_from_the_main_frontend_endpoint()
     {
