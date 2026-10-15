@@ -12,7 +12,7 @@
 This work order intentionally contains **one behavioral fix** and **one diagnostics-only change**.
 
 1. **Overlay behavior fix:** increase the `OverlayProcessController` initial `Ready` wait timeout from **5 seconds to 12 seconds**, so a legitimate cold WinUI 3 startup can finish its existing pipe handshake instead of being killed just after it has created the hidden window.
-2. **Main UI diagnostic logging:** instrument the **pre-IPC cold-start interval** and the existing UI startup milestones with low-volume timestamped/elapsed-time logs. Do **not** optimize or otherwise change startup behavior in this PR.
+2. **Main UI DEBUG diagnostic logging:** instrument the **pre-IPC cold-start interval** and the existing UI startup milestones with low-volume timestamped/elapsed-time **DEBUG** records. Do **not** optimize startup or change the severity/content of existing INFO/Warning/Error events in this PR.
 
 These two changes belong in one PR. Do not introduce a generic startup manager, a retry framework, adaptive timeout policy, new worker/thread, launch broker, or UI warm-host architecture.
 
@@ -149,7 +149,7 @@ File: `src/SteamInputAddonforClaw.UI/Program.cs`
 
 Use a single local `Stopwatch` or `Stopwatch.GetTimestamp()` captured at the **very beginning of `Main`**, before `UiLog.ConfigureDirectory`. Log only after a usable UI log directory is available. Keep the existing single-instance and WinUI entry behavior identical.
 
-Add a small number of existing-`UiLog` startup milestone entries:
+Add a small number of **`UiLog.Debug`** startup milestone entries. All newly introduced timing/milestone messages must be marked DEBUG, not INFO. Preserve existing informational startup events:
 
 1. `UI managed entry` immediately after `UiLog.ConfigureDirectory(args)`; include `PID` and process-entry elapsed time.
 2. `Log retention completed`; include elapsed time for `AddonLogRetention.PruneDirectory(...)`.
@@ -162,13 +162,13 @@ A **minimal illustrative pattern**; adapt to exact existing naming/locals:
 ~~~csharp
 var managedEntry = Stopwatch.GetTimestamp();
 UiLog.ConfigureDirectory(args);
-UiLog.Info("Startup", "UI managed entry.",
+UiLog.Debug("Startup", "UI managed entry.",
     ("PID", Environment.ProcessId),
     ("ElapsedMs", Stopwatch.GetElapsedTime(managedEntry).TotalMilliseconds));
 
 var retentionStart = Stopwatch.GetTimestamp();
 AddonLogRetention.PruneDirectory(UiLog.DirectoryPath);
-UiLog.Info("Startup", "UI log retention completed.",
+UiLog.Debug("Startup", "UI log retention completed.",
     ("DurationMs", Stopwatch.GetElapsedTime(retentionStart).TotalMilliseconds));
 
 // Keep the actual gate and Application.Start behavior exactly as before.
@@ -184,7 +184,7 @@ Avoid log-heavy per-page tracing or frame/render instrumentation; `MainWindow.xa
 
 File: `src/SteamInputAddonforClaw.UI/App.xaml.cs`
 
-Add an initial `OnLaunched entered` milestone and simple elapsed times around the **existing** `StartFrontendAsync` chain. Use the same existing UI logging mechanism (this UI already aliases `AppLog` to its own `UiLog`).
+Add an initial **DEBUG** `OnLaunched entered` milestone and DEBUG elapsed-time entries around the **existing** `StartFrontendAsync` chain. Use the same existing UI logging mechanism (this UI already aliases `AppLog` to its own `UiLog`).
 
 Required independent durations or equivalent event timestamps:
 
@@ -194,7 +194,7 @@ Required independent durations or equivalent event timestamps:
 - `new MainWindow(...)`: retain existing detailed `MainWindow` constructor/XAML logs, optionally attach total duration to the existing `MainWindow initialized` log.
 - `ActivateOrDeferOnUiThread()` / `Frontend activated`: startup elapsed and existing activation outcome.
 
-Prefer enriching the current `Frontend connected.`, `Bootstrap acquired.`, `MainWindow initialized.`, `Frontend activated.` events with numeric `DurationMs` / `ElapsedMs` fields instead of duplicating each event at another severity.
+**Keep the existing INFO** `Frontend connected.`, `Bootstrap acquired.`, `MainWindow initialized.`, and `Frontend activated.` events as-is for normal lifecycle diagnostics. Add small companion **DEBUG** duration/elapsed-time records for the measured stages; do not turn existing INFO events into DEBUG, and do not add the new timing fields to those INFO lines.
 
 The existing `stage`-based exception handling must remain intact, and any added diagnostic code must not make UI startup fail when logging is unavailable. Use ordinary local stopwatch measurements; do **not** add a telemetry subsystem, global timing state, injected clock service, new API, or cross-process clock sync mechanism. Make sure timestamps can be correlated using the existing ISO-offset log times and process IDs.
 
@@ -204,7 +204,7 @@ File: `src/SteamInputAddonforClaw/Lifecycle/FrontendProcessLauncher.cs`
 
 Retain the current `Frontend open requested`, `Frontend process launch attempted`, and `Frontend process launch succeeded/failed` events.
 
-At the narrow existing `_startProcess(startInfo)` call, capture **Process.Start call duration** and (on success) child `PID`. Include `Reason` in the success event as already done. Preserve null-return, exception, retry-on-next-user-request, and lack-of-process-ownership behavior. Do **not** conflate the time spent awaiting Runtime prerequisites/surface coordination with the measured `Process.Start` call duration.
+At the narrow existing `_startProcess(startInfo)` call, capture **Process.Start call duration** and (on success) child `PID` in a **new DEBUG** diagnostic event. Preserve the existing INFO process-launch success/failure messages (including their `Reason`); preserve null-return, exception, retry-on-next-user-request, and lack-of-process-ownership behavior. Do **not** conflate time awaiting Runtime prerequisites/surface coordination with the measured `Process.Start` call duration.
 
 An implementation outline:
 
@@ -212,19 +212,20 @@ An implementation outline:
 var launchStart = Stopwatch.GetTimestamp();
 var process = _startProcess(startInfo);
 // Existing null-return handling stays intact.
-AppLog.Info("Frontend", "Frontend process launch succeeded.",
+AppLog.Debug("Frontend", "Frontend Process.Start timing.",
     ("Reason", reason),
     ("PID", process.Id),
     ("StartCallElapsedMs", Stopwatch.GetElapsedTime(launchStart).TotalMilliseconds));
 ~~~
 
-Keep the actual existing exception/null handling intact; the snippet shows only the measurement placement. No prelaunch `WaitForInputIdle`, no synchronous `WaitForExit`, no automatic retry and no change in requested elevation/token or launch flags.
+Keep the actual existing INFO success/failure events and exception/null handling intact; the snippet shows only the **additional DEBUG** measurement placement. No prelaunch `WaitForInputIdle`, no synchronous `WaitForExit`, no automatic retry and no change in requested elevation/token or launch flags.
 
 There is **no need to change** `NamedPipeAddonFrontendClient` or `NamedPipeAddonFrontendServer` protocols just to add the timings.
 
 ### 5.4 Logging quality
 
-- Prefer a handful of **INFO** startup milestones, ensuring they are present in normal captured `ui-<PID>.log` files even without an explicitly enabled Runtime debug level.
+- **Every newly added timing or startup milestone must use `DEBUG`, never `INFO`.** Preserve the existing INFO / WARN / ERROR lifecycle records unchanged. Runtime-side DEBUG events follow the existing Runtime log-level filter.
+- **Important existing behavior:** `UiLog.Debug` currently writes `[DEBUG]` records unconditionally to `ui-<PID>.log`; it does not check the elevated Runtime's `AppLog.MinimumLevelOverride`. Merely choosing DEBUG severity does **not** mean these UI records are suppressed when the user has not enabled Debug. Do not claim otherwise or introduce a second logging authority, new process argument, startup-state buffer, or level-filtering system in this two-change PR. This work order specifies DEBUG *severity*; any separate requirement for strict user-setting-based suppression needs a separate explicit design decision.
 - Use numeric milliseconds consistently (prefer `ElapsedMs` for a single starting point; `DurationMs` or `StartCallElapsedMs` for a discrete step).
 - Preserve existing log directory selection, file name, retention policy, and exception-swallowing logging behavior.
 - Log no user SID, personal paths beyond already-present diagnostics, secrets, controller IDs, or large serialized snapshots.
@@ -266,8 +267,8 @@ Absolutely do not modify:
 
 ### Main UI instrumentation
 - First UI managed entry is visible **before** the older `Frontend connected` log in a fresh `ui-<PID>.log`.
-- Logs let an investigator distinguish managed-entry/log-prune/single-instance/WinUI callback timing from frontend IPC handshake, bootstrap, MainWindow initialization and activation.
-- Runtime Process.Start call duration and child PID are measurable/correlatable.
+- Newly added DEBUG logs let an investigator distinguish managed-entry/log-prune/single-instance/WinUI callback timing from frontend IPC handshake, bootstrap, MainWindow initialization and activation, while preserving the existing INFO events.
+- Runtime Process.Start call duration and child PID are recorded in DEBUG diagnostics and measurable/correlatable.
 - Existing warm Main UI path remains functionally unchanged; no startup optimization is attempted in this PR.
 - Existing Main UI/Overlay cooperation and standalone Full1902 lifecycle behavior remain unchanged.
 
