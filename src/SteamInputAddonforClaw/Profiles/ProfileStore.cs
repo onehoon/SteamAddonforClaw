@@ -142,8 +142,7 @@ public sealed class ProfileStore
                     AppLog.Warn("Profiles", "Profile document has invalid null structural fields. Preserving the original file.", null, ("Path", _profilesPath));
                     return new ProfileLoadResult(new ProfileDocument(), ProfileLoadStatus.Malformed);
                 }
-                AppLog.Debug("Profiles", "Profile document loaded.", ("Path", _profilesPath), ("GameCount", parsed!.Games.Count), ("XboxGameCount", parsed.XboxGames.Count));
-                return new ProfileLoadResult(parsed, ProfileLoadStatus.Loaded);
+                return new ProfileLoadResult(parsed!, ProfileLoadStatus.Loaded);
             }
             catch (JsonException exception)
             {

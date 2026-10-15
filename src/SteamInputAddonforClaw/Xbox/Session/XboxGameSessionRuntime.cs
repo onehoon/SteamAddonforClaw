@@ -371,7 +371,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
                 return;
             }
 
-            RetireProcess(existing, processExited: true, "A different process creation time reused this PID.");
+            RetireProcess(existing, processExited: true);
         }
 
         var record = new ProcessRecord(generation);
@@ -404,8 +404,13 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
 
         if (inspection.Match is not { } match)
         {
-            AppLog.Debug("XboxSession", "Candidate did not prove an exact XBOX game identity.",
-                ("PID", processId), ("Disposition", inspection.Disposition), ("Reason", inspection.FailureReason));
+            if (inspection.Disposition is not (
+                XboxGameProcessInspectionDisposition.NoPackage or
+                XboxGameProcessInspectionDisposition.ConfigNegative))
+            {
+                AppLog.Debug("XboxSession", "Candidate identity inspection was inconclusive.",
+                    ("PID", processId), ("Disposition", inspection.Disposition), ("Reason", inspection.FailureReason));
+            }
             return;
         }
 
@@ -476,10 +481,10 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     {
         if (!_processes.TryGetValue(key.ProcessId, out var record) || record.Generation.Key != key)
             return;
-        RetireProcess(record, processExited: true, "Matched process handle signaled exit.");
+        RetireProcess(record, processExited: true);
     }
 
-    private void RetireProcess(ProcessRecord record, bool processExited, string reason)
+    private void RetireProcess(ProcessRecord record, bool processExited)
     {
         var key = record.Generation.Key;
         if (_processes.TryGetValue(key.ProcessId, out var current) && ReferenceEquals(current, record))
@@ -495,10 +500,6 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
             SetActiveGame(null);
             AppLog.Info("XboxSession", "Matched XBOX game process exited; active identity cleared.",
                 ("PID", key.ProcessId), ("CreationTime", key.CreationTime));
-        }
-        else
-        {
-            AppLog.Debug("XboxSession", "A classified XBOX candidate process exited.", ("PID", key.ProcessId), ("Reason", reason));
         }
     }
 

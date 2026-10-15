@@ -104,7 +104,6 @@ internal sealed class WindowsHidHidePackageProbe : IHidHidePackageProbe
             }
             if (versions.Length == 1)
             {
-                AppLog.Debug("HidHidePackageProbe", "HidHide package evidence found.", ("Source", candidates.Length > 0 ? "HKLMUninstall" : "InstallerDependencyFallback"), ("CandidateCount", candidates.Length), ("NormalizedVersion", versions[0]), ("PublisherMatch", candidates.Length > 0), ("Installed", true));
                 return new(true, versions[0], true);
             }
 

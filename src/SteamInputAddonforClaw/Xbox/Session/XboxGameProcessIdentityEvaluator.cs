@@ -128,6 +128,8 @@ internal static class XboxGameProcessIdentityEvaluator
     private const int ErrorSuccess = 0;
     private const int AppModelErrorNoPackage = 15700;
     private const long MaximumConfigBytes = 2 * 1024 * 1024;
+    private const string ConfigSimplyMissing =
+        "MicrosoftGame.config was not found in the Package object's Effective/Installed locations.";
 
     internal static async Task<XboxGameProcessInspection> InspectAsync(
         IGameProcessGeneration generation,
@@ -152,7 +154,7 @@ internal static class XboxGameProcessIdentityEvaluator
             ? evidence.PackageFamilyName
             : null;
 
-        var configFailure = "MicrosoftGame.config was not found in the Package object's Effective/Installed locations.";
+        var configFailure = ConfigSimplyMissing;
         if (!string.IsNullOrWhiteSpace(evidence.ConfigLocationFailure))
             configFailure += " " + evidence.ConfigLocationFailure;
         var sawExecutableMismatch = false;
@@ -234,7 +236,8 @@ internal static class XboxGameProcessIdentityEvaluator
             LogConfigResolution(generation, evidence, null, mismatchReason);
             return Negative(XboxGameProcessInspectionDisposition.ExecutableMismatch, mismatchReason);
         }
-        LogConfigResolution(generation, evidence, null, configFailure);
+        if (!string.Equals(configFailure, ConfigSimplyMissing, StringComparison.Ordinal))
+            LogConfigResolution(generation, evidence, null, configFailure);
         return Negative(XboxGameProcessInspectionDisposition.ConfigNegative, configFailure);
     }
 

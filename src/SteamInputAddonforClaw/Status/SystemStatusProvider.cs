@@ -60,7 +60,6 @@ internal sealed class SystemStatusProvider(
         {
             AppLog.Debug("Status", "Controller badge projection failed; using Unavailable.", ("Reason", exception.GetType().Name));
         }
-        AppLog.Debug("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
         return new SystemStatusSnapshot(device, hardwareCompatibility, prerequisites, steam, addon, recoverySafe)
         {
             ControllerBadge = controllerBadge
