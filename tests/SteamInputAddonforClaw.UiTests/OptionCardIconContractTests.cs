@@ -10,7 +10,7 @@ public sealed class OptionCardIconContractTests
         ("DevicePage.xaml", "MSI Center M", "FontIcon:E71D"),
         ("DevicePage.xaml", "TDP Control", "FontIcon:E945"),
         ("DevicePage.xaml", "CPU Boost", "FontIcon:EEA1"),
-        ("DevicePage.xaml", "Maximum Processor State", "FontIcon:F149"),
+        ("DevicePage.xaml", "Maximum Processor State", "FontIcon:F42F"),
         ("DevicePage.xaml", "Windows Power Mode", "FontIcon:E7E8"),
         ("DevicePage.xaml", "Battery charge limit", "FontIcon:E86B"),
 
