@@ -13,6 +13,7 @@ public static class Program
     public static void Main(string[] args)
     {
         OverlayLog.ConfigureDirectory(args);
+        OverlayLog.SetMinimumLevel(FrontendLaunchArguments.ResolveLogLevel(args));
         AddonLogRetention.PruneDirectory(OverlayLog.DirectoryPath);
         OverlayLog.Info("App", "Overlay process starting",
             ("PID", Environment.ProcessId),

@@ -318,7 +318,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         NamedPipeServerStream? pipe;
         lock (_sync)
         {
-            if (!_readyState || _state != OverlayState.Visible) return false;
+            if (!_readyState) return false;
             pipe = _activePipe;
         }
         if (pipe is null) return false;

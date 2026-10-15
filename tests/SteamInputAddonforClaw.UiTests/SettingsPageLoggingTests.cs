@@ -60,15 +60,54 @@ public sealed class SettingsPageLoggingTests
     {
         var source = File.ReadAllText(Path.Combine(
             FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml.cs"));
+        var mutationStart = source.IndexOf("private async void LogLevelComboBox_SelectionChanged(", StringComparison.Ordinal);
+        var refreshStart = source.IndexOf("private async Task RefreshLoggingStateAsync()", mutationStart, StringComparison.Ordinal);
+        var openFolderStart = source.IndexOf("private void OpenLogFolderButton_Click(", refreshStart, StringComparison.Ordinal);
+        var mutation = source[mutationStart..refreshStart];
+        var refresh = source[refreshStart..openFolderStart];
 
-        Assert.Contains("_lastKnownLogLevel = bootstrap.Settings.LogLevel", source, StringComparison.Ordinal);
-        Assert.Contains("_logDirectoryPath = bootstrap.LogDirectoryPath", source, StringComparison.Ordinal);
-        Assert.Contains("_frontend.SetLogLevelAsync(level)", source, StringComparison.Ordinal);
-        Assert.Contains("_lastKnownLogLevel = result.LogLevel", source, StringComparison.Ordinal);
-        Assert.Contains("await RefreshLoggingStateAsync()", source, StringComparison.Ordinal);
-        Assert.Contains("_frontend!.GetBootstrapAsync()", source, StringComparison.Ordinal);
-        Assert.Contains("SetLogLevel(_lastKnownLogLevel)", source, StringComparison.Ordinal);
+        var mutationResult = mutation.IndexOf("await _frontend.SetLogLevelAsync(level)", StringComparison.Ordinal);
+        var applyAuthoritativeResult = mutation.IndexOf("UiLog.SetMinimumLevel(result.LogLevel)", StringComparison.Ordinal);
+        Assert.True(mutationResult >= 0 && mutationResult < applyAuthoritativeResult);
+        Assert.Contains("_lastKnownLogLevel = result.LogLevel", mutation, StringComparison.Ordinal);
+        Assert.DoesNotContain("UiLog.SetMinimumLevel(level)", mutation, StringComparison.Ordinal);
+        Assert.Contains("await RefreshLoggingStateAsync()", mutation, StringComparison.Ordinal);
+
+        var bootstrapRead = refresh.IndexOf("await _frontend!.GetBootstrapAsync()", StringComparison.Ordinal);
+        var applyBootstrapLevel = refresh.IndexOf("UiLog.SetMinimumLevel(_lastKnownLogLevel)", StringComparison.Ordinal);
+        Assert.True(bootstrapRead >= 0 && bootstrapRead < applyBootstrapLevel);
+        Assert.Contains("_lastKnownLogLevel = bootstrap.Settings.LogLevel", refresh, StringComparison.Ordinal);
+        Assert.Contains("_logDirectoryPath = bootstrap.LogDirectoryPath", refresh, StringComparison.Ordinal);
+        Assert.Contains("SetLogLevel(_lastKnownLogLevel)", refresh, StringComparison.Ordinal);
+        var refreshFailure = refresh.IndexOf("catch (Exception refreshException)", StringComparison.Ordinal);
+        Assert.True(refreshFailure >= 0);
+        Assert.Contains("SetLogLevel(_lastKnownLogLevel)", refresh[refreshFailure..], StringComparison.Ordinal);
+        Assert.DoesNotContain("UiLog.SetMinimumLevel(", refresh[refreshFailure..], StringComparison.Ordinal);
         Assert.Contains("ProcessStartInfo(\"explorer.exe\", $\"\\\"{_logDirectoryPath}\\\"\")", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Child_startup_and_authoritative_bootstrap_apply_log_level_before_logging()
+    {
+        var root = FindRepositoryRoot();
+        var uiProgram = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Program.cs"));
+        var uiApp = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "App.xaml.cs"));
+        var overlayProgram = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Program.cs"));
+        var overlayApp = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs"));
+
+        Assert.True(uiProgram.IndexOf("UiLog.SetMinimumLevel(FrontendLaunchArguments.ResolveLogLevel(args))", StringComparison.Ordinal)
+            < uiProgram.IndexOf("UiLog.Debug(", StringComparison.Ordinal));
+        Assert.True(overlayProgram.IndexOf("OverlayLog.SetMinimumLevel(FrontendLaunchArguments.ResolveLogLevel(args))", StringComparison.Ordinal)
+            < overlayProgram.IndexOf("OverlayLog.Info(", StringComparison.Ordinal));
+        Assert.True(uiApp.IndexOf("UiLog.SetMinimumLevel(bootstrap.Settings.LogLevel)", StringComparison.Ordinal)
+            < uiApp.IndexOf("AppLog.Info(\"Frontend\", \"Bootstrap acquired.\")", StringComparison.Ordinal));
+
+        var settingsHandlerStart = overlayApp.IndexOf("private void OnFrontendSettingsStateReceived(", StringComparison.Ordinal);
+        var settingsHandlerEnd = overlayApp.IndexOf("private void OnControllerVibrationStateReceived(", settingsHandlerStart, StringComparison.Ordinal);
+        var settingsHandler = overlayApp[settingsHandlerStart..settingsHandlerEnd];
+        Assert.Contains("settingsAvailable && Enum.IsDefined(settings.LogLevel)", settingsHandler, StringComparison.Ordinal);
+        Assert.True(settingsHandler.IndexOf("OverlayLog.SetMinimumLevel(settings.LogLevel)", StringComparison.Ordinal)
+            < settingsHandler.IndexOf("_dispatcherQueue?.TryEnqueue", StringComparison.Ordinal));
     }
 
     [Fact]

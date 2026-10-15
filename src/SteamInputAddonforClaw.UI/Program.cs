@@ -15,6 +15,7 @@ public static class Program
     {
         var managedEntryTimestamp = Stopwatch.GetTimestamp();
         UiLog.ConfigureDirectory(args);
+        UiLog.SetMinimumLevel(FrontendLaunchArguments.ResolveLogLevel(args));
         UiLog.Debug("Startup", "UI managed entry.",
             ("PID", Environment.ProcessId),
             ("ElapsedMs", Stopwatch.GetElapsedTime(managedEntryTimestamp).TotalMilliseconds));

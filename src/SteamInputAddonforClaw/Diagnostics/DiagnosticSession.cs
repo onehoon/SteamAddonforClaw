@@ -73,7 +73,7 @@ internal static class ControllerStateDiagnostics
             _lastDPadSession = session;
             _lastDPad = current;
         }
-        AppLog.Info("Input", "Physical D-pad state changed", ("TestSession", session),
+        AppLog.Debug("Input", "Physical D-pad state changed", ("TestSession", session),
             ("Up", buttons.DPadUp), ("Right", buttons.DPadRight), ("Down", buttons.DPadDown), ("Left", buttons.DPadLeft));
     }
 

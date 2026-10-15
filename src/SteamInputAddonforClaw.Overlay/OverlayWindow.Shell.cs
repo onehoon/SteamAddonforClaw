@@ -238,7 +238,7 @@ public sealed partial class OverlayWindow
             ApplyRowSelectionVisual();
         }
 
-        OverlayLog.Info("Shell", "Authoritative Overlay tab order applied.", ("SelectedTab", _tabState.SelectedTab));
+        OverlayLog.Debug("Shell", "Authoritative Overlay tab order applied.", ("SelectedTab", _tabState.SelectedTab));
     }
 
     // Keep the fixed Setting rows anchored by their local index and remap only tab-order rows by

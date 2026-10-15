@@ -78,6 +78,7 @@ public partial class App : Application
             stage = "BootstrapAcquisition";
             var bootstrapTimestamp = Stopwatch.GetTimestamp();
             var bootstrap = await _frontendClient.GetBootstrapAsync().ConfigureAwait(true);
+            UiLog.SetMinimumLevel(bootstrap.Settings.LogLevel);
             AppLog.Info("Frontend", "Bootstrap acquired.");
             AppLog.Debug("Startup", "Frontend bootstrap timing.",
                 ("DurationMs", Stopwatch.GetElapsedTime(bootstrapTimestamp).TotalMilliseconds),

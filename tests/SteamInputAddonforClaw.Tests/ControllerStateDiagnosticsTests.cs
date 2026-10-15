@@ -108,7 +108,7 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
     }
 
     [Fact]
-    public void DPadTransitionIsLoggedAtInfoLevel()
+    public void DPadTransitionIsLoggedAtDebugLevel()
     {
         var neutral = Neutral().Buttons;
         var pressed = neutral with { DPadUp = true, DPadRight = true };
@@ -118,12 +118,28 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
 
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
-        Assert.Contains("[INFO]", log);
+        Assert.Contains("[DEBUG]", log);
         Assert.Contains("Physical D-pad state changed", log);
         Assert.Contains("Up=True", log);
         Assert.Contains("Right=True", log);
         Assert.Contains("Down=False", log);
         Assert.Contains("Left=False", log);
+    }
+
+    [Fact]
+    public void Info_level_suppresses_physical_dpad_transition_diagnostics()
+    {
+        var previousLevel = AppLog.MinimumLevelOverride;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        try
+        {
+            ControllerStateDiagnostics.LogDPadTransitionIfChanged(Neutral().Buttons, session: 700099);
+            AppLog.DrainForTests();
+
+            var log = File.Exists(AppLog.CurrentLogFilePath) ? LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty;
+            Assert.DoesNotContain("TestSession=700099", log);
+        }
+        finally { AppLog.MinimumLevelOverride = previousLevel; }
     }
 
     [Fact]

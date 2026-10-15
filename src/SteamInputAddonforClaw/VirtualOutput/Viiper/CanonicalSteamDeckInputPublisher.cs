@@ -286,7 +286,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
             WaitHandle[] handles = [stopEvent, timer];
             while (true)
             {
-                var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
+                var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
                 var waitStart = diagnosticsEnabled ? _timestampProvider() : 0;
 
                 var signaled = WaitHandle.WaitAny(handles);
@@ -505,7 +505,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
             rightPad);
         var state = _systemButtonOverlay.Apply(mapped);
 
-        var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
+        var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
         var pulseDiagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
         var callStart = diagnosticsEnabled || pulseDiagnosticsEnabled ? _timestampProvider() : 0;
         var accepted = _sink.SetState(state);
@@ -598,7 +598,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
         var averagePublishWorkMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _publishWorkTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
         var averageWakeLatenessMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _wakeLatenessTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
 
-        AppLog.Info("SteamOutput", "Canonical Steam Deck publisher heartbeat",
+        AppLog.Debug("SteamOutput", "Canonical Steam Deck publisher heartbeat",
             ("SetStateCallsLastSecond", _setStateCallsSinceHeartbeat),
             ("TotalPublishedStateCount", _publishedStateCount),
             ("SetStateFailures", _totalSetStateFailures),

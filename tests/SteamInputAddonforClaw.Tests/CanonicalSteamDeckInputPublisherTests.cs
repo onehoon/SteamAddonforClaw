@@ -638,6 +638,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         var heartbeat = Assert.Single(log.Split('\n'), line => line.Contains("Canonical Steam Deck publisher heartbeat"));
+        Assert.Contains("[DEBUG]", heartbeat);
         Assert.Contains("SetStateCallsLastSecond=3", heartbeat);
         Assert.Contains("TotalPublishedStateCount=3", heartbeat);
         Assert.Contains("SetStateFailures=0", heartbeat);
@@ -659,6 +660,44 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Contains("AverageWakeLatenessMs=0", heartbeat);
         Assert.Contains("MaxWakeLatenessMs=0", heartbeat);
         Assert.Contains("SkippedDeadlineCount=0", heartbeat);
+    }
+
+    [Fact]
+    public async Task Info_publish_keeps_output_but_skips_timing_sampling_and_heartbeat()
+    {
+        var previousLevel = AppLog.MinimumLevelOverride;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        var timestampCalls = 0;
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            source, sink, ticks,
+            timestampProvider: () =>
+            {
+                Interlocked.Increment(ref timestampCalls);
+                return Stopwatch.Frequency + 1;
+            });
+        publisher.Start();
+        var callsAfterStart = Volatile.Read(ref timestampCalls);
+
+        try
+        {
+            await ticks.TickAsync();
+            await sink.WaitForCountAsync(1);
+            Assert.Equal(callsAfterStart, Volatile.Read(ref timestampCalls));
+            Assert.Equal(1, publisher.PublishedStateCount);
+
+            await publisher.StopAsync();
+            AppLog.DrainForTests();
+            var log = File.Exists(AppLog.CurrentLogFilePath) ? LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty;
+            Assert.DoesNotContain("Canonical Steam Deck publisher heartbeat", log);
+        }
+        finally
+        {
+            await publisher.StopAsync();
+            AppLog.MinimumLevelOverride = previousLevel;
+        }
     }
 
     [Fact]

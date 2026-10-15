@@ -224,6 +224,34 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
     }
 
     [Fact]
+    public void Frontend_settings_invalidation_refreshes_log_preference_before_visible_capture_guards()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var method = ExtractMethod(source, "private void OnFrontendStateInvalidatedForOverlay");
+
+        var shutdownGuard = method.IndexOf("if (Volatile.Read(ref _processShutdownStarted) != 0) return;", StringComparison.Ordinal);
+        var settingsRefresh = method.IndexOf("_overlayController.RefreshFrontendSettingsAsync()", StringComparison.Ordinal);
+        var captureGuard = method.IndexOf("if (!_overlayCaptureActive) return;", StringComparison.Ordinal);
+        var visibilityGuard = method.IndexOf("if (!_overlayController.IsVisible) return;", StringComparison.Ordinal);
+
+        Assert.True(shutdownGuard >= 0 && shutdownGuard < settingsRefresh);
+        Assert.True(settingsRefresh < captureGuard && captureGuard < visibilityGuard);
+        Assert.Equal(1, CountOccurrences(method, "RefreshFrontendSettingsAsync()"));
+        foreach (var otherRefresh in new[]
+        {
+            "RefreshShortcutAsync()",
+            "RefreshBackButtonMappingAsync()",
+            "RefreshControllerVibrationAsync()",
+            "RefreshQuickSettingsAsync()",
+            "RefreshClawHudAsync()",
+        })
+        {
+            var index = method.IndexOf(otherRefresh, StringComparison.Ordinal);
+            Assert.True(index > visibilityGuard, $"{otherRefresh} must remain behind the existing capture/visibility guards.");
+        }
+    }
+
+    [Fact]
     public void Overlay_first_show_target_uses_the_shared_steam_and_xbox_active_profile_authority()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");

@@ -15,6 +15,86 @@ public sealed class FseHomeHandoffTests
         Assert.Equal(
             Path.Combine(localAppData, "SteamInputAddonforClaw-Data", "logs", "fse-home-last.log"),
             path);
+        Assert.Equal(
+            Path.Combine(localAppData, "SteamInputAddonforClaw-Data", "settings.json"),
+            FseHomeDiagnostics.ResolveSettingsPath(localAppData));
+    }
+
+    [Fact]
+    public void Missing_settings_defaults_fse_home_logging_to_info()
+    {
+        var localAppData = CreateTemporaryDirectory();
+        try
+        {
+            var diagnostics = new FseHomeDiagnostics(localAppData);
+            diagnostics.Start();
+            diagnostics.Info("started");
+            diagnostics.Debug("intermediate detail");
+
+            var text = File.ReadAllText(FseHomeDiagnostics.ResolveLogPath(localAppData));
+            Assert.Contains("[INFO] started", text);
+            Assert.DoesNotContain("[DEBUG]", text);
+        }
+        finally { Directory.Delete(localAppData, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("{\"LogLevel\":\"Verbose\"}")]
+    public void Malformed_or_unknown_setting_fails_closed_without_creating_a_log(string settings)
+    {
+        var localAppData = CreateTemporaryDirectory();
+        try
+        {
+            WriteSettings(localAppData, settings);
+            var diagnostics = new FseHomeDiagnostics(localAppData);
+            diagnostics.Start();
+            diagnostics.Info("must not be written");
+
+            Assert.False(File.Exists(FseHomeDiagnostics.ResolveLogPath(localAppData)));
+        }
+        finally { Directory.Delete(localAppData, recursive: true); }
+    }
+
+    [Fact]
+    public void Off_does_not_create_or_truncate_the_fse_home_log()
+    {
+        var localAppData = CreateTemporaryDirectory();
+        try
+        {
+            WriteSettings(localAppData, "{\"LogLevel\":\"Off\"}");
+            var logPath = FseHomeDiagnostics.ResolveLogPath(localAppData);
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            File.WriteAllText(logPath, "previous record");
+
+            var diagnostics = new FseHomeDiagnostics(localAppData);
+            diagnostics.Start();
+            diagnostics.Info("must not be appended");
+
+            Assert.Equal("previous record", File.ReadAllText(logPath));
+        }
+        finally { Directory.Delete(localAppData, recursive: true); }
+    }
+
+    [Fact]
+    public void Debug_setting_keeps_intermediate_fse_home_diagnostics()
+    {
+        var localAppData = CreateTemporaryDirectory();
+        try
+        {
+            WriteSettings(localAppData, "{\"LogLevel\":\"Debug\"}");
+            var diagnostics = new FseHomeDiagnostics(localAppData);
+            diagnostics.Start();
+            diagnostics.Info("handoff started");
+            diagnostics.Debug("foreground probe");
+            diagnostics.Warn("handoff fallback");
+
+            var text = File.ReadAllText(FseHomeDiagnostics.ResolveLogPath(localAppData));
+            Assert.Contains("[INFO] handoff started", text);
+            Assert.Contains("[DEBUG] foreground probe", text);
+            Assert.Contains("[WARN] handoff fallback", text);
+        }
+        finally { Directory.Delete(localAppData, recursive: true); }
     }
 
     [Fact]
@@ -103,5 +183,12 @@ public sealed class FseHomeHandoffTests
         var path = Path.Combine(Path.GetTempPath(), $"fse-home-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private static void WriteSettings(string localAppData, string content)
+    {
+        var path = FseHomeDiagnostics.ResolveSettingsPath(localAppData);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
     }
 }

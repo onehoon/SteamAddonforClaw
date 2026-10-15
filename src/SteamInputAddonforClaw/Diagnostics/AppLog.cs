@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
 
@@ -40,6 +41,13 @@ internal static class AppLog
     // to Info through LogLevelBootstrap, while an explicit Off preference remains authoritative.
     private static int _minimumLevel = (int)AppLogLevel.Off;
     internal static AppLogLevel MinimumLevelOverride { get => (AppLogLevel)Volatile.Read(ref _minimumLevel); set => Volatile.Write(ref _minimumLevel, (int)value); }
+    internal static FrontendLogLevel CurrentFrontendLogLevel => MinimumLevelOverride switch
+    {
+        AppLogLevel.Debug => FrontendLogLevel.Debug,
+        AppLogLevel.Info => FrontendLogLevel.Info,
+        AppLogLevel.Off => FrontendLogLevel.Off,
+        _ => FrontendLogLevel.Off,
+    };
 
     /// <summary>
     /// Cheap pre-check for call sites that would otherwise do non-trivial work (timestamp sampling,

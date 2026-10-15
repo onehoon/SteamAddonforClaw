@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -6,8 +7,10 @@ internal static class OverlayLog
 {
     private static readonly object Sync = new();
     private static string _directory = FrontendLaunchArguments.ResolveLogDirectory([]);
+    private static int _minimumLevel = (int)FrontendLogLevel.Off;
 
     internal static string DirectoryPath => _directory;
+    internal static void SetMinimumLevel(FrontendLogLevel level) => Volatile.Write(ref _minimumLevel, (int)level);
 
     internal static void ConfigureDirectory(string[] args)
     {
@@ -29,6 +32,7 @@ internal static class OverlayLog
 
     private static void Write(string level, string category, string message, Exception? exception, IReadOnlyList<(string Key, object? Value)> fields)
     {
+        if (!ShouldWrite(level)) return;
         try
         {
             var suffix = string.Join(' ', fields.Select(field => $"{field.Key}={Format(field.Value)}"));
@@ -43,6 +47,13 @@ internal static class OverlayLog
         {
             // Overlay diagnostics are best effort and must never affect the UI lifecycle.
         }
+    }
+
+    private static bool ShouldWrite(string severity)
+    {
+        var selected = (FrontendLogLevel)Volatile.Read(ref _minimumLevel);
+        return selected == FrontendLogLevel.Debug
+            || (selected == FrontendLogLevel.Info && severity != "DEBUG");
     }
 
     private static string Format(object? value)

@@ -66,7 +66,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
         await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            AppLog.Info("Power.Notify", "Power notification observed.", ("Cycle", _cycle), ("Epoch", _gate.Epoch), ("Signal", observation.Signal), ("ObservedUtc", observation.ObservedUtc), ("BarrierApplied", observation.BarrierApplied));
+            AppLog.Debug("Power.Notify", "Power notification observed.", ("Cycle", _cycle), ("Epoch", _gate.Epoch), ("Signal", observation.Signal), ("ObservedUtc", observation.ObservedUtc), ("BarrierApplied", observation.BarrierApplied));
             if (observation.Signal == PowerSignal.Suspend)
             {
                 if (!observation.BarrierApplied) { AppLog.Debug("Power.Coordinator", "Duplicate suspend ignored.", ("Cycle", _cycle), ("Epoch", _gate.Epoch)); return; }

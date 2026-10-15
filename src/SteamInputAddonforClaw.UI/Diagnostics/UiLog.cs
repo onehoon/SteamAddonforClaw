@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.UI.Diagnostics;
 
@@ -6,8 +7,10 @@ internal static class UiLog
 {
     private static readonly object Sync = new();
     private static string _directory = FrontendLaunchArguments.ResolveLogDirectory([]);
+    private static int _minimumLevel = (int)FrontendLogLevel.Off;
 
     internal static string DirectoryPath => _directory;
+    internal static void SetMinimumLevel(FrontendLogLevel level) => Volatile.Write(ref _minimumLevel, (int)level);
 
     internal static void ConfigureDirectory(string[] args) => ConfigureDirectory(FrontendLaunchArguments.ResolveLogDirectory(args));
 
@@ -34,6 +37,7 @@ internal static class UiLog
 
     private static void Write(string level, string category, string message, Exception? exception, IReadOnlyList<(string Key, object? Value)> fields)
     {
+        if (!ShouldWrite(level)) return;
         try
         {
             var suffix = string.Join(' ', fields.Select(field => $"{field.Key}={field.Value}"));
@@ -47,5 +51,12 @@ internal static class UiLog
         catch
         {
         }
+    }
+
+    private static bool ShouldWrite(string severity)
+    {
+        var selected = (FrontendLogLevel)Volatile.Read(ref _minimumLevel);
+        return selected == FrontendLogLevel.Debug
+            || (selected == FrontendLogLevel.Info && severity != "DEBUG");
     }
 }
