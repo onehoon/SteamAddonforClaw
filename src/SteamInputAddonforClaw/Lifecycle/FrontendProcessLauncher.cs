@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.FrontendTransport;
 
@@ -12,18 +13,22 @@ internal sealed class FrontendProcessLauncher
     private readonly string _executablePath;
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
+    private readonly Func<FrontendLogLevel> _logLevelProvider;
     private bool _runtimeReady;
     private bool _pendingOpen;
     private FrontendOpenReason? _pendingReason;
     private bool _stopping;
 
-    internal FrontendProcessLauncher(string runtimeBaseDirectory, string logDirectory, Func<ProcessStartInfo, Process?>? startProcess = null)
+    internal FrontendProcessLauncher(string runtimeBaseDirectory, string logDirectory,
+        Func<ProcessStartInfo, Process?>? startProcess = null,
+        Func<FrontendLogLevel>? logLevelProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeBaseDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(logDirectory);
         _executablePath = Path.Combine(runtimeBaseDirectory, "ui", "SteamInputAddonforClaw.UI.exe");
         _logDirectory = logDirectory;
         _startProcess = startProcess ?? Process.Start;
+        _logLevelProvider = logLevelProvider ?? (() => AppLog.CurrentFrontendLogLevel);
     }
 
     internal string ExecutablePath => _executablePath;
@@ -89,6 +94,8 @@ internal sealed class FrontendProcessLauncher
         var startInfo = new ProcessStartInfo(_executablePath) { UseShellExecute = false };
         startInfo.ArgumentList.Add(FrontendLaunchArguments.LogDirectoryOption);
         startInfo.ArgumentList.Add(_logDirectory);
+        startInfo.ArgumentList.Add(FrontendLaunchArguments.LogLevelOption);
+        startInfo.ArgumentList.Add(_logLevelProvider().ToString());
         AppLog.Info("Frontend", "Frontend process launch attempted.", ("Reason", reason), ("Path", _executablePath));
         try
         {

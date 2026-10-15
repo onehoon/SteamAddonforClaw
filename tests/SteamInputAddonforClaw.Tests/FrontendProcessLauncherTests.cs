@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
 using Xunit;
@@ -73,11 +74,30 @@ public sealed class FrontendProcessLauncherTests
     {
         var starts = new List<ProcessStartInfo>();
         var logDirectory = @"C:\Users\Test User\Addon Data\logs";
-        var launcher = new FrontendProcessLauncher("C:\\runtime", logDirectory, info => { starts.Add(info); return null; });
+        var launcher = new FrontendProcessLauncher("C:\\runtime", logDirectory,
+            info => { starts.Add(info); return null; }, () => FrontendLogLevel.Info);
         launcher.MarkRuntimeReady();
         launcher.Launch(launcher.RequestOpen(FrontendOpenReason.InitialManualLaunch)!.Value);
 
         Assert.Single(starts);
-        Assert.Equal([FrontendLaunchArguments.LogDirectoryOption, logDirectory], starts[0].ArgumentList);
+        Assert.Equal([
+            FrontendLaunchArguments.LogDirectoryOption, logDirectory,
+            FrontendLaunchArguments.LogLevelOption, nameof(FrontendLogLevel.Info)], starts[0].ArgumentList);
+    }
+
+    [Fact]
+    public void Reads_effective_log_level_at_launch_instead_of_construction()
+    {
+        var starts = new List<ProcessStartInfo>();
+        var effectiveLevel = FrontendLogLevel.Off;
+        var launcher = new FrontendProcessLauncher("C:\\runtime", @"C:\logs with spaces",
+            info => { starts.Add(info); return null; }, () => effectiveLevel);
+        launcher.MarkRuntimeReady();
+        effectiveLevel = FrontendLogLevel.Debug;
+
+        launcher.Launch(FrontendOpenReason.Tray);
+
+        Assert.Equal(nameof(FrontendLogLevel.Debug), starts.Single().ArgumentList[^1]);
+        Assert.Equal(@"C:\logs with spaces", starts.Single().ArgumentList[1]);
     }
 }
