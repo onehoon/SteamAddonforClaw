@@ -150,6 +150,30 @@ public sealed class MainUiThemeTests
     }
 
     [Fact]
+    public void Shortcut_dialogs_use_the_page_actual_theme()
+    {
+        var source = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "ShortcutPage.xaml.cs"));
+        const string dialogMarker = "var dialog = new ContentDialog";
+        var dialogs = new List<string>();
+        var searchFrom = 0;
+
+        while (true)
+        {
+            var dialogStart = source.IndexOf(dialogMarker, searchFrom, StringComparison.Ordinal);
+            if (dialogStart < 0) break;
+
+            var dialogEnd = source.IndexOf("\n        };", dialogStart, StringComparison.Ordinal);
+            Assert.True(dialogEnd > dialogStart);
+            dialogs.Add(source[dialogStart..dialogEnd]);
+            searchFrom = dialogStart + dialogMarker.Length;
+        }
+
+        Assert.Equal(2, dialogs.Count);
+        Assert.All(dialogs, dialog => Assert.Contains("RequestedTheme = ActualTheme,", dialog, StringComparison.Ordinal));
+        Assert.All(dialogs, dialog => Assert.Contains("XamlRoot = XamlRoot", dialog, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Failed_save_restores_the_last_saved_selection_before_any_theme_change()
     {
         var source = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
