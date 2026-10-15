@@ -121,6 +121,7 @@ public sealed partial class WindowsTweaksPage : UserControl
             PrimaryButtonText = MainUiStrings.Get("Tweaks_SafetyNotice_Accept", "I understand"),
             CloseButtonText = MainUiStrings.Get("Tweaks_SafetyNotice_Cancel", "Cancel"),
             DefaultButton = ContentDialogButton.Primary,
+            RequestedTheme = ActualTheme,
             XamlRoot = XamlRoot,
         };
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
@@ -186,7 +187,7 @@ public sealed partial class WindowsTweaksPage : UserControl
         if (row.ConfiguredEnabled is { } configured)
             toggle.IsOn = configured;
         toggle.IsEnabled = row.CanChange && !_mutatingIds.Contains(row.Id);
-        stateText.Text = FormatState(row) ?? string.Empty;
+        SetStateLabel(stateText, FormatState(row));
     }
 
     internal static FrontendWindowsTweaksSnapshot ReplaceTweak(
@@ -216,7 +217,7 @@ public sealed partial class WindowsTweaksPage : UserControl
         toggle.IsEnabled = false;
         _applyingSnapshot = false;
         var controls = GetControls(id);
-        controls.State.Text = MainUiStrings.Get("Tweaks_Updating", "Updating…");
+        SetStateLabel(controls.State, MainUiStrings.Get("Tweaks_Updating", "Updating…"));
         try
         {
             var result = await _frontend.SetWindowsTweakAsync(id, requested);
@@ -253,7 +254,7 @@ public sealed partial class WindowsTweaksPage : UserControl
     {
         return row.State switch
         {
-            FrontendWindowsTweakState.Enabled or FrontendWindowsTweakState.Disabled => null,
+            FrontendWindowsTweakState.Enabled or FrontendWindowsTweakState.Disabled => FormatVerifiedState(row),
             FrontendWindowsTweakState.EnablePendingRestart
                 when row.Id == FrontendWindowsTweakId.MemoryIntegrity
                     && row.ConfiguredEnabled == true
@@ -271,6 +272,29 @@ public sealed partial class WindowsTweaksPage : UserControl
         };
     }
 
+    private static string? FormatVerifiedState(FrontendWindowsTweakSnapshot row)
+    {
+        if (row.Id is FrontendWindowsTweakId.MemoryIntegrity or FrontendWindowsTweakId.VirtualMachinePlatform)
+            return null;
+
+        var configuredBehaviorEnabled = row.State == FrontendWindowsTweakState.Enabled;
+        var titleDisablesBehavior = row.Id is FrontendWindowsTweakId.DisablePasswordOnWake
+            or FrontendWindowsTweakId.DisableEdgeBackground
+            or FrontendWindowsTweakId.DisableStartupAppDelay;
+        var behaviorEnabled = titleDisablesBehavior ? !configuredBehaviorEnabled : configuredBehaviorEnabled;
+        return MainUiStrings.Get(
+            behaviorEnabled ? "Tweaks_State_Enabled" : "Tweaks_State_Disabled",
+            behaviorEnabled ? "Enabled" : "Disabled");
+    }
+
+    private static void SetStateLabel(TextBlock stateText, string? message)
+    {
+        var hasMessage = !string.IsNullOrWhiteSpace(message);
+        stateText.Text = hasMessage ? message! : string.Empty;
+        stateText.Visibility = hasMessage ? Visibility.Visible : Visibility.Collapsed;
+        ToolTipService.SetToolTip(stateText, hasMessage ? message! : string.Empty);
+    }
+
     private void SetOperationMessage(string? message)
     {
         OperationMessageText.Text = message ?? string.Empty;
@@ -284,7 +308,6 @@ public sealed partial class WindowsTweaksPage : UserControl
         FrontendWindowsTweakId.InstantContextMenus => (InstantContextMenusCard, InstantContextMenusSwitch, InstantContextMenusState),
         FrontendWindowsTweakId.ClassicContextMenu => (ClassicContextMenuCard, ClassicContextMenuSwitch, ClassicContextMenuState),
         FrontendWindowsTweakId.DisablePasswordOnWake => (DisablePasswordOnWakeCard, DisablePasswordOnWakeSwitch, DisablePasswordOnWakeState),
-        FrontendWindowsTweakId.DisableWindowsWidgets => (DisableWindowsWidgetsCard, DisableWindowsWidgetsSwitch, DisableWindowsWidgetsState),
         FrontendWindowsTweakId.DisableEdgeBackground => (DisableEdgeBackgroundCard, DisableEdgeBackgroundSwitch, DisableEdgeBackgroundState),
         FrontendWindowsTweakId.DisableStartupAppDelay => (DisableStartupAppDelayCard, DisableStartupAppDelaySwitch, DisableStartupAppDelayState),
         _ => throw new ArgumentOutOfRangeException(nameof(id)),
@@ -297,7 +320,6 @@ public sealed partial class WindowsTweaksPage : UserControl
         var value when ReferenceEquals(value, InstantContextMenusSwitch) => FrontendWindowsTweakId.InstantContextMenus,
         var value when ReferenceEquals(value, ClassicContextMenuSwitch) => FrontendWindowsTweakId.ClassicContextMenu,
         var value when ReferenceEquals(value, DisablePasswordOnWakeSwitch) => FrontendWindowsTweakId.DisablePasswordOnWake,
-        var value when ReferenceEquals(value, DisableWindowsWidgetsSwitch) => FrontendWindowsTweakId.DisableWindowsWidgets,
         var value when ReferenceEquals(value, DisableEdgeBackgroundSwitch) => FrontendWindowsTweakId.DisableEdgeBackground,
         var value when ReferenceEquals(value, DisableStartupAppDelaySwitch) => FrontendWindowsTweakId.DisableStartupAppDelay,
         _ => throw new ArgumentOutOfRangeException(nameof(toggle)),

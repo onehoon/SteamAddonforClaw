@@ -501,12 +501,6 @@
   <data name="Tweaks_DisablePasswordOnWakeDescription.Text" xml:space="preserve">
     <value>Return from sleep without requiring sign-in.</value>
   </data>
-  <data name="Tweaks_DisableWindowsWidgetsCard.Header" xml:space="preserve">
-    <value>Disable Windows Widgets</value>
-  </data>
-  <data name="Tweaks_DisableWindowsWidgetsDescription.Text" xml:space="preserve">
-    <value>Block the Windows Widgets experience where supported by Windows policy.</value>
-  </data>
   <data name="Tweaks_DisableEdgeBackgroundCard.Header" xml:space="preserve">
     <value>Disable Edge Background</value>
   </data>
@@ -539,6 +533,12 @@
   </data>
   <data name="Tweaks_State_ConfiguredNotRunning" xml:space="preserve">
     <value>Configured — not running</value>
+  </data>
+  <data name="Tweaks_State_Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="Tweaks_State_Disabled" xml:space="preserve">
+    <value>Disabled</value>
   </data>
   <data name="Tweaks_State_RestartRequired" xml:space="preserve">
     <value>Restart required</value>

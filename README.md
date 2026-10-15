@@ -201,9 +201,9 @@ Shortcut tiles use an action-specific Fluent icon by default. In the Main App's 
 
 ### Tweaks
 
-The **Tweaks** page reads Windows state when opened and after each change. It keeps mixed, unavailable, and unsupported states distinct from a verified **On** or **Off** state. A consolidated safety notice appears at most once per local calendar day. The app does not automatically restart Windows, sign out, or restart Explorer; some existing Windows settings may require one of those actions to become fully effective.
+The **Tweaks** page reads Windows state when opened and after each change. It keeps mixed, unavailable, and unsupported states distinct from a verified **Enabled** or **Disabled** state. A consolidated safety notice appears at most once per local calendar day. The app does not automatically restart Windows, sign out, or restart Explorer; some existing Windows settings may require one of those actions to become fully effective.
 
-The **Registry Tweaks** group includes **Faster Menus**, **Classic Context Menu**, **Disable Password on Wake**, **Disable Windows Widgets**, **Disable Edge Background**, and **Disable Startup App Delay**. The Widgets policy is offered only on Windows editions documented to support it; Windows 11 Home is unsupported. Edge background policies do not immediately close existing Edge processes. Startup App Delay configures two Explorer values for future logins; actual startup changes may vary.
+The **Registry Tweaks** group includes **Faster Menus**, **Classic Context Menu**, **Disable Password on Wake**, **Disable Edge Background**, and **Disable Startup App Delay**. Edge background policies do not immediately close existing Edge processes. Startup App Delay configures two Explorer values for future logins; actual startup changes may vary.
 
 ### Settings
 

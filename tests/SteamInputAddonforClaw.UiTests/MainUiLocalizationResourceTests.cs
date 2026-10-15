@@ -76,7 +76,6 @@ public sealed class MainUiLocalizationResourceTests
             "Tweaks_InstantContextMenusCard", "Tweaks_InstantContextMenusDescription",
             "Tweaks_ClassicContextMenuCard", "Tweaks_ClassicContextMenuDescription",
             "Tweaks_DisablePasswordOnWakeCard", "Tweaks_DisablePasswordOnWakeDescription",
-            "Tweaks_DisableWindowsWidgetsCard", "Tweaks_DisableWindowsWidgetsDescription",
             "Tweaks_DisableEdgeBackgroundCard", "Tweaks_DisableEdgeBackgroundDescription",
             "Tweaks_DisableStartupAppDelayCard", "Tweaks_DisableStartupAppDelayDescription"
         };
@@ -125,6 +124,8 @@ public sealed class MainUiLocalizationResourceTests
             ["Tweaks_Updating"] = "Updating…",
             ["Tweaks_ChangeUnconfirmed"] = "The change could not be confirmed. Reopen the Tweaks tab to refresh Windows state.",
             ["Tweaks_State_ConfiguredNotRunning"] = "Configured — not running",
+            ["Tweaks_State_Enabled"] = "Enabled",
+            ["Tweaks_State_Disabled"] = "Disabled",
             ["Tweaks_State_RestartRequired"] = "Restart required",
             ["Tweaks_State_ExplorerRestartRequired"] = "Explorer restart required",
             ["Tweaks_State_Unsupported"] = "Unsupported",
