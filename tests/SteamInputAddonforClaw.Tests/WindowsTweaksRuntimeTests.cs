@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class WindowsTweaksRuntimeTests
 {
     [Fact]
-    public void Catalog_contains_only_the_eight_approved_entries_in_order()
+    public void Catalog_contains_only_the_seven_retained_entries_and_preserves_wire_ids()
     {
         Assert.Equal(
         [
@@ -17,7 +17,6 @@ public sealed class WindowsTweaksRuntimeTests
             FrontendWindowsTweakId.InstantContextMenus,
             FrontendWindowsTweakId.ClassicContextMenu,
             FrontendWindowsTweakId.DisablePasswordOnWake,
-            FrontendWindowsTweakId.DisableWindowsWidgets,
             FrontendWindowsTweakId.DisableEdgeBackground,
             FrontendWindowsTweakId.DisableStartupAppDelay,
         ], FrontendWindowsTweakCatalog.All.Select(item => item.Id));
@@ -30,12 +29,30 @@ public sealed class WindowsTweaksRuntimeTests
         var fasterMenus = Assert.Single(FrontendWindowsTweakCatalog.All, item => item.Id == FrontendWindowsTweakId.InstantContextMenus);
         Assert.Equal("Faster Menus", fasterMenus.Title);
         Assert.Equal("Disable menu animation and reduce submenu delay to 10 ms.", fasterMenus.Description);
-        Assert.Equal(5, (int)FrontendWindowsTweakId.DisableWindowsWidgets);
         Assert.Equal(6, (int)FrontendWindowsTweakId.DisableEdgeBackground);
         Assert.Equal(7, (int)FrontendWindowsTweakId.DisableStartupAppDelay);
+        Assert.DoesNotContain((FrontendWindowsTweakId)5, FrontendWindowsTweakCatalog.All.Select(item => item.Id));
+        Assert.Equal(
+            FrontendWindowsTweakCatalog.All.Select(item => item.Id),
+            FrontendWindowsTweaksSnapshot.Unavailable.Tweaks.Select(item => item.Id));
         Assert.Equal(83, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(7, (int)FrontendWindowsTweakState.Unknown);
         Assert.Equal(8, (int)FrontendWindowsTweakState.Mixed);
+    }
+
+    [Fact]
+    public async Task Retired_numeric_id_five_is_rejected_without_os_reads_or_writes()
+    {
+        var platform = new FakePlatform();
+        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
+
+        var result = await runtime.SetAsync((FrontendWindowsTweakId)5, enabled: true);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(FrontendWindowsTweakState.Unknown, result.UpdatedTweak.State);
+        Assert.False(result.UpdatedTweak.CanChange);
+        Assert.Empty(platform.Reads);
+        Assert.Empty(platform.Writes);
     }
 
     [Theory]
@@ -77,7 +94,6 @@ public sealed class WindowsTweaksRuntimeTests
     }
 
     [Theory]
-    [InlineData(FrontendWindowsTweakId.DisableWindowsWidgets)]
     [InlineData(FrontendWindowsTweakId.DisableEdgeBackground)]
     [InlineData(FrontendWindowsTweakId.DisableStartupAppDelay)]
     public void New_registry_tweaks_map_mixed_values_to_an_actionable_mixed_state(FrontendWindowsTweakId id)
@@ -132,7 +148,7 @@ public sealed class WindowsTweaksRuntimeTests
 
         var snapshot = await runtime.CaptureAsync();
 
-        Assert.Equal(8, snapshot.Tweaks.Count);
+        Assert.Equal(7, snapshot.Tweaks.Count);
         var failedRow = Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.VirtualMachinePlatform);
         Assert.Equal(FrontendWindowsTweakState.Unknown, failedRow.State);
         Assert.False(failedRow.CanChange);
@@ -166,7 +182,6 @@ public sealed class WindowsTweaksRuntimeTests
     [InlineData(FrontendWindowsTweakId.InstantContextMenus)]
     [InlineData(FrontendWindowsTweakId.ClassicContextMenu)]
     [InlineData(FrontendWindowsTweakId.DisablePasswordOnWake)]
-    [InlineData(FrontendWindowsTweakId.DisableWindowsWidgets)]
     [InlineData(FrontendWindowsTweakId.DisableEdgeBackground)]
     [InlineData(FrontendWindowsTweakId.DisableStartupAppDelay)]
     public async Task Mutation_sets_without_preflight_and_returns_only_targeted_readback(FrontendWindowsTweakId id)
@@ -264,54 +279,6 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.Equal([FrontendWindowsTweakId.MemoryIntegrity], platform.Reads);
         Assert.Equal(FrontendWindowsTweakState.Managed,
             result.UpdatedTweak.State);
-    }
-
-    [Fact]
-    public async Task Unsupported_widgets_edition_is_not_changeable_and_does_not_write()
-    {
-        var platform = new FakePlatform
-        {
-            Read = id => id == FrontendWindowsTweakId.DisableWindowsWidgets
-                ? new(false, false, null, null, "The Windows Widgets policy is not supported on this Windows edition.")
-                : new(true, false, false, false),
-            Write = (_, _) => throw new PlatformNotSupportedException("The Windows Widgets policy is unavailable."),
-        };
-        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
-
-        var result = await runtime.SetAsync(FrontendWindowsTweakId.DisableWindowsWidgets, enabled: true);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal([(FrontendWindowsTweakId.DisableWindowsWidgets, true)], platform.Writes);
-        Assert.Equal([FrontendWindowsTweakId.DisableWindowsWidgets], platform.Reads);
-        var row = result.UpdatedTweak;
-        Assert.Equal(FrontendWindowsTweakState.Unsupported, row.State);
-        Assert.False(row.CanChange);
-        Assert.Contains("not supported", row.Detail, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task Widgets_policy_write_failure_returns_the_actual_readback_without_claiming_success()
-    {
-        var platform = new FakePlatform
-        {
-            Read = _ => new(true, false, false, false),
-            Write = (id, _) =>
-            {
-                if (id == FrontendWindowsTweakId.DisableWindowsWidgets)
-                    throw new UnauthorizedAccessException("Synthetic Widgets policy write denial.");
-            },
-        };
-        var runtime = new WindowsTweaksRuntime(platform, isKnownA2vmModel: false);
-
-        var result = await runtime.SetAsync(FrontendWindowsTweakId.DisableWindowsWidgets, enabled: true);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal([(FrontendWindowsTweakId.DisableWindowsWidgets, true)], platform.Writes);
-        var row = result.UpdatedTweak;
-        Assert.Equal(FrontendWindowsTweakState.Disabled, row.State);
-        Assert.False(row.ConfiguredEnabled);
-        Assert.False(row.EffectiveEnabled);
-        Assert.Contains("UnauthorizedAccessException", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]

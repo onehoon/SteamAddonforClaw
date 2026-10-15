@@ -260,42 +260,15 @@ public sealed class WindowsTweaksOperatingSystemContractTests
     }
 
     [Fact]
-    public void Widgets_policy_support_fails_closed_by_windows_edition()
-    {
-        Assert.True(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("Professional"));
-        Assert.True(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("Enterprise"));
-        Assert.True(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("Education"));
-        Assert.True(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("IoTEnterpriseS"));
-        Assert.False(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("CoreSingleLanguage"));
-        Assert.False(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("IoTCore"));
-        Assert.Null(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport("FutureEdition"));
-        Assert.Null(WindowsTweaksOperatingSystem.ResolveWidgetsPolicyEditionSupport(null));
-
-        var capture = Method("CaptureDisableWindowsWidgets");
-        var mutation = Method("SetDisableWindowsWidgets");
-        var editionRead = Method("ReadWidgetsPolicyEditionSupport");
-        Assert.Contains("WindowsTweakRegistry.Read(Registry.LocalMachine, WindowsCurrentVersionPath, \"EditionID\")", editionRead, StringComparison.Ordinal);
-        Assert.Contains("ReadWidgetsPolicyEditionSupport()", capture, StringComparison.Ordinal);
-        Assert.Contains("if (!editionSupport.Value)", capture, StringComparison.Ordinal);
-        Assert.Contains("ReadWidgetsPolicyEditionSupport()", mutation, StringComparison.Ordinal);
-        Assert.Contains("if (!editionSupport.Value)", mutation, StringComparison.Ordinal);
-        Assert.True(mutation.IndexOf("if (!editionSupport.Value)", StringComparison.Ordinal)
-            < mutation.IndexOf("WindowsTweakRegistry.Write", StringComparison.Ordinal));
-        Assert.Contains("WindowsTweakRegistry.Read(Registry.LocalMachine, WidgetsPolicyPath, \"AllowNewsAndInterests\")", capture, StringComparison.Ordinal);
-        Assert.Contains("WindowsTweakRegistry.Write(Registry.LocalMachine, WidgetsPolicyPath, \"AllowNewsAndInterests\", 0, RegistryValueKind.DWord)", mutation, StringComparison.Ordinal);
-        Assert.Contains("WindowsTweakRegistry.DeleteValue(Registry.LocalMachine, WidgetsPolicyPath, \"AllowNewsAndInterests\")", mutation, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void Registry_tweak_mapping_requires_all_exact_zero_dwords_or_all_values_absent()
     {
-        var widgetsAbsent = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+        var singleValueAbsent = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
             new WindowsTweakRegistryValueRead(false, false, null, null));
-        var widgetsZero = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+        var singleValueZero = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
             new WindowsTweakRegistryValueRead(true, true, 0, RegistryValueKind.DWord));
-        var widgetsOne = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+        var singleValueOne = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
             new WindowsTweakRegistryValueRead(true, true, 1, RegistryValueKind.DWord));
-        var widgetsWrongKind = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
+        var singleValueWrongKind = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
             new WindowsTweakRegistryValueRead(true, true, "0", RegistryValueKind.String));
         var absent = WindowsTweaksOperatingSystem.ResolveZeroDwordRegistryValues(
             new(false, false, null, null),
@@ -310,12 +283,12 @@ public sealed class WindowsTweaksOperatingSystemContractTests
             new(true, true, 0, RegistryValueKind.DWord),
             new(true, true, "0", RegistryValueKind.String));
 
-        Assert.False(widgetsAbsent.ConfiguredEnabled);
-        Assert.False(widgetsAbsent.IsMixed);
-        Assert.True(widgetsZero.ConfiguredEnabled);
-        Assert.False(widgetsZero.IsMixed);
-        Assert.True(widgetsOne.IsMixed);
-        Assert.True(widgetsWrongKind.IsMixed);
+        Assert.False(singleValueAbsent.ConfiguredEnabled);
+        Assert.False(singleValueAbsent.IsMixed);
+        Assert.True(singleValueZero.ConfiguredEnabled);
+        Assert.False(singleValueZero.IsMixed);
+        Assert.True(singleValueOne.IsMixed);
+        Assert.True(singleValueWrongKind.IsMixed);
         Assert.False(absent.ConfiguredEnabled);
         Assert.False(absent.IsMixed);
         Assert.True(zero.ConfiguredEnabled);
