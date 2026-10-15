@@ -20,6 +20,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private readonly string _executablePath;
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
+    private readonly Func<FrontendLogLevel> _logLevelProvider;
     private readonly Func<string, NamedPipeOverlayServer> _serverFactory;
     // PR3: bound once by AddonProcessHost onto the ONE IAddonFrontendControl. FrontendTransport
     // never sees StartupSettingsCoordinator -- only these typed shared Setting operations.
@@ -60,11 +61,13 @@ internal sealed class OverlayProcessController : IAsyncDisposable
 
     internal OverlayProcessController(string runtimeBaseDirectory, string logDirectory,
         Func<ProcessStartInfo, Process?>? startProcess = null,
-        Func<string, NamedPipeOverlayServer>? serverFactory = null)
+        Func<string, NamedPipeOverlayServer>? serverFactory = null,
+        Func<FrontendLogLevel>? logLevelProvider = null)
     {
         _executablePath = Path.Combine(runtimeBaseDirectory, "overlay", "SteamInputAddonforClaw.Overlay.exe");
         _logDirectory = logDirectory;
         _startProcess = startProcess ?? Process.Start;
+        _logLevelProvider = logLevelProvider ?? (() => AppLog.CurrentFrontendLogLevel);
         // The default factory reads the bound authority at connection time (StartCoreAsync), which
         // always runs after AddonProcessHost has bound its Runtime authorities.
         _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _captureTabOrder, _moveTabOrder, _mutateQuickSettings,
@@ -327,7 +330,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         NamedPipeOverlayServer? server;
         var capture = _captureFrontendSettings;
         lock (_sync) server = _server;
-        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+        if (server is null || capture is null || !server.IsReady) return;
         OverlayFrontendSettingsMutationResponse state;
         try { state = await capture(CancellationToken.None).ConfigureAwait(false); }
         catch { state = new(0, false, "Settings are unavailable.", new FrontendSettingsSnapshot(FrontendLogLevel.Off, false, FrontButtonMappingSettings.Default) { BackButtonMapping = BackButtonMappingSettings.Default }, false, false); }
@@ -467,14 +470,18 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         Process? process;
         try
         {
-            process = _startProcess(new ProcessStartInfo
+            var startInfo = new ProcessStartInfo
             {
                 FileName = _executablePath,
-                Arguments = $"--log-directory \"{_logDirectory}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(_executablePath) ?? AppContext.BaseDirectory
-            });
+            };
+            startInfo.ArgumentList.Add(FrontendLaunchArguments.LogDirectoryOption);
+            startInfo.ArgumentList.Add(_logDirectory);
+            startInfo.ArgumentList.Add(FrontendLaunchArguments.LogLevelOption);
+            startInfo.ArgumentList.Add(_logLevelProvider().ToString());
+            process = _startProcess(startInfo);
         }
         catch
         {

@@ -38,9 +38,9 @@ public partial class App : Application
         _window.ShortcutExecutionRequested += OnShortcutExecutionRequested;
         OverlayLog.Info("App", "OverlayWindow constructed.", ("Hwnd", _window.HandleForDiagnostics));
         _window.Closed += (_, _) => { OverlayLog.Info("Window", "Closed received."); Exit(); };
-        OverlayLog.Info("Window", "Initial hidden preparation started.");
+        OverlayLog.Debug("Window", "Initial hidden preparation started.");
         _window.PrepareHidden();
-        OverlayLog.Info("Window", "Initial hidden preparation completed.");
+        OverlayLog.Debug("Window", "Initial hidden preparation completed.");
         _ = ConnectAndRunAsync();
     }
 
@@ -133,7 +133,7 @@ public partial class App : Application
     // Marshalled through the existing DispatcherQueue; completes only after the shell has applied it.
     private Task HandleTabOrderAsync(AddonQuickSettingsTabOrderSnapshot state)
     {
-        OverlayLog.Info("TabOrder", "Authoritative tab-order state received.", ("Available", state.Available), ("Count", state.Rows.Count));
+        OverlayLog.Debug("TabOrder", "Authoritative tab-order state received.", ("Available", state.Available), ("Count", state.Rows.Count));
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
         {
@@ -227,6 +227,8 @@ public partial class App : Application
 
     private void OnFrontendSettingsStateReceived(FrontendSettingsSnapshot settings, bool ledAvailable, bool settingsAvailable)
     {
+        if (settingsAvailable && Enum.IsDefined(settings.LogLevel))
+            OverlayLog.SetMinimumLevel(settings.LogLevel);
         _dispatcherQueue?.TryEnqueue(() => _window?.ApplyFrontendSettingsState(settings, ledAvailable, settingsAvailable));
     }
 

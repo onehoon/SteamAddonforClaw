@@ -354,6 +354,7 @@ public sealed partial class SettingsPage : UserControl
         {
             var result = await _frontend.SetLogLevelAsync(level).ConfigureAwait(true);
             _lastKnownLogLevel = result.LogLevel;
+            UiLog.SetMinimumLevel(result.LogLevel);
             SetLogLevel(_lastKnownLogLevel);
         }
         catch (Exception exception)
@@ -369,6 +370,7 @@ public sealed partial class SettingsPage : UserControl
         {
             var bootstrap = await _frontend!.GetBootstrapAsync().ConfigureAwait(true);
             _lastKnownLogLevel = bootstrap.Settings.LogLevel;
+            UiLog.SetMinimumLevel(_lastKnownLogLevel);
             _logDirectoryPath = bootstrap.LogDirectoryPath;
             SetLogLevel(_lastKnownLogLevel);
         }

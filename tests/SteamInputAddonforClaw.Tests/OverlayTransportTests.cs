@@ -1217,6 +1217,67 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Runtime_launches_overlay_with_current_log_level_and_refreshes_settings_while_hidden()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay Settings Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var logDirectory = Path.Combine(root, "logs with spaces");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var effectiveLevel = FrontendLogLevel.Off;
+        string[]? capturedArguments = null;
+        var currentSettings = new FrontendSettingsSnapshot(FrontendLogLevel.Debug, false, FrontButtonMappingSettings.Default);
+        var received = new TaskCompletionSource<FrontendSettingsSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Process? StartTestProcess(ProcessStartInfo startInfo)
+        {
+            capturedArguments = [.. startInfo.ArgumentList];
+            return StartLongRunningTestProcess(startInfo);
+        }
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, logDirectory,
+                StartTestProcess, _ => new NamedPipeOverlayServer(pipeName), () => effectiveLevel);
+            controller.BindProductionControlsAuthority(
+                _ => Task.FromResult(new OverlayFrontendSettingsMutationResponse(0, true, null, currentSettings, true)),
+                (_, _) => Task.FromResult(new OverlayFrontendSettingsMutationResponse(1, false, "unused", currentSettings, true)),
+                _ => Task.FromResult(FrontendControllerVibrationStrengthSnapshot.Unavailable()),
+                (_, _) => Task.FromResult(new FrontendControllerVibrationStrengthMutationResult(
+                    FrontendControllerVibrationStrengthMutationOutcome.Unavailable,
+                    FrontendControllerVibrationStrengthSnapshot.Unavailable(), "unused")));
+
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            client.FrontendSettingsStateReceived += (settings, _, available) =>
+            {
+                if (available && settings.LogLevel == FrontendLogLevel.Off) received.TrySetResult(settings);
+            };
+            var run = client.RunAsync(_ => Task.CompletedTask);
+
+            effectiveLevel = FrontendLogLevel.Debug;
+            Assert.True(await controller.StartAsync());
+            Assert.False(controller.IsVisible);
+            Assert.NotNull(capturedArguments);
+            Assert.Equal([
+                FrontendLaunchArguments.LogDirectoryOption, logDirectory,
+                FrontendLaunchArguments.LogLevelOption, nameof(FrontendLogLevel.Debug)], capturedArguments);
+
+            currentSettings = currentSettings with { LogLevel = FrontendLogLevel.Off };
+            await controller.RefreshFrontendSettingsAsync();
+
+            Assert.Equal(FrontendLogLevel.Off, (await received.Task.WaitAsync(TimeSpan.FromSeconds(5))).LogLevel);
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Failed_explicit_hide_retires_the_session_and_reports_failure()
     {
         var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));

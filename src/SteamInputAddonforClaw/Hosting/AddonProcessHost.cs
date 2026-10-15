@@ -2498,17 +2498,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         return false;
     }
 
-    // SF-V2-02 section 17: refresh only while the Overlay is both currently captured (OQ4 authority)
-    // and currently visible (OverlayProcessController's own acknowledgement-based fact). No polling --
-    // this only runs from the Runtime's own StateInvalidated event.
+    // No polling: this runs only from the Runtime's StateInvalidated event. The narrow frontend
+    // settings snapshot also keeps a Ready hidden Overlay's log threshold current; other state
+    // refreshes remain gated by the existing captured and visible facts below.
     private void OnFrontendStateInvalidatedForOverlay(object? sender, EventArgs e)
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        _ = _overlayController.RefreshFrontendSettingsAsync();
         if (!_overlayCaptureActive) return;
         if (!_overlayController.IsVisible) return;
         _ = _overlayController.RefreshShortcutAsync();
         _ = _overlayController.RefreshBackButtonMappingAsync();
-        _ = _overlayController.RefreshFrontendSettingsAsync();
         _ = _overlayController.RefreshControllerVibrationAsync();
         // Section 23: an admitted Overlay mutation already returns a fresh authoritative page; a
         // redundant refresh here could otherwise race/overwrite that result (including erasing a
