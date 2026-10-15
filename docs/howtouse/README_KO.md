@@ -78,15 +78,15 @@ MSI Center M의 컨트롤러 관리가 비활성화되어 Addon이 컨트롤러�
 | --- | --- |
 | **Xbox 360** | Steam 게임과 Big Picture가 활성 상태가 아닌 일반 Windows 환경 |
 | **Steam Deck** | 전역 선택 또는 활성화된 게임 프로필에서 Steam 게임/Big Picture용으로 선택한 경우 |
-| **DualSense Edge** | **Controller → Controller for Steam** 또는 활성화된 Steam 게임 프로필에서 선택한 경우 |
+| **DualSense Edge** | **Controller → Controller for Steam Game** 또는 활성화된 Steam 게임 프로필에서 선택한 경우 |
 
-전역 **Steam Deck** 또는 **DualSense Edge**는 **Controller → Controller for Steam**에서 선택합니다. 내부 기본값은 Steam Deck이며 표시 이름에는 “(Default)”를 붙이지 않습니다. Steam 게임 프로필에서 별도 컨트롤러를 지정할 수도 있고, **Use default**는 전역 선택을 따릅니다. Steam 게임 또는 Big Picture가 활성화되면 컨트롤러 선택만 잠기며, 게임별 재정의가 있으면 실제 적용된 컨트롤러를 표시합니다. Steam과 Big Picture가 모두 비활성인 일반 Windows나 Xbox 게임 중에는 컨트롤러 선택을 변경할 수 있습니다. **Gyroscope** 토글은 모든 상태에서 변경할 수 있습니다. Steam 게임 시작/종료 시 활성 게임의 선택과 전역 선택 사이를 자동 전환하고, Steam 게임과 Big Picture가 모두 비활성인 일반 Windows에서는 Xbox 360을 사용합니다. 한 번에 하나의 가상 컨트롤러만 연결됩니다. **Normal** 또는 **Steam Game / Big Picture**에서 설정한 버튼 동작은 실제 활성화된 컨트롤러 표현에 맞춰 사용됩니다.
+전역 **Steam Deck** 또는 **DualSense Edge**는 **Controller → Controller for Steam Game**에서 선택합니다. 내부 기본값은 Steam Deck이며 표시 이름에는 “(Default)”를 붙이지 않습니다. Steam 게임 프로필에서 별도 컨트롤러를 지정할 수도 있고, **Use default**는 전역 선택을 따릅니다. Steam 게임 또는 Big Picture가 활성화되면 컨트롤러 선택만 잠기며, 게임별 재정의가 있으면 실제 적용된 컨트롤러를 표시합니다. Steam과 Big Picture가 모두 비활성인 일반 Windows나 Xbox 게임 중에는 컨트롤러 선택을 변경할 수 있습니다. **Gyroscope** 토글은 모든 상태에서 변경할 수 있습니다. Steam 게임 시작/종료 시 활성 게임의 선택과 전역 선택 사이를 자동 전환하고, Steam 게임과 Big Picture가 모두 비활성인 일반 Windows에서는 Xbox 360을 사용합니다. 한 번에 하나의 가상 컨트롤러만 연결됩니다. **Normal** 또는 **Steam Game / Big Picture**에서 설정한 버튼 동작은 실제 활성화된 컨트롤러 표현에 맞춰 사용됩니다.
 
 ## 자이로스코프 / IMU — Steam Input 설정
 
-**Controller → Controller for Steam**의 전역 **Gyroscope** 토글은 기본적으로 켜져 있습니다. 켜져 있고 Steam용 가상 컨트롤러가 적용되면 지원되는 물리 자이로스코프·가속도 값을 Steam Input에 전달합니다. 끄면 센서 수집과 모션 입력을 중단하지만 일반 컨트롤러 입력과 가상 장치 연결은 유지됩니다. Addon 자체에서는 자이로를 마우스나 조이스틱으로 변환하지 않습니다. **Xbox 360 모드에서는 자이로 입력을 제공하지 않습니다.**
+**Controller → Controller for Steam Game**의 전역 **Gyroscope** 토글은 기본적으로 켜져 있습니다. 켜져 있고 Steam용 가상 컨트롤러가 적용되면 지원되는 물리 자이로스코프·가속도 값을 Steam Input에 전달합니다. 끄면 센서 수집과 모션 입력을 중단하지만 일반 컨트롤러 입력과 가상 장치 연결은 유지됩니다. Addon 자체에서는 자이로를 마우스나 조이스틱으로 변환하지 않습니다. **Xbox 360 모드에서는 자이로 입력을 제공하지 않습니다.**
 
-**자이로를 중요하게 사용한다면 현재 A2VM 8 관찰 결과는 DualSense Edge를 우선 추천합니다.** **Controller → Controller for Steam** 또는 활성화된 Steam 게임 프로필에서 선택하세요. A2VM 8 테스트에서는 Edge 자이로 움직임이 부드러웠지만, 가상 Steam Deck의 **Gyro To Mouse**는 Addon **0.1.365**에서도 끊김(Choppy)이 보고됐습니다. Gyroscope 토글은 센서 수집/입력만 켜고 끄며 이 부드러움 문제를 해결하지 않습니다. 이 결과가 모든 기기·게임에 동일하게 적용되는 것은 아닙니다. [Steam Deck 자이로 조사 기록](../gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md)에서 현재까지의 결과를 확인할 수 있습니다.
+**자이로를 중요하게 사용한다면 현재 A2VM 8 관찰 결과는 DualSense Edge를 우선 추천합니다.** **Controller → Controller for Steam Game** 또는 활성화된 Steam 게임 프로필에서 선택하세요. A2VM 8 테스트에서는 Edge 자이로 움직임이 부드러웠지만, 가상 Steam Deck의 **Gyro To Mouse**는 Addon **0.1.365**에서도 끊김(Choppy)이 보고됐습니다. Gyroscope 토글은 센서 수집/입력만 켜고 끄며 이 부드러움 문제를 해결하지 않습니다. 이 결과가 모든 기기·게임에 동일하게 적용되는 것은 아닙니다. [Steam Deck 자이로 조사 기록](../gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md)에서 현재까지의 결과를 확인할 수 있습니다.
 
 **MSI Claw 8 AI+ A2VM(8인치) 검증 기록:** Steam Deck 자이로 보정 화면에서 실제 센서 입력과 3개 회전축의 6개 방향이 확인됐으며, **Aniimo**에서는 Steam Input의 **Always On** 조건에서 자이로 → 조이스틱 조작이 동작했습니다(Addon **0.1.350.0**). 그러나 이 결과는 **Gyro To Mouse가 부드럽다는 검증이 아닙니다.**
 
@@ -119,7 +119,7 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 ### Controller
 
-페이지 맨 위의 **Controller for Steam** 영역에서 **Steam Deck** 또는 **DualSense Edge**를 선택하고 **Gyroscope**를 켜거나 끕니다. Steam Deck은 내부 기본값이지만 표시 이름에는 “(Default)”가 없습니다. Steam 게임/Big Picture 중에는 컨트롤러 선택만 잠기고 실제 적용된 컨트롤러가 표시됩니다. 자이로 토글은 Steam 게임, Big Picture, Xbox 게임, 일반 Windows 상태에서 변경할 수 있습니다. Runtime 상태를 읽을 수 없을 때는 컨트롤러 선택을 잠급니다.
+페이지 맨 위의 **Controller for Steam Game** 영역에서 **Steam Deck** 또는 **DualSense Edge**를 선택하고 **Gyroscope**를 켜거나 끕니다. Steam Deck은 내부 기본값이지만 표시 이름에는 “(Default)”가 없습니다. Steam 게임/Big Picture 중에는 컨트롤러 선택만 잠기고 실제 적용된 컨트롤러가 표시됩니다. 자이로 토글은 Steam 게임, Big Picture, Xbox 게임, 일반 Windows 상태에서 변경할 수 있습니다. Runtime 상태를 읽을 수 없을 때는 컨트롤러 선택을 잠급니다.
 
 **Controller**에서 **Gamebar Button**(WING)과 **Center M Button**의 동작을 설정합니다. 각 버튼은 **Normal**과 **Steam Game / Big Picture**에서 서로 다른 동작을 가질 수 있습니다. 현재 컨트롤러 표현에 따라 사용할 설정이 자동으로 선택됩니다.
 
@@ -147,7 +147,7 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 **Steam** 페이지에는 설치된 Steam 게임과 Steam이 인식하는 Non-Steam 바로가기가 표시됩니다. **Refresh**, 검색, 즐겨찾기를 사용해 게임을 찾고 선택하면 프로필을 편집할 수 있습니다. 게임을 실행하기 전에 미리 프로필을 설정하고, 실제 사용할 프로필의 활성화 스위치를 켜세요.
 
-게임 상세 설정 맨 위의 **Virtual Controller**에서 **Use default**, **Steam Deck**, **DualSense Edge**를 선택합니다. 이 선택은 프로필이 켜져 있고 Steam / Big Picture가 비활성 상태일 때만 편집할 수 있습니다. 프로필을 꺼도 선택한 값은 보존됩니다. **Use default** 또는 프로필이 없거나 꺼진 경우에는 **Controller → Controller for Steam**의 전역 선택을 따릅니다. Big Picture에서 게임이 활성화되면 켜진 프로필의 명시적 선택이 자동 적용되고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아갑니다.
+게임 상세 설정 맨 위의 **Virtual Controller**에서 **Use default**, **Steam Deck**, **DualSense Edge**를 선택합니다. 이 선택은 프로필이 켜져 있고 Steam / Big Picture가 비활성 상태일 때만 편집할 수 있습니다. 프로필을 꺼도 선택한 값은 보존됩니다. **Use default** 또는 프로필이 없거나 꺼진 경우에는 **Controller → Controller for Steam Game**의 전역 선택을 따릅니다. Big Picture에서 게임이 활성화되면 켜진 프로필의 명시적 선택이 자동 적용되고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아갑니다.
 
 게임별 설정은 다음과 같습니다.
 
@@ -216,7 +216,7 @@ Developer Menu는 개발자용 진단 메뉴이며 일반적인 설정이나 사
 
 Steam 및 XBOX 게임 프로필은 게임을 실행하기 전에 미리 만들고 편집할 수 있습니다. 프로필을 꺼도 저장된 값은 유지됩니다.
 
-Steam 게임의 **Virtual Controller**는 마스터 프로필이 켜져 있을 때만 편집할 수 있습니다. **Use default** 또는 프로필이 없거나 꺼진 경우 **Controller → Controller for Steam**의 전역 선택을 사용합니다. Big Picture에서 게임이 시작되면 켜진 프로필의 명시적 선택으로 자동 전환하고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아옵니다. Steam 게임 또는 Big Picture가 활성화된 동안 전역·게임별 컨트롤러 수동 선택은 잠깁니다. 프로필을 껐다 다시 켜도 게임별 선택은 보존됩니다.
+Steam 게임의 **Virtual Controller**는 마스터 프로필이 켜져 있을 때만 편집할 수 있습니다. **Use default** 또는 프로필이 없거나 꺼진 경우 **Controller → Controller for Steam Game**의 전역 선택을 사용합니다. Big Picture에서 게임이 시작되면 켜진 프로필의 명시적 선택으로 자동 전환하고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아옵니다. Steam 게임 또는 Big Picture가 활성화된 동안 전역·게임별 컨트롤러 수동 선택은 잠깁니다. 프로필을 껐다 다시 켜도 게임별 선택은 보존됩니다.
 
 **TDP Control**, **CPU Boost**, **Windows Power Mode**는 Device와 게임 프로필 양쪽에 있는 기능입니다. 실행 중인 게임 프로필에서 해당 기능을 켜면 프로필 값이 우선합니다. 프로필에서 해당 기능을 끄면 활성화된 Device 설정을 계속 사용할 수 있습니다.
 
@@ -245,7 +245,7 @@ Quick Settings Overlay는 컨트롤러로 조작하는 Addon의 별도 설정 �
 
 - **Device** — 지원되는 기기 전체 TDP Control, CPU Boost, Windows Power Mode, 배터리 충전 한도에 빠르게 접근합니다.
 - **Profile** — 현재 활성화되어 앱이 인식한 게임의 설정을 표시합니다. 게임이 없으면 “No game is currently running. Start a game to configure its profile.”라고 안내합니다. 게임과 기기에 따라 표시되는 항목이 다르며, XBOX 프로필에는 M1/M2 설정도 표시될 수 있습니다.
-- **Controller** — 메인 앱과 공유되는 **Controller for Steam** 선택 및 **Gyroscope** 토글, Xbox 360 M1/M2 매핑, 지원되는 경우 Joystick LED 및 진동 설정을 제공합니다.
+- **Controller** — 메인 앱과 공유되는 **Controller for Steam Game** 선택 및 **Gyroscope** 토글, Xbox 360 M1/M2 매핑, 지원되는 경우 Joystick LED 및 진동 설정을 제공합니다.
 - **Shortcut** — 설정한 바로가기를 실행합니다. 세부 설정은 메인 앱의 Shortcut에서 편집합니다.
 - **Setting** — Overlay 탭 순서와 현재 전원 소스만 표시하는 옵션을 설정합니다.
 
@@ -297,7 +297,7 @@ Windows 절전, 최대 절전, 복귀, 재시작 뒤 컨트롤러 표현과 설�
 
 ### Steam 게임이 Xbox 컨트롤러로 표시됩니다
 
-Steam이 실행 중이고 게임을 활성 상태로 인식하는지 확인하세요. Addon이 컨트롤러를 관리하도록 MSI Center M이 비활성화되어 있는지도 확인하세요. 게임을 시작하기 전에 전역 컨트롤러는 **Controller → Controller for Steam**에서 선택하고, 필요하면 Steam 프로필을 켠 뒤 **Virtual Controller** 게임별 선택을 지정하세요. Steam 게임이나 Big Picture가 활성화되면 수동 선택은 잠깁니다. 일반 Windows 환경에서는 Xbox 360을 사용합니다.
+Steam이 실행 중이고 게임을 활성 상태로 인식하는지 확인하세요. Addon이 컨트롤러를 관리하도록 MSI Center M이 비활성화되어 있는지도 확인하세요. 게임을 시작하기 전에 전역 컨트롤러는 **Controller → Controller for Steam Game**에서 선택하고, 필요하면 Steam 프로필을 켠 뒤 **Virtual Controller** 게임별 선택을 지정하세요. Steam 게임이나 Big Picture가 활성화되면 수동 선택은 잠깁니다. 일반 Windows 환경에서는 Xbox 360을 사용합니다.
 
 ### 절전 복귀 후 컨트롤러가 응답하지 않습니다
 

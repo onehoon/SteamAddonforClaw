@@ -105,42 +105,42 @@
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
-  <data name="Controller_SteamVirtualControllerExpander.Header" xml:space="preserve"><value>Steam용 컨트롤러</value></data>
+  <data name="Controller_SteamVirtualControllerExpander.Header" xml:space="preserve"><value>Steam 게임용 컨트롤러</value></data>
   <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve"><value>Steam에서 사용할 컨트롤러와 자이로 입력을 설정합니다.</value></data>
-  <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve"><value>Steam 게임 또는 Big Picture가 활성 상태이면 컨트롤러 선택이 잠깁니다.</value></data>
+  <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve"><value>Steam 게임 또는 빅픽쳐 모드 중에는 변경 할 수 없습니다.</value></data>
   <data name="Controller_SteamControllerUnavailable.Text" xml:space="preserve"><value>사용할 수 없음</value></data>
   <data name="Controller_GyroscopeCard.Header" xml:space="preserve"><value>자이로스코프</value></data>
   <data name="Controller_GyroscopeUpdateFailed" xml:space="preserve"><value>자이로스코프 설정을 저장하지 못했습니다. 마지막으로 확인된 값으로 복원했습니다.</value></data>
   <data name="Controller_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
   <data name="Controller_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
-  <data name="Controller_MappingUnavailable.Text" xml:space="preserve"><value>Unavailable</value></data>
-  <data name="Controller_ButtonMappingHeader.Text" xml:space="preserve"><value>Button Mapping</value></data>
-  <data name="Controller_GamebarExpander.Header" xml:space="preserve"><value>Gamebar Button</value></data>
+  <data name="Controller_MappingUnavailable.Text" xml:space="preserve"><value>사용할 수 없음</value></data>
+  <data name="Controller_ButtonMappingHeader.Text" xml:space="preserve"><value>버튼 맵핑</value></data>
+  <data name="Controller_GamebarExpander.Header" xml:space="preserve"><value>XBOX 게임바 버튼</value></data>
   <data name="Controller_GamebarExpander.Description" xml:space="preserve"><value>The action for the Gamebar button, per runtime presentation domain.</value></data>
   <data name="Controller_GamebarNormalCard.Header" xml:space="preserve"><value>Normal</value></data>
-  <data name="Controller_GamebarSteamCard.Header" xml:space="preserve"><value>Steam Game / Big Picture</value></data>
-  <data name="Controller_CenterMExpander.Header" xml:space="preserve"><value>Center M Button</value></data>
+  <data name="Controller_GamebarSteamCard.Header" xml:space="preserve"><value>Steam 게임 / Steam 빅픽쳐 모드</value></data>
+  <data name="Controller_CenterMExpander.Header" xml:space="preserve"><value>Center M 버튼</value></data>
   <data name="Controller_CenterMExpander.Description" xml:space="preserve"><value>The action for the Center M button, per runtime presentation domain.</value></data>
   <data name="Controller_CenterMNormalCard.Header" xml:space="preserve"><value>Normal</value></data>
-  <data name="Controller_CenterMSteamCard.Header" xml:space="preserve"><value>Steam Game / Big Picture</value></data>
-  <data name="Controller_BackButtonMappingExpander.Header" xml:space="preserve"><value>M1 / M2</value></data>
+  <data name="Controller_CenterMSteamCard.Header" xml:space="preserve"><value>Steam 게임 / Steam 빅픽쳐 모드</value></data>
+  <data name="Controller_BackButtonMappingExpander.Header" xml:space="preserve"><value>M1 / M2 버튼</value></data>
   <data name="Controller_BackButtonMappingExpander.Description" xml:space="preserve"><value>XBOX 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4.</value></data>
-  <data name="Controller_M1Card.Header" xml:space="preserve"><value>M1</value></data>
-  <data name="Controller_M2Card.Header" xml:space="preserve"><value>M2</value></data>
-  <data name="Controller_SettingsHeader.Text" xml:space="preserve"><value>Controller Settings</value></data>
-  <data name="Controller_LedExpander.Header" xml:space="preserve"><value>Joystick LED</value></data>
+  <data name="Controller_M1Card.Header" xml:space="preserve"><value>M1 버튼</value></data>
+  <data name="Controller_M2Card.Header" xml:space="preserve"><value>M2 버튼</value></data>
+  <data name="Controller_SettingsHeader.Text" xml:space="preserve"><value>컨트롤러 설정</value></data>
+  <data name="Controller_LedExpander.Header" xml:space="preserve"><value>조이스틱 LED</value></data>
   <data name="Controller_LedExpander.Description" xml:space="preserve"><value>Set one static color and global brightness for all controller LEDs.</value></data>
-  <data name="Controller_LedBrightnessCard.Header" xml:space="preserve"><value>Brightness</value></data>
-  <data name="Controller_LedColorCard.Header" xml:space="preserve"><value>Color</value></data>
+  <data name="Controller_LedBrightnessCard.Header" xml:space="preserve"><value>밝기</value></data>
+  <data name="Controller_LedColorCard.Header" xml:space="preserve"><value>색상</value></data>
   <data name="Controller_LedChooseColor.Text" xml:space="preserve"><value>Choose color</value></data>
-  <data name="Controller_VibrationStrengthExpander.Header" xml:space="preserve"><value>Vibration Strength</value></data>
+  <data name="Controller_VibrationStrengthExpander.Header" xml:space="preserve"><value>진동 세기</value></data>
   <data name="Controller_VibrationStrengthExpander.Description" xml:space="preserve"><value>Set the vibration strength applied while the Addon owns the controller.</value></data>
-  <data name="Controller_LeftMotorCard.Header" xml:space="preserve"><value>Left Motor</value></data>
+  <data name="Controller_LeftMotorCard.Header" xml:space="preserve"><value>왼쪽 모터</value></data>
   <data name="Controller_LeftMotorTestButton.Content" xml:space="preserve"><value>테스트</value></data>
-  <data name="Controller_RightMotorCard.Header" xml:space="preserve"><value>Right Motor</value></data>
+  <data name="Controller_RightMotorCard.Header" xml:space="preserve"><value>오른쪽 모터</value></data>
   <data name="Controller_RightMotorTestButton.Content" xml:space="preserve"><value>테스트</value></data>
-  <data name="Controller_VibrationRecoveryCard.Header" xml:space="preserve"><value>Vibration Recovery</value></data>
-  <data name="Controller_RestoreVibrationButton.Content" xml:space="preserve"><value>Restore Vibration</value></data>
+  <data name="Controller_VibrationRecoveryCard.Header" xml:space="preserve"><value>진동 복구</value></data>
+  <data name="Controller_RestoreVibrationButton.Content" xml:space="preserve"><value>복구</value></data>
   <data name="Controller_SteamActivity_Active" xml:space="preserve"><value>Steam이 활성 상태입니다. 실제 적용된 컨트롤러를 표시하며 선택은 잠깁니다.</value></data>
   <data name="Controller_SteamActivity_Idle" xml:space="preserve"><value>Steam 게임이나 Big Picture가 아닐 때 컨트롤러를 변경할 수 있습니다.</value></data>
   <data name="Controller_SteamActivity_Unknown" xml:space="preserve"><value>컨트롤러 상태를 확인할 수 없어 선택이 잠겼습니다.</value></data>
@@ -185,7 +185,7 @@
   <data name="Controller_BackTarget_RightStickClick" xml:space="preserve"><value>Right Stick Click (R3)</value></data>
   <data name="Controller_BackTarget_View" xml:space="preserve"><value>View</value></data>
   <data name="Controller_BackTarget_Menu" xml:space="preserve"><value>Menu</value></data>
-  <data name="Controller_BackTarget_XboxGuide" xml:space="preserve"><value>Xbox Guide</value></data>
+  <data name="Controller_BackTarget_XboxGuide" xml:space="preserve"><value>XBOX Guide</value></data>
   <data name="MainNav_Steam.Content" xml:space="preserve"><value>Steam</value></data>
   <data name="Steam_BackButton.Content" xml:space="preserve"><value>Back</value></data>
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>

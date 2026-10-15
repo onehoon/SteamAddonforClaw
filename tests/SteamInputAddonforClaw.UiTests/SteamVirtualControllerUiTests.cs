@@ -22,7 +22,7 @@ public sealed class SteamVirtualControllerUiTests
         var mapping = controllerXaml.IndexOf("x:Name=\"MappingContent\"", StringComparison.Ordinal);
 
         Assert.True(title >= 0 && unavailable > controllerXaml.IndexOf("SteamVirtualControllerExpander", StringComparison.Ordinal) && mapping > unavailable);
-        Assert.Equal("Controller for Steam", (string?)expander.Attribute("Header"));
+        Assert.Equal("Controller for Steam Game", (string?)expander.Attribute("Header"));
         Assert.Equal("Controller_SteamVirtualControllerExpander", (string?)expander.Attribute(x + "Uid"));
         Assert.Equal("False", (string?)expander.Attribute("IsExpanded"));
         Assert.Contains("Text=\"Choose the controller used by Steam and configure gyroscope input.\"", controllerXaml, StringComparison.Ordinal);
@@ -69,7 +69,7 @@ public sealed class SteamVirtualControllerUiTests
             Assert.DoesNotContain("Controller_SteamControllerUnavailable.Content", resources, StringComparison.Ordinal);
             var resourceData = XDocument.Parse(resources).Descendants("data")
                 .ToDictionary(element => (string)element.Attribute("name")!, element => (string?)element.Element("value"));
-            Assert.Equal(culture == "en-US" ? "Controller for Steam" : "Steam용 컨트롤러",
+            Assert.Equal(culture == "en-US" ? "Controller for Steam Game" : "Steam 게임용 컨트롤러",
                 resourceData["Controller_SteamVirtualControllerExpander.Header"]);
             Assert.Equal(culture == "en-US" ? "Gyroscope" : "자이로스코프", resourceData["Controller_GyroscopeCard.Header"]);
             Assert.Equal(culture == "en-US" ? "Unavailable" : "사용할 수 없음",
@@ -181,7 +181,7 @@ public sealed class SteamVirtualControllerUiTests
             Assert.DoesNotContain("실험", guide, StringComparison.Ordinal);
             Assert.DoesNotContain("Settings → Steam / Big Picture Controller", guide, StringComparison.Ordinal);
             Assert.DoesNotContain("#### Steam / Big Picture Controller", guide, StringComparison.Ordinal);
-            Assert.Contains("Controller → Controller for Steam", guide, StringComparison.Ordinal);
+            Assert.Contains("Controller → Controller for Steam Game", guide, StringComparison.Ordinal);
             Assert.Contains("Use default", guide, StringComparison.Ordinal);
             Assert.Contains("Gyroscope", guide, StringComparison.Ordinal);
             Assert.Contains("Quick Settings Overlay", guide, StringComparison.Ordinal);

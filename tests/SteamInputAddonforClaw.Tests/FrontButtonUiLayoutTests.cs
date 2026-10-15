@@ -20,7 +20,7 @@ public sealed class FrontButtonUiLayoutTests
         var xaml = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
 
         Assert.Contains("Button Mapping", xaml, StringComparison.Ordinal);
-        var gamebar = xaml.IndexOf("Header=\"Gamebar Button\"", StringComparison.Ordinal);
+        var gamebar = xaml.IndexOf("Header=\"XBOX Gamebar Button\"", StringComparison.Ordinal);
         var centerM = xaml.IndexOf("Header=\"Center M Button\"", StringComparison.Ordinal);
         Assert.True(gamebar >= 0 && centerM >= 0);
         Assert.True(gamebar < centerM);
@@ -62,7 +62,7 @@ public sealed class FrontButtonUiLayoutTests
     {
         var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
 
-        Assert.Contains("FrontButtonAction.XboxApp => MainUiStrings.Get(\"Controller_Action_Xbox\", \"Xbox\")", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("FrontButtonAction.XboxApp => MainUiStrings.Get(\"Controller_Action_Xbox\", \"XBOX\")", codeBehind, StringComparison.Ordinal);
         Assert.Contains("FrontButtonActionCapabilities.ActionsFor(domain)", codeBehind, StringComparison.Ordinal);
     }
 

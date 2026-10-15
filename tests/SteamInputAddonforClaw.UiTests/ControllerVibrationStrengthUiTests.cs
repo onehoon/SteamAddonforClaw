@@ -44,7 +44,7 @@ public sealed class ControllerVibrationStrengthUiTests
         var recoveryButton = Assert.Single(cards[2].Elements());
         Assert.Equal("Button", recoveryButton.Name.LocalName);
         Assert.Equal("RestoreVibrationButton", (string?)recoveryButton.Attribute(x + "Name"));
-        Assert.Equal("Restore Vibration", (string?)recoveryButton.Attribute("Content"));
+        Assert.Equal("Restore", (string?)recoveryButton.Attribute("Content"));
         Assert.Equal("RestoreVibrationButton_Click", (string?)recoveryButton.Attribute("Click"));
         Assert.Equal("Right", (string?)recoveryButton.Attribute("HorizontalAlignment"));
         Assert.Contains("Temporarily disconnects virtual controller input", (string?)recoveryButton.Attribute("ToolTipService.ToolTip"), StringComparison.Ordinal);
@@ -60,7 +60,7 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("CanStartVibrationRearm(", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("_vibrationRearmInProgress = true", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("RestoreVibrationButton.Content = MainUiStrings.Get(\"Controller_RestoreVibrationButton_BusyContent\", \"Restoring…\")", rearmHandler, StringComparison.Ordinal);
-        Assert.Contains("RestoreVibrationButton.Content = MainUiStrings.Get(\"Controller_RestoreVibrationButton/Content\", \"Restore Vibration\")", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("RestoreVibrationButton.Content = MainUiStrings.Get(\"Controller_RestoreVibrationButton/Content\", \"Restore\")", rearmHandler, StringComparison.Ordinal);
         var restoreResourceKey = "Controller_RestoreVibrationButton.Content";
         foreach (var culture in new[] { "en-US", "ko-KR" })
         {

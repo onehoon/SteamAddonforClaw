@@ -498,6 +498,7 @@ public sealed partial class ShortcutPage : UserControl
             PrimaryButtonText = MainUiStrings.Get("Shortcut_Dialog_Save", "Save"),
             CloseButtonText = MainUiStrings.Get("Shortcut_Dialog_Cancel", "Cancel"),
             DefaultButton = ContentDialogButton.Primary,
+            RequestedTheme = ActualTheme,
             XamlRoot = XamlRoot
         };
 
@@ -1148,6 +1149,7 @@ public sealed partial class ShortcutPage : UserControl
             PrimaryButtonText = MainUiStrings.Get("Shortcut_Delete_Confirm", "Delete"),
             CloseButtonText = MainUiStrings.Get("Shortcut_Dialog_Cancel", "Cancel"),
             DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = ActualTheme,
             XamlRoot = XamlRoot
         };
         _dialogOpen = true;
