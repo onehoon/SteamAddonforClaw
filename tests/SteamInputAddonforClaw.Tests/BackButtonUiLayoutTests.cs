@@ -17,9 +17,9 @@ public sealed class BackButtonUiLayoutTests
     {
         var xaml = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
 
-        var gamebar = xaml.IndexOf("Header=\"Gamebar Button\"", StringComparison.Ordinal);
+        var gamebar = xaml.IndexOf("Header=\"XBOX Gamebar Button\"", StringComparison.Ordinal);
         var centerM = xaml.IndexOf("Header=\"Center M Button\"", StringComparison.Ordinal);
-        var back = xaml.IndexOf("Header=\"M1 / M2\"", StringComparison.Ordinal);
+        var back = xaml.IndexOf("Header=\"M1 / M2 Button\"", StringComparison.Ordinal);
 
         Assert.True(gamebar >= 0 && centerM >= 0 && back >= 0);
         Assert.True(gamebar < centerM && centerM < back);
@@ -34,7 +34,7 @@ public sealed class BackButtonUiLayoutTests
     {
         var xaml = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
 
-        Assert.Contains("Xbox 360 mode only", xaml, StringComparison.Ordinal);
+        Assert.Contains("XBOX 360 mode only", xaml, StringComparison.Ordinal);
         Assert.Contains("Steam Game / Big Picture", xaml, StringComparison.Ordinal);
         Assert.Contains("M1 as R4", xaml, StringComparison.Ordinal);
         Assert.Contains("M2 as L4", xaml, StringComparison.Ordinal);
