@@ -623,6 +623,37 @@ public sealed class MainUiLocalizationResourceTests
             .Replace("\r\n", "\n", StringComparison.Ordinal);
         var english = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "en-US", "Resources.resw"));
         var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
+        foreach (var (key, englishValue, koreanValue) in new[]
+        {
+            ("Controller_SteamVirtualControllerExpander.Header", "Controller for Steam Game", "Steam 게임용 컨트롤러"),
+            ("Controller_SteamVirtualControllerActivity.Text", "Selection is disabled while a Steam game or Big Picture Mode is active.", "Steam 게임 또는 빅픽쳐 모드 중에는 변경 할 수 없습니다."),
+            ("Controller_MappingUnavailable.Text", "Unavailable", "사용할 수 없음"),
+            ("Controller_ButtonMappingHeader.Text", "Button Mapping", "버튼 맵핑"),
+            ("Controller_GamebarExpander.Header", "XBOX Gamebar Button", "XBOX 게임바 버튼"),
+            ("Controller_GamebarSteamCard.Header", "Steam Game / Big Picture", "Steam 게임 / Steam 빅픽쳐 모드"),
+            ("Controller_CenterMExpander.Header", "Center M Button", "Center M 버튼"),
+            ("Controller_CenterMSteamCard.Header", "Steam Game / Big Picture", "Steam 게임 / Steam 빅픽쳐 모드"),
+            ("Controller_BackButtonMappingExpander.Header", "M1 / M2 Button", "M1 / M2 버튼"),
+            ("Controller_BackButtonMappingExpander.Description", "XBOX 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4.", "XBOX 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4."),
+            ("Controller_M1Card.Header", "M1 Button", "M1 버튼"),
+            ("Controller_M2Card.Header", "M2 Button", "M2 버튼"),
+            ("Controller_SettingsHeader.Text", "Controller Settings", "컨트롤러 설정"),
+            ("Controller_LedExpander.Header", "Joystick LED", "조이스틱 LED"),
+            ("Controller_LedBrightnessCard.Header", "Brightness", "밝기"),
+            ("Controller_LedColorCard.Header", "Color", "색상"),
+            ("Controller_VibrationStrengthExpander.Header", "Vibration Strength", "진동 세기"),
+            ("Controller_LeftMotorCard.Header", "Left Motor", "왼쪽 모터"),
+            ("Controller_RightMotorCard.Header", "Right Motor", "오른쪽 모터"),
+            ("Controller_VibrationRecoveryCard.Header", "Vibration Recovery", "진동 복구"),
+            ("Controller_RestoreVibrationButton.Content", "Restore", "복구"),
+            ("Controller_Action_Xbox", "XBOX", "XBOX"),
+            ("Controller_BackTarget_XboxGuide", "XBOX Guide", "XBOX Guide")
+        })
+        {
+            Assert.Equal(englishValue, english[key]);
+            Assert.Equal(koreanValue, korean[key]);
+        }
+
         var literalKeys = Regex.Matches(source, "MainUiStrings\\.Get\\(\\\"(?<key>Controller_[^\\\"]+)\\\"")
             .Select(match => match.Groups["key"].Value)
             .Distinct(StringComparer.Ordinal)
@@ -644,7 +675,7 @@ public sealed class MainUiLocalizationResourceTests
             ("SteamQuickAccess", "Controller_Action_SteamQuickAccess", "Steam Quick Access"),
             ("KeyboardHotkey", "Controller_Action_KeyboardHotkey", "Keyboard / Hotkey"),
             ("LaunchApplication", "Controller_Action_LaunchApplication", "Launch Application"),
-            ("XboxApp", "Controller_Action_Xbox", "Xbox")
+            ("XboxApp", "Controller_Action_Xbox", "XBOX")
         })
         {
             Assert.Contains($"FrontButtonAction.{action} => MainUiStrings.Get(\"{key}\", \"{fallback}\")", source, StringComparison.Ordinal);
@@ -656,6 +687,7 @@ public sealed class MainUiLocalizationResourceTests
 
         Assert.Contains("$\"Controller_BackTarget_{target}\"", source, StringComparison.Ordinal);
         Assert.Contains("BackButtonMappingLabels.GetDisplayName(target)", source, StringComparison.Ordinal);
+        Assert.Contains("? \"XBOX Guide\"", source, StringComparison.Ordinal);
         foreach (var target in Enum.GetValues<Xbox360BackButtonTarget>())
         {
             var key = $"Controller_BackTarget_{target}";
@@ -676,7 +708,7 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Contains("private readonly CheckBox _control = new() { Content = \"Ctrl\" }", source, StringComparison.Ordinal);
         Assert.Contains("new ComboBoxItem { Content = vkey.ToString(), Tag = vkey }", source, StringComparison.Ordinal);
         Assert.Contains("_runAsAdministrator.IsChecked == true", source, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Controller_RestoreVibrationButton/Content\", \"Restore Vibration\")", source, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Controller_RestoreVibrationButton/Content\", \"Restore\")", source, StringComparison.Ordinal);
         Assert.Contains("Controller_RestoreVibrationButton.Content", english.Keys);
         Assert.Contains("Controller_RestoreVibrationButton.Content", korean.Keys);
         Assert.Equal("safe fallback", MainUiStrings.Get("Missing_Controller_Test_Key", "safe fallback"));

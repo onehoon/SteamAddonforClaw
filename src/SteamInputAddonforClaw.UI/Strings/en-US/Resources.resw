@@ -105,7 +105,7 @@
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
-  <data name="Controller_SteamVirtualControllerExpander.Header" xml:space="preserve"><value>Controller for Steam</value></data>
+  <data name="Controller_SteamVirtualControllerExpander.Header" xml:space="preserve"><value>Controller for Steam Game</value></data>
   <data name="Controller_SteamVirtualControllerDescription.Text" xml:space="preserve"><value>Choose the controller used by Steam and configure gyroscope input.</value></data>
   <data name="Controller_SteamVirtualControllerActivity.Text" xml:space="preserve"><value>Selection is disabled while a Steam game or Big Picture Mode is active.</value></data>
   <data name="Controller_SteamControllerUnavailable.Text" xml:space="preserve"><value>Unavailable</value></data>
@@ -115,7 +115,7 @@
   <data name="Controller_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
   <data name="Controller_MappingUnavailable.Text" xml:space="preserve"><value>Unavailable</value></data>
   <data name="Controller_ButtonMappingHeader.Text" xml:space="preserve"><value>Button Mapping</value></data>
-  <data name="Controller_GamebarExpander.Header" xml:space="preserve"><value>Gamebar Button</value></data>
+  <data name="Controller_GamebarExpander.Header" xml:space="preserve"><value>XBOX Gamebar Button</value></data>
   <data name="Controller_GamebarExpander.Description" xml:space="preserve"><value>The action for the Gamebar button, per runtime presentation domain.</value></data>
   <data name="Controller_GamebarNormalCard.Header" xml:space="preserve"><value>Normal</value></data>
   <data name="Controller_GamebarSteamCard.Header" xml:space="preserve"><value>Steam Game / Big Picture</value></data>
@@ -123,10 +123,10 @@
   <data name="Controller_CenterMExpander.Description" xml:space="preserve"><value>The action for the Center M button, per runtime presentation domain.</value></data>
   <data name="Controller_CenterMNormalCard.Header" xml:space="preserve"><value>Normal</value></data>
   <data name="Controller_CenterMSteamCard.Header" xml:space="preserve"><value>Steam Game / Big Picture</value></data>
-  <data name="Controller_BackButtonMappingExpander.Header" xml:space="preserve"><value>M1 / M2</value></data>
-  <data name="Controller_BackButtonMappingExpander.Description" xml:space="preserve"><value>Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4.</value></data>
-  <data name="Controller_M1Card.Header" xml:space="preserve"><value>M1</value></data>
-  <data name="Controller_M2Card.Header" xml:space="preserve"><value>M2</value></data>
+  <data name="Controller_BackButtonMappingExpander.Header" xml:space="preserve"><value>M1 / M2 Button</value></data>
+  <data name="Controller_BackButtonMappingExpander.Description" xml:space="preserve"><value>XBOX 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4.</value></data>
+  <data name="Controller_M1Card.Header" xml:space="preserve"><value>M1 Button</value></data>
+  <data name="Controller_M2Card.Header" xml:space="preserve"><value>M2 Button</value></data>
   <data name="Controller_SettingsHeader.Text" xml:space="preserve"><value>Controller Settings</value></data>
   <data name="Controller_LedExpander.Header" xml:space="preserve"><value>Joystick LED</value></data>
   <data name="Controller_LedExpander.Description" xml:space="preserve"><value>Set one static color and global brightness for all controller LEDs.</value></data>
@@ -140,7 +140,7 @@
   <data name="Controller_RightMotorCard.Header" xml:space="preserve"><value>Right Motor</value></data>
   <data name="Controller_RightMotorTestButton.Content" xml:space="preserve"><value>Test</value></data>
   <data name="Controller_VibrationRecoveryCard.Header" xml:space="preserve"><value>Vibration Recovery</value></data>
-  <data name="Controller_RestoreVibrationButton.Content" xml:space="preserve"><value>Restore Vibration</value></data>
+  <data name="Controller_RestoreVibrationButton.Content" xml:space="preserve"><value>Restore</value></data>
   <data name="Controller_SteamActivity_Active" xml:space="preserve"><value>Steam is active. The applied controller is shown; controller selection is locked.</value></data>
   <data name="Controller_SteamActivity_Idle" xml:space="preserve"><value>Controller selection can be changed outside Steam games and Big Picture Mode.</value></data>
   <data name="Controller_SteamActivity_Unknown" xml:space="preserve"><value>Controller state is unavailable. Selection is locked.</value></data>
@@ -152,7 +152,7 @@
   <data name="Controller_Action_SteamQuickAccess" xml:space="preserve"><value>Steam Quick Access</value></data>
   <data name="Controller_Action_KeyboardHotkey" xml:space="preserve"><value>Keyboard / Hotkey</value></data>
   <data name="Controller_Action_LaunchApplication" xml:space="preserve"><value>Launch Application</value></data>
-  <data name="Controller_Action_Xbox" xml:space="preserve"><value>Xbox</value></data>
+  <data name="Controller_Action_Xbox" xml:space="preserve"><value>XBOX</value></data>
   <data name="Controller_BindingEditor_ApplicationPath" xml:space="preserve"><value>Application path</value></data>
   <data name="Controller_BindingEditor_Arguments" xml:space="preserve"><value>Arguments (optional)</value></data>
   <data name="Controller_BindingEditor_RunAsAdministrator" xml:space="preserve"><value>Run as administrator</value></data>
@@ -185,7 +185,7 @@
   <data name="Controller_BackTarget_RightStickClick" xml:space="preserve"><value>Right Stick Click (R3)</value></data>
   <data name="Controller_BackTarget_View" xml:space="preserve"><value>View</value></data>
   <data name="Controller_BackTarget_Menu" xml:space="preserve"><value>Menu</value></data>
-  <data name="Controller_BackTarget_XboxGuide" xml:space="preserve"><value>Xbox Guide</value></data>
+  <data name="Controller_BackTarget_XboxGuide" xml:space="preserve"><value>XBOX Guide</value></data>
   <data name="MainNav_Steam.Content" xml:space="preserve"><value>Steam</value></data>
   <data name="Steam_BackButton.Content" xml:space="preserve"><value>Back</value></data>
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>

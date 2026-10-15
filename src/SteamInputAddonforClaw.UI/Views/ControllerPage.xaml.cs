@@ -449,9 +449,10 @@ public sealed partial class ControllerPage : UserControl
         foreach (var item in comboBox.Items.OfType<ComboBoxItem>())
         {
             if (item.Tag is not Xbox360BackButtonTarget target) continue;
-            item.Content = MainUiStrings.Get(
-                $"Controller_BackTarget_{target}",
-                BackButtonMappingLabels.GetDisplayName(target));
+            var fallback = target == Xbox360BackButtonTarget.XboxGuide
+                ? "XBOX Guide"
+                : BackButtonMappingLabels.GetDisplayName(target);
+            item.Content = MainUiStrings.Get($"Controller_BackTarget_{target}", fallback);
         }
     }
 
@@ -680,7 +681,7 @@ public sealed partial class ControllerPage : UserControl
         finally
         {
             _vibrationRearmInProgress = false;
-            RestoreVibrationButton.Content = MainUiStrings.Get("Controller_RestoreVibrationButton/Content", "Restore Vibration");
+            RestoreVibrationButton.Content = MainUiStrings.Get("Controller_RestoreVibrationButton/Content", "Restore");
             UpdateVibrationControls();
         }
     }
@@ -1103,7 +1104,7 @@ public sealed partial class ControllerPage : UserControl
         FrontButtonAction.SteamQuickAccess => MainUiStrings.Get("Controller_Action_SteamQuickAccess", "Steam Quick Access"),
         FrontButtonAction.KeyboardHotkey => MainUiStrings.Get("Controller_Action_KeyboardHotkey", "Keyboard / Hotkey"),
         FrontButtonAction.LaunchApplication => MainUiStrings.Get("Controller_Action_LaunchApplication", "Launch Application"),
-        FrontButtonAction.XboxApp => MainUiStrings.Get("Controller_Action_Xbox", "Xbox"),
+        FrontButtonAction.XboxApp => MainUiStrings.Get("Controller_Action_Xbox", "XBOX"),
         _ => action.ToString()
     };
 

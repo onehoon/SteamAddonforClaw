@@ -9,7 +9,7 @@
                 <TextBlock x:Uid="Controller_PageDescription" Opacity="0.7" Text="Configure controller buttons and controller-specific settings." TextWrapping="Wrap" />
             </StackPanel>
 
-            <ctcontrols:SettingsExpander x:Name="SteamVirtualControllerExpander" x:Uid="Controller_SteamVirtualControllerExpander" Header="Controller for Steam" IsExpanded="False">
+            <ctcontrols:SettingsExpander x:Name="SteamVirtualControllerExpander" x:Uid="Controller_SteamVirtualControllerExpander" Header="Controller for Steam Game" IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
@@ -40,7 +40,7 @@
                 <TextBlock x:Uid="Controller_ButtonMappingHeader" Text="Button Mapping" FontSize="18" FontWeight="SemiBold" />
 
                 <StackPanel x:Name="FrontButtonMappingContent" Spacing="12">
-                <ctcontrols:SettingsExpander x:Uid="Controller_GamebarExpander" Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="False">
+                <ctcontrols:SettingsExpander x:Uid="Controller_GamebarExpander" Header="XBOX Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="False">
                     <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE990;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard x:Uid="Controller_GamebarNormalCard" Header="Normal">
@@ -80,18 +80,18 @@
                 <ctcontrols:SettingsExpander
                     x:Name="BackButtonMappingExpander"
                     x:Uid="Controller_BackButtonMappingExpander"
-                    Header="M1 / M2"
-                    Description="Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4."
+                    Header="M1 / M2 Button"
+                    Description="XBOX 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4."
                     IsExpanded="False">
                     <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8AB;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
-                        <ctcontrols:SettingsCard x:Uid="Controller_M1Card" Header="M1">
+                        <ctcontrols:SettingsCard x:Uid="Controller_M1Card" Header="M1 Button">
                             <ComboBox
                                 x:Name="M1TargetComboBox"
                                 MinWidth="220"
                                 SelectionChanged="BackButtonTargetComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
-                        <ctcontrols:SettingsCard x:Uid="Controller_M2Card" Header="M2">
+                        <ctcontrols:SettingsCard x:Uid="Controller_M2Card" Header="M2 Button">
                             <ComboBox
                                 x:Name="M2TargetComboBox"
                                 MinWidth="220"
@@ -206,7 +206,7 @@
                         <Button
                             x:Name="RestoreVibrationButton"
                             x:Uid="Controller_RestoreVibrationButton"
-                            Content="Restore Vibration"
+                            Content="Restore"
                             HorizontalAlignment="Right"
                             ToolTipService.ToolTip="Temporarily disconnects virtual controller input. Save and close your game first."
                             Click="RestoreVibrationButton_Click" />

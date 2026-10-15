@@ -81,17 +81,17 @@ Supported **virtual controller presentations** are:
 | --- | --- |
 | **Xbox 360** | Normal Windows use, outside an active Steam game or Big Picture |
 | **Steam Deck** | Steam game or Big Picture, when selected by the global preference or an enabled game profile |
-| **DualSense Edge** | Steam game or Big Picture, when selected in **Controller → Controller for Steam** or an enabled Steam game profile |
+| **DualSense Edge** | Steam game or Big Picture, when selected in **Controller → Controller for Steam Game** or an enabled Steam game profile |
 
-Choose the global **Steam Deck** or **DualSense Edge** option in **Controller → Controller for Steam**. The internal first-install preference remains Steam Deck. An enabled Steam game profile can select its own controller or **Use default** to inherit the global choice. The controller selector is locked while a Steam game or Big Picture Mode is active and shows the controller actually applied, including a game-profile override. Selection is available when neither Steam nor Big Picture is active, including normal Windows or Xbox-only gameplay. The separate **Gyroscope** switch remains available in every state. Steam game launch and exit still switch automatically to an enabled game's override and back to the global choice when Big Picture remains active. Outside Steam game and Big Picture activity, Windows continues to use Xbox 360. Only one virtual controller presentation is attached at a time. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the active presentation.
+Choose the global **Steam Deck** or **DualSense Edge** option in **Controller → Controller for Steam Game**. The internal first-install preference remains Steam Deck. An enabled Steam game profile can select its own controller or **Use default** to inherit the global choice. The controller selector is locked while a Steam game or Big Picture Mode is active and shows the controller actually applied, including a game-profile override. Selection is available when neither Steam nor Big Picture is active, including normal Windows or Xbox-only gameplay. The separate **Gyroscope** switch remains available in every state. Steam game launch and exit still switch automatically to an enabled game's override and back to the global choice when Big Picture remains active. Outside Steam game and Big Picture activity, Windows continues to use Xbox 360. Only one virtual controller presentation is attached at a time. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the active presentation.
 
 ## Gyroscope / IMU — Steam Input configuration
 
-The global **Gyroscope** switch is on by default in **Controller → Controller for Steam**. When on and the Addon is presenting a Steam-facing virtual controller, available physical **gyroscope and accelerometer** data is passed to Steam Input. Turning it off stops motion-sensor collection and sends no motion input; ordinary controller input and the virtual-device connection remain active. The Addon does **not** perform gyro-to-mouse or gyro-to-joystick conversion itself, and its **Xbox 360 presentation does not provide gyro input**.
+The global **Gyroscope** switch is on by default in **Controller → Controller for Steam Game**. When on and the Addon is presenting a Steam-facing virtual controller, available physical **gyroscope and accelerometer** data is passed to Steam Input. Turning it off stops motion-sensor collection and sends no motion input; ordinary controller input and the virtual-device connection remain active. The Addon does **not** perform gyro-to-mouse or gyro-to-joystick conversion itself, and its **Xbox 360 presentation does not provide gyro input**.
 
 DualSense Edge presentation also forwards available motion data through its existing publisher path. Edge button, PS/Quick Access, rumble, and motion behavior have not been comprehensively verified across every supported device and game.
 
-**If gyro is a priority, current A2VM 8 observations favor DualSense Edge.** Choose it at **Controller → Controller for Steam** or in an enabled Steam game profile. On the tested A2VM 8, DualSense Edge gyro felt smooth, while virtual Steam Deck **Gyro To Mouse** was still reported choppy with Addon **0.1.365**. The Gyroscope switch only controls sensor collection/input; it does not resolve this reported smoothness issue. This is an observation from current testing, not a guarantee for every device or game. See the [Steam Deck gyro investigation](docs/gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md).
+**If gyro is a priority, current A2VM 8 observations favor DualSense Edge.** Choose it at **Controller → Controller for Steam Game** or in an enabled Steam game profile. On the tested A2VM 8, DualSense Edge gyro felt smooth, while virtual Steam Deck **Gyro To Mouse** was still reported choppy with Addon **0.1.365**. The Gyroscope switch only controls sensor collection/input; it does not resolve this reported smoothness issue. This is an observation from current testing, not a guarantee for every device or game. See the [Steam Deck gyro investigation](docs/gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md).
 
 **Verified on MSI Claw 8 AI+ A2VM (8-inch):** Steam's gyro calibration screen shows live motion. All three rotation axes and all six direction signs matched the user's genuine Steam Controller in a direct calibration-screen comparison. **Gyro-to-joystick camera control worked in Aniimo** with Steam Input's gyro activation set to **Always On** (Addon build **0.1.350.0**). This confirms the tested A2VM 8 end-to-end path, not every game's configuration or quantitative gyro accuracy.
 
@@ -125,7 +125,7 @@ For **TDP Control**, **CPU Boost**, **Maximum Processor State**, and **Windows P
 
 ### Controller
 
-At the top of **Controller**, use **Controller for Steam** to choose **Steam Deck** or **DualSense Edge** and toggle **Gyroscope**. Steam Deck remains the internal default, but “(Default)” is not part of its display name. The selection is used by Big Picture and by Steam games whose enabled profile uses **Use default**. Controller selection is locked during a Steam game or Big Picture and displays the actually applied controller; Gyroscope remains changeable. Both controls are available in normal Windows or Xbox-only gameplay when Runtime settings are available.
+At the top of **Controller**, use **Controller for Steam Game** to choose **Steam Deck** or **DualSense Edge** and toggle **Gyroscope**. Steam Deck remains the internal default, but “(Default)” is not part of its display name. The selection is used by Big Picture and by Steam games whose enabled profile uses **Use default**. Controller selection is locked during a Steam game or Big Picture and displays the actually applied controller; Gyroscope remains changeable. Both controls are available in normal Windows or Xbox-only gameplay when Runtime settings are available.
 
 Use **Controller** to choose actions for the **Gamebar Button** (WING) and **Center M Button**. Each has separate **Normal** and **Steam Game / Big Picture** assignments. The current controller presentation selects which assignment is used; the buttons do not have to be remapped when Steam starts or stops.
 
@@ -153,7 +153,7 @@ The **Vibration Strength** expander also contains **Vibration Recovery → Resto
 
 The **Steam** page lists installed Steam games and Non-Steam shortcuts that Steam recognizes. Use **Refresh**, search, and the favorite control to find a game. Select a game to edit its profile. Profiles can be prepared before launching the game; use the profile's enable switch when you want it to apply.
 
-The first profile card is **Virtual Controller**. Choose **Use default**, **Steam Deck**, or **DualSense Edge**. The choice can be edited only while the profile is enabled and Steam / Big Picture is idle; turning the profile off retains its saved choice. With Big Picture active, a game's enabled override is selected automatically when Steam reports that game as active, then the global choice is restored when the game ends and Big Picture remains active. **Use default** always inherits **Controller → Controller for Steam**.
+The first profile card is **Virtual Controller**. Choose **Use default**, **Steam Deck**, or **DualSense Edge**. The choice can be edited only while the profile is enabled and Steam / Big Picture is idle; turning the profile off retains its saved choice. With Big Picture active, a game's enabled override is selected automatically when Steam reports that game as active, then the global choice is restored when the game ends and Big Picture remains active. **Use default** always inherits **Controller → Controller for Steam Game**.
 
 Per-game options include:
 
@@ -232,7 +232,7 @@ Developer Menu is reserved for developer diagnostics and is not needed for norma
 
 You can create and edit Steam and XBOX game profiles before starting a game. Saved values are kept when a profile is disabled.
 
-A Steam game's **Virtual Controller** choice is available only while its master profile is enabled. **Use default** or a disabled/missing profile inherits the global **Controller → Controller for Steam** choice. When a game starts in Big Picture, its enabled explicit choice is selected automatically; when it ends and Big Picture stays open, the global choice resumes. Manual global and per-game controller choices are locked while any Steam game or Big Picture Mode is active. Turning a profile off keeps its saved controller choice for when the profile is enabled again.
+A Steam game's **Virtual Controller** choice is available only while its master profile is enabled. **Use default** or a disabled/missing profile inherits the global **Controller → Controller for Steam Game** choice. When a game starts in Big Picture, its enabled explicit choice is selected automatically; when it ends and Big Picture stays open, the global choice resumes. Manual global and per-game controller choices are locked while any Steam game or Big Picture Mode is active. Turning a profile off keeps its saved controller choice for when the profile is enabled again.
 
 **TDP Control**, **CPU Boost**, and **Windows Power Mode** exist at both Device and game-profile level. When one of these settings is enabled in the active game profile, the profile value takes priority. If that profile setting is off, the enabled Device setting can continue to apply.
 
@@ -261,7 +261,7 @@ Quick Settings Overlay is the Addon's separate controller-friendly settings wind
 
 - **Device** — quick access to supported device-wide TDP Control, CPU Boost, Windows Power Mode, and battery charge-limit settings.
 - **Profile** — settings for the currently active recognized game. When no game is active, the page says: “No game is currently running. Start a game to configure its profile.” The available rows depend on the game and device; XBOX profiles can also expose M1/M2 mapping.
-- **Controller** — the shared **Controller for Steam** selection and **Gyroscope** toggle, Xbox 360 M1/M2 mapping, and (when supported) joystick LED and vibration settings.
+- **Controller** — the shared **Controller for Steam Game** selection and **Gyroscope** toggle, Xbox 360 M1/M2 mapping, and (when supported) joystick LED and vibration settings.
 - **Shortcut** — run your configured shortcuts. Add or edit shortcut details in the Main App.
 - **Setting** — rearrange the Overlay tabs and choose whether to show only the current power source.
 
@@ -313,7 +313,7 @@ If the controller has not returned after a short wait, try **Restart Addon** fro
 
 ### A Steam game appears as an Xbox controller
 
-Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. Set the global choice at **Controller → Controller for Steam** before starting a game, or enable the Steam profile and choose its **Virtual Controller** override. Manual changes are disabled while a Steam game or Big Picture Mode is active.
+Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. Set the global choice at **Controller → Controller for Steam Game** before starting a game, or enable the Steam profile and choose its **Virtual Controller** override. Manual changes are disabled while a Steam game or Big Picture Mode is active.
 
 ### Gyro values appear in Steam calibration, but the game does not respond
 
