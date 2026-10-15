@@ -50,7 +50,7 @@ internal sealed class CenterMStartupControl
         }
 
         var state = Classify(server, updater, service);
-        AppLog.Info("CenterM.Startup", "Startup state captured.", ("State", state), ("Server", server), ("Updater", updater), ("Service", service));
+        AppLog.Debug("CenterM.Startup", "Startup state captured.", ("State", state), ("Server", server), ("Updater", updater), ("Service", service));
         return new FrontendCenterMStartupSnapshot(state, server, updater, FoundationEnabledFlag(service), null);
     }
 

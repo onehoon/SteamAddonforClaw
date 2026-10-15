@@ -53,7 +53,7 @@ public sealed partial class OverlayWindow
         }
 
         var stopwatch = Stopwatch.StartNew();
-        OverlayLog.Info("Animation", "Show animation started",
+        OverlayLog.Debug("Animation", "Show animation started",
             ("DurationMs", ShowDuration.TotalMilliseconds),
             ("StartScale", HiddenScale), ("EndScale", 1.0),
             ("StartTranslateYDip", HiddenTranslateYDip), ("EndTranslateYDip", 0.0),
@@ -64,7 +64,7 @@ public sealed partial class OverlayWindow
             await AnimateAsync(HiddenScale, 1.0f, HiddenTranslateYDip, 0.0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
             TrySetVisibleVisualState();
             LogSurfaceBounds("Show.Visible");
-            OverlayLog.Info("Animation", "Show animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
+            OverlayLog.Debug("Animation", "Show animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
         }
         catch (Exception exception)
         {
@@ -86,7 +86,7 @@ public sealed partial class OverlayWindow
         if (AnimationsEnabled())
         {
             var stopwatch = Stopwatch.StartNew();
-            OverlayLog.Info("Animation", "Hide animation started",
+            OverlayLog.Debug("Animation", "Hide animation started",
                 ("DurationMs", HideDuration.TotalMilliseconds),
                 ("StartScale", 1.0), ("EndScale", HiddenScale),
                 ("StartTranslateYDip", 0.0), ("EndTranslateYDip", HiddenTranslateYDip),
@@ -94,7 +94,7 @@ public sealed partial class OverlayWindow
             try
             {
                 await AnimateAsync(1.0f, HiddenScale, 0.0, HiddenTranslateYDip, 1.0, HiddenOpacity, HideDuration, easeIn: true);
-                OverlayLog.Info("Animation", "Hide animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
+                OverlayLog.Debug("Animation", "Hide animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
             }
             catch (Exception exception)
             {
@@ -123,7 +123,7 @@ public sealed partial class OverlayWindow
     {
         WindowInterop.Configure(this, out var rect, out _lastConfiguredDpi, out var monitorText);
         var scale = _lastConfiguredDpi / 96.0;
-        OverlayLog.Info("Geometry", "Overlay window configured",
+        OverlayLog.Debug("Geometry", "Overlay window configured",
             ("Monitor", monitorText),
             ("OverlayX", rect.X), ("OverlayY", rect.Y),
             ("Dpi", _lastConfiguredDpi), ("Scale", scale),
@@ -145,7 +145,7 @@ public sealed partial class OverlayWindow
             }
 
             var scale = xamlRoot.RasterizationScale;
-            OverlayLog.Info("Geometry", "Overlay surface bounds snapshot",
+            OverlayLog.Debug("Geometry", "Overlay surface bounds snapshot",
                 ("Reason", reason), ("OverlayHwnd", HandleForDiagnostics), ("Dpi", _lastConfiguredDpi),
                 ("RasterizationScale", scale),
                 ("WindowLeft", native.WindowRect.X), ("WindowTop", native.WindowRect.Y),

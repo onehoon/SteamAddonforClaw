@@ -329,7 +329,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                         AppLog.Debug("MsiInput", "Initial ControllerState.", ("TestSession", session.Id), ("M1", IsM1Pressed(current)), ("M2", IsM2Pressed(current)));
                     // M5: record the first observed physical D-pad state too, not just later
                     // transitions, so it lines up with the canonical publisher's own first-tick log.
-                    if (AppLog.IsEnabled(AppLogLevel.Info))
+                    if (AppLog.IsEnabled(AppLogLevel.Debug))
                         ControllerStateDiagnostics.LogDPadTransitionIfChanged(current.Buttons, session.Id);
                     StateChanged?.Invoke(this, current);
                     previous = current;
@@ -342,7 +342,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                         LogStateChange(session.Id, previous, current);
                         ControllerStateDiagnostics.LogChanges(previous, current, session.Id);
                     }
-                    if (AppLog.IsEnabled(AppLogLevel.Info))
+                    if (AppLog.IsEnabled(AppLogLevel.Debug))
                         ControllerStateDiagnostics.LogDPadTransitionIfChanged(current.Buttons, session.Id);
                     StateChanged?.Invoke(this, current);
                     previous = current;

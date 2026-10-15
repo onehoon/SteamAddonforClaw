@@ -462,7 +462,7 @@ public sealed partial class MainWindow : Window
         if (_windowClosed) return;
 
         if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, StartDeferredPageWarmup))
-            AppLog.Info("Startup", "Deferred page warm-up was not queued because the UI dispatcher is unavailable.");
+            AppLog.Debug("Startup", "Deferred page warm-up was not queued because the UI dispatcher is unavailable.");
     }
 
     private void StartDeferredPageWarmup()
@@ -470,7 +470,7 @@ public sealed partial class MainWindow : Window
         if (_windowClosed || _warmupStarted) return;
 
         _warmupStarted = true;
-        AppLog.Info("Startup", "Deferred Main UI page warm-up started after the initial render opportunity.",
+        AppLog.Debug("Startup", "Deferred Main UI page warm-up started after the initial render opportunity.",
             ("ElapsedMs", Stopwatch.GetElapsedTime(_windowCreatedTimestamp).TotalMilliseconds));
         WarmNextPage();
     }
@@ -487,7 +487,7 @@ public sealed partial class MainWindow : Window
 
         if (_nextWarmupPageIndex >= DeferredWarmupPages.Length)
         {
-            AppLog.Info("Startup", "Deferred Main UI page warm-up completed.",
+            AppLog.Debug("Startup", "Deferred Main UI page warm-up completed.",
                 ("ElapsedMs", Stopwatch.GetElapsedTime(_windowCreatedTimestamp).TotalMilliseconds));
             return;
         }
@@ -496,7 +496,7 @@ public sealed partial class MainWindow : Window
         var pageTimer = Stopwatch.StartNew();
         var created = TryMaterializeMainPage(page);
         pageTimer.Stop();
-        AppLog.Info("Startup", "Deferred Main UI page warm-up step completed.",
+        AppLog.Debug("Startup", "Deferred Main UI page warm-up step completed.",
             ("Page", page),
             ("Created", created),
             ("DurationMs", pageTimer.Elapsed.TotalMilliseconds));
@@ -504,13 +504,13 @@ public sealed partial class MainWindow : Window
         if (_windowClosed) return;
         if (_nextWarmupPageIndex >= DeferredWarmupPages.Length)
         {
-            AppLog.Info("Startup", "Deferred Main UI page warm-up completed.",
+            AppLog.Debug("Startup", "Deferred Main UI page warm-up completed.",
                 ("ElapsedMs", Stopwatch.GetElapsedTime(_windowCreatedTimestamp).TotalMilliseconds));
             return;
         }
 
         if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, WarmNextPage))
-            AppLog.Info("Startup", "Remaining deferred pages will be created on demand because the UI dispatcher is unavailable.");
+            AppLog.Debug("Startup", "Remaining deferred pages will be created on demand because the UI dispatcher is unavailable.");
     }
 
     private bool IsMainPageMaterialized(MainNavigationPage page) => page switch

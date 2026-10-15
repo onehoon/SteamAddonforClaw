@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Win32;
 
 namespace SteamInputAddonforClaw.FseHome;
@@ -14,29 +15,29 @@ internal static class Program
     {
         var diagnostics = new FseHomeDiagnostics();
         diagnostics.Start();
-        diagnostics.Write("FseHome start");
+        diagnostics.Info("FseHome start");
 
         HandoffWindow? handoffWindow = null;
         try
         {
             handoffWindow = HandoffWindow.Create();
-            diagnostics.Write($"Handoff window shown HWND={FormatHwnd(handoffWindow.Handle)} Bounds={handoffWindow.Bounds}");
+            diagnostics.Debug($"Handoff window shown HWND={FormatHwnd(handoffWindow.Handle)} Bounds={handoffWindow.Bounds}");
 
             var launchRequestedAt = Stopwatch.GetTimestamp();
             var launch = SteamLauncher.RequestBigPicture();
-            diagnostics.Write($"Steam launch mode={launch.Mode}");
+            diagnostics.Info($"Steam launch mode={launch.Mode}");
             if (launch.ExecutablePath is not null)
-                diagnostics.Write($"Steam executable={launch.ExecutablePath}");
+                diagnostics.Debug($"Steam executable={launch.ExecutablePath}");
             if (launch.DirectLaunchFailure is not null)
-                diagnostics.Write($"Direct Steam launch failed; URI fallback used. Reason={launch.DirectLaunchFailure}");
+                diagnostics.Warn($"Direct Steam launch failed; URI fallback used. Reason={launch.DirectLaunchFailure}");
 
             while (Stopwatch.GetElapsedTime(launchRequestedAt) < ReadinessTimeout)
             {
                 if (SteamBigPictureWindowProbe.TryFind(out var candidate) && NativeMethods.IsWindow(candidate.Handle))
                 {
                     var elapsedMilliseconds = Stopwatch.GetElapsedTime(launchRequestedAt).TotalMilliseconds;
-                    diagnostics.Write($"BPM candidate found HWND={FormatHwnd(candidate.Handle)} PID={candidate.ProcessId} ElapsedMs={elapsedMilliseconds:F0}");
-                    diagnostics.Write($"Foreground before handoff HWND={FormatHwnd(NativeMethods.GetForegroundWindow())}");
+                    diagnostics.Debug($"BPM candidate found HWND={FormatHwnd(candidate.Handle)} PID={candidate.ProcessId} ElapsedMs={elapsedMilliseconds:F0}");
+                    diagnostics.Debug($"Foreground before handoff HWND={FormatHwnd(NativeMethods.GetForegroundWindow())}");
 
                     handoffWindow.Hide();
                     if (NativeMethods.IsIconic(candidate.Handle))
@@ -44,11 +45,15 @@ internal static class Program
 
                     var foregroundRequestSucceeded = NativeMethods.SetForegroundWindow(candidate.Handle);
                     var foregroundAfterHandoff = NativeMethods.GetForegroundWindow();
-                    diagnostics.Write($"SetForegroundWindow returned={foregroundRequestSucceeded}");
-                    diagnostics.Write($"Foreground after handoff HWND={FormatHwnd(foregroundAfterHandoff)}");
+                    diagnostics.Debug($"SetForegroundWindow returned={foregroundRequestSucceeded}");
+                    diagnostics.Debug($"Foreground after handoff HWND={FormatHwnd(foregroundAfterHandoff)}");
 
                     handoffWindow.Dispose();
                     handoffWindow = null;
+                    if (foregroundAfterHandoff == candidate.Handle)
+                        diagnostics.Info("Steam Big Picture handoff completed.");
+                    else
+                        diagnostics.Warn("Steam Big Picture handoff did not reach the foreground.");
                     return foregroundAfterHandoff == candidate.Handle ? 0 : 1;
                 }
 
@@ -61,21 +66,24 @@ internal static class Program
                     1,
                     ProbeIntervalMilliseconds);
                 if (!NativeMethods.WaitForMessagesOrTimeout(waitMilliseconds))
+                {
+                    diagnostics.Warn("Message wait failed before Steam Big Picture became ready.");
                     return 1;
+                }
             }
 
-            diagnostics.Write("Steam Big Picture readiness timed out after 60000 ms");
+            diagnostics.Warn("Steam Big Picture readiness timed out after 60000 ms");
             return 1;
         }
         catch (Exception exception)
         {
-            diagnostics.Write($"Exception type={exception.GetType().FullName} message={exception.Message}");
+            diagnostics.Error($"Exception type={exception.GetType().FullName} message={exception.Message}");
             return 1;
         }
         finally
         {
             handoffWindow?.Dispose();
-            diagnostics.Write("FseHome exit");
+            diagnostics.Info("FseHome exit");
         }
     }
 
@@ -187,9 +195,16 @@ internal static class SteamLauncher
 internal sealed class FseHomeDiagnostics
 {
     private const string PersistentDataDirectoryName = "SteamInputAddonforClaw-Data";
-    private readonly string _path = ResolveLogPath(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-    private bool _available = true;
+    private readonly string _localApplicationData;
+    private readonly string _path;
+    private FseHomeLogLevel _minimumLevel;
+    private bool _available;
+
+    internal FseHomeDiagnostics(string? localApplicationData = null)
+    {
+        _localApplicationData = localApplicationData ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        _path = ResolveLogPath(_localApplicationData);
+    }
 
     internal static string ResolveLogPath(string localApplicationData)
     {
@@ -197,12 +212,23 @@ internal sealed class FseHomeDiagnostics
         return Path.Combine(localApplicationData, PersistentDataDirectoryName, "logs", "fse-home-last.log");
     }
 
+    internal static string ResolveSettingsPath(string localApplicationData)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localApplicationData);
+        return Path.Combine(localApplicationData, PersistentDataDirectoryName, "settings.json");
+    }
+
     internal void Start()
     {
+        _minimumLevel = ReadLogLevel(ResolveSettingsPath(_localApplicationData));
+        if (_minimumLevel == FseHomeLogLevel.Off)
+            return;
+
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             File.WriteAllText(_path, string.Empty, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            _available = true;
         }
         catch (Exception)
         {
@@ -210,16 +236,24 @@ internal sealed class FseHomeDiagnostics
         }
     }
 
-    internal void Write(string message)
+    internal void Debug(string message) => Write(FseHomeLogLevel.Debug, "DEBUG", message);
+
+    internal void Info(string message) => Write(FseHomeLogLevel.Info, "INFO", message);
+
+    internal void Warn(string message) => Write(FseHomeLogLevel.Info, "WARN", message);
+
+    internal void Error(string message) => Write(FseHomeLogLevel.Info, "ERROR", message);
+
+    private void Write(FseHomeLogLevel level, string severity, string message)
     {
-        if (!_available)
+        if (!_available || (level == FseHomeLogLevel.Debug && _minimumLevel != FseHomeLogLevel.Debug))
             return;
 
         try
         {
             File.AppendAllText(
                 _path,
-                $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}",
+                $"{DateTimeOffset.Now:O} [{severity}] {message}{Environment.NewLine}",
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
         catch (Exception)
@@ -227,4 +261,26 @@ internal sealed class FseHomeDiagnostics
             _available = false;
         }
     }
+
+    private static FseHomeLogLevel ReadLogLevel(string settingsPath)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            if (!document.RootElement.TryGetProperty("LogLevel", out var value) || value.ValueKind != JsonValueKind.String)
+                return FseHomeLogLevel.Off;
+
+            return value.GetString()?.ToLowerInvariant() switch
+            {
+                "info" => FseHomeLogLevel.Info,
+                "debug" => FseHomeLogLevel.Debug,
+                _ => FseHomeLogLevel.Off,
+            };
+        }
+        catch (FileNotFoundException) { return FseHomeLogLevel.Info; }
+        catch (DirectoryNotFoundException) { return FseHomeLogLevel.Info; }
+        catch { return FseHomeLogLevel.Off; }
+    }
+
+    private enum FseHomeLogLevel { Off, Info, Debug }
 }
