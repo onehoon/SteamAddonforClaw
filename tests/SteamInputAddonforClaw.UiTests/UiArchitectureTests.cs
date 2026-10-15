@@ -10,6 +10,46 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class UiArchitectureTests
 {
     [Fact]
+    public void Frontend_cold_start_milestones_use_debug_and_preserve_existing_info_events()
+    {
+        var root = FindRepositoryRoot();
+        var program = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Program.cs"));
+        var app = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/App.xaml.cs"));
+        var launcher = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Lifecycle/FrontendProcessLauncher.cs"));
+
+        foreach (var milestone in new[]
+        {
+            "UI managed entry.",
+            "Log retention completed.",
+            "Single-instance gate checked.",
+            "COM wrapper initialization completed.",
+            "Application.Start beginning.",
+            "Application.Start callback entered."
+        })
+            Assert.Contains($"UiLog.Debug(\"Startup\", \"{milestone}\"", program, StringComparison.Ordinal);
+
+        foreach (var milestone in new[]
+        {
+            "OnLaunched entered.",
+            "StartFrontendAsync entered.",
+            "Frontend client creation completed.",
+            "Frontend IPC connection timing.",
+            "Frontend bootstrap timing.",
+            "MainWindow initialization timing.",
+            "Frontend activation request completed."
+        })
+            Assert.Contains($"AppLog.Debug(\"Startup\", \"{milestone}\"", app, StringComparison.Ordinal);
+
+        Assert.Contains("AppLog.Debug(\"Frontend\", \"Frontend Process.Start timing.\"", launcher, StringComparison.Ordinal);
+        Assert.Contains("(\"StartCallElapsedMs\", startCallElapsedMs)", launcher, StringComparison.Ordinal);
+        Assert.Contains("AppLog.Info(\"Frontend\", \"Frontend connected.\")", app, StringComparison.Ordinal);
+        Assert.Contains("AppLog.Info(\"Frontend\", \"Bootstrap acquired.\")", app, StringComparison.Ordinal);
+        Assert.Contains("AppLog.Info(\"Frontend\", \"MainWindow initialized.\")", app, StringComparison.Ordinal);
+        Assert.Contains("AppLog.Info(\"Frontend\", \"Frontend activated.\")", app, StringComparison.Ordinal);
+        Assert.Contains("AppLog.Info(\"Frontend\", \"Frontend process launch succeeded.\"", launcher, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Project_references_preserve_the_headless_dependency_direction()
     {
         var ui = References("src/SteamInputAddonforClaw.UI/SteamInputAddonforClaw.UI.csproj");

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.FrontendTransport;
@@ -32,6 +33,9 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        var startupTimestamp = Stopwatch.GetTimestamp();
+        AppLog.Debug("Startup", "OnLaunched entered.",
+            ("ElapsedMs", Stopwatch.GetElapsedTime(startupTimestamp).TotalMilliseconds));
         if (_singleInstanceGate is null)
         {
             Exit();
@@ -45,27 +49,49 @@ public partial class App : Application
             if (_dispatcherQueue?.TryEnqueue(ActivateOrDeferOnUiThread) != true)
                 AppLog.Info("Frontend activation ignored because the UI dispatcher is unavailable.");
         });
-        _ = StartFrontendAsync();
+        _ = StartFrontendAsync(startupTimestamp);
     }
 
-    private async Task StartFrontendAsync()
+    private async Task StartFrontendAsync(long startupTimestamp)
     {
+        AppLog.Debug("Startup", "StartFrontendAsync entered.",
+            ("ElapsedMs", Stopwatch.GetElapsedTime(startupTimestamp).TotalMilliseconds));
         var stage = "FrontendClientCreation";
         try
         {
+            var clientCreationTimestamp = Stopwatch.GetTimestamp();
             _frontendClient = UiFrontendClientFactory.Create();
             _frontendClient.Disconnected += OnFrontendDisconnected;
             _frontendClient.CloseRequested += OnFrontendCloseRequested;
+            AppLog.Debug("Startup", "Frontend client creation completed.",
+                ("DurationMs", Stopwatch.GetElapsedTime(clientCreationTimestamp).TotalMilliseconds),
+                ("ElapsedMs", Stopwatch.GetElapsedTime(startupTimestamp).TotalMilliseconds));
+
             stage = "RuntimeConnection";
+            var connectionTimestamp = Stopwatch.GetTimestamp();
             await _frontendClient.ConnectAsync().ConfigureAwait(true);
             AppLog.Info("Frontend", "Frontend connected.");
+            AppLog.Debug("Startup", "Frontend IPC connection timing.",
+                ("DurationMs", Stopwatch.GetElapsedTime(connectionTimestamp).TotalMilliseconds),
+                ("ElapsedMs", Stopwatch.GetElapsedTime(startupTimestamp).TotalMilliseconds));
+
             stage = "BootstrapAcquisition";
+            var bootstrapTimestamp = Stopwatch.GetTimestamp();
             var bootstrap = await _frontendClient.GetBootstrapAsync().ConfigureAwait(true);
             AppLog.Info("Frontend", "Bootstrap acquired.");
+            AppLog.Debug("Startup", "Frontend bootstrap timing.",
+                ("DurationMs", Stopwatch.GetElapsedTime(bootstrapTimestamp).TotalMilliseconds),
+                ("ElapsedMs", Stopwatch.GetElapsedTime(startupTimestamp).TotalMilliseconds));
+
             stage = "MainWindowInitialization";
+            var mainWindowTimestamp = Stopwatch.GetTimestamp();
             _mainWindow = CreateMainWindowWithDiagnostics(_frontendClient, bootstrap);
             _mainWindow.Closed += OnMainWindowClosed;
             AppLog.Info("Frontend", "MainWindow initialized.");
+            AppLog.Debug("Startup", "MainWindow initialization timing.",
+                ("DurationMs", Stopwatch.GetElapsedTime(mainWindowTimestamp).TotalMilliseconds),
+                ("ElapsedMs", Stopwatch.GetElapsedTime(startupTimestamp).TotalMilliseconds));
+
             if (Volatile.Read(ref _pendingClose) != 0)
             {
                 AppLog.Info("Frontend", "Pending Runtime close honored before activation.");
@@ -75,8 +101,13 @@ public partial class App : Application
             if (_activationPending)
                 AppLog.Info("Frontend", "Pending UI activation fulfilled.");
             stage = "Activation";
+            var activationTimestamp = Stopwatch.GetTimestamp();
             ActivateOrDeferOnUiThread();
             AppLog.Info("Frontend", "Frontend activated.");
+            AppLog.Debug("Startup", "Frontend activation request completed.",
+                ("DurationMs", Stopwatch.GetElapsedTime(activationTimestamp).TotalMilliseconds),
+                ("ElapsedMs", Stopwatch.GetElapsedTime(startupTimestamp).TotalMilliseconds),
+                ("ActivationPending", _activationPending));
         }
         catch (Exception exception)
         {

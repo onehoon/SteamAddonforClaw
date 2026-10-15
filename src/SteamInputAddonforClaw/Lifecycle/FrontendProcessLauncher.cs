@@ -92,7 +92,21 @@ internal sealed class FrontendProcessLauncher
         AppLog.Info("Frontend", "Frontend process launch attempted.", ("Reason", reason), ("Path", _executablePath));
         try
         {
-            if (_startProcess(startInfo) is null)
+            var startCallTimestamp = Stopwatch.GetTimestamp();
+            var process = _startProcess(startInfo);
+            var startCallElapsedMs = Stopwatch.GetElapsedTime(startCallTimestamp).TotalMilliseconds;
+            int? processId = null;
+            if (process is not null)
+            {
+                try { processId = process.Id; }
+                catch { }
+            }
+            AppLog.Debug("Frontend", "Frontend Process.Start timing.",
+                ("Reason", reason),
+                ("PID", processId),
+                ("StartCallElapsedMs", startCallElapsedMs));
+
+            if (process is null)
             {
                 AppLog.Warn("Frontend", "Frontend process launch returned no process; Runtime remains active.", null, ("Reason", reason), ("Path", _executablePath));
                 return;
