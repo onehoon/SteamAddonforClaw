@@ -70,6 +70,15 @@
   <data name="Device_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
   <data name="Device_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
+  <data name="Device_MaximumProcessorState_InvalidSettings" xml:space="preserve"><value>The saved Maximum Processor State settings are invalid. No Windows changes were made.</value></data>
+  <data name="Device_MaximumProcessorState_RuntimeInterrupted" xml:space="preserve"><value>Maximum Processor State could not be updated because the Runtime connection was interrupted.</value></data>
+  <data name="Device_MaximumProcessorState_SettingsUnavailable" xml:space="preserve"><value>The current Windows maximum processor state could not be read.</value></data>
+  <data name="Device_MaximumProcessorState_SettingsUnwritable" xml:space="preserve"><value>Maximum Processor State settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
+  <data name="Device_MaximumProcessorState_UpdateFailed" xml:space="preserve"><value>Maximum Processor State could not be updated.</value></data>
+  <data name="Device_MaximumProcessorStateAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_MaximumProcessorStateDcCard.Header" xml:space="preserve"><value>DC</value></data>
+  <data name="Device_MaximumProcessorStateExpander.Description" xml:space="preserve"><value>Set the Windows maximum processor performance state to 99% or 100%. This is not a CPU utilization limit. Turning this off stops applying the setting but does not restore the previous value.</value></data>
+  <data name="Device_MaximumProcessorStateExpander.Header" xml:space="preserve"><value>Maximum Processor State</value></data>
   <data name="Device_PageTitle.Text" xml:space="preserve"><value>Device</value></data>
   <data name="Device_PowerMode_InitializationFailed" xml:space="preserve"><value>Windows Power Mode could not be initialized.</value></data>
   <data name="Device_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>

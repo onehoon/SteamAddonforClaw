@@ -23,6 +23,9 @@ public sealed partial class DevicePage : UserControl
     // SelectionChanged does not treat that render as a user edit and write it back out (work order
     // section 17 -- the same feedback-loop-prevention shape already used elsewhere in this UI).
     private bool _suppressSelectionEvents;
+    private bool _suppressMaximumProcessorStateEvents;
+    private bool _maximumProcessorStateMutationBusy;
+    private FrontendMaximumProcessorStateSnapshot _maximumProcessorStateSnapshot = FrontendMaximumProcessorStateSnapshot.Unavailable;
     private bool _suppressTdpEvents;
     private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
     private FrontendPowerModeSnapshot _powerModeSnapshot = FrontendPowerModeSnapshot.Unavailable;
@@ -49,13 +52,22 @@ public sealed partial class DevicePage : UserControl
         new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Device_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed")),
     ];
 
+    private static readonly MaximumProcessorStatePercentItem[] MaximumProcessorStatePercentages =
+    [
+        new(100, "100%"),
+        new(99, "99%")
+    ];
+
     public DevicePage()
     {
         InitializeComponent();
         CpuBoostAcComboBox.ItemsSource = Modes;
         CpuBoostDcComboBox.ItemsSource = Modes;
+        MaximumProcessorStateAcComboBox.ItemsSource = MaximumProcessorStatePercentages;
+        MaximumProcessorStateDcComboBox.ItemsSource = MaximumProcessorStatePercentages;
         PowerModeAcComboBox.ItemsSource = PowerModes;
         PowerModeDcComboBox.ItemsSource = PowerModes;
+        UpdateMaximumProcessorStateEditability();
     }
 
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
@@ -107,7 +119,7 @@ public sealed partial class DevicePage : UserControl
         if (_frontend is null) return;
         // Shared Frontend V2 (SF-V2-01): one aggregate read replaces separate Device
         // captures. A failed child capture is isolated server-side into that child's Unavailable
-        // snapshot (all five render methods handle Unavailable), so only
+        // snapshot (all child render methods handle Unavailable), so only
         // a whole-transport failure needs to be handled here -- and it must fail closed rather than
         // leave stale editable controls (work order section 10.4).
         FrontendDeviceQuickSettingsSnapshot snapshot;
@@ -116,12 +128,14 @@ public sealed partial class DevicePage : UserControl
         {
             AppLog.Warn("Device", "Device Quick Settings snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
             Render(FrontendCpuBoostSnapshot.Unavailable);
+            RenderMaximumProcessorState(FrontendMaximumProcessorStateSnapshot.Unavailable);
             RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: false);
             RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);
             RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot.Unavailable, preserveDirtyDraft: false);
             return;
         }
         Render(snapshot.CpuBoost);
+        RenderMaximumProcessorState(snapshot.MaximumProcessorState ?? FrontendMaximumProcessorStateSnapshot.Unavailable);
         RenderTdp(snapshot.Tdp);
         RenderPowerMode(snapshot.PowerMode);
         RenderBatteryChargeLimit(snapshot.BatteryChargeLimit);
@@ -316,6 +330,133 @@ public sealed partial class DevicePage : UserControl
             AppLog.Warn("Device", "Power Mode mutation failed.", exception);
             PowerModeInfoBar.Severity = InfoBarSeverity.Error; PowerModeInfoBar.Message = MainUiStrings.Get("Device_PowerMode_RuntimeInterrupted", "Power Mode could not be updated because the Runtime connection was interrupted."); SetInfoBarOpen(PowerModeInfoBar, true);
             await RefreshAsync();
+        }
+    }
+
+    private void RenderMaximumProcessorState(FrontendMaximumProcessorStateSnapshot snapshot)
+    {
+        _maximumProcessorStateSnapshot = snapshot;
+        _suppressMaximumProcessorStateEvents = true;
+        try
+        {
+            MaximumProcessorStateEnabledToggleSwitch.IsOn = snapshot.Enabled;
+            MaximumProcessorStateAcComboBox.SelectedItem = snapshot.Ac.DesiredPercent is { } ac
+                ? MaximumProcessorStatePercentages.FirstOrDefault(item => item.Percent == ac)
+                : null;
+            MaximumProcessorStateDcComboBox.SelectedItem = snapshot.Dc.DesiredPercent is { } dc
+                ? MaximumProcessorStatePercentages.FirstOrDefault(item => item.Percent == dc)
+                : null;
+        }
+        finally { _suppressMaximumProcessorStateEvents = false; }
+
+        UpdateMaximumProcessorStateEditability();
+        if (snapshot == FrontendMaximumProcessorStateSnapshot.Unavailable)
+        {
+            MaximumProcessorStateInfoBar.Severity = InfoBarSeverity.Warning;
+            MaximumProcessorStateInfoBar.Message = MainUiStrings.Get(
+                "Device_MaximumProcessorState_SettingsUnavailable",
+                "The current Windows maximum processor state could not be read.");
+            SetInfoBarOpen(MaximumProcessorStateInfoBar, true);
+        }
+        else if (!snapshot.PersistenceWritable)
+        {
+            MaximumProcessorStateInfoBar.Severity = InfoBarSeverity.Error;
+            MaximumProcessorStateInfoBar.Message = MainUiStrings.Get(
+                "Device_MaximumProcessorState_SettingsUnwritable",
+                "Maximum Processor State settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.");
+            SetInfoBarOpen(MaximumProcessorStateInfoBar, true);
+        }
+        else if (!snapshot.ConfigurationValid)
+        {
+            MaximumProcessorStateInfoBar.Severity = InfoBarSeverity.Error;
+            MaximumProcessorStateInfoBar.Message = MainUiStrings.Get(
+                "Device_MaximumProcessorState_InvalidSettings",
+                "The saved Maximum Processor State settings are invalid. No Windows changes were made.");
+            SetInfoBarOpen(MaximumProcessorStateInfoBar, true);
+        }
+        else if (snapshot.LastFailure is { } failure)
+        {
+            MaximumProcessorStateInfoBar.Severity = InfoBarSeverity.Warning;
+            MaximumProcessorStateInfoBar.Message = failure;
+            SetInfoBarOpen(MaximumProcessorStateInfoBar, true);
+        }
+        else if (snapshot.Ac.CurrentStatus == FrontendMaximumProcessorStateReadStatus.Unavailable
+            || snapshot.Dc.CurrentStatus == FrontendMaximumProcessorStateReadStatus.Unavailable)
+        {
+            MaximumProcessorStateInfoBar.Severity = InfoBarSeverity.Warning;
+            MaximumProcessorStateInfoBar.Message = MainUiStrings.Get(
+                "Device_MaximumProcessorState_SettingsUnavailable",
+                "The current Windows maximum processor state could not be read.");
+            SetInfoBarOpen(MaximumProcessorStateInfoBar, true);
+        }
+        else SetInfoBarOpen(MaximumProcessorStateInfoBar, false);
+    }
+
+    private void UpdateMaximumProcessorStateEditability()
+    {
+        var editable = _maximumProcessorStateSnapshot.PersistenceWritable
+            && _maximumProcessorStateSnapshot.ConfigurationValid
+            && !_maximumProcessorStateMutationBusy;
+        MaximumProcessorStateEnabledToggleSwitch.IsEnabled = editable;
+        MaximumProcessorStateAcComboBox.IsEnabled = editable && _maximumProcessorStateSnapshot.Enabled;
+        MaximumProcessorStateDcComboBox.IsEnabled = editable && _maximumProcessorStateSnapshot.Enabled;
+    }
+
+    private async void MaximumProcessorStateEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressMaximumProcessorStateEvents || _frontend is null || _maximumProcessorStateMutationBusy) return;
+        var enabled = MaximumProcessorStateEnabledToggleSwitch.IsOn;
+        await RunMaximumProcessorStateMutationAsync(() => _frontend.SetDeviceMaximumProcessorStateEnabledAsync(enabled));
+    }
+
+    private async void MaximumProcessorStateAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressMaximumProcessorStateEvents || _frontend is null || _maximumProcessorStateMutationBusy
+            || MaximumProcessorStateAcComboBox.SelectedItem is not MaximumProcessorStatePercentItem item) return;
+        await RunMaximumProcessorStateMutationAsync(() => _frontend.SetDeviceMaximumProcessorStateAcAsync(item.Percent));
+    }
+
+    private async void MaximumProcessorStateDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressMaximumProcessorStateEvents || _frontend is null || _maximumProcessorStateMutationBusy
+            || MaximumProcessorStateDcComboBox.SelectedItem is not MaximumProcessorStatePercentItem item) return;
+        await RunMaximumProcessorStateMutationAsync(() => _frontend.SetDeviceMaximumProcessorStateDcAsync(item.Percent));
+    }
+
+    private async Task RunMaximumProcessorStateMutationAsync(Func<Task<FrontendMaximumProcessorStateMutationResult>> mutation)
+    {
+        _maximumProcessorStateMutationBusy = true;
+        UpdateMaximumProcessorStateEditability();
+        try
+        {
+            var result = await mutation();
+            RenderMaximumProcessorState(result.Snapshot);
+            if (!result.Succeeded)
+            {
+                MaximumProcessorStateInfoBar.Severity = result.Outcome is FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed
+                    or FrontendMaximumProcessorStateMutationOutcome.InvalidTarget
+                    ? InfoBarSeverity.Error
+                    : InfoBarSeverity.Warning;
+                MaximumProcessorStateInfoBar.Message = result.FailureMessage ?? MainUiStrings.Get(
+                    "Device_MaximumProcessorState_UpdateFailed",
+                    "Maximum Processor State could not be updated.");
+                SetInfoBarOpen(MaximumProcessorStateInfoBar, true);
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "Maximum Processor State mutation failed.", exception, ("Reason", exception.GetType().Name));
+            MaximumProcessorStateInfoBar.Severity = InfoBarSeverity.Error;
+            MaximumProcessorStateInfoBar.Message = MainUiStrings.Get(
+                "Device_MaximumProcessorState_RuntimeInterrupted",
+                "Maximum Processor State could not be updated because the Runtime connection was interrupted.");
+            SetInfoBarOpen(MaximumProcessorStateInfoBar, true);
+            await RefreshAsync();
+        }
+        finally
+        {
+            _maximumProcessorStateMutationBusy = false;
+            UpdateMaximumProcessorStateEditability();
         }
     }
 
@@ -806,6 +947,7 @@ public sealed partial class DevicePage : UserControl
         }
     }
 
+    private sealed record MaximumProcessorStatePercentItem(int Percent, string Label);
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
     private sealed record PowerModeItem(WindowsPowerMode Mode, string Label);
 }

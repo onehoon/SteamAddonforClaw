@@ -36,7 +36,8 @@ public sealed record ProfileDocument
     /// System.Text.Json's built-in extension-data support rather than a custom JSON DOM
     /// synchronization engine. The same sidecar is applied to every intentionally extensible
     /// nested section (<see cref="DeviceSettings"/>, <see cref="DevicePerformanceSettings"/>,
-    /// <see cref="DeviceDisplaySettings"/>, <see cref="GameProfile"/>, <see cref="XboxGameProfile"/>,
+    /// <see cref="DeviceDisplaySettings"/>, <see cref="DeviceMaximumProcessorStateSettings"/>,
+    /// <see cref="GameProfile"/>, <see cref="XboxGameProfile"/>,
     /// <see cref="NonSteamGameControllerOverrides"/>, <see cref="GamePerformanceOverrides"/>,
     /// <see cref="GameDisplayOverrides"/>) so a future
     /// additive field anywhere in the document round-trips, not just at the root.</summary>

@@ -187,7 +187,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 81: retire Developer diagnostics and append Windows Widgets, Edge Background, and Startup App Delay tweak IDs.
 // Version 82: return only the updated Windows Tweak row from a mutation; no full-page recapture is included.
 // Version 83: add the controller gyroscope preference mutation and settings projection.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 83; }
+// Version 84: add Device-only Maximum Processor State capture/mutations and its Device aggregate child.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 84; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -239,7 +240,8 @@ internal enum FrontendRpcMethod
     SetGameProfileGpuMinimumClockDc, SetXboxGameProfileGpuMinimumClockEnabled, SetXboxGameProfileGpuMinimumClockAc,
     SetXboxGameProfileGpuMinimumClockDc, RunDeveloperRumbleRearm,
     SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled, SetGyroscopeEnabled,
-    CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning
+    CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning,
+    CaptureMaximumProcessorState, SetDeviceMaximumProcessorStateEnabled, SetDeviceMaximumProcessorStateAc, SetDeviceMaximumProcessorStateDc
 }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
@@ -252,6 +254,9 @@ internal sealed record SetExperimentalVirtualTouchpadEnabledRequest(bool Enabled
 internal sealed record SetGyroscopeEnabledRequest(bool Enabled);
 internal sealed record SetWindowsTweakRequest(FrontendWindowsTweakId Id, bool Enabled);
 internal sealed record AcknowledgeWindowsTweaksWarningRequest(DateOnly LocalDate);
+internal sealed record SetDeviceMaximumProcessorStateEnabledRequest(bool Enabled);
+internal sealed record SetDeviceMaximumProcessorStateAcRequest(int Percent);
+internal sealed record SetDeviceMaximumProcessorStateDcRequest(int Percent);
 internal sealed record SetGamingHomeSelectionRequest(FrontendGamingHomeSelection Selection);
 internal sealed record SetGamingHomeStartupRequest(bool Enabled);
 internal sealed record SetClawHudEnabledRequest(bool Enabled);

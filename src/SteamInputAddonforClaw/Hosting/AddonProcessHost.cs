@@ -101,6 +101,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly ProfileStore _profileStore;
     private readonly ProfileMutationGate _profileMutationGate = new();
     private readonly CpuBoostRuntime _cpuBoostRuntime;
+    private readonly MaximumProcessorStateRuntime _maximumProcessorStateRuntime;
     private readonly PowerModeRuntime _powerModeRuntime;
     private readonly GameProfileMutations _gameProfileMutations;
     private readonly XboxGameProfileMutations _xboxGameProfileMutations;
@@ -230,6 +231,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,
             userProcessLauncher: _userProcessLauncher);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
+        _maximumProcessorStateRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
         _xboxGameProfileMutations = new(_profileStore, _profileMutationGate);
@@ -692,7 +694,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // Device/Profile CPU Boost is a sibling capability of Routing/OEM1, not a member of the
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
-            cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
+            cpuBoostRuntime: _cpuBoostRuntime, maximumProcessorStateRuntime: _maximumProcessorStateRuntime,
+            tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
             xboxGameProfileMutations: _xboxGameProfileMutations,
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
             activeProfileTargetSource: CaptureActiveProfileTarget,
@@ -2903,6 +2906,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Error("Profiles.CpuBoost", "CPU Boost startup reconcile failed.", exception);
         }
+        try { _maximumProcessorStateRuntime.StartupReconcile(); }
+        catch (Exception exception) { AppLog.Error("Profiles.MaximumProcessorState", "Maximum Processor State startup reconcile failed.", exception); }
         try { _powerModeRuntime.StartupReconcile(); }
         catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode startup reconcile failed.", exception); }
         ReconcileIntelGpuMinimumClockForStartup();
@@ -4155,7 +4160,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             () => _cpuBoostRuntime.Reconcile(),
             () => _powerModeRuntime.Reconcile(),
             () => _intelGpuMinimumClockRuntime.ReconcileAfterResume(),
-            () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"));
+            () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"),
+            reconcileMaximumProcessorState: () => _maximumProcessorStateRuntime.Reconcile());
     }
 
     private async Task ReconcileXboxObserverAndTouchpadAfterResumeAsync(XboxGameSessionRuntime xboxGameSessionRuntime)
@@ -4174,7 +4180,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Action reconcileCpuBoost,
         Action reconcilePowerMode,
         Action? reconcileGpuMinimumClock = null,
-        Action? reconcileBattery = null)
+        Action? reconcileBattery = null,
+        Action? reconcileMaximumProcessorState = null)
     {
         try
         {
@@ -4201,6 +4208,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("Profiles.PowerMode", "Power Mode resume reconcile failed.", exception);
+        }
+
+        try
+        {
+            reconcileMaximumProcessorState?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.MaximumProcessorState", "Maximum Processor State resume reconcile failed.", exception);
         }
 
         try

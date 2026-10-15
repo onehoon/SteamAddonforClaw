@@ -70,6 +70,15 @@
   <data name="Device_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
   <data name="Device_CpuBoostExpander.Header" xml:space="preserve"><value>CPU 부스트</value></data>
+  <data name="Device_MaximumProcessorState_InvalidSettings" xml:space="preserve"><value>저장된 최대 프로세서 상태 설정이 올바르지 않아 Windows를 변경하지 않았습니다.</value></data>
+  <data name="Device_MaximumProcessorState_RuntimeInterrupted" xml:space="preserve"><value>Runtime 연결이 끊겨 최대 프로세서 상태를 업데이트하지 못했습니다.</value></data>
+  <data name="Device_MaximumProcessorState_SettingsUnavailable" xml:space="preserve"><value>현재 Windows 최대 프로세서 상태를 읽지 못했습니다.</value></data>
+  <data name="Device_MaximumProcessorState_SettingsUnwritable" xml:space="preserve"><value>기존 프로필을 덮어쓰지 않도록 최대 프로세서 상태 설정을 불러오지 못한 경우 변경할 수 없습니다.</value></data>
+  <data name="Device_MaximumProcessorState_UpdateFailed" xml:space="preserve"><value>최대 프로세서 상태를 업데이트하지 못했습니다.</value></data>
+  <data name="Device_MaximumProcessorStateAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_MaximumProcessorStateDcCard.Header" xml:space="preserve"><value>DC</value></data>
+  <data name="Device_MaximumProcessorStateExpander.Description" xml:space="preserve"><value>Windows 최대 프로세서 성능 상태를 99% 또는 100%로 설정합니다. CPU 사용률 제한이 아닙니다. 끄면 설정 적용만 중지하며 이전 값으로 복원하지 않습니다.</value></data>
+  <data name="Device_MaximumProcessorStateExpander.Header" xml:space="preserve"><value>최대 프로세서 상태</value></data>
   <data name="Device_PageTitle.Text" xml:space="preserve"><value>디바이스</value></data>
   <data name="Device_PowerMode_InitializationFailed" xml:space="preserve"><value>Windows Power Mode could not be initialized.</value></data>
   <data name="Device_PowerMode_Mode_Balanced" xml:space="preserve"><value>균형</value></data>

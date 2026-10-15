@@ -44,8 +44,8 @@ public sealed record DeviceBatteryChargeLimitSettings
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
 
-/// <summary>Device-wide performance category. <see cref="CpuBoost"/> is the first real field added
-/// here (PR276); TDP and other performance fields may follow additively later.
+/// <summary>Device-wide performance category. CPU Boost, Maximum Processor State, TDP, and other
+/// performance fields are added additively as their Device-only Runtime owners are introduced.
 /// <see cref="ExtensionData"/> preserves a future field an older/compatible build does not yet
 /// understand across a load-then-save round trip, so that build does not silently erase it.</summary>
 public sealed record DevicePerformanceSettings
@@ -57,10 +57,28 @@ public sealed record DevicePerformanceSettings
     /// <see cref="DeviceCpuBoostSettings"/> for the current initialized/uninitialized semantics.</summary>
     public DeviceCpuBoostSettings? CpuBoost { get; init; }
 
+    /// <summary>Optional Device-only desired Windows maximum processor performance state. A
+    /// missing section means the Addon does not manage this policy; startup and reads must not
+    /// initialize or apply it implicitly.</summary>
+    public DeviceMaximumProcessorStateSettings? MaximumProcessorState { get; init; }
+
     /// <summary><see langword="null"/> means Device TDP has not been initialized or configured by
     /// the Addon. A non-null value always contains complete AC and DC power pairs.</summary>
     public DeviceTdpSettings? Tdp { get; init; }
     public DevicePowerModeSettings? PowerMode { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+/// <summary>Persisted Device-only maximum processor performance-state choices. Nullable fields let
+/// the Runtime distinguish a complete supported configuration from malformed or incomplete JSON
+/// without coercing it into a Windows write.</summary>
+public sealed record DeviceMaximumProcessorStateSettings
+{
+    public bool? Enabled { get; init; }
+    public int? Ac { get; init; }
+    public int? Dc { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

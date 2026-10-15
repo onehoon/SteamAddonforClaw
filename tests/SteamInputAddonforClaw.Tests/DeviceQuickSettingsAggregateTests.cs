@@ -79,6 +79,27 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
     }
 
     [Fact]
+    public async Task Maximum_processor_state_capture_failure_does_not_hide_existing_children()
+    {
+        var cpuBoostRuntime = CreateReconciledCpuBoostRuntime(new FakeCpuBoostPowerPolicy
+        {
+            Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive),
+            Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled)
+        });
+        var powerModeRuntime = CreateReconciledPowerModeRuntime(new FakePowerModePolicy());
+        var maximumProcessorStateRuntime = new MaximumProcessorStateRuntime(
+            new ProfileStore(Path.Combine(_testDirectory, "profiles.json")),
+            new ThrowingMaximumProcessorStatePowerPolicy());
+        var control = CreateControl(cpuBoostRuntime, powerModeRuntime, maximumProcessorStateRuntime);
+
+        var aggregate = await control.CaptureDeviceQuickSettingsAsync();
+
+        Assert.Equal(CpuBoostMode.Aggressive, aggregate.CpuBoost.Ac.Current);
+        Assert.NotEqual(FrontendPowerModeSnapshot.Unavailable, aggregate.PowerMode);
+        Assert.Equal(FrontendMaximumProcessorStateSnapshot.Unavailable, aggregate.MaximumProcessorState);
+    }
+
+    [Fact]
     public async Task Aggregate_capture_never_mutates_or_persists_anything()
     {
         var cpuPolicy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
@@ -147,7 +168,8 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
 
     private InProcessAddonFrontendControl CreateControl(
         CpuBoostRuntime? cpuBoostRuntime,
-        PowerModeRuntime? powerModeRuntime)
+        PowerModeRuntime? powerModeRuntime,
+        MaximumProcessorStateRuntime? maximumProcessorStateRuntime = null)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -157,7 +179,8 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
             new ThrowingSystemStatusProvider(),
             null,
             cpuBoostRuntime: cpuBoostRuntime,
-            powerModeRuntime: powerModeRuntime);
+            powerModeRuntime: powerModeRuntime,
+            maximumProcessorStateRuntime: maximumProcessorStateRuntime);
     }
 
     public void Dispose()
@@ -175,6 +198,12 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
     {
         public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException("Status capture is not part of these tests.");
+    }
+
+    private sealed class ThrowingMaximumProcessorStatePowerPolicy : IMaximumProcessorStatePowerPolicy
+    {
+        public MaximumProcessorStateSystemState Read() => throw new InvalidOperationException("Simulated read failure.");
+        public MaximumProcessorStateApplyResult Apply(int? ac, int? dc) => MaximumProcessorStateApplyResult.NoOp;
     }
 
 }

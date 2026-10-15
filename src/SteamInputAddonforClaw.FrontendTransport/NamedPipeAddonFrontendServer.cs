@@ -166,6 +166,12 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
                     continue;
                 }
+                if (message.Payload is not null && message.Method.Value == FrontendRpcMethod.CaptureMaximumProcessorState)
+                {
+                    requests.TryRemove(id, out var invalidMaximumProcessorStateCaptureCts); invalidMaximumProcessorStateCaptureCts?.Dispose();
+                    await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
+                    continue;
+                }
                 if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureGamingHome or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.CaptureShortcutEditor or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.ScanXboxGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimit or FrontendRpcMethod.CaptureControllerVibrationStrength or FrontendRpcMethod.RunDeveloperRumbleRearm)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
@@ -224,7 +230,15 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         }
     }
 
-    private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.CaptureWindowsTweaks
+    private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.CaptureMaximumProcessorState
+        ? FrontendWireCodec.Payload(await _inner.CaptureMaximumProcessorStateAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetDeviceMaximumProcessorStateEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetDeviceMaximumProcessorStateEnabledAsync(FrontendWireCodec.Decode<SetDeviceMaximumProcessorStateEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetDeviceMaximumProcessorStateAc
+        ? FrontendWireCodec.Payload(await _inner.SetDeviceMaximumProcessorStateAcAsync(FrontendWireCodec.Decode<SetDeviceMaximumProcessorStateAcRequest>(p).Percent, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetDeviceMaximumProcessorStateDc
+        ? FrontendWireCodec.Payload(await _inner.SetDeviceMaximumProcessorStateDcAsync(FrontendWireCodec.Decode<SetDeviceMaximumProcessorStateDcRequest>(p).Percent, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureWindowsTweaks
         ? FrontendWireCodec.Payload(await _inner.CaptureWindowsTweaksAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetWindowsTweak
         ? FrontendWireCodec.Payload(await _inner.SetWindowsTweakAsync(FrontendWireCodec.Decode<SetWindowsTweakRequest>(p).Id, FrontendWireCodec.Decode<SetWindowsTweakRequest>(p).Enabled, t).ConfigureAwait(false))

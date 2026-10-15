@@ -89,6 +89,39 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
+            <InfoBar x:Name="MaximumProcessorStateInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
+            <ctcontrols:SettingsExpander
+                x:Name="MaximumProcessorStateExpander"
+                x:Uid="Device_MaximumProcessorStateExpander"
+                Header="Maximum Processor State"
+                Description="Set the Windows maximum processor performance state to 99% or 100%. This is not a CPU utilization limit. Turning this off stops applying the setting but does not restore the previous value."
+                IsExpanded="False">
+                <ctcontrols:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xF149;" />
+                </ctcontrols:SettingsExpander.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="MaximumProcessorStateEnabledToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="MaximumProcessorStateEnabledToggleSwitch_Toggled" />
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard x:Uid="Device_MaximumProcessorStateAcCard" Header="AC">
+                        <ComboBox
+                            x:Name="MaximumProcessorStateAcComboBox"
+                            MinWidth="220"
+                            DisplayMemberPath="Label"
+                            SelectionChanged="MaximumProcessorStateAcComboBox_SelectionChanged" />
+                    </ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard x:Uid="Device_MaximumProcessorStateDcCard" Header="DC">
+                        <ComboBox
+                            x:Name="MaximumProcessorStateDcComboBox"
+                            MinWidth="220"
+                            DisplayMemberPath="Label"
+                            SelectionChanged="MaximumProcessorStateDcComboBox_SelectionChanged" />
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
+
             <InfoBar x:Name="PowerModeInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="PowerModeExpander" x:Uid="Device_PowerModeExpander" Header="Windows Power Mode" Description="Configured Windows 11 power mode for each power rail." IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
