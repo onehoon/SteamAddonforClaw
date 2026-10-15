@@ -75,6 +75,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // PR277 section 1): this projection deliberately has NO dependency on _runtime/routing status
     // and must keep working when _runtime is null (no routing composition at all).
     private readonly CpuBoostRuntime? _cpuBoostRuntime;
+    private readonly MaximumProcessorStateRuntime? _maximumProcessorStateRuntime;
     private readonly PowerModeRuntime? _powerModeRuntime;
     private readonly IntelFrameLimiterRuntime? _intelFpsRuntime;
     private readonly IntelGpuMinimumClockRuntime? _intelGpuMinimumClockRuntime;
@@ -162,7 +163,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<bool>>? reconcileExperimentalVirtualTouchpad = null,
         Func<AddonPresentationKind?>? activePresentationSource = null,
         Func<string, Task>? reconcileMotionReaders = null,
-        WindowsTweaksRuntime? windowsTweaksRuntime = null)
+        WindowsTweaksRuntime? windowsTweaksRuntime = null,
+        MaximumProcessorStateRuntime? maximumProcessorStateRuntime = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -171,6 +173,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _centerMAuthorityTransition = centerMAuthorityTransition;
         _updateCoordinator = updateCoordinator;
         _cpuBoostRuntime = cpuBoostRuntime;
+        _maximumProcessorStateRuntime = maximumProcessorStateRuntime;
         _powerModeRuntime = powerModeRuntime;
         _intelFpsRuntime = intelFpsRuntime;
         _intelGpuMinimumClockRuntime = intelGpuMinimumClockRuntime;
@@ -1683,6 +1686,63 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendCpuBoostSnapshot> CaptureCpuBoostAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(_cpuBoostRuntime is null ? FrontendCpuBoostSnapshot.Unavailable : MapCpuBoostSnapshot(_cpuBoostRuntime.Snapshot));
 
+    public Task<FrontendMaximumProcessorStateSnapshot> CaptureMaximumProcessorStateAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_maximumProcessorStateRuntime is null
+            ? FrontendMaximumProcessorStateSnapshot.Unavailable
+            : MapMaximumProcessorStateSnapshot(_maximumProcessorStateRuntime.Capture()));
+    }
+
+    public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+        => MutateMaximumProcessorState(() => _maximumProcessorStateRuntime!.SetEnabled(enabled));
+
+    public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateAcAsync(int percent, CancellationToken cancellationToken = default)
+        => MutateMaximumProcessorState(() => _maximumProcessorStateRuntime!.SetAc(percent));
+
+    public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateDcAsync(int percent, CancellationToken cancellationToken = default)
+        => MutateMaximumProcessorState(() => _maximumProcessorStateRuntime!.SetDc(percent));
+
+    private Task<FrontendMaximumProcessorStateMutationResult> MutateMaximumProcessorState(Func<MaximumProcessorStateMutationResult> mutation)
+    {
+        ThrowIfShuttingDown();
+        if (_maximumProcessorStateRuntime is null)
+            return Task.FromResult(new FrontendMaximumProcessorStateMutationResult(
+                FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed,
+                "Maximum Processor State is unavailable.",
+                FrontendMaximumProcessorStateSnapshot.Unavailable));
+
+        var result = mutation();
+        var snapshot = MapMaximumProcessorStateSnapshot(_maximumProcessorStateRuntime.Snapshot);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(new FrontendMaximumProcessorStateMutationResult(
+            MapMaximumProcessorStateOutcome(result.Outcome), result.FailureMessage, snapshot));
+    }
+
+    private static FrontendMaximumProcessorStateMutationOutcome MapMaximumProcessorStateOutcome(MaximumProcessorStateMutationOutcome outcome) => outcome switch
+    {
+        MaximumProcessorStateMutationOutcome.Succeeded => FrontendMaximumProcessorStateMutationOutcome.Succeeded,
+        MaximumProcessorStateMutationOutcome.InvalidTarget => FrontendMaximumProcessorStateMutationOutcome.InvalidTarget,
+        MaximumProcessorStateMutationOutcome.ApplyFailed => FrontendMaximumProcessorStateMutationOutcome.ApplyFailed,
+        _ => FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed
+    };
+
+    private static FrontendMaximumProcessorStateSnapshot MapMaximumProcessorStateSnapshot(MaximumProcessorStateRuntimeSnapshot snapshot) => new(
+        MapMaximumProcessorStateSide(snapshot.AcCurrent, snapshot.AcDesired),
+        MapMaximumProcessorStateSide(snapshot.DcCurrent, snapshot.DcDesired),
+        snapshot.Enabled,
+        snapshot.ConfigurationValid,
+        snapshot.PersistenceWritable,
+        snapshot.LastFailure);
+
+    private static FrontendMaximumProcessorStateSideSnapshot MapMaximumProcessorStateSide(MaximumProcessorStateSideReading reading, int? desired) => new(
+        reading.Status == MaximumProcessorStateReadStatus.Known
+            ? FrontendMaximumProcessorStateReadStatus.Known
+            : FrontendMaximumProcessorStateReadStatus.Unavailable,
+        reading.Percent,
+        desired);
+
     public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -2057,7 +2117,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) { AppLog.Warn("Device", "Battery charge-limit snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
 
-        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, batteryChargeLimit);
+        var maximumProcessorState = FrontendMaximumProcessorStateSnapshot.Unavailable;
+        try { maximumProcessorState = await CaptureMaximumProcessorStateAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) { AppLog.Warn("Device", "Maximum Processor State snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
+
+        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, batteryChargeLimit, maximumProcessorState);
     }
 
     /// <summary>Captures Device settings or the Runtime-selected active Steam/XBOX profile. The

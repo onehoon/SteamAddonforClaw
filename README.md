@@ -115,10 +115,11 @@ The page also provides device-wide performance and battery controls:
 
 - **TDP Control** — enables processor power-limit management. **PL1** is the sustained power limit and **PL2** is the higher short-duration limit. Values are separate for **Plugged in** and **On battery**. Available ranges depend on the detected Claw model. When available, the first setup may start from the existing MSI Center M Manual TDP values.
 - **CPU Boost** — enables management of the Windows processor boost mode, separately for plugged-in and battery use. Choices are **Disabled**, **Enabled**, **Aggressive**, **Efficient Enabled**, **Efficient Aggressive**, **Aggressive At Guaranteed**, and **Efficient Aggressive At Guaranteed**.
+- **Maximum Processor State** — optionally sets the Windows maximum processor performance state to **99%** or **100%** separately for AC and DC. It is off for new users, is not a CPU-utilization limit, and is independent of CPU Boost. Turning it off stops the Addon from applying the setting; it does not restore the previous Windows value.
 - **Windows Power Mode** — enables management of the Windows power mode, separately for each power source: **Best power efficiency**, **Balanced**, or **Best performance**.
 - **Battery charge limit** — enables a charging limit from 60% to 100% in 5% steps, when the device supports it.
 
-For **TDP Control**, **CPU Boost**, and **Windows Power Mode**, turning the feature off means the Addon stops managing that setting. It does not necessarily restore the exact Windows or MSI value that existed before the Addon managed it. Your saved choices are kept so you can enable the feature again later.
+For **TDP Control**, **CPU Boost**, **Maximum Processor State**, and **Windows Power Mode**, turning the feature off means the Addon stops managing that setting. It does not necessarily restore the exact Windows or MSI value that existed before the Addon managed it. Your saved choices are kept so you can enable the feature again later.
 
 **Battery charge limit** is different: its switch directly enables or disables the MSI charge-limit function. The selected percentage remains saved for later use.
 
@@ -235,7 +236,7 @@ A Steam game's **Virtual Controller** choice is available only while its master 
 
 **TDP Control**, **CPU Boost**, and **Windows Power Mode** exist at both Device and game-profile level. When one of these settings is enabled in the active game profile, the profile value takes priority. If that profile setting is off, the enabled Device setting can continue to apply.
 
-**Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls. They do not fall back to a Device setting when disabled or when no matching game profile is active. **Battery charge limit** is Device-only and is not part of a game profile.
+**Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls. They do not fall back to a Device setting when disabled or when no matching game profile is active. **Battery charge limit** and **Maximum Processor State** are Device-only and are not part of a game profile.
 
 ```text
 Recognized active game + enabled profile

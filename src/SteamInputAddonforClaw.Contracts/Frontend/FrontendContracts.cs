@@ -120,6 +120,33 @@ public sealed record FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutc
     public bool Succeeded => Outcome == FrontendCpuBoostMutationOutcome.Succeeded;
 }
 
+public enum FrontendMaximumProcessorStateReadStatus { Known, Unavailable }
+public enum FrontendMaximumProcessorStateMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, ApplyFailed }
+public sealed record FrontendMaximumProcessorStateSideSnapshot(
+    FrontendMaximumProcessorStateReadStatus CurrentStatus,
+    uint? CurrentPercent,
+    int? DesiredPercent);
+public sealed record FrontendMaximumProcessorStateSnapshot(
+    FrontendMaximumProcessorStateSideSnapshot Ac,
+    FrontendMaximumProcessorStateSideSnapshot Dc,
+    bool Enabled,
+    bool ConfigurationValid,
+    bool PersistenceWritable,
+    string? LastFailure)
+{
+    public static readonly FrontendMaximumProcessorStateSnapshot Unavailable = new(
+        new(FrontendMaximumProcessorStateReadStatus.Unavailable, null, null),
+        new(FrontendMaximumProcessorStateReadStatus.Unavailable, null, null),
+        Enabled: false, ConfigurationValid: false, PersistenceWritable: false, LastFailure: null);
+}
+public sealed record FrontendMaximumProcessorStateMutationResult(
+    FrontendMaximumProcessorStateMutationOutcome Outcome,
+    string? FailureMessage,
+    FrontendMaximumProcessorStateSnapshot Snapshot)
+{
+    public bool Succeeded => Outcome == FrontendMaximumProcessorStateMutationOutcome.Succeeded;
+}
+
 public enum FrontendTdpMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
 public enum FrontendTdpPowerSource { AC, DC }
 public sealed record FrontendTdpPowerPair(int Pl1Watts, int Pl2Watts);
@@ -142,20 +169,22 @@ public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcom
 /// cref="FrontendTdpSnapshot.Unavailable"/>/<see cref="FrontendPowerModeSnapshot.Unavailable"/>/<see
 /// cref="FrontendBatteryChargeLimitSnapshot.Unavailable"/> must
 /// not imply the others are unavailable. This is a UI projection convenience only -- it is not a new
-/// Device/Quick Settings authority and must not gain Center M, Status, active Profile, or other
-/// feature members.</summary>
+/// Device/Quick Settings authority. The Main-App-only Maximum Processor State child is read-only to
+/// Overlay consumers; do not add it to the Overlay projection or use this aggregate for active-profile state.</summary>
 [method: JsonConstructor]
 public sealed record FrontendDeviceQuickSettingsSnapshot(
     FrontendCpuBoostSnapshot CpuBoost,
     FrontendTdpSnapshot Tdp,
     FrontendPowerModeSnapshot PowerMode,
-    FrontendBatteryChargeLimitSnapshot BatteryChargeLimit)
+    FrontendBatteryChargeLimitSnapshot BatteryChargeLimit,
+    FrontendMaximumProcessorStateSnapshot? MaximumProcessorState = null)
 {
     public static readonly FrontendDeviceQuickSettingsSnapshot Unavailable = new(
         FrontendCpuBoostSnapshot.Unavailable,
         FrontendTdpSnapshot.Unavailable,
         FrontendPowerModeSnapshot.Unavailable,
-        FrontendBatteryChargeLimitSnapshot.Unavailable);
+        FrontendBatteryChargeLimitSnapshot.Unavailable,
+        FrontendMaximumProcessorStateSnapshot.Unavailable);
 }
 
 public enum FrontendFanProbeState { Unavailable, Ready, Running, Completed, Failed }
@@ -620,6 +649,16 @@ public interface IAddonFrontendControl
     /// them.</summary>
     Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
+    /// <summary>Reads the actual Windows AC/DC values and persisted Device-only choices. It must not
+    /// persist or apply the feature when the setting has never been initialized.</summary>
+    Task<FrontendMaximumProcessorStateSnapshot> CaptureMaximumProcessorStateAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendMaximumProcessorStateSnapshot.Unavailable);
+    Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendMaximumProcessorStateMutationResult(FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed, "Maximum Processor State is unavailable.", FrontendMaximumProcessorStateSnapshot.Unavailable));
+    Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateAcAsync(int percent, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendMaximumProcessorStateMutationResult(FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed, "Maximum Processor State is unavailable.", FrontendMaximumProcessorStateSnapshot.Unavailable));
+    Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateDcAsync(int percent, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendMaximumProcessorStateMutationResult(FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed, "Maximum Processor State is unavailable.", FrontendMaximumProcessorStateSnapshot.Unavailable));
     Task<FrontendPowerModeSnapshot> CapturePowerModeAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendPowerModeSnapshot.Unavailable);
     Task<FrontendPowerModeMutationResult> SetDevicePowerModeAcAsync(WindowsPowerMode mode, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendPowerModeMutationResult(FrontendPowerModeMutationOutcome.PersistenceFailed, "Power Mode is unavailable.", FrontendPowerModeSnapshot.Unavailable));
     Task<FrontendPowerModeMutationResult> SetDevicePowerModeDcAsync(WindowsPowerMode mode, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendPowerModeMutationResult(FrontendPowerModeMutationOutcome.PersistenceFailed, "Power Mode is unavailable.", FrontendPowerModeSnapshot.Unavailable));
@@ -631,9 +670,9 @@ public interface IAddonFrontendControl
     Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
     /// <summary>Shared Device Quick Settings aggregate read (Shared Frontend V2, SF-V2-01): captures
-    /// Battery Charge Limit/CPU Boost/TDP/Power Mode in one round trip. Overlay continues to project
-    /// only its existing controls. A UI projection convenience over <see cref="CaptureBatteryChargeLimitAsync"/>/<see cref="CaptureCpuBoostAsync"/>/<see cref="CaptureTdpAsync"/>/<see
-    /// cref="CapturePowerModeAsync"/> -- it must not replace those focused methods, must not persist
+    /// Battery Charge Limit/CPU Boost/TDP/Power Mode and the Main-App-only Maximum Processor State
+    /// in one round trip. Overlay continues to project only its existing controls. A UI projection
+    /// convenience over the focused capture methods -- it must not replace those methods, must not persist
     /// or mutate anything, and one child capture failing must not discard healthy siblings.</summary>
     Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendDeviceQuickSettingsSnapshot.Unavailable);

@@ -137,6 +137,23 @@ public sealed class AddonProcessHostResumeTests
     }
 
     [Fact]
+    public async Task Resume_reconcile_includes_maximum_processor_state_without_coupling_existing_runtimes()
+    {
+        var calls = new List<string>();
+
+        await AddonProcessHost.ReconcilePerformanceAfterResumeAsync(
+            CancellationToken.None,
+            static (_, _) => Task.CompletedTask,
+            () => calls.Add("CPU"),
+            () => calls.Add("Power"),
+            () => calls.Add("GPU"),
+            () => calls.Add("Battery"),
+            () => calls.Add("MaximumProcessorState"));
+
+        Assert.Equal(new[] { "CPU", "Power", "MaximumProcessorState", "GPU", "Battery" }, calls);
+    }
+
+    [Fact]
     public async Task Resume_reconcile_keeps_power_mode_independent_when_cpu_boost_fails()
     {
         var calls = new List<string>();

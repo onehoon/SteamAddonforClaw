@@ -386,7 +386,9 @@ public sealed class UiArchitectureTests
         Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE7E8;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", normalizedXaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"TDP Control\"", xaml, StringComparison.Ordinal);
         Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Maximum Processor State\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"Maximum Processor State\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
+        Assert.Contains("x:Name=\"MaximumProcessorStateInfoBar\" IsClosable=\"False\" IsOpen=\"False\" Visibility=\"Collapsed\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -401,6 +403,7 @@ public sealed class UiArchitectureTests
             "BatteryChargeLimitInfoBar",
             "TdpInfoBar",
             "CpuBoostInfoBar",
+            "MaximumProcessorStateInfoBar",
             "PowerModeInfoBar",
         };
 
