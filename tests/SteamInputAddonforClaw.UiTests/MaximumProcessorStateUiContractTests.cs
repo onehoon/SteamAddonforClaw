@@ -16,7 +16,7 @@ public sealed class MaximumProcessorStateUiContractTests
             < xaml.IndexOf("x:Name=\"MaximumProcessorStateExpander\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("x:Name=\"MaximumProcessorStateExpander\"", StringComparison.Ordinal)
             < xaml.IndexOf("x:Name=\"PowerModeExpander\"", StringComparison.Ordinal));
-        Assert.Contains("<FontIcon Glyph=\"&#xF149;\" />", xaml, StringComparison.Ordinal);
+        Assert.Contains("<FontIcon Glyph=\"&#xF42F;\" />", xaml, StringComparison.Ordinal);
         Assert.Contains("MaximumProcessorStateEnabledToggleSwitch_Toggled", xaml, StringComparison.Ordinal);
         Assert.Contains("MaximumProcessorStateAcComboBox_SelectionChanged", xaml, StringComparison.Ordinal);
         Assert.Contains("MaximumProcessorStateDcComboBox_SelectionChanged", xaml, StringComparison.Ordinal);
