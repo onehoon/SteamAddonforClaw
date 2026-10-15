@@ -97,7 +97,7 @@
                 Description="Set the Windows maximum processor performance state to 99% or 100%. This is not a CPU utilization limit. Turning this off stops applying the setting but does not restore the previous value."
                 IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xF149;" />
+                    <FontIcon Glyph="&#xF42F;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch
                     x:Name="MaximumProcessorStateEnabledToggleSwitch"
