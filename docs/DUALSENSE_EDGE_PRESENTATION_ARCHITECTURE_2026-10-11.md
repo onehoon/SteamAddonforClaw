@@ -376,7 +376,7 @@ Current action executor deliberately tolerates inability to issue an output puls
 
 Implement **ordinary** two-channel rumble only. The fork SetDualSenseOutputCallback returns rumbleSmall / rumbleLarge 8-bit host values, plus LED fields. The current physical IPhysicalRumbleSink accepts two-motor feedback. Follow the established Xbox360/Deck feedback adapter lifetime and scaling conventions, mapping callback motor intensities to physical sink with measured motor ordering; stop both motors on callback disarm, presentation transition and shutdown.
 
-A callback registration failure should leave ordinary Edge input functioning with feedback unavailable, consistent with existing best-effort feedback policy; do not make feedback a controller-ownership failure. A feedback STOP or drain failure on paths that already require strict proof (e.g. explicit developer re-arm or short Windows session-end preparation) remains subject to the existing strict safety contract.
+A callback registration failure should leave ordinary Edge input functioning with feedback unavailable, consistent with existing best-effort feedback policy; do not make feedback a controller-ownership failure. A feedback STOP or drain failure on paths that require strict proof (such as explicit user-triggered Restore, or the retained but production-disabled Windows session-end preparation) remains subject to the existing strict safety contract.
 
 Explicitly out of scope: DualSense native high-frequency haptic audio/waveform semantics, adaptive L2/R2 force feedback, speaker/audio endpoints, lightbar behavior, player LED semantics, vibration-strength UI changes. Do not claim that ordinary rumble is equivalent to Sony advanced haptics.
 

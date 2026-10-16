@@ -11,12 +11,27 @@ public sealed class AddonProcessHostWindowsSessionEndTests
         var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
         var tray = Method(host, "internal bool TryInitializeTray(Action restart)");
 
-        Assert.Contains("new NativeTrayHostWindow(HandleWindowsSessionEnd)", tray, StringComparison.Ordinal);
+        Assert.Contains("private const bool EnableA2vmAutomaticRumbleLifecycle = false;", host, StringComparison.Ordinal);
+        Assert.Contains("new NativeTrayHostWindow(", tray, StringComparison.Ordinal);
+        Assert.Contains("EnableA2vmAutomaticRumbleLifecycle ? HandleWindowsSessionEnd : null", tray, StringComparison.Ordinal);
         Assert.Contains("new SystemTrayIcon(_trayHostWindow.Handle", tray, StringComparison.Ordinal);
         Assert.Contains("operation.Wait(WindowsSessionEndPreparationBudget)", host, StringComparison.Ordinal);
         Assert.Contains("deadline.Cancel()", host, StringComparison.Ordinal);
         Assert.Contains("ObserveLateSessionEndTask(operation)", host, StringComparison.Ordinal);
         Assert.Contains("PnP1901Verified", host, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void One_disabled_host_policy_controls_both_automatic_entry_points()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
+        var ownerFactory = Method(host, "private Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? CreatePhysicalOwnership(");
+        var tray = Method(host, "internal bool TryInitializeTray(Action restart)");
+
+        Assert.Contains("private const bool EnableA2vmAutomaticRumbleLifecycle = false;", host, StringComparison.Ordinal);
+        Assert.Contains("enableA2vmAutomaticRumbleLifecycle: EnableA2vmAutomaticRumbleLifecycle", ownerFactory, StringComparison.Ordinal);
+        Assert.Contains("new NativeTrayHostWindow(", tray, StringComparison.Ordinal);
+        Assert.Contains("EnableA2vmAutomaticRumbleLifecycle ? HandleWindowsSessionEnd : null", tray, StringComparison.Ordinal);
     }
 
     [Fact]

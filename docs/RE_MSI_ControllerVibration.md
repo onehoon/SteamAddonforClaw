@@ -10,7 +10,7 @@ and does not issue `SyncToROM`.
 
 ## 2026-10-10 production support and recovery update
 
-Production pair writes are enabled on CG3EM and A2VM 8 from prior hardware evidence, and are now enabled on A2VM 7 by the explicitly scoped shared-A2VM protocol policy. A2VM 7 has **not** been physically tested; this is family-level rollout, not device-level validation. On A2VM 8, the user physically confirmed that the manual PID1902 → PID1901 → PID1902 recovery restores previously silent physical rumble. A2VM 7/8 also receive one optional mode initialization per actual Windows boot when their first strong state is already PID1902. These software transitions do not themselves verify motor output or firmware register state.
+Production pair writes are enabled on CG3EM and A2VM 8 from prior hardware evidence, and are now enabled on A2VM 7 by the explicitly scoped shared-A2VM protocol policy. A2VM 7 has **not** been physically tested; this is family-level rollout, not device-level validation. On A2VM 8, the user physically confirmed that the manual PID1902 → PID1901 → PID1902 recovery restores previously silent physical rumble. The optional automatic A2VM boot initialization implementation remains in the source but is disabled by default; manual Restore is the only intentional rumble-specific mode cycle in the production default. Software transitions do not themselves verify motor output or firmware register state.
 
 Keep the three paths distinct: runtime game rumble uses the controller's output report path (including the investigated report `0x05`); saved left/right strength uses one profile command `0x3C/0x21`, index 1, offset `0x22`, length 2; Joystick LED uses separate `0x3C/0x21` profile-frame writes at the exact firmware-mapped RGB base. None is evidence for either of the other mechanisms. See [Joystick LED RE](RE_MSI_Joystick_LED.md).
 
@@ -200,7 +200,7 @@ and its obsolete runtime read path has been removed. Its recorded 0/100 and
 ## Still unproven
 
 - Direct physical pair-write and motor-effect validation on A2VM 7 / MS-1T42 remains unperformed; enabled support is based on shared-family protocol evidence.
-- A2VM 7 boot re-arm behavior and A2VM 7 physical motor effect have not been tested.
+- A2VM 7 manual Restore behavior and A2VM 7 physical motor effect have not been tested; the automatic boot re-arm is disabled by default.
 - Physical effect of the A2VM 8 `50/50` restore was not separately established;
   its transport acceptance does not prove device-side durability.
 - Controller-side durable profile persistence across power loss; production

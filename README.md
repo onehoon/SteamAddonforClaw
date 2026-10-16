@@ -67,7 +67,7 @@ Do not run another controller-management or virtual-controller-routing applicati
 4. To let the Addon manage the built-in controller, choose **Disable** for **MSI Center M** and confirm **Disable and Restart**. Windows must restart for this controller-authority change to take effect.
 5. After Windows starts again, the Addon runs in the background. Open the Main App to configure controls, performance settings, profiles, or ClawHUD.
 
-On A2VM 7/8, the Addon attempts its optional controller-mode rumble initialization once per actual Windows boot; EX/CG3EM is excluded. During a real Windows shutdown or restart, it may make one best-effort PID1901 command only after controller output and input have been safely retired. This does not release MSI Center M authority or change HidHide, and PID1901 arrival is not verified before Windows exits. Addon restarts, logoff, sleep, hibernate, and resume do not use this path.
+The optional A2VM 7/8 automatic rumble initialization and Windows session-end PID1901 preparation remain in the codebase but are disabled in the production default. Startup keeps an already-present PID1902 controller or uses the ordinary strictly verified PID1901-to-PID1902 ownership transition. Windows shutdown/restart does not issue the A2VM-only PID1901 preparation command. When the existing healthy-owned-session checks allow it, use **Controller → Vibration → Restore** to request rumble recovery manually; this does not release Addon authority or change persistent HidHide ownership.
 
 If you prefer the stock MSI controller behavior, leave MSI Center M enabled or use **Enable and Restart** on the Device page.
 
@@ -147,7 +147,7 @@ The **M1 / M2** section configures the rear buttons while the Addon presents an 
 
 Where supported, **Joystick LED** can be enabled or disabled, with one static color and global brightness from 0% to 100%. The A2VM LED path is admitted only when the controller reports the exact firmware `0x0230`; the EX uses its exact known firmware mappings. **Vibration Strength** adjusts the left and right motors independently from 0% to 100% and includes a **Test** action for each motor. Strength writes are enabled on CG3EM and A2VM 7/8; A2VM 7 uses the shared-family policy and has not been individually hardware-tested. These controls may be unavailable when the detected device or firmware is not supported.
 
-The **Vibration Strength** expander also contains **Vibration Recovery → Restore Vibration** on all three supported models. It temporarily disconnects the virtual controller, so save your game and close it first. A success message confirms software restoration only, not physical motor output; run **Left Test** and **Right Test** afterward. EX/CG3EM supports only this manual action and does not receive the A2VM boot-time cycle.
+The **Vibration Strength** expander also contains **Vibration Recovery → Restore Vibration** on all three supported models. It temporarily disconnects the virtual controller, so save your game and close it first. A success message confirms software restoration only, not physical motor output; run **Left Test** and **Right Test** afterward. Manual Restore is available on all three models; automatic A2VM boot-time rumble cycling is disabled by default.
 
 ### Steam
 
@@ -301,11 +301,11 @@ WING and Center M are configurable front buttons; they are not part of the ordin
 
 Closing the Main App window does not stop the background Addon or controller presentation. The notification-area icon provides **Open** and **Restart Addon**. Use **Open** to bring back the Main App; use **Restart Addon** if you need to restart the running Addon. The tray menu does not provide a general **Quit** command. To return controller management to MSI Center M, use **Device → MSI Center M → Enable and Restart**; use the normal Windows uninstall path to remove the app.
 
-The Addon checks for and downloads updates in the background after startup. This does not interrupt the current session. The downloaded update is applied on a later safe Addon startup. On A2VM 7/8, the optional rumble initialization is once per Windows boot, not per Addon or update restart. You can also use **Settings → Application updates → Check** to check and download now, then choose **Install update** when it becomes available. If checking or downloading fails, the Addon continues running; try **Check** again later.
+The Addon checks for and downloads updates in the background after startup. This does not interrupt the current session. The downloaded update is applied on a later safe Addon startup. A2VM 7/8 do not run the optional automatic rumble mode cycle during startup or special PID1901 preparation at Windows session end in the production default. You can use **Controller → Vibration → Restore** when the existing ownership and lifecycle checks allow manual recovery. You can also use **Settings → Application updates → Check** to check and download now, then choose **Install update** when it becomes available. If checking or downloading fails, the Addon continues running; try **Check** again later.
 
 ## Sleep, resume, and restart
 
-The Addon is designed to recover its controller presentation and settings after Windows sleep, hibernate, resume, and restart. Resume uses normal ownership recovery and does not repeat the A2VM boot-only mode cycle. After waking, Windows may take a short time to reconnect the built-in controller. Wait for the device to settle before changing controller ownership or starting another controller utility.
+The Addon is designed to recover its controller presentation and settings after Windows sleep, hibernate, resume, and restart. Resume uses normal ownership recovery and does not perform the disabled optional A2VM rumble mode cycle. After waking, Windows may take a short time to reconnect the built-in controller. Wait for the device to settle before changing controller ownership or starting another controller utility.
 
 If the controller has not returned after a short wait, try **Restart Addon** from the notification-area icon. If you want to stop Addon controller management, use **Device → MSI Center M → Enable and Restart** and let Windows restart.
 
@@ -364,7 +364,7 @@ Open **Settings → Required Components** to see the reported status. Follow the
 - Steam profile tracking depends on Steam continuing to report the game or shortcut as active. Some launcher chains can cause a profile to stop applying when Steam loses that association.
 - Quick Settings Overlay is separate from Steam Quick Access. The Addon does not inject an Addon tab into Steam's menu.
 - **Steam Deck and DualSense Edge gyro / motion output are implemented.** A2VM 8 Steam Deck gyro direction/sign and Steam Input gyro-to-joystick gameplay have been tested, but Steam Deck Gyro To Mouse was still reported choppy in Addon 0.1.365. Current A2VM 8 observations favor DualSense Edge when gyro is needed; Edge controls and compatibility remain unverified across all devices and games. A2VM 7 and EX/CG3EM gyro validation remains pending. Activation and tuning are handled in **Steam Input**, not in the Addon.
-- A2VM 7 vibration-strength support and A2VM 7/8 `0x0230` LED writes follow shared-family and exact-firmware policy; A2VM 7 strength behavior and physical LED effects have not been individually validated. Unknown firmware remains unsupported. The boot-only mode cycle confirms software transitions, not physical motor output; SteamOS rumble is outside this Windows Addon's control.
+- A2VM 7 vibration-strength support and A2VM 7/8 `0x0230` LED writes follow shared-family and exact-firmware policy; A2VM 7 strength behavior and physical LED effects have not been individually validated. Unknown firmware remains unsupported. Automatic A2VM rumble mode cycling is disabled by default; manual Restore does not itself verify physical motor output. SteamOS rumble is outside this Windows Addon's control.
 - A general Device-page Fan Control is not currently available as a user feature.
 - The product supports one interactive Windows user and session; Fast User Switching, Remote Desktop sessions, and multi-user use are not supported.
 
