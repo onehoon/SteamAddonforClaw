@@ -411,6 +411,38 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Equal("Settings", english["MainNav_Settings"]);
         Assert.False(string.IsNullOrWhiteSpace(korean["MainNav_Settings"]));
         Assert.DoesNotContain("MainNav_Settings.Content", english.Keys);
+        var expectedKorean = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Settings_PageTitle.Text"] = "설정",
+            ["Settings_UpdateCard.Header"] = "앱 업데이트",
+            ["Settings_UpdateButton.Content"] = "확인",
+            ["Settings_AppThemeCard.Header"] = "테마",
+            ["Settings_AppTheme_System.Content"] = "시스템",
+            ["Settings_AppTheme_Light.Content"] = "라이트",
+            ["Settings_AppTheme_Dark.Content"] = "다크",
+            ["Settings_GamingHomeExpander.Header"] = "XBOX 모드(Full Screen Experience)",
+            ["Settings_GamingHomeExpander.Description"] = "XBOX 모드에서 사용할 앱을 선택하세요.",
+            ["Settings_GamingHome_Off.Content"] = "사용안함",
+            ["Settings_GamingHome_Xbox.Content"] = "XBOX",
+            ["Settings_GamingHome_SteamBigPicture.Content"] = "Steam 빅픽쳐 모드",
+            ["Settings_GamingHomeStartupCard.Header"] = "시작 시 XBOX 모드로 전환",
+            ["Settings_QuickSettingsPowerSourceCard.Header"] = "현재 전원 방식 옵션만 보기",
+            ["Settings_QuickSettingsPowerSourceCard.Description"] = "퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.",
+            ["Settings_LoggingCard.Header"] = "로그",
+            ["Settings_LoggingCard.Description"] = "앱 로그 레벨을 선택하세요.",
+            ["Settings_OpenLogFolderButton.Content"] = "폴더 열기",
+            ["Settings_RequiredComponentsExpander.Header"] = "필수 추가 설치 앱",
+            ["Settings_Update_InstallAction"] = "업데이트 설치",
+            ["Settings_Update_Checking"] = "업데이트 확인 중..."
+        };
+        foreach (var (key, value) in expectedKorean)
+        {
+            Assert.Equal(value, korean[key]);
+        }
+
+        Assert.Equal("XBOX Mode (Full Screen Experience)", english["Settings_GamingHomeExpander.Header"]);
+        Assert.Equal("Choose the home app used by XBOX Mode", english["Settings_GamingHomeExpander.Description"]);
+        Assert.Equal("XBOX", english["Settings_GamingHome_Xbox.Content"]);
         var appThemeCard = document.Descendants().Single(element =>
             element.Name.LocalName == "SettingsCard" && (string?)element.Attribute(XamlNamespace + "Name") == "AppThemeCard");
         Assert.Equal("Choose the main app appearance.", (string?)appThemeCard.Attribute("Description"));
@@ -471,6 +503,7 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Contains("MainUiStrings.Get(\"Settings_UpdateButton/Content\", \"Check\")", source, StringComparison.Ordinal);
         Assert.Contains("UpdateButton.Content = snapshot.CanInstall\n            ? MainUiStrings.Get(\"Settings_Update_InstallAction\", \"Install update\")\n            : MainUiStrings.Get(\"Settings_UpdateButton/Content\", \"Check\");", source, StringComparison.Ordinal);
         Assert.Matches("MainUiStrings\\.Get\\(\\s*\"Settings_GamingHomeExpander/Description\"", source);
+        Assert.Matches("MainUiStrings\\.Get\\(\\s*\"Settings_GamingHomeExpander/Description\",\\s*\"Choose the home app used by XBOX Mode\"\\)", source);
         Assert.Matches("MainUiStrings\\.Get\\(\\s*\"Settings_GamingHomeStartupCard/Description\"", source);
         Assert.DoesNotContain("MainUiStrings.Get(\"Settings_GamingHomeExpander.Description\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("MainUiStrings.Get(\"Settings_GamingHomeStartupCard.Description\"", source, StringComparison.Ordinal);

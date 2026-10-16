@@ -165,7 +165,7 @@ public sealed partial class SettingsPage : UserControl
                     "The current Windows app is outside Addon control. Choose Off, Xbox, or Steam Big Picture to replace it.")
                 : MainUiStrings.Get(
                     "Settings_GamingHomeExpander/Description",
-                    "Choose the home app used by Windows gaming full screen experience.")
+                    "Choose the home app used by XBOX Mode")
             : snapshot.UnavailableReason ?? MainUiStrings.Get(
                 "Settings_GamingHome_UnavailableDescription",
                 "The current Windows setting could not be verified.");

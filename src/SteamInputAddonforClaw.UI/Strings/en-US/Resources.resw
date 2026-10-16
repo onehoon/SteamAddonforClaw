@@ -621,16 +621,16 @@ These settings are reversible where Windows and policy permit. Windows policy or
     <value>Dark</value>
   </data>
   <data name="Settings_GamingHomeExpander.Header" xml:space="preserve">
-    <value>Windows Gaming Full Screen Experience</value>
+    <value>XBOX Mode (Full Screen Experience)</value>
   </data>
   <data name="Settings_GamingHomeExpander.Description" xml:space="preserve">
-    <value>Choose the home app used by Windows gaming full screen experience.</value>
+    <value>Choose the home app used by XBOX Mode</value>
   </data>
   <data name="Settings_GamingHome_Off.Content" xml:space="preserve">
     <value>Off</value>
   </data>
   <data name="Settings_GamingHome_Xbox.Content" xml:space="preserve">
-    <value>Xbox</value>
+    <value>XBOX</value>
   </data>
   <data name="Settings_GamingHome_SteamBigPicture.Content" xml:space="preserve">
     <value>Steam Big Picture</value>

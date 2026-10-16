@@ -72,7 +72,7 @@ public sealed class SettingsPageUpdateTests
         var openLogFolderEnd = source.IndexOf("\n    }", openLogFolderStart, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsExpander", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"GamingHomeExpander\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"Windows Gaming Full Screen Experience\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"XBOX Mode (Full Screen Experience)\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsExpanded=\"False\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ComboBox x:Name=\"GamingHomeComboBox\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Tag=\"None\"", xaml, StringComparison.Ordinal);

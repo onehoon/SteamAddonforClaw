@@ -583,76 +583,76 @@
     <value>설정</value>
   </data>
   <data name="Settings_PageTitle.Text" xml:space="preserve">
-    <value>Settings</value>
+    <value>설정</value>
   </data>
   <data name="Settings_UpdateCard.Header" xml:space="preserve">
-    <value>Application updates</value>
+    <value>앱 업데이트</value>
   </data>
   <data name="Settings_UpdateButton.Content" xml:space="preserve">
-    <value>Check</value>
+    <value>확인</value>
   </data>
   <data name="Settings_Update_InstallAction" xml:space="preserve">
-    <value>Install update</value>
+    <value>업데이트 설치</value>
   </data>
   <data name="Settings_Update_Checking" xml:space="preserve">
-    <value>Checking for updates…</value>
+    <value>업데이트 확인 중...</value>
   </data>
   <data name="Settings_Update_OperationFailed" xml:space="preserve">
     <value>The update operation failed. Try again.</value>
   </data>
   <data name="Settings_AppThemeCard.Header" xml:space="preserve">
-    <value>App theme</value>
+    <value>테마</value>
   </data>
   <data name="Settings_AppTheme_System.Content" xml:space="preserve">
-    <value>System</value>
+    <value>시스템</value>
   </data>
   <data name="Settings_AppTheme_Light.Content" xml:space="preserve">
-    <value>Light</value>
+    <value>라이트</value>
   </data>
   <data name="Settings_AppTheme_Dark.Content" xml:space="preserve">
-    <value>Dark</value>
+    <value>다크</value>
   </data>
   <data name="Settings_GamingHomeExpander.Header" xml:space="preserve">
-    <value>Windows Gaming Full Screen Experience</value>
+    <value>XBOX 모드(Full Screen Experience)</value>
   </data>
   <data name="Settings_GamingHomeExpander.Description" xml:space="preserve">
-    <value>Choose the home app used by Windows gaming full screen experience.</value>
+    <value>XBOX 모드에서 사용할 앱을 선택하세요.</value>
   </data>
   <data name="Settings_GamingHome_Off.Content" xml:space="preserve">
-    <value>Off</value>
+    <value>사용안함</value>
   </data>
   <data name="Settings_GamingHome_Xbox.Content" xml:space="preserve">
-    <value>Xbox</value>
+    <value>XBOX</value>
   </data>
   <data name="Settings_GamingHome_SteamBigPicture.Content" xml:space="preserve">
-    <value>Steam Big Picture</value>
+    <value>Steam 빅픽쳐 모드</value>
   </data>
   <data name="Settings_GamingHome_Other.Content" xml:space="preserve">
     <value>Other Windows app</value>
   </data>
   <data name="Settings_GamingHomeStartupCard.Header" xml:space="preserve">
-    <value>Start on Windows startup</value>
+    <value>시작 시 XBOX 모드로 전환</value>
   </data>
   <data name="Settings_GamingHomeStartupCard.Description" xml:space="preserve">
     <value>Start Windows directly in the selected gaming home.</value>
   </data>
   <data name="Settings_QuickSettingsPowerSourceCard.Header" xml:space="preserve">
-    <value>Show only current power source</value>
+    <value>현재 전원 방식 옵션만 보기</value>
   </data>
   <data name="Settings_QuickSettingsPowerSourceCard.Description" xml:space="preserve">
-    <value>Show only the controls for the currently connected power source in Quick Settings Overlay.</value>
+    <value>퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.</value>
   </data>
   <data name="Settings_LoggingCard.Header" xml:space="preserve">
-    <value>Logging</value>
+    <value>로그</value>
   </data>
   <data name="Settings_LoggingCard.Description" xml:space="preserve">
-    <value>Choose log detail.</value>
+    <value>앱 로그 레벨을 선택하세요.</value>
   </data>
   <data name="Settings_OpenLogFolderButton.Content" xml:space="preserve">
-    <value>Open folder</value>
+    <value>폴더 열기</value>
   </data>
   <data name="Settings_RequiredComponentsExpander.Header" xml:space="preserve">
-    <value>Required Components</value>
+    <value>필수 추가 설치 앱</value>
   </data>
   <data name="Settings_GamingHome_InitiallyUnavailable" xml:space="preserve">
     <value>Windows Gaming Full Screen Experience is unavailable.</value>

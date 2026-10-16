@@ -35,15 +35,15 @@
             <ctcontrols:SettingsExpander
                 x:Name="GamingHomeExpander"
                 x:Uid="Settings_GamingHomeExpander"
-                Description="Choose the home app used by Windows gaming full screen experience."
-                Header="Windows Gaming Full Screen Experience"
+                Description="Choose the home app used by XBOX Mode"
+                Header="XBOX Mode (Full Screen Experience)"
                 IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <SymbolIcon Symbol="FullScreen" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ComboBox x:Name="GamingHomeComboBox" SelectionChanged="GamingHomeComboBox_SelectionChanged">
                     <ComboBoxItem x:Uid="Settings_GamingHome_Off" Content="Off" Tag="None" />
-                    <ComboBoxItem x:Uid="Settings_GamingHome_Xbox" Content="Xbox" Tag="Xbox" />
+                    <ComboBoxItem x:Uid="Settings_GamingHome_Xbox" Content="XBOX" Tag="Xbox" />
                     <ComboBoxItem x:Uid="Settings_GamingHome_SteamBigPicture" Content="Steam Big Picture" Tag="SteamBigPicture" />
                     <ComboBoxItem x:Name="GamingHomeOtherSelectionItem" x:Uid="Settings_GamingHome_Other" Content="Other Windows app" Tag="Other" />
                 </ComboBox>
