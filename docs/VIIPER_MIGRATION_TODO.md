@@ -27,7 +27,7 @@ not describe the Edge device.
 The embedded VIIPER revision is:
 
 ```text
-onehoon/VIIPER@7f815ba2daa2d065471f9f2512ae7e62c7f22e6a
+onehoon/VIIPER@7c9dc6d85841cb9fa542ba0cb17f8d2050f2a3ca
 ```
 
 The Addon-side Deck and Edge sessions, mappers, publishers, and shared
