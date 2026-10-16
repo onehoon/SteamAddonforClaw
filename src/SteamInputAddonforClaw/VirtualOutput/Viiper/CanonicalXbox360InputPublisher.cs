@@ -405,7 +405,8 @@ internal sealed class CanonicalXbox360InputPublisher
         AppLog.Debug("SteamOutput", "Controller cadence timer armed.",
             ("Event", "CadenceApplied"), ("Stage", "Xbox360Publisher"),
             ("PreviousHz", previousPeriodMilliseconds == 0 ? 0 : 1000 / previousPeriodMilliseconds),
-            ("AppliedHz", 1000 / appliedPeriodMilliseconds), ("PeriodMs", appliedPeriodMilliseconds), ("Result", "Success"));
+            ("AppliedHz", 1000 / appliedPeriodMilliseconds), ("PeriodMs", appliedPeriodMilliseconds), ("Result", "Success"),
+            ("IdleReportDedup", appliedPeriodMilliseconds == 8 ? "On" : "Off"));
 
     private static void LogCadenceApplyFailed(int previousPeriodMilliseconds, int desiredPeriodMilliseconds, Exception exception) =>
         AppLog.Error("SteamOutput", "Xbox360 publisher cadence timer arm failed.", exception,

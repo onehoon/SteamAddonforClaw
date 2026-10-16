@@ -605,6 +605,11 @@ public sealed class CanonicalXbox360InputPublisherTests
     [Fact]
     public async Task Production_worker_changes_live_period_and_suppresses_equal_state_after_returning_idle()
     {
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousLevel = AppLog.MinimumLevelOverride;
+        var directory = Path.Combine(Path.GetTempPath(), $"SteamInput.CadenceTransitionLog.{Guid.NewGuid():N}");
+        AppLog.DirectoryOverride = directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
         var origin = 123_456L;
         var now = origin;
         var requires250Hz = 0;
@@ -661,10 +666,19 @@ public sealed class CanonicalXbox360InputPublisherTests
             Assert.Equal(1, sink.Count);
             Assert.Equal(1, publisher.PublishedStateCount);
             Assert.All(sink.States, state => Assert.Equal(expectedState, state));
+
+            AppLog.DrainForTests();
+            var log = AppLog.ReadAllTextForTests(AppLog.CurrentLogFilePath);
+            Assert.Equal(2, log.Split("IdleReportDedup=On", StringSplitOptions.None).Length - 1);
+            Assert.Equal(1, log.Split("IdleReportDedup=Off", StringSplitOptions.None).Length - 1);
         }
         finally
         {
             await publisher.StopAsync();
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousLevel;
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
     }
 

@@ -889,6 +889,63 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Theory]
+    [InlineData("msi.claw.a2vm.7")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task A2vm_initial_pid1902_uses_ordinary_acquisition_when_automatic_rumble_lifecycle_is_disabled(string modelId)
+    {
+        var markerCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            HardwareDeviceModel = new(modelId),
+            EnableA2vmAutomaticRumbleLifecycle = false,
+            ClaimBootAttempt = () => { markerCalls++; return BootSessionAttemptResult.Claimed; },
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned, result.Reason);
+        Assert.False(result.ModeWriteIssued);
+        Assert.Equal(0, markerCalls);
+        Assert.Empty(h.FastWriteTargets);
+        Assert.Empty(h.SwitchTargets);
+        Assert.Equal(2, h.NativeCaptureCalls);
+        Assert.Single(h.GamepadMode.QueryIdentities);
+        Assert.Equal([PrimaryPnp, ControlPnp], h.HidHideApplied);
+        Assert.True(h.InputSource.IsRunning);
+    }
+
+    [Theory]
+    [InlineData("msi.claw.a2vm.7")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task A2vm_initial_pid1901_uses_ordinary_strict_transition_when_automatic_rumble_lifecycle_is_disabled(string modelId)
+    {
+        var markerCalls = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,
+            HardwareDeviceModel = new(modelId),
+            EnableA2vmAutomaticRumbleLifecycle = false,
+            ClaimBootAttempt = () => { markerCalls++; return BootSessionAttemptResult.Claimed; },
+            PnpDevices = A2vmOwnedPnpDevices(),
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned, result.Reason);
+        Assert.True(result.ModeWriteIssued);
+        Assert.Equal(0, markerCalls);
+        Assert.Empty(h.FastWriteTargets);
+        Assert.Equal([MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.Equal(1, h.SwitchCalls);
+        Assert.Equal(2, h.NativeCaptureCalls);
+        Assert.Single(h.GamepadMode.QueryIdentities);
+        Assert.Equal([PrimaryPnp, ControlPnp], h.HidHideApplied);
+        Assert.True(h.InputSource.IsRunning);
+    }
+
+    [Theory]
     [InlineData("ambiguous")]
     [InlineData("wrong-usage")]
     [InlineData("missing")]
@@ -1112,6 +1169,27 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.True(Array.IndexOf(events, "ModeSwitch:XInput") < Array.IndexOf(events, "ModeSwitch:DirectInput"));
         Assert.True(Array.IndexOf(events, "ModeSwitch:DirectInput") < Array.IndexOf(events, "InputStart"));
 
+        await owner.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData("msi.claw.a2vm.7")]
+    [InlineData("msi.claw.a2vm.8")]
+    public async Task Manual_restore_remains_available_when_automatic_rumble_lifecycle_is_disabled(string modelId)
+    {
+        var h = CreateRearmHarness();
+        h.HardwareDeviceModel = new(modelId);
+        h.EnableA2vmAutomaticRumbleLifecycle = false;
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+
+        var result = await owner.RunDeveloperRumbleRearmAsync(() => true);
+
+        Assert.Equal(DeveloperRumbleRearmPhysicalOutcome.Completed, result.Outcome);
+        Assert.True(result.XInputTransitionVerified);
+        Assert.True(result.DirectInputTransitionVerified);
+        Assert.Equal([MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], h.SwitchTargets);
+        Assert.True(h.InputSource.IsRunning);
         await owner.DisposeAsync();
     }
 
@@ -2852,6 +2930,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public FrontendCenterMStartupState Authority { get; set; } = FrontendCenterMStartupState.Disabled;
         public MsiClawNativeMode InitialMode { get; set; } = MsiClawNativeMode.DirectInput;
         public HandheldDeviceModelId? HardwareDeviceModel { get; set; }
+        // Existing focused tests opt into the retained legacy path; disabled-policy tests override this.
+        public bool EnableA2vmAutomaticRumbleLifecycle { get; set; } = true;
         public Func<BootSessionAttemptResult>? ClaimBootAttempt { get; set; }
         public NativeStateCaptureStatus InitialCaptureStatus { get; set; } = NativeStateCaptureStatus.Success;
         public MsiClawIdentityConfidence InitialConfidence { get; set; } = MsiClawIdentityConfidence.Strong;
@@ -3102,7 +3182,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 return Task.FromResult(succeeds);
             },
             a2vmInitialPid1901Window: A2vmInitialPid1901Window,
-            a2vmInitialFinalReadinessWindow: A2vmInitialFinalReadinessWindow);
+            a2vmInitialFinalReadinessWindow: A2vmInitialFinalReadinessWindow,
+            enableA2vmAutomaticRumbleLifecycle: EnableA2vmAutomaticRumbleLifecycle);
         }
 
         public void AdvanceTime(TimeSpan duration) =>

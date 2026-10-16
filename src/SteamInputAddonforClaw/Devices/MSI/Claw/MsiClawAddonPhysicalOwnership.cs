@@ -149,6 +149,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     private readonly Func<IReadOnlyList<string>> _captureExistingOwnedHiddenTargets;
     private readonly IMsiClawGamepadModeClient? _gamepadModeClient;
     private readonly HandheldDeviceModelId? _hardwareDeviceModel;
+    private readonly bool _enableA2vmAutomaticRumbleLifecycle;
     private readonly Func<BootSessionAttemptResult> _claimA2vmBootAttempt;
     private readonly Func<MsiClawInitialFastModeEndpoint, MsiClawNativeMode, CancellationToken, Task<bool>> _writeA2vmInitialFastModeCommand;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -212,7 +213,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         Func<MsiClawPhysicalIdentity, CancellationToken, Task<MsiClawModeCommandWriteResult>>? writeXInputCommand = null,
         Func<MsiClawInitialFastModeEndpoint, MsiClawNativeMode, CancellationToken, Task<bool>>? writeA2vmInitialFastModeCommand = null,
         TimeSpan? a2vmInitialPid1901Window = null,
-        TimeSpan? a2vmInitialFinalReadinessWindow = null)
+        TimeSpan? a2vmInitialFinalReadinessWindow = null,
+        bool enableA2vmAutomaticRumbleLifecycle = false)
     {
         _captureCenterMStartupState = captureCenterMStartupState;
         _captureStableNativeState = captureStableNativeState;
@@ -228,6 +230,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         _captureExistingOwnedHiddenTargets = captureExistingOwnedHiddenTargets;
         _gamepadModeClient = gamepadModeClient;
         _hardwareDeviceModel = hardwareDeviceModel;
+        _enableA2vmAutomaticRumbleLifecycle = enableA2vmAutomaticRumbleLifecycle;
         _claimA2vmBootAttempt = claimA2vmBootAttempt ?? BootSession.TryClaimA2vmRumbleAttempt;
         _writeA2vmInitialFastModeCommand = writeA2vmInitialFastModeCommand ?? ((_, _, _) => Task.FromResult(false));
         _delay = delay ?? Task.Delay;
@@ -303,7 +306,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             ("ModeWriteRequired", initialMode == MsiClawNativeMode.XInput));
 
         var bootAttempt = BootSessionAttemptResult.Unavailable;
-        if (IsA2vmBootRumblePrimeModel(_hardwareDeviceModel))
+        if (_enableA2vmAutomaticRumbleLifecycle && IsA2vmBootRumblePrimeModel(_hardwareDeviceModel))
         {
             if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
                 return Fail("AuthorityChangedBeforeBootRumbleAttempt", false);
@@ -318,7 +321,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         }
 
         var pidTransitionWriteIssued = false;
-        var a2vmInitialFastPath = IsA2vmBootRumblePrimeModel(_hardwareDeviceModel);
+        var a2vmInitialFastPath = _enableA2vmAutomaticRumbleLifecycle
+            && IsA2vmBootRumblePrimeModel(_hardwareDeviceModel);
         var bootRumbleCycleEnabled = a2vmInitialFastPath
             && initialMode == MsiClawNativeMode.DirectInput
             && bootAttempt == BootSessionAttemptResult.Claimed;

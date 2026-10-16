@@ -44,6 +44,7 @@ internal enum AddonProcessStartupOutcome
 internal sealed class AddonProcessHost : IAsyncDisposable
 {
     private static readonly TimeSpan WindowsSessionEndPreparationBudget = TimeSpan.FromMilliseconds(2000);
+    private const bool EnableA2vmAutomaticRumbleLifecycle = false;
     private readonly Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? _runtimeCompositionFactory;
     private readonly Func<string>? _frontendPipeNameFactory;
     private readonly bool _headlessUninstallPreparation;
@@ -1475,7 +1476,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             hardwareDeviceModel: hardwareDeviceModel,
             writeXInputCommand: (identity, token) => nativeState.WriteXInputCommandAsync(identity, token),
             writeA2vmInitialFastModeCommand: (endpoint, target, token) =>
-                nativeState.WriteInitialA2vmFastModeAsync(endpoint, target, token));
+                nativeState.WriteInitialA2vmFastModeAsync(endpoint, target, token),
+            enableA2vmAutomaticRumbleLifecycle: EnableA2vmAutomaticRumbleLifecycle);
     }
 
     private async Task StartMotionSourceAsync(string trigger)
@@ -3087,7 +3089,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         try
         {
-            _trayHostWindow = new NativeTrayHostWindow(HandleWindowsSessionEnd);
+            _trayHostWindow = new NativeTrayHostWindow(
+                EnableA2vmAutomaticRumbleLifecycle ? HandleWindowsSessionEnd : null);
             _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, EvaluateUserRestart);
             return true;
         }
