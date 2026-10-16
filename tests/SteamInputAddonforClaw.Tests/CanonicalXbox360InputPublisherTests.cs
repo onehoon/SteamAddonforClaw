@@ -187,6 +187,188 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
+    public void Production_idle_state_refreshes_after_250ms_with_controlled_monotonic_time()
+    {
+        var origin = 123_456L;
+        var now = origin;
+        var sink = new FakeSink();
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            sink.SetState,
+            timestampProvider: () => Volatile.Read(ref now),
+            requires250Hz: static () => false);
+
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(1, sink.Count);
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(1, sink.Count);
+
+        now = checked(origin + Stopwatch.Frequency / 4 - 1);
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(1, sink.Count);
+        Assert.Equal(1, publisher.PublishedStateCount);
+
+        now = checked(origin + Stopwatch.Frequency / 4);
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(2, sink.Count);
+        Assert.Equal(2, publisher.PublishedStateCount);
+    }
+
+    [Fact]
+    public void Production_idle_state_changes_publish_buttons_release_triggers_and_sticks_immediately()
+    {
+        var auxiliary = new AuxiliaryButtonState([false, false]);
+        var source = new Snapshot(new ControllerState(auxiliary));
+        var sink = new FakeSink();
+        var publisher = new CanonicalXbox360InputPublisher(
+            source,
+            sink.SetState,
+            timestampProvider: static () => 123_456L,
+            requires250Hz: static () => false);
+
+        Assert.True(publisher.PublishProductionStateOnce());
+        source.Value = new ControllerState(
+            new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+            default, default, default, auxiliary);
+        Assert.True(publisher.PublishProductionStateOnce());
+        source.Value = new ControllerState(auxiliary);
+        Assert.True(publisher.PublishProductionStateOnce());
+        source.Value = new ControllerState(default, default, default, new TriggerState(1, 0), auxiliary);
+        Assert.True(publisher.PublishProductionStateOnce());
+        source.Value = new ControllerState(default, new StickState(1, -2), new StickState(-3, 4), default, auxiliary);
+        Assert.True(publisher.PublishProductionStateOnce());
+
+        Assert.Equal(5, sink.Count);
+        Assert.Equal(5, publisher.PublishedStateCount);
+        Assert.Equal(0u, sink.States[0].Buttons);
+        Assert.Equal(Xbox360ButtonBits.A, sink.States[1].Buttons);
+        Assert.Equal(0u, sink.States[2].Buttons);
+        Assert.Equal((byte)1, sink.States[3].LT);
+        Assert.Equal((short)1, sink.States[4].LX);
+        Assert.Equal((short)-2, sink.States[4].LY);
+        Assert.Equal((short)-3, sink.States[4].RX);
+        Assert.Equal((short)4, sink.States[4].RY);
+    }
+
+    [Fact]
+    public void Production_idle_state_compares_final_mapping_and_rear_suppression_output()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));
+        var sink = new FakeSink();
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.Disabled);
+        var suppressM1 = false;
+        var publisher = new CanonicalXbox360InputPublisher(
+            source,
+            sink.SetState,
+            timestampProvider: static () => 123_456L,
+            backButtonMappingProvider: () => mapping,
+            rearButtonSuppressionProvider: (_, slot) => suppressM1 && slot == AuxiliaryButtonSlot.RightRear,
+            requires250Hz: static () => false);
+
+        Assert.True(publisher.PublishProductionStateOnce());
+        mapping = mapping with { M1 = Xbox360BackButtonTarget.B };
+        Assert.True(publisher.PublishProductionStateOnce());
+        suppressM1 = true;
+        Assert.True(publisher.PublishProductionStateOnce());
+        mapping = mapping with { M1 = Xbox360BackButtonTarget.XboxGuide };
+        suppressM1 = false;
+        Assert.True(publisher.PublishProductionStateOnce());
+
+        Assert.Equal(4, sink.Count);
+        Assert.Equal(Xbox360ButtonBits.A, sink.States[0].Buttons);
+        Assert.Equal(Xbox360ButtonBits.B, sink.States[1].Buttons);
+        Assert.Equal(0u, sink.States[2].Buttons);
+        Assert.Equal(Xbox360ButtonBits.Guide, sink.States[3].Buttons);
+    }
+
+    [Fact]
+    public void Production_fast_path_submits_equal_states_and_idle_path_resumes_duplicate_suppression()
+    {
+        var requires250Hz = false;
+        var sink = new FakeSink();
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            sink.SetState,
+            timestampProvider: static () => 123_456L,
+            requires250Hz: () => requires250Hz);
+
+        Assert.True(publisher.PublishProductionStateOnce());
+        requires250Hz = true;
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(3, sink.Count);
+        Assert.Equal(3, publisher.PublishedStateCount);
+
+        requires250Hz = false;
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(3, sink.Count);
+        Assert.Equal(3, publisher.PublishedStateCount);
+    }
+
+    [Fact]
+    public void Production_rejected_changed_state_is_not_counted_as_accepted()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var faults = 0;
+        var publisher = new CanonicalXbox360InputPublisher(
+            source,
+            sink.SetState,
+            fault: _ => faults++,
+            timestampProvider: static () => 123_456L,
+            requires250Hz: static () => false);
+
+        Assert.True(publisher.PublishProductionStateOnce());
+        source.Value = new ControllerState(
+            new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+            default, default, default, new AuxiliaryButtonState([false, false]));
+        sink.Accept = false;
+
+        Assert.False(publisher.PublishProductionStateOnce());
+        Assert.Equal(2, sink.Count);
+        Assert.Equal(1, publisher.PublishedStateCount);
+        Assert.Equal(1, faults);
+
+        // The production worker would exit on the fault; invoke the same tick seam once more only
+        // to prove the rejected state did not replace the last successfully accepted neutral state.
+        source.Value = new ControllerState(new AuxiliaryButtonState([false, false]));
+        sink.Accept = true;
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(2, sink.Count);
+        Assert.Equal(1, publisher.PublishedStateCount);
+    }
+
+    [Fact]
+    public void Production_rejected_idle_refresh_does_not_advance_success_timestamp()
+    {
+        var origin = 123_456L;
+        var now = origin;
+        var sink = new FakeSink();
+        var faults = 0;
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            sink.SetState,
+            fault: _ => faults++,
+            timestampProvider: () => Volatile.Read(ref now),
+            requires250Hz: static () => false);
+
+        Assert.True(publisher.PublishProductionStateOnce());
+        now = checked(origin + Stopwatch.Frequency / 4);
+        sink.Accept = false;
+        Assert.False(publisher.PublishProductionStateOnce());
+        Assert.Equal(1, publisher.PublishedStateCount);
+        Assert.Equal(1, faults);
+
+        // The worker exits after rejection; exercise its same deterministic tick seam to verify
+        // that only the last successful timestamp governs the next refresh decision.
+        now = checked(now + Stopwatch.Frequency / 1000);
+        sink.Accept = true;
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(3, sink.Count);
+        Assert.Equal(2, publisher.PublishedStateCount);
+    }
+
+    [Fact]
     public async Task False_sink_reports_fault_once_and_stops_publishing()
     {
         var sink = new FakeSink { Accept = false }; var ticks = new ManualTicks(); var faults = 0;
@@ -326,6 +508,35 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
+    public async Task Throwing_production_sink_reports_fault_once_and_stops_the_worker()
+    {
+        var sink = new FakeSink { ThrowOnSet = true };
+        var faults = 0;
+        var faultObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            sink.SetState,
+            fault: _ => { Interlocked.Increment(ref faults); faultObserved.TrySetResult(true); });
+
+        publisher.Start();
+        try
+        {
+            await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            while (publisher.IsRunning && DateTime.UtcNow < deadline) await Task.Delay(5);
+
+            Assert.False(publisher.IsRunning);
+            Assert.Equal(1, Volatile.Read(ref faults));
+            Assert.Equal(0, publisher.PublishedStateCount);
+            Assert.Equal(0, sink.Count);
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Duplicate_Start_rejected()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
@@ -392,7 +603,7 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
-    public async Task Production_worker_starts_idle_at_8ms_and_changes_live_period_without_restart_or_state_loss()
+    public async Task Production_worker_changes_live_period_and_suppresses_equal_state_after_returning_idle()
     {
         var origin = 123_456L;
         var now = origin;
@@ -443,12 +654,75 @@ public sealed class CanonicalXbox360InputPublisherTests
             now = checked(now + activeTicks);
             active.Timer.ArmRelative(TimeSpan.FromTicks(1));
             Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
-            await sink.WaitForCountAsync(2, TimeSpan.FromSeconds(2));
             Assert.True(arms.TryDequeue(out var idleAgain));
             Assert.Equal(idleTicks, idleAgain.Deadline - idleAgain.Now);
             Assert.Same(initial.Timer, idleAgain.Timer);
             Assert.True(publisher.IsRunning);
+            Assert.Equal(1, sink.Count);
+            Assert.Equal(1, publisher.PublishedStateCount);
             Assert.All(sink.States, state => Assert.Equal(expectedState, state));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Production_idle_worker_skips_equal_native_state_until_refresh_deadline()
+    {
+        var origin = 123_456L;
+        var arms = new ConcurrentQueue<(WindowsHighResolutionOneShotTimer Timer, long Deadline, long Now)>();
+        using var armObserved = new ManualResetEventSlim(false);
+        var sink = new FakeSink();
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            sink.SetState,
+            timestampProvider: () => origin,
+            requires250Hz: static () => false)
+        {
+            ArmForDeadlineOverrideForTests = (timer, deadline, now) =>
+            {
+                timer.ArmRelative(TimeSpan.FromSeconds(30));
+                arms.Enqueue((timer, deadline, now));
+                armObserved.Set();
+            },
+        };
+
+        try
+        {
+            publisher.Start();
+            Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
+            Assert.True(arms.TryDequeue(out var initialArm));
+
+            armObserved.Reset();
+            initialArm.Timer.ArmRelative(TimeSpan.FromTicks(1));
+            Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
+            Assert.Equal(1, sink.Count);
+            Assert.Equal(default, sink.States[0]);
+            Assert.True(arms.TryDequeue(out var afterFirstTick));
+
+            armObserved.Reset();
+            afterFirstTick.Timer.ArmRelative(TimeSpan.FromTicks(1));
+            Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
+            Assert.Equal(1, sink.Count);
+            Assert.Equal(1, publisher.PublishedStateCount);
+            Assert.True(arms.TryDequeue(out _));
+
+            await publisher.StopAsync();
+            armObserved.Reset();
+            publisher.Start();
+            Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
+            Assert.True(arms.TryDequeue(out var restartedArm));
+
+            armObserved.Reset();
+            restartedArm.Timer.ArmRelative(TimeSpan.FromTicks(1));
+            Assert.True(armObserved.Wait(TimeSpan.FromSeconds(2)));
+            await publisher.StopAsync();
+
+            Assert.Equal(2, sink.Count);
+            Assert.Equal(2, publisher.PublishedStateCount);
+            Assert.All(sink.States, static state => Assert.Equal(default, state));
         }
         finally
         {
