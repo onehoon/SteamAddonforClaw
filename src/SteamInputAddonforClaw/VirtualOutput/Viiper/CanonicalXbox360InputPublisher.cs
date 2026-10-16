@@ -10,7 +10,9 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// <see cref="Xbox360DeviceStateMapper"/>, to a caller-supplied Xbox360 state sink on a monotonic
 /// absolute 4 ms / 250 Hz active or 8 ms / 125 Hz idle deadline schedule, driven by a dedicated worker thread waiting on
 /// <see cref="WindowsHighResolutionOneShotTimer"/> and re-armed via
-/// <see cref="CanonicalPublisherDeadlineMath"/>.
+/// <see cref="CanonicalPublisherDeadlineMath"/>. The production worker suppresses identical idle
+/// native submissions with a bounded 250 ms refresh; explicit tick-source calls remain one write
+/// per supplied tick.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -32,6 +34,7 @@ internal sealed class CanonicalXbox360InputPublisher
 {
     private static readonly TimeSpan ActiveProductionPeriod = TimeSpan.FromMilliseconds(4);
     private static readonly TimeSpan IdleProductionPeriod = TimeSpan.FromMilliseconds(8);
+    private static readonly TimeSpan IdleDuplicateRefreshInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>Test-only seam so the join-timeout fail-closed path can be exercised deterministically.</summary>
@@ -49,6 +52,9 @@ internal sealed class CanonicalXbox360InputPublisher
     private Task? _task;
     private int _publishedStateCount;
     private int _faultReported;
+    private Xbox360DeviceState _lastAcceptedState;
+    private bool _hasLastAcceptedState;
+    private long _lastSuccessfulSubmissionTimestamp;
 
     // Production path only: dedicated worker thread driven by a real Windows high-resolution
     // one-shot timer, re-armed each iteration against the deadline schedule below. Never used when a
@@ -113,6 +119,9 @@ internal sealed class CanonicalXbox360InputPublisher
         if (HasRunResources)
             throw new InvalidOperationException("The previous canonical Xbox360 publisher run has not been cleaned up; call StopAsync() before starting again.");
         Interlocked.Exchange(ref _faultReported, 0);
+        _lastAcceptedState = default;
+        _hasLastAcceptedState = false;
+        _lastSuccessfulSubmissionTimestamp = 0;
 
         if (_ticks is not null)
         {
@@ -271,7 +280,7 @@ internal sealed class CanonicalXbox360InputPublisher
                 var signaled = WaitHandle.WaitAny(handles);
                 if (signaled == 0) return; // stop event
 
-                var keepGoing = PublishCurrentStateOnce();
+                var keepGoing = PublishProductionStateOnce();
                 if (!keepGoing) return;
 
                 if (stopEvent.WaitOne(0)) return;
@@ -318,7 +327,7 @@ internal sealed class CanonicalXbox360InputPublisher
         {
             while (await ticks.WaitForTickAsync(token).ConfigureAwait(false))
             {
-                if (!PublishCurrentStateOnce()) return;
+                if (!PublishCurrentStateOnce(allowIdleDuplicateSkip: false)) return;
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -326,12 +335,20 @@ internal sealed class CanonicalXbox360InputPublisher
     }
 
     /// <summary>
-    /// The single publish operation shared by both the production worker thread and the test/async
-    /// tick loop: map the current snapshot through <see cref="Xbox360DeviceStateMapper"/>, invoke the
-    /// sink, and report+stop once on rejection. The current back-button mapping is read for each
-    /// report so a settings mutation does not require publisher restart or presentation churn.
+    /// Applies the production worker's cached 250-Hz decision before publishing one mapped state.
+    /// Kept internal so tests can exercise this exact per-tick decision with a controlled clock.
     /// </summary>
-    private bool PublishCurrentStateOnce()
+    internal bool PublishProductionStateOnce()
+    {
+        var requires250Hz = _requires250Hz();
+        return PublishCurrentStateOnce(allowIdleDuplicateSkip: !requires250Hz);
+    }
+
+    /// <summary>
+    /// Maps the current snapshot and invokes the sink. The current back-button mapping is read for
+    /// each report so a settings mutation does not require publisher restart or presentation churn.
+    /// </summary>
+    private bool PublishCurrentStateOnce(bool allowIdleDuplicateSkip)
     {
         var rawState = _snapshot.LatestState;
         var mapped = Xbox360DeviceStateMapper.Map(
@@ -339,14 +356,42 @@ internal sealed class CanonicalXbox360InputPublisher
             _backButtonMappingProvider(),
             _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.RightRear),
             _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.LeftRear));
+
+        if (allowIdleDuplicateSkip &&
+            _hasLastAcceptedState &&
+            StatesEqual(mapped, _lastAcceptedState) &&
+            Stopwatch.GetElapsedTime(_lastSuccessfulSubmissionTimestamp, _timestampProvider()) < IdleDuplicateRefreshInterval)
+        {
+            return true;
+        }
+
         if (!_setState(mapped))
         {
             ReportFault(new InvalidOperationException("Canonical VIIPER rejected a typed Xbox360 state."));
             return false;
         }
+
+        _lastAcceptedState = mapped;
+        _hasLastAcceptedState = true;
+        _lastSuccessfulSubmissionTimestamp = _timestampProvider();
         _publishedStateCount++;
         return true;
     }
+
+    private static bool StatesEqual(Xbox360DeviceState left, Xbox360DeviceState right) =>
+        left.Buttons == right.Buttons &&
+        left.LT == right.LT &&
+        left.RT == right.RT &&
+        left.LX == right.LX &&
+        left.LY == right.LY &&
+        left.RX == right.RX &&
+        left.RY == right.RY &&
+        left.Reserved0 == right.Reserved0 &&
+        left.Reserved1 == right.Reserved1 &&
+        left.Reserved2 == right.Reserved2 &&
+        left.Reserved3 == right.Reserved3 &&
+        left.Reserved4 == right.Reserved4 &&
+        left.Reserved5 == right.Reserved5;
 
     private void ReportFault(Exception exception)
     {
