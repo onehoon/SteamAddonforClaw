@@ -24,6 +24,7 @@ public sealed class CanonicalViiperRuntimeTests
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
         Assert.NotNull(runtime);
+        Assert.Null(native.ServerLogCallback);
         Assert.Equal(
         [
             "NewUSBServer",
@@ -1774,6 +1775,7 @@ public sealed class CanonicalViiperRuntimeTests
         private USBDeviceAttachmentState _edgeAttachmentState = USBDeviceAttachmentState.Detached;
         internal USBDeviceAttachmentState EdgeFinalAttachmentState => _edgeAttachmentState;
         internal Action<DSDeviceState>? OnSetEdgeState { get; set; }
+        internal ViiperLogCallback? ServerLogCallback { get; private set; }
 
         private int _attachmentStateQueries;
 
@@ -1786,6 +1788,7 @@ public sealed class CanonicalViiperRuntimeTests
         public bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null)
         {
             Record("NewUSBServer");
+            ServerLogCallback = logCallback;
             serverHandle = 10;
             return NewServerResult;
         }

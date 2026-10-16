@@ -186,7 +186,7 @@ public sealed class ElevationConfigurationTests
     }
 
     [Fact]
-    public void Wmi_fallback_diagnostics_are_preserved_on_the_production_helper_path()
+    public void Wmi_fallback_failure_diagnostics_are_preserved_on_the_production_helper_path()
     {
         var helper = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
         var client = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "TdpHelperClient.cs"));
@@ -195,7 +195,7 @@ public sealed class ElevationConfigurationTests
         Assert.Contains("fallbackCause", helper);
         Assert.Contains("GetMethodParameters", helper);
         Assert.Contains("Profiles.Tdp.Wmi", client);
-        Assert.Contains("GetWmiFallback", client);
+        Assert.Contains("(\"Stage\", response?.Stage ?? \"HelperProtocol\")", client);
         Assert.Contains("response.ExceptionType", client);
         Assert.Contains("response.ManagementStatus", client);
     }

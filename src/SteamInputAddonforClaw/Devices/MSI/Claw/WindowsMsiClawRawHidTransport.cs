@@ -81,7 +81,6 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
             return Task.FromResult(false);
         }
 
-        AppLog.Debug("NativeMode", "Raw MSI HID write succeeded.", ("Operation", "Write"), ("BytesWritten", written), ("RequestedLength", buffer.Length));
         return Task.FromResult(true);
     }
 

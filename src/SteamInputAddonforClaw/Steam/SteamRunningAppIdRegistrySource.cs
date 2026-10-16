@@ -37,13 +37,6 @@ public sealed class SteamRunningAppIdRegistrySource : IRunningAppIdSource, IDisp
             using var steamKey = Registry.CurrentUser.OpenSubKey(SteamRegistryPath, writable: false);
             var rawValue = steamKey?.GetValue(RunningAppIdValueName);
             var runningAppId = ConvertRegistryValueToRunningAppId(rawValue);
-            AppLog.Debug(
-                "Steam",
-                "RunningAppID registry value read.",
-                ("RawType", rawValue?.GetType().Name ?? "null"),
-                ("RawValue", rawValue),
-                ("RunningAppID", runningAppId),
-                ("Interpretation", rawValue is int ? "DwordBitPattern" : "SupportedRegistryRepresentation"));
             return runningAppId;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or ObjectDisposedException)

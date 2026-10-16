@@ -354,7 +354,7 @@ internal sealed class CanonicalViiperRuntime
                 DeviceHandlerConnectTimeoutMs = 5_000,
                 WriteBatchFlushIntervalMs = 1
             };
-            if (!native.NewUSBServer(ref config, out serverHandle, CanonicalViiperDiagnosticLog.Callback))
+            if (!native.NewUSBServer(ref config, out serverHandle, logCallback: null))
             {
                 LogInitFailure("NewUSBServerFailed");
                 return null; // nothing acquired -- proven clean, nothing to discard.
