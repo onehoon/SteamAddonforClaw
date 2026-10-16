@@ -352,7 +352,7 @@ internal sealed class CanonicalViiperRuntime
                 Addr = address,
                 ConnectionTimeoutMs = 30_000,
                 DeviceHandlerConnectTimeoutMs = 5_000,
-                WriteBatchFlushIntervalMs = 1
+                WriteBatchFlushIntervalMs = 0
             };
             if (!native.NewUSBServer(ref config, out serverHandle, logCallback: null))
             {
