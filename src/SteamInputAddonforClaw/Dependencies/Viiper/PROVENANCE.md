@@ -63,10 +63,14 @@ The following Addon files must remain aligned with this artifact:
 - this provenance record
 - `Dependencies/Viiper/viiper.lock.json` (machine-readable identity; verified by `scripts/verify-viiper.ps1`)
 
-The active Addon composition uses one canonical runtime: Xbox360 for Windows
-mode and Steam Deck (default) or optionally selected DualSense Edge for
-Steam/Big Picture, with only one attached output and publisher at a time. Edge
-logical-device creation remains lazy. The Steam Deck identity `28DE:1205` is
-Deck-only. MSI Claw EX basic non-gyro controller input is validated; physical
-Edge recognition, controls, motion orientation, PS/QAM, rumble, and lifecycle
-require separate user validation after merge.
+The active Addon composition uses one canonical runtime/server and one
+caller-owned USB bus. Xbox360, Steam Deck, and DualSense Edge typed logical
+devices are all created and verified detached during shared-runtime
+initialization; all three are required for runtime readiness. Only the
+selected device is attached and published: Xbox360 for regular Windows use,
+or Steam Deck (default) / optionally selected DualSense Edge for Steam/Big
+Picture. Edge attachment and publisher activation are deferred until
+selection; Edge logical-device creation is not lazy. The Steam Deck identity
+`28DE:1205` is Deck-only. MSI Claw EX basic non-gyro controller input is
+validated; physical Edge recognition, controls, motion orientation, PS/QAM,
+rumble, and lifecycle require separate user validation after merge.
