@@ -718,6 +718,11 @@ public sealed class MainUiLocalizationResourceTests
         {
             var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
             Assert.StartsWith("Controller_", uid, StringComparison.Ordinal);
+            var message = (string?)element.Attribute("Message");
+            if (message is null) continue;
+
+            Assert.Equal(message, english[$"{uid}.Message"]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[$"{uid}.Message"]));
         }
 
         var localizedProperties = new[] { "Text", "Content", "Header", "Description", "Message" };
@@ -868,7 +873,7 @@ public sealed class MainUiLocalizationResourceTests
         foreach (var element in uidElements)
         {
             var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
-            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText" })
+            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText", "Message" })
             {
                 var sourceValue = (string?)element.Attribute(property);
                 if (sourceValue is null) continue;
@@ -980,7 +985,15 @@ public sealed class MainUiLocalizationResourceTests
         Assert.DoesNotContain("${feature} could not be updated.", source, StringComparison.Ordinal);
 
         var verifier = File.ReadAllText(Path.Combine(root, "scripts", "verify-ui-localization-pri.ps1"));
-        Assert.Contains("Text|Content|Header|Description|PlaceholderText", verifier, StringComparison.Ordinal);
+        var propertyPattern = Regex.Match(verifier, @"if \(\$key -match '(?<pattern>[^']+)'\)");
+        Assert.True(propertyPattern.Success, "The published PRI verifier must expose its XAML property-key pattern.");
+        var messageKeyMatch = Regex.Match(
+            "Controller_FrontButtonPathValidationInfoBar.Message",
+            propertyPattern.Groups["pattern"].Value);
+        Assert.True(messageKeyMatch.Success, "The published PRI verifier must treat Message as a XAML property resource.");
+        Assert.Equal(
+            "/Resources/Controller_FrontButtonPathValidationInfoBar/Message",
+            $"/Resources/{messageKeyMatch.Groups["uid"].Value}/{messageKeyMatch.Groups["property"].Value}");
     }
 
     [Fact]
@@ -1021,7 +1034,7 @@ public sealed class MainUiLocalizationResourceTests
         {
             var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
             Assert.StartsWith("Xbox_", uid, StringComparison.Ordinal);
-            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText" })
+            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText", "Message" })
             {
                 var sourceValue = (string?)element.Attribute(property);
                 if (string.IsNullOrWhiteSpace(sourceValue)) continue;
