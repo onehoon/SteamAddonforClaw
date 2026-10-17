@@ -63,6 +63,8 @@ public sealed partial class MainWindow : Window
     private bool _prerequisiteSetupPendingActivation;
     private bool _prerequisiteSetupInProgress;
     private bool _prerequisiteSetupAttemptedForCurrentProcess;
+    private bool _centerMDisableConfirmationRequestedForCurrentProcess;
+    private bool _centerMDisableConfirmationPendingAfterSetup;
     private DeveloperPage? _developerMenuContent;
     private ClawSensorProbePage? _clawSensorProbeContent;
     private FanHardwareProbePage? _fanHardwareProbeContent;
@@ -764,7 +766,11 @@ public sealed partial class MainWindow : Window
             Volatile.Write(ref _statusRefreshPending, 1);
             return;
         }
-        try { RenderSystemStatus(await _frontend.CaptureStatusAsync()); }
+        try
+        {
+            RenderSystemStatus(await _frontend.CaptureStatusAsync());
+            await TryShowCenterMDisableConfirmationAsync();
+        }
         catch (Exception exception)
         {
             _profileContent?.SetSteamActivity(null);
@@ -838,7 +844,10 @@ public sealed partial class MainWindow : Window
             var result = await _frontend.RunPrerequisiteSetupAsync();
             AppLog.Info("PrerequisiteSetup", "Prerequisite setup worker finished.", ("Result", result.Result));
             if (result.Status is not null)
+            {
                 RenderSystemStatus(result.Status);
+                await TryShowCenterMDisableConfirmationAsync();
+            }
             await HandlePrerequisiteSetupResultAsync(result.Result);
         }
         catch (Exception exception) { AppLog.Warn("PrerequisiteSetup", "Automatic prerequisite setup failed.", exception); }
@@ -856,7 +865,7 @@ public sealed partial class MainWindow : Window
             or FrontendPrerequisiteSetupResultKind.Installed
             or FrontendPrerequisiteSetupResultKind.RebootRequired)
         {
-            await DeviceContent.ConfirmCenterMDisableAfterPrerequisiteSetupAsync();
+            await TryShowCenterMDisableConfirmationAsync(afterPrerequisiteSetup: true);
             return;
         }
 
@@ -875,6 +884,39 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "OK",
             XamlRoot = Content.XamlRoot
         }.ShowAsync();
+    }
+
+    private async Task TryShowCenterMDisableConfirmationAsync(bool afterPrerequisiteSetup = false)
+    {
+        if (afterPrerequisiteSetup)
+            _centerMDisableConfirmationPendingAfterSetup = true;
+
+        if (_centerMDisableConfirmationRequestedForCurrentProcess)
+        {
+            _centerMDisableConfirmationPendingAfterSetup = false;
+            return;
+        }
+
+        var prerequisitesAreReady = _latestSystemStatus?.SetupStatus == FrontendSetupStatus.Complete;
+        if (!_centerMDisableConfirmationPendingAfterSetup && !prerequisitesAreReady)
+            return;
+
+        if (!_windowActivatedForUser || Content.XamlRoot is null || DeviceContent.XamlRoot is null)
+            return;
+
+        var requestedAfterSetup = _centerMDisableConfirmationPendingAfterSetup;
+        _centerMDisableConfirmationRequestedForCurrentProcess = true;
+        _centerMDisableConfirmationPendingAfterSetup = false;
+        try
+        {
+            await DeviceContent.ConfirmCenterMDisableAfterPrerequisiteSetupAsync();
+        }
+        catch (Exception exception)
+        {
+            _centerMDisableConfirmationRequestedForCurrentProcess = false;
+            _centerMDisableConfirmationPendingAfterSetup = requestedAfterSetup;
+            AppLog.Warn("Device", "Center M disable confirmation could not be shown.", exception);
+        }
     }
 
     private void UpdatePrerequisiteSetupBusyUi()
@@ -1051,6 +1093,7 @@ public sealed partial class MainWindow : Window
     {
         SetLocalizedSettingsItemContent();
         ApplyUpdateReadySettingsBadge();
+        _ = TryShowCenterMDisableConfirmationAsync();
         if (_prerequisiteSetupPendingActivation && _windowActivatedForUser)
             _ = RefreshSystemStatusAsync();
 

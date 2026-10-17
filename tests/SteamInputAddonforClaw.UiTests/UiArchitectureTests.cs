@@ -1113,7 +1113,7 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Missing_prerequisites_start_automatically_after_activation_and_reuse_center_m_confirmation()
+    public void Missing_and_already_ready_prerequisites_reuse_center_m_confirmation()
     {
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
@@ -1122,6 +1122,11 @@ public sealed class UiArchitectureTests
 
         Assert.Contains("_frontend.CaptureStatusAsync()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("snapshot.CanInstallRequiredComponents", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_latestSystemStatus?.SetupStatus == FrontendSetupStatus.Complete", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_centerMDisableConfirmationRequestedForCurrentProcess", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("!_windowActivatedForUser || Content.XamlRoot is null || DeviceContent.XamlRoot is null", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("await TryShowCenterMDisableConfirmationAsync();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("TryShowCenterMDisableConfirmationAsync(afterPrerequisiteSetup: true)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("RunPrerequisiteSetupAsync()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("RequestPrerequisiteSetupActivation()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_prerequisiteSetupInProgress", mainWindow, StringComparison.Ordinal);
