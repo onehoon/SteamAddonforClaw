@@ -68,7 +68,7 @@ Physical authority
 
 Virtual presentation while Addon owns the controller
     Steam/BPM inactive → Xbox360
-    Steam/BPM active   → SteamDeck
+    Steam/BPM active   → SteamDeck (default) or DualSense Edge (Settings)
 ```
 
 Steam no longer decides whether the Addon owns the physical controller.
@@ -471,19 +471,22 @@ one VIIPER server
 one caller-owned bus
 one persistent Xbox360 logical device
 one persistent SteamDeck logical device
+one persistent DualSense Edge logical device
 ```
 
-Both devices are created detached.
+All three logical devices are created detached during runtime initialization
+(`autoAttachLocalhost: false`). Steam Deck and DualSense Edge selection controls
+**attachment/publishing**, not logical-device creation.
 
 Stable presentation invariant:
 
 ```text
-Attached(Xbox360) XOR Attached(SteamDeck) == true
+Exactly one of {Xbox360, SteamDeck, DualSense Edge} is attached/live.
 ```
 
-Short controlled transitions may have both detached.
+Short controlled transitions may have all three detached.
 
-Never intentionally attach both.
+Never intentionally attach more than one.
 
 ---
 
@@ -495,6 +498,7 @@ Normal/default:
 Steam/BPM inactive
 → Xbox360 attached/live
 → SteamDeck detached
+→ DualSense Edge detached
 ```
 
 Steam/BPM:
@@ -502,7 +506,8 @@ Steam/BPM:
 ```text
 Steam game active OR BPM active
 → Xbox360 detached
-→ SteamDeck attached/live
+→ selected Steam presentation attached/live: SteamDeck (default) or DualSense Edge
+→ other Steam presentation detached
 ```
 
 Steam/BPM never changes:
@@ -520,8 +525,8 @@ Do not hard-code X360 at boot.
 Immediately before first attach:
 
 ```text
-read freshest Steam/BPM state
-→ choose X360 or SteamDeck
+read freshest Steam/BPM state and existing Steam controller preference
+→ choose Xbox360, SteamDeck, or DualSense Edge
 ```
 
 This handles Steam starting directly into BPM without an unnecessary X360 attach/switch cycle.
@@ -555,7 +560,10 @@ X360 neutral
 → start SteamDeck publisher
 ```
 
-SteamDeck → X360 uses the same inverse pattern.
+SteamDeck → X360 uses the same inverse pattern. The corresponding
+Xbox360 ↔ DualSense Edge switch follows the same single-attached-presentation
+ownership and stop/neutral/detach contract, using Edge's own session/publisher
+and feedback handling.
 
 Throughout normal presentation switching:
 
@@ -1109,7 +1117,7 @@ MSI authority restored
 8. **Ordinary startup/recovery keeps PID1902 if already present; the A2VM 7/8 automatic boot-rumble cycle and session-end preparation are disabled by default.**
 9. **DirectInput and HidHide are persistent physical-ownership infrastructure, not Steam-session resources.**
 10. **HidHide configuration persists across restart while Disabled.**
-11. **Xbox360 is normal/default presentation; SteamDeck is Steam/BPM presentation.**
+11. **Xbox360 is the normal/Windows presentation; SteamDeck (default) or DualSense Edge (Settings) is the Steam/BPM presentation.**
 12. **Steam/BPM changes presentation only, never physical authority.**
 13. **Exactly one virtual logical device is attached/live at a stable point.**
 14. **PID1901 during Disabled runtime is recoverable owned-state drift, not a reason to yield.**
