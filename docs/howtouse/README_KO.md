@@ -2,7 +2,7 @@
 
 Steam Addon for Claw는 지원되는 MSI Claw 핸드헬드의 내장 컨트롤러에 Steam 연동과 게임별 성능 설정을 제공합니다. Steam 게임 또는 Steam Big Picture가 활성화되면 내장 컨트롤러를 Steam Deck 또는 DualSense Edge로, 그 외에는 Xbox 360 컨트롤러로 표현할 수 있습니다. 전역 Steam 컨트롤러와 선택적인 Steam 게임별 컨트롤러도 지정할 수 있으며, 전면·후면 버튼, 성능 HUD, 바로가기, 별도의 Quick Settings Overlay, Windows 게임 홈 동작도 설정할 수 있습니다.
 
-이 안내서는 현재 앱에서 실제로 제공하는 기능을 설명합니다. 메인 앱에는 **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **How to Use**, **Settings**가 있습니다. **Quick Settings Overlay**는 컨트롤러로 조작하는 별도 창이며, Steam Quick Access나 ClawHUD와는 다릅니다.
+이 안내서는 현재 앱에서 실제로 제공하는 기능을 설명합니다. 메인 앱에는 **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **Tweaks**, **How to Use**, **Settings**가 있습니다. **Quick Settings Overlay**는 컨트롤러로 조작하는 별도 창이며, Steam Quick Access나 ClawHUD와는 다릅니다.
 
 ## 목차
 
@@ -19,6 +19,7 @@ Steam Addon for Claw는 지원되는 MSI Claw 핸드헬드의 내장 컨트롤�
   - [XBOX](#xbox)
   - [ClawHUD](#clawhud)
   - [Shortcut](#shortcut)
+  - [Tweaks](#tweaks)
   - [Settings](#settings)
 - [게임 프로필과 설정 우선순위](#게임-프로필과-설정-우선순위)
 - [Non-Steam 게임](#non-steam-게임)
@@ -44,9 +45,7 @@ Device 페이지에는 제조사와 모델, 호환 상태, 보드 식별 정보,
 
 컨트롤러 관리를 시작하기 전에 지원 모델인지 확인합니다. 모델을 식별할 수 없거나 지원되지 않으면 컨트롤러 기능이 시작되지 않습니다.
 
-MSI Claw 8 EX AI+ CG3EM은 실제 기기에서 검증되었습니다. A2VM 모델도 소프트웨어에서 지원하지만 동등한 실기 검증은 아직 진행 중입니다. 필요한 기능을 기기가 제공하지 않으면 일부 하드웨어 설정이 숨겨지거나 사용할 수 없을 수 있습니다.
-
-A2VM 8에서는 수동 컨트롤러 복구로 무음 모터가 다시 동작한 것을 실기 확인했습니다. A2VM 7의 진동 강도와 LED 지원은 A2VM 공통 프로토콜 및 firmware 정책에 따른 것이며, A2VM 7 실기에서 개별 검증한 결과는 아닙니다.
+MSI Claw 8 EX AI+ CG3EM은 실제 기기에서 검증되었습니다. A2VM 모델도 지원하지만 일부 기능은 실기 검증이 진행 중입니다. MSI Claw 8 AI+ A2VM에서는 Steam Input과 게임에서 자이로 입력이 확인되었습니다. LED·진동 등 기기별 기능은 모델과 펌웨어에 따라 사용 가능 여부가 달라질 수 있습니다.
 
 ## 요구 사항 및 호환성
 
@@ -66,7 +65,7 @@ A2VM 8에서는 수동 컨트롤러 복구로 무음 모터가 다시 동작한 
 4. Addon이 내장 컨트롤러를 관리하도록 하려면 **MSI Center M**의 **Disable**을 선택한 후 **Disable and Restart**를 확인합니다. 컨트롤러 관리 권한을 바꾸려면 Windows 재시작이 필요합니다.
 5. Windows가 다시 시작되면 Addon은 백그라운드에서 실행됩니다. 메인 앱을 열어 버튼, 성능 설정, 프로필 또는 ClawHUD를 설정하세요.
 
-A2VM 7/8에서는 실제 Windows 부팅당 한 번 선택적 컨트롤러 모드 진동 초기화를 시도합니다. EX/CG3EM은 자동 초기화에서 제외됩니다. 실제 Windows 종료·재시작 때 컨트롤러 출력과 입력 정리가 안전하게 완료된 경우에만 PID1901 전환 명령을 한 번 best-effort로 보낼 수 있습니다. 이는 MSI Center M 권한을 해제하거나 HidHide 설정을 바꾸는 동작이 아니며, Windows 종료 전에 PID1901 재열거까지 확인하지 않습니다. Addon 재시작, 로그오프, 절전·최대 절전·복귀에는 이 경로를 사용하지 않습니다.
+진동이 나오지 않는다면 게임을 저장하고 종료한 뒤 **Controller → Vibration Strength → Vibration Recovery → Restore**를 사용하세요. 자동 진동 복구는 기본적으로 실행되지 않습니다. 복구 후 좌우 모터의 **Test** 버튼으로 실제 진동을 확인할 수 있습니다.
 
 MSI 기본 컨트롤러 동작을 계속 사용하려면 MSI Center M을 활성화 상태로 두세요. 나중에 Device에서 **Enable and Restart**를 선택해도 됩니다.
 
@@ -80,15 +79,15 @@ MSI Center M의 컨트롤러 관리가 비활성화되어 Addon이 컨트롤러�
 | **Steam Deck** | 전역 선택 또는 활성화된 게임 프로필에서 Steam 게임/Big Picture용으로 선택한 경우 |
 | **DualSense Edge** | **Controller → Controller for Steam Game** 또는 활성화된 Steam 게임 프로필에서 선택한 경우 |
 
-전역 **Steam Deck** 또는 **DualSense Edge**는 **Controller → Controller for Steam Game**에서 선택합니다. 내부 기본값은 Steam Deck이며 표시 이름에는 “(Default)”를 붙이지 않습니다. Steam 게임 프로필에서 별도 컨트롤러를 지정할 수도 있고, **Use default**는 전역 선택을 따릅니다. Steam 게임 또는 Big Picture가 활성화되면 컨트롤러 선택만 잠기며, 게임별 재정의가 있으면 실제 적용된 컨트롤러를 표시합니다. Steam과 Big Picture가 모두 비활성인 일반 Windows나 Xbox 게임 중에는 컨트롤러 선택을 변경할 수 있습니다. **Gyroscope** 토글은 모든 상태에서 변경할 수 있습니다. Steam 게임 시작/종료 시 활성 게임의 선택과 전역 선택 사이를 자동 전환하고, Steam 게임과 Big Picture가 모두 비활성인 일반 Windows에서는 Xbox 360을 사용합니다. 한 번에 하나의 가상 컨트롤러만 연결됩니다. **Normal** 또는 **Steam Game / Big Picture**에서 설정한 버튼 동작은 실제 활성화된 컨트롤러 표현에 맞춰 사용됩니다.
+전역 **Steam Deck** 또는 **DualSense Edge**는 **Controller → Controller for Steam Game**에서 선택합니다. 기본 선택은 Steam Deck입니다. Steam 게임 프로필에서 별도 컨트롤러를 지정할 수도 있고, **Use default**는 전역 선택을 따릅니다. Steam 게임 또는 Big Picture가 활성화되면 컨트롤러 선택만 잠기며, 게임별 재정의가 있으면 실제 적용된 컨트롤러를 표시합니다. Steam과 Big Picture가 모두 비활성인 일반 Windows나 Xbox 게임 중에는 컨트롤러 선택을 변경할 수 있습니다. **Gyroscope** 토글은 모든 상태에서 변경할 수 있습니다. Steam 게임 시작/종료 시 활성 게임의 선택과 전역 선택 사이를 자동 전환하고, Steam 게임과 Big Picture가 모두 비활성인 일반 Windows에서는 Xbox 360을 사용합니다. 한 번에 하나의 가상 컨트롤러만 연결됩니다. **Normal** 또는 **Steam Game / Big Picture**에서 설정한 버튼 동작은 실제 활성화된 컨트롤러 표현에 맞춰 사용됩니다.
 
 ## 자이로스코프 / IMU — Steam Input 설정
 
 **Controller → Controller for Steam Game**의 전역 **Gyroscope** 토글은 기본적으로 켜져 있습니다. 켜져 있고 Steam용 가상 컨트롤러가 적용되면 지원되는 물리 자이로스코프·가속도 값을 Steam Input에 전달합니다. 끄면 센서 수집과 모션 입력을 중단하지만 일반 컨트롤러 입력과 가상 장치 연결은 유지됩니다. Addon 자체에서는 자이로를 마우스나 조이스틱으로 변환하지 않습니다. **Xbox 360 모드에서는 자이로 입력을 제공하지 않습니다.**
 
-**자이로를 중요하게 사용한다면 현재 A2VM 8 관찰 결과는 DualSense Edge를 우선 추천합니다.** **Controller → Controller for Steam Game** 또는 활성화된 Steam 게임 프로필에서 선택하세요. A2VM 8 테스트에서는 Edge 자이로 움직임이 부드러웠지만, 가상 Steam Deck의 **Gyro To Mouse**는 Addon **0.1.365**에서도 끊김(Choppy)이 보고됐습니다. Gyroscope 토글은 센서 수집/입력만 켜고 끄며 이 부드러움 문제를 해결하지 않습니다. 이 결과가 모든 기기·게임에 동일하게 적용되는 것은 아닙니다. [Steam Deck 자이로 조사 기록](../gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md)에서 현재까지의 결과를 확인할 수 있습니다.
+**자이로를 주로 사용한다면 DualSense Edge 모드를 고려해 보세요.** 테스트한 MSI Claw 8 AI+ A2VM에서는 DualSense Edge 자이로 움직임이 더 부드러웠고, Steam Deck 모드의 **Gyro To Mouse**에는 끊김이 보고됐습니다. 기기와 게임에 따라 결과가 다를 수 있습니다. Gyroscope 토글은 모션 입력을 켜고 끄는 기능이며 활성화 조건과 감도는 Steam Input에서 설정합니다.
 
-**MSI Claw 8 AI+ A2VM(8인치) 검증 기록:** Steam Deck 자이로 보정 화면에서 실제 센서 입력과 3개 회전축의 6개 방향이 확인됐으며, **Aniimo**에서는 Steam Input의 **Always On** 조건에서 자이로 → 조이스틱 조작이 동작했습니다(Addon **0.1.350.0**). 그러나 이 결과는 **Gyro To Mouse가 부드럽다는 검증이 아닙니다.**
+같은 기기에서 Steam 자이로 보정 화면에 움직임이 표시되고, Steam Input 활성화 조건을 **Always On**으로 설정했을 때 게임의 자이로 → 조이스틱 카메라 조작이 작동한 사례가 있습니다.
 
 **자이로 동작과 활성화 조건, 감도는 Steam Input에서 설정하세요.** Steam에서 게임별 **컨트롤러 레이아웃 → 자이로 동작(Gyro Behavior)**을 열고 **Gyro To Mouse** 또는 자이로 → 조이스틱 동작을 선택합니다. 보정 화면에서 센서가 움직여도 활성화 버튼·조건에 따라 게임에서 동작하지 않을 수 있으므로, 처음에는 **Always On**으로 확인한 뒤 필요한 조건과 감도를 조정하세요.
 
@@ -110,18 +109,19 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 - **TDP Control** — 프로세서 전력 한도 관리를 켭니다. **PL1**은 지속 전력 한도이고 **PL2**는 짧은 시간 적용되는 더 높은 전력 한도입니다. **Plugged in**과 **On battery** 값은 따로 설정합니다. 설정 가능한 범위는 Claw 모델에 따라 다릅니다. 지원되는 경우 첫 설정에서 기존 MSI Center M Manual TDP 값을 불러올 수 있습니다.
 - **CPU Boost** — Windows 프로세서 부스트 모드를 전원 상태별로 관리합니다. **Disabled**, **Enabled**, **Aggressive**, **Efficient Enabled**, **Efficient Aggressive**, **Aggressive At Guaranteed**, **Efficient Aggressive At Guaranteed** 중 선택합니다.
+- **Maximum Processor State** — Windows의 최대 프로세서 성능 상태를 **Plugged in**과 **On battery** 각각 **99%** 또는 **100%**로 설정합니다. CPU 사용률 상한을 정하는 기능은 아니며 CPU Boost와 별도로 동작합니다. 처음 설치하면 꺼져 있습니다. 끄면 관리가 중단되지만 이전 Windows 값으로 자동 복원되지는 않습니다.
 - **Windows Power Mode** — 전원 상태별 Windows 전원 모드를 관리합니다. **Best power efficiency**, **Balanced**, **Best performance** 중 선택합니다.
 - **Battery charge limit** — 기기가 지원하는 경우 충전 한도를 켜고 60%부터 100%까지 5% 단위로 설정합니다.
 
-**TDP Control**, **CPU Boost**, **Windows Power Mode**를 끄면 Addon이 해당 설정의 관리를 중단합니다. Addon이 건드리기 전의 Windows/MSI 값을 언제나 그대로 복원한다는 의미는 아닙니다. 저장한 값은 유지되므로 나중에 다시 켤 수 있습니다.
+**TDP Control**, **CPU Boost**, **Maximum Processor State**, **Windows Power Mode**를 끄면 Addon이 해당 설정의 관리를 중단합니다. Addon이 건드리기 전의 Windows/MSI 값을 언제나 그대로 복원한다는 의미는 아닙니다. 저장한 값은 유지되므로 나중에 다시 켤 수 있습니다.
 
 **Battery charge limit**은 동작이 다릅니다. 이 토글은 MSI의 충전 제한 기능 자체를 직접 켜거나 끕니다. 선택한 충전 한도 퍼센트는 나중에 다시 사용할 수 있도록 저장됩니다.
 
 ### Controller
 
-페이지 맨 위의 **Controller for Steam Game** 영역에서 **Steam Deck** 또는 **DualSense Edge**를 선택하고 **Gyroscope**를 켜거나 끕니다. Steam Deck은 내부 기본값이지만 표시 이름에는 “(Default)”가 없습니다. Steam 게임/Big Picture 중에는 컨트롤러 선택만 잠기고 실제 적용된 컨트롤러가 표시됩니다. 자이로 토글은 Steam 게임, Big Picture, Xbox 게임, 일반 Windows 상태에서 변경할 수 있습니다. Runtime 상태를 읽을 수 없을 때는 컨트롤러 선택을 잠급니다.
+페이지 맨 위의 **Controller for Steam Game** 영역에서 기본값인 **Steam Deck** 또는 **DualSense Edge**를 선택하고 **Gyroscope**를 켜거나 끕니다. Steam 게임/Big Picture 중에는 컨트롤러 선택만 잠기고 실제 적용된 컨트롤러가 표시됩니다. 자이로 토글은 Steam 게임, Big Picture, Xbox 게임, 일반 Windows 상태에서 변경할 수 있습니다. Runtime 상태를 읽을 수 없을 때는 컨트롤러 선택을 잠급니다.
 
-**Controller**에서 **Gamebar Button**(WING)과 **Center M Button**의 동작을 설정합니다. 각 버튼은 **Normal**과 **Steam Game / Big Picture**에서 서로 다른 동작을 가질 수 있습니다. 현재 컨트롤러 표현에 따라 사용할 설정이 자동으로 선택됩니다.
+**Controller**에서 **XBOX Gamebar Button**(WING)과 **Center M Button**의 동작을 설정합니다. 각 버튼은 **Normal**과 **Steam Game / Big Picture**에서 서로 다른 동작을 가질 수 있습니다. 현재 컨트롤러 표현에 따라 사용할 설정이 자동으로 선택됩니다.
 
 설정 그룹에 따라 사용할 수 있는 동작이 다릅니다.
 
@@ -139,9 +139,9 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 **M1 / M2**에서는 Xbox 360 컨트롤러로 표시되는 동안의 후면 버튼 동작을 설정합니다. 각각 **Disabled**, A/B/X/Y, D-Pad 방향, LB/RB, LT/RT, L3/R3, View, Menu, Xbox Guide 중 선택할 수 있습니다. 두 버튼을 같은 대상으로 지정해도 됩니다. Steam Game / Big Picture에서는 M1은 R4, M2는 L4로 유지되며 이 전역 Xbox 360 설정은 Steam Deck 동작을 바꾸지 않습니다. XBOX 게임에서 게임별 M1/M2 설정을 켜면 전역 매핑 대신 사용할 수 있습니다.
 
-기기에서 지원하는 경우 **Joystick LED**를 켜거나 끄고, 전체 LED에 적용할 하나의 고정 색상과 0%~100% 밝기를 설정할 수 있습니다. A2VM LED는 컨트롤러에서 실제 firmware `0x0230`이 확인될 때만 허용하며, EX는 알려진 firmware 주소만 사용합니다. **Vibration Strength**에서는 좌우 모터를 각각 0%~100%로 조절하고 각 **Test** 버튼으로 확인합니다. 진동 강도 쓰기는 CG3EM과 A2VM 7/8에서 활성화되어 있으며, A2VM 7은 공통 제품군 정책에 따른 지원으로 개별 실기 검증은 아직 없습니다.
+기기에서 지원하는 경우 **Joystick LED**를 켜거나 끄고 하나의 고정 색상과 0%~100% 밝기를 설정할 수 있습니다. **Vibration Strength**에서는 좌우 모터를 각각 0%~100%로 조절하고 각 **Test** 버튼으로 실제 진동을 확인합니다. 모델·펌웨어에 따라 일부 설정은 사용할 수 없으며, A2VM 7의 일부 동작은 기기별 실기 검증이 진행 중입니다.
 
-기존 **Vibration Strength** 펼침 영역에는 세 번째 **Vibration Recovery** 카드와 세 모델 공통 **Restore Vibration** 버튼도 있습니다. 가상 컨트롤러가 잠시 끊기므로 게임을 저장하고 종료한 뒤 실행하세요. 성공 메시지는 소프트웨어 복구 완료만 의미하며 모터의 실제 진동을 보증하지 않습니다. 이후 **Left Test**와 **Right Test**를 각각 실행해 확인하세요. EX/CG3EM은 이 수동 복구만 제공하며 A2VM 부팅 초기화는 실행하지 않습니다.
+**Vibration Strength** 안의 **Vibration Recovery → Restore**는 세 지원 모델에서 사용할 수 있는 수동 진동 복구 기능입니다. 실행 중 가상 컨트롤러가 잠시 끊기므로 게임을 저장하고 종료한 뒤 사용하세요. 성공 메시지 자체가 실제 모터 동작을 보증하지는 않으므로 좌우 **Test** 버튼으로 확인하세요. 자동 진동 복구는 기본적으로 꺼져 있습니다.
 
 ### Steam
 
@@ -188,7 +188,28 @@ Intel XeFG를 사용하는 경우 PresentMon이 드라이버에서 생성된 모
 - 기본 디스플레이를 JPEG 스크린샷으로 캡처
 - Steam Big Picture, Steam 클라이언트 또는 Xbox 앱 열기
 
-스크린샷은 사용자 지정 폴더에 저장하거나 기본 Windows `Pictures\Screenshots` 폴더를 사용할 수 있습니다. **Browse**로 폴더를 선택하고, **Open folder**로 탐색기에서 열며, **Use default**로 기본 폴더를 사용합니다. Overlay에 표시된 바로가기는 여기에서 설정한 동작을 실행합니다. 세부 설정은 메인 앱에서 편집하세요.
+**실행 파일(.exe)**과 **PowerShell** 바로가기에는 **Run as administrator** 옵션이 있으며 기본값은 꺼짐입니다. 관리자 권한이 꼭 필요한 동작에만 켜세요. 다른 바로가기 유형에는 이 옵션이 없습니다.
+
+스크린샷은 기본 디스플레이를 JPEG 파일로 저장합니다. **Browse**로 사용자 지정 폴더를 선택하거나 **Use default**로 Windows `Pictures\Screenshots` 폴더를 사용할 수 있습니다. **Open folder**는 선택된 폴더를 열며, **Save**를 눌러야 변경 사항이 저장됩니다. 스크린샷 바로가기는 하나만 추가할 수 있습니다.
+
+바로가기의 아이콘은 동작에 맞춰 자동 설정되지만, 추가·편집 창에서 다른 아이콘을 선택하거나 기본 아이콘으로 되돌릴 수 있습니다. Overlay에는 설정한 바로가기와 아이콘이 표시됩니다. 세부 설정은 메인 앱에서 편집하세요.
+
+### Tweaks
+
+**Tweaks**에서는 지원되는 Windows 기능 및 레지스트리 설정을 변경할 수 있습니다. 처음 열거나 필요한 경우 안전 안내문을 확인해야 하며, 이 안내문은 하루에 한 번 표시될 수 있습니다. 일부 변경은 Windows 또는 파일 탐색기 재시작 후 적용됩니다. Addon이 자동으로 재시작하지는 않습니다. Windows 정책이나 기기 상태에 따라 사용할 수 없는 옵션도 있으며, 적용 확인이 필요한 상태는 화면에 따로 표시됩니다.
+
+**Gaming Performance** 항목:
+- **Memory Integrity** — Windows 커널 메모리 보호 기능을 켜거나 끕니다. **끄면 Windows 보안이 약화됩니다.** 켤 때는 호환되지 않는 드라이버나 프로그램이 영향을 받을 수 있습니다.
+- **Virtual Machine Platform** — Windows 가상화 플랫폼 기능을 켜거나 끕니다. 끄면 가상화 기능에 의존하는 프로그램이 동작하지 않을 수 있습니다.
+
+**Registry Tweaks** 항목:
+- **Faster Menus** — 메뉴 애니메이션을 끄고 하위 메뉴가 열리기까지의 지연을 줄입니다.
+- **Classic Context Menu** — Windows 11의 오른쪽 클릭 메뉴를 클래식 방식으로 표시합니다.
+- **Disable Password on Wake** — 절전에서 복귀할 때 로그인을 요구하지 않도록 합니다. **다른 사람이 기기에 직접 접근할 경우 바탕화면을 열 수 있으므로 주의하세요.**
+- **Disable Edge Background** — Edge의 시작 부스트 및 백그라운드 실행을 비활성화합니다. 이미 실행 중인 Edge는 직접 종료해야 할 수 있습니다.
+- **Disable Startup App Delay** — 시작 앱의 실행 지연 설정을 제거합니다. 실제 시작 속도 개선은 환경에 따라 달라집니다.
+
+**Disable ...**로 시작하는 항목은 토글을 **켜면 이름에 표시된 비활성화 동작이 적용**됩니다. 토글을 끄면 Windows가 허용하는 범위에서 그 옵션을 해제합니다.
 
 ### Settings
 
@@ -196,21 +217,25 @@ Intel XeFG를 사용하는 경우 PresentMon이 드라이버에서 생성된 모
 
 **Check**를 누르면 업데이트를 다시 확인하고 있으면 다운로드합니다. 다운로드가 끝나 설치할 수 있으면 버튼이 **Install update**로 바뀝니다. 선택하면 Addon이 재시작되고 다음 안전한 시작 과정에서 업데이트가 적용됩니다. 업데이트가 없으면 최신 상태라고 표시됩니다.
 
-#### Windows 게임 전체 화면 환경 (Windows Gaming Full Screen Experience)
+#### XBOX Mode (Full Screen Experience)
 
-Windows 게임 전체 화면 환경에 사용할 홈 앱을 **Off**, **Xbox**, **Steam Big Picture** 중 선택합니다. **Off**는 Addon이 선택한 게임 홈을 사용하지 않도록 합니다. **Start on Windows startup**은 다음 Windows 시작 시 선택한 홈 앱으로 바로 진입할지 정합니다. Windows가 이미 다른 앱을 사용 중이면 **Other Windows app**에 현재 선택이 표시됩니다. 새 옵션으로 선택하거나 해당 앱의 시작 동작을 Addon에서 관리할 수는 없습니다.
+Windows 게임 전체 화면 환경에서 사용할 홈 앱을 **Off**, **XBOX**, **Steam Big Picture** 중 선택합니다. **Off**는 Addon이 선택한 게임 홈을 사용하지 않도록 합니다. **Start on Windows startup**은 다음 Windows 시작 시 선택한 홈 앱으로 바로 진입할지 정합니다. Windows가 이미 다른 앱을 사용 중이면 **Other Windows app**에 현재 선택이 표시됩니다. 새 옵션으로 선택하거나 해당 앱의 시작 동작을 Addon에서 관리할 수는 없습니다.
+
+#### 앱 테마 (App theme)
+
+메인 앱의 표시 방식을 **System**, **Light**, **Dark** 중 선택합니다. **System**은 Windows의 테마 설정을 따릅니다.
 
 #### 현재 전원 소스만 표시 (Show only current power source)
 
 켜면 Quick Settings Overlay에서 현재 연결된 전원에 해당하는 컨트롤만 표시합니다. 메인 앱에서는 **Plugged in**과 **On battery** 설정을 계속 모두 볼 수 있습니다.
 
+#### 로깅 (Logging)
+
+기록할 로그의 상세 수준을 **Off**, **Info**, **Debug** 중 선택합니다. **Open folder**는 로그가 저장되는 폴더를 엽니다. 문제가 발생했을 때 기록을 확인하거나 오류를 제보할 때 사용할 수 있습니다.
+
 #### 필수 구성 요소 (Required Components)
 
 컨트롤러 기능에 필요한 구성 요소의 준비 상태를 확인합니다. 직접 드라이버를 설치하는 화면은 아닙니다. 앱에 설정 또는 재시작 안내가 표시되면 안내를 따르세요.
-
-#### 개발자 메뉴 (Developer Menu)
-
-Developer Menu는 개발자용 진단 메뉴이며 일반적인 설정이나 사용에는 필요하지 않습니다.
 
 ## 게임 프로필과 설정 우선순위
 
@@ -220,7 +245,7 @@ Steam 게임의 **Virtual Controller**는 마스터 프로필이 켜져 있을 �
 
 **TDP Control**, **CPU Boost**, **Windows Power Mode**는 Device와 게임 프로필 양쪽에 있는 기능입니다. 실행 중인 게임 프로필에서 해당 기능을 켜면 프로필 값이 우선합니다. 프로필에서 해당 기능을 끄면 활성화된 Device 설정을 계속 사용할 수 있습니다.
 
-**Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**은 게임 프로필 전용 기능입니다. 이 기능을 끄거나 일치하는 활성 게임 프로필이 없을 때 대신 사용할 Device 설정은 없습니다. **Battery charge limit**은 Device 전용이며 게임 프로필에는 포함되지 않습니다.
+**Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**은 게임 프로필 전용 기능입니다. 이 기능을 끄거나 일치하는 활성 게임 프로필이 없을 때 대신 사용할 Device 설정은 없습니다. **Battery charge limit**과 **Maximum Processor State**는 Device 전용이며 게임 프로필에는 포함되지 않습니다.
 
 ```text
 인식된 게임 실행 중 + 활성화된 프로필
@@ -241,7 +266,7 @@ Steam 게임의 **Virtual Controller**는 마스터 프로필이 켜져 있을 �
 
 ## Quick Settings Overlay
 
-Quick Settings Overlay는 컨트롤러로 조작하는 Addon의 별도 설정 창입니다. 메인 앱과 같은 저장 설정을 사용합니다. **Device**, **Profile**, **Controller**, **Shortcut**, **Setting** 탭이 있으며 **Setting → Tab Order**에서 순서를 바꿀 수 있습니다.
+Quick Settings Overlay는 컨트롤러로 조작하는 Addon의 별도 설정 창입니다. 메인 앱과 같은 저장 설정을 사용합니다. 기본 탭 순서는 **Shortcut**, **Device**, **Controller**, **Setting**, **Profile**이며 **Setting → Tab Order**에서 순서를 바꿀 수 있습니다.
 
 - **Device** — 지원되는 기기 전체 TDP Control, CPU Boost, Windows Power Mode, 배터리 충전 한도에 빠르게 접근합니다.
 - **Profile** — 현재 활성화되어 앱이 인식한 게임의 설정을 표시합니다. 게임이 없으면 “No game is currently running. Start a game to configure its profile.”라고 안내합니다. 게임과 기기에 따라 표시되는 항목이 다르며, XBOX 프로필에는 M1/M2 설정도 표시될 수 있습니다.
@@ -279,17 +304,17 @@ Addon 설정 탭을 Steam Quick Access Menu 안에 삽입하지 않습니다.
 | Menu / Start | Menu 동작 | Menu / Start |
 | M1 / M2 | R4 / L4 | Controller에서 설정, 기본값은 Disabled |
 
-WING과 Center M은 별도로 설정하는 전면 버튼이며 일반 게임패드 버튼 매핑 표에 포함되지 않습니다. **Steam Deck과 DualSense Edge 모드에서는 자이로/모션 출력을 지원합니다.** 게임별 활성화와 Gyro To Mouse·조이스틱 변환 및 감도 설정은 Steam Input에서 진행하며, 자이로를 주로 사용할 때는 **DualSense Edge**를 권장합니다.
+WING과 Center M은 별도로 설정하는 전면 버튼이며 일반 게임패드 버튼 매핑 표에 포함되지 않습니다. **Steam Deck과 DualSense Edge 모드에서는 자이로/모션 출력을 지원합니다.** 자이로 활성화 조건, Gyro To Mouse·조이스틱 동작 및 감도는 Addon이 아닌 Steam Input에서 설정하세요.
 
 ## 백그라운드 실행 및 업데이트
 
 메인 앱 창을 닫아도 백그라운드 Addon과 컨트롤러 표현은 종료되지 않습니다. 작업 표시줄 알림 영역 아이콘에서 **Open** 또는 **Restart Addon**을 선택할 수 있습니다. **Open**은 메인 앱을 다시 열고, **Restart Addon**은 실행 중인 Addon을 재시작합니다. 트레이 메뉴에는 일반적인 **Quit** 명령이 없습니다. 컨트롤러 관리를 MSI Center M에 돌리려면 **Device → MSI Center M → Enable and Restart**를 사용하세요. 앱 전체 제거에는 Windows의 일반 제거 절차를 사용하세요.
 
-Addon은 시작 후 백그라운드에서 업데이트를 확인하고 다운로드합니다. 이 과정은 현재 세션을 중단하지 않습니다. 다운로드된 업데이트는 나중에 안전한 Addon 시작 과정에서 적용됩니다. A2VM 7/8의 선택적 진동 초기화는 Windows 부팅당 한 번이며 Addon/업데이트 재시작마다 반복되지 않습니다. 직접 확인하려면 **Settings → Application updates → Check**를 사용하고, 업데이트가 준비되면 **Install update**를 선택하세요. 확인이나 다운로드에 실패해도 Addon은 계속 실행되며, 나중에 **Check**를 다시 선택할 수 있습니다.
+Addon은 시작 후 백그라운드에서 업데이트를 확인하고 다운로드합니다. 이 과정은 현재 세션을 중단하지 않습니다. 다운로드된 업데이트는 나중에 안전한 Addon 시작 과정에서 적용됩니다. 직접 확인하려면 **Settings → Application updates → Check**를 사용하고, 업데이트가 준비되면 **Install update**를 선택하세요. 확인이나 다운로드에 실패해도 Addon은 계속 실행되며, 나중에 **Check**를 다시 선택할 수 있습니다.
 
 ## 절전·복귀·재시작
 
-Windows 절전, 최대 절전, 복귀, 재시작 뒤 컨트롤러 표현과 설정을 복구하도록 설계되어 있습니다. 절전 복귀는 일반 소유권 복구를 사용하며 A2VM 부팅 전용 모드 전환을 반복하지 않습니다. 절전에서 깬 뒤 Windows가 내장 컨트롤러를 다시 연결하는 데 시간이 걸릴 수 있습니다. 컨트롤러 관리 설정을 바꾸거나 다른 컨트롤러 프로그램을 실행하기 전에 잠시 기다리세요.
+Windows 절전, 최대 절전, 복귀, 재시작 뒤 컨트롤러 연결과 설정을 복구하도록 설계되어 있습니다. 절전에서 깬 뒤 Windows가 내장 컨트롤러를 다시 연결하는 데 시간이 걸릴 수 있습니다. 컨트롤러 관리 설정을 바꾸거나 다른 컨트롤러 프로그램을 실행하기 전에 잠시 기다리세요.
 
 잠시 기다려도 컨트롤러가 돌아오지 않으면 알림 영역에서 **Restart Addon**을 사용해 보세요. Addon의 컨트롤러 관리를 중단하려면 **Device → MSI Center M → Enable and Restart**를 선택하고 Windows 재시작을 완료하세요.
 
@@ -305,7 +330,7 @@ Windows가 컨트롤러를 다시 연결할 때까지 잠시 기다린 후 필�
 
 ### 모터가 진동하지 않습니다
 
-Addon이 컨트롤러를 관리하는 상태에서 **Controller → Vibration Strength**를 열고 **Left Test**와 **Right Test**를 실행하세요. 계속 무음이면 게임을 저장하고 종료한 뒤 **Vibration Recovery → Restore Vibration**을 선택하고 두 테스트를 다시 실행하세요. 실행 중 가상 컨트롤러 연결이 잠시 끊깁니다. 성공은 소프트웨어 모드 전환·소유권·표현 복구를 뜻할 뿐 실제 모터 동작을 확인한 것은 아닙니다. 복구가 실패하면 검증되지 않은 물리 입력에 가상 컨트롤러를 연결하지 않습니다. 사용 가능할 때 **Device → MSI Center M → Enable and Restart**로 MSI에 제어권을 돌려주세요.
+Addon이 컨트롤러를 관리하는 상태에서 **Controller → Vibration Strength**를 열고 **Left Test**와 **Right Test**를 실행하세요. 계속 무음이면 게임을 저장하고 종료한 뒤 **Vibration Recovery → Restore**를 선택하고 두 테스트를 다시 실행하세요. 실행 중 가상 컨트롤러 연결이 잠시 끊깁니다. 성공 메시지가 실제 모터 동작을 확인한 것은 아니므로 두 테스트로 확인하세요. 복구에 실패하면 필요할 때 **Device → MSI Center M → Enable and Restart**를 사용해 MSI에 컨트롤러 관리를 돌려주세요.
 
 ### WING 또는 Center M이 다른 동작을 합니다
 
@@ -343,9 +368,9 @@ Addon이 컨트롤러를 관리하는 상태에서 **Controller → Vibration St
 - XBOX 카탈로그는 인식된 설치 게임을 표시하며 Microsoft Store 또는 Game Pass의 모든 앱을 포함하지 않습니다.
 - Steam 프로필은 Steam이 게임 또는 바로가기를 활성 상태로 보고하는지에 따라 달라집니다. 일부 런처 실행 방식에서는 Steam이 연결을 잃어 프로필 적용이 중단될 수 있습니다.
 - Quick Settings Overlay와 Steam Quick Access는 별개입니다. Steam 메뉴에 Addon 탭을 넣지 않습니다.
-- **Steam Deck과 DualSense Edge의 자이로/모션 출력은 구현되어 있습니다.** Steam Deck의 Gyro To Mouse는 Addon 0.1.365에서도 끊김이 보고됐습니다. 현재 A2VM 8 관찰 결과는 자이로 사용 시 DualSense Edge를 우선 추천하지만, Edge 제어와 호환성이 모든 기기·게임에서 확인된 것은 아닙니다. A2VM 7 및 EX/CG3EM의 자이로 실기 검증은 아직 완료되지 않았습니다.
+- **Steam Deck과 DualSense Edge는 자이로/모션 입력을 지원합니다.** 테스트한 A2VM 8에서 Steam Deck의 Gyro To Mouse는 끊김이 있었고 DualSense Edge가 상대적으로 부드러웠습니다. 기기와 게임에 따라 차이가 있을 수 있으며 A2VM 7·EX/CG3EM은 자이로 실기 검증이 완료되지 않았습니다.
 - 일반 Device 페이지의 Fan Control은 현재 사용자 기능으로 제공되지 않습니다.
-- A2VM 7 진동 강도와 A2VM 7/8 `0x0230` LED 쓰기는 공통 제품군 및 정확한 firmware 정책을 적용합니다. A2VM 7 진동 동작과 물리 LED 효과는 개별 실기 검증이 아직 없으며, 알 수 없는 firmware는 지원하지 않습니다. 부팅 모드 전환은 소프트웨어 상태만 확인하며 실제 모터 출력을 보증하지 않습니다. SteamOS 진동은 이 Windows Addon의 제어 범위가 아닙니다.
+- Joystick LED 및 진동 관련 기능은 모델과 펌웨어에 따라 이용 가능 여부가 다르며, A2VM 7의 일부 동작은 아직 별도로 검증되지 않았습니다. 자동 진동 복구는 기본적으로 꺼져 있습니다. 수동 **Restore**의 성공 여부와 실제 모터 진동은 각각 확인해야 합니다.
 - 한 명의 대화형 Windows 사용자와 세션을 지원합니다. 빠른 사용자 전환, 원격 데스크톱 세션 및 다중 사용자 사용은 지원하지 않습니다.
 
 ## 기본 MSI 컨트롤러로 복귀 및 제거
