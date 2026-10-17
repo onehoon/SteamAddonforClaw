@@ -687,10 +687,10 @@
   <data name="Settings_RequiredComponents_ReadyCount" xml:space="preserve">
     <value>{0} of {1} ready</value>
   </data>
-  <data name="Device_AutoStart_Verified" xml:space="preserve"><value>자동 시작 · 정상</value></data>
-  <data name="Device_AutoStart_NeedsAttention" xml:space="preserve"><value>자동 시작 · 오류</value></data>
-  <data name="Device_AutoStart_Unknown" xml:space="preserve"><value>자동 시작 · 확인 불가</value></data>
-  <data name="Device_AutoStart_Repairing" xml:space="preserve"><value>자동 시작 · 복구 중…</value></data>
+  <data name="Device_AutoStart_Verified" xml:space="preserve"><value>자동 시작 정상</value></data>
+  <data name="Device_AutoStart_NeedsAttention" xml:space="preserve"><value>자동 시작 오류</value></data>
+  <data name="Device_AutoStart_Unknown" xml:space="preserve"><value>자동 시작 확인 불가</value></data>
+  <data name="Device_AutoStart_Repairing" xml:space="preserve"><value>자동 시작 복구 중…</value></data>
   <data name="Device_AutoStartRepairButton.Content" xml:space="preserve"><value>복구</value></data>
   <data name="Device_AutoStart_VerifiedHint" xml:space="preserve"><value>필수 Windows 로그온 작업이 현재 시작 계약과 일치합니다.</value></data>
   <data name="Device_AutoStart_UnknownHint" xml:space="preserve"><value>현재 Runtime 세션에서 시작 작업을 확인하지 않았습니다. 복구를 눌러 확인하세요.</value></data>

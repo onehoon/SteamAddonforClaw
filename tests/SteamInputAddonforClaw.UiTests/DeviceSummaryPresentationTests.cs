@@ -22,7 +22,7 @@ public sealed class DeviceSummaryPresentationTests
     [Theory]
     [InlineData(FrontendControllerBadgeState.Unavailable, "Unavailable")]
     [InlineData(FrontendControllerBadgeState.MsiNative, "MSI Native")]
-    [InlineData(FrontendControllerBadgeState.Xbox360Active, "Xbox 360 · Active")]
+    [InlineData(FrontendControllerBadgeState.Xbox360Active, "XBOX 360 · Active")]
     [InlineData(FrontendControllerBadgeState.SteamDeckActive, "Steam Deck · Active")]
     [InlineData(FrontendControllerBadgeState.DualSenseEdgeActive, "DualSense Edge · Active")]
     [InlineData(FrontendControllerBadgeState.Initializing, "Initializing…")]
@@ -39,6 +39,36 @@ public sealed class DeviceSummaryPresentationTests
         FrontendControllerBadgeState badge,
         string expected) =>
         Assert.Equal(expected, DeviceSummaryPresentation.FormatControllerBadge(hardwareStatus, badge));
+
+    [Theory]
+    [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.Xbox360Active, "Success")]
+    [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.SteamDeckActive, "Success")]
+    [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.DualSenseEdgeActive, "Success")]
+    [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.MsiNative, "Success")]
+    [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.Initializing, "Caution")]
+    [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.Reconnecting, "Caution")]
+    [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.NeedsAttention, "Critical")]
+    [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.Unavailable, "Neutral")]
+    [InlineData(FrontendHardwareStatus.Unsupported, FrontendControllerBadgeState.Xbox360Active, "Critical")]
+    [InlineData(FrontendHardwareStatus.Indeterminate, FrontendControllerBadgeState.Xbox360Active, "Neutral")]
+    public void ControllerIndicatorTone_MapsStatusAndPreservesHardwareOverrides(
+        FrontendHardwareStatus hardwareStatus,
+        FrontendControllerBadgeState badge,
+        string expected) =>
+        Assert.Equal(expected, DeviceSummaryPresentation.ControllerIndicatorTone(hardwareStatus, badge).ToString());
+
+    [Theory]
+    [InlineData(FrontendStartupTaskState.Verified, false, "Success")]
+    [InlineData(FrontendStartupTaskState.NeedsAttention, false, "Critical")]
+    [InlineData(FrontendStartupTaskState.Unknown, false, "Neutral")]
+    [InlineData(FrontendStartupTaskState.NeedsAttention, true, "Caution")]
+    [InlineData(FrontendStartupTaskState.Unknown, true, "Caution")]
+    public void StartupTaskIndicatorTone_MapsStateAndRepairProgress(
+        FrontendStartupTaskState state,
+        bool repairing,
+        string expected) =>
+        Assert.Equal(expected, DeviceSummaryPresentation.StartupTaskIndicatorTone(
+            new FrontendStartupTaskSnapshot(state, FrontendStartupTaskIssue.None), repairing).ToString());
 
     [Fact]
     public void WithUnavailableControllerBadge_PreservesOtherCapturedStatus()
@@ -66,6 +96,10 @@ public sealed class DeviceSummaryPresentationTests
         Assert.Equal(snapshot.SetupStatus, unavailable.SetupStatus);
         Assert.Equal(snapshot.CanInstallRequiredComponents, unavailable.CanInstallRequiredComponents);
         Assert.Equal(FrontendStartupTaskSnapshot.Unknown, unavailable.StartupTask);
+        Assert.Equal(DeviceStatusIndicatorTone.Neutral,
+            DeviceSummaryPresentation.ControllerIndicatorTone(unavailable.Hardware.Status, unavailable.ControllerBadge));
+        Assert.Equal(DeviceStatusIndicatorTone.Neutral,
+            DeviceSummaryPresentation.StartupTaskIndicatorTone(unavailable.StartupTask, repairing: false));
     }
 
     [Theory]

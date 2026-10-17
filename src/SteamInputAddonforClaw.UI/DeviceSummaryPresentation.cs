@@ -2,6 +2,14 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Views;
 
+internal enum DeviceStatusIndicatorTone
+{
+    Neutral,
+    Success,
+    Caution,
+    Critical
+}
+
 /// <summary>
 /// Pure, UI-framework-free formatting for the Device page identity/support summary. Kept separate
 /// from <c>DevicePage</c> code-behind so the mapping rules can be unit tested without a UI thread,
@@ -32,7 +40,7 @@ internal static class DeviceSummaryPresentation
         return badge switch
         {
             FrontendControllerBadgeState.MsiNative => "MSI Native",
-            FrontendControllerBadgeState.Xbox360Active => "Xbox 360 · Active",
+            FrontendControllerBadgeState.Xbox360Active => "XBOX 360 · Active",
             FrontendControllerBadgeState.SteamDeckActive => "Steam Deck · Active",
             FrontendControllerBadgeState.DualSenseEdgeActive => "DualSense Edge · Active",
             FrontendControllerBadgeState.Initializing => "Initializing…",
@@ -41,6 +49,40 @@ internal static class DeviceSummaryPresentation
             _ => "Unavailable"
         };
     }
+
+    internal static DeviceStatusIndicatorTone ControllerIndicatorTone(
+        FrontendHardwareStatus hardwareStatus,
+        FrontendControllerBadgeState badge)
+    {
+        if (hardwareStatus == FrontendHardwareStatus.Unsupported)
+            return DeviceStatusIndicatorTone.Critical;
+        if (hardwareStatus == FrontendHardwareStatus.Indeterminate)
+            return DeviceStatusIndicatorTone.Neutral;
+
+        return badge switch
+        {
+            FrontendControllerBadgeState.MsiNative
+                or FrontendControllerBadgeState.Xbox360Active
+                or FrontendControllerBadgeState.SteamDeckActive
+                or FrontendControllerBadgeState.DualSenseEdgeActive => DeviceStatusIndicatorTone.Success,
+            FrontendControllerBadgeState.Initializing
+                or FrontendControllerBadgeState.Reconnecting => DeviceStatusIndicatorTone.Caution,
+            FrontendControllerBadgeState.NeedsAttention => DeviceStatusIndicatorTone.Critical,
+            _ => DeviceStatusIndicatorTone.Neutral
+        };
+    }
+
+    internal static DeviceStatusIndicatorTone StartupTaskIndicatorTone(
+        FrontendStartupTaskSnapshot snapshot,
+        bool repairing) =>
+        repairing
+            ? DeviceStatusIndicatorTone.Caution
+            : snapshot.State switch
+            {
+                FrontendStartupTaskState.Verified => DeviceStatusIndicatorTone.Success,
+                FrontendStartupTaskState.NeedsAttention => DeviceStatusIndicatorTone.Critical,
+                _ => DeviceStatusIndicatorTone.Neutral
+            };
 
     internal static FrontendStatusSnapshot WithUnavailableControllerBadge(FrontendStatusSnapshot snapshot) =>
         snapshot with
