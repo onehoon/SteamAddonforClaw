@@ -909,6 +909,16 @@ public sealed partial class MainWindow : Window
         _centerMDisableConfirmationPendingAfterSetup = false;
         try
         {
+            var centerM = await _frontend.CaptureCenterMStartupAsync();
+            if (centerM.State != FrontendCenterMStartupState.Enabled)
+            {
+                _centerMDisableConfirmationRequestedForCurrentProcess =
+                    centerM.State == FrontendCenterMStartupState.Disabled;
+                _centerMDisableConfirmationPendingAfterSetup =
+                    requestedAfterSetup && centerM.State != FrontendCenterMStartupState.Disabled;
+                return;
+            }
+
             await DeviceContent.ConfirmCenterMDisableAfterPrerequisiteSetupAsync();
         }
         catch (Exception exception)

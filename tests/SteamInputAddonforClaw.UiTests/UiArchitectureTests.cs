@@ -1118,6 +1118,8 @@ public sealed class UiArchitectureTests
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
         var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var windowActivated = ExtractMethod(mainWindow, "private void OnWindowActivated");
+        var centerMConfirmation = ExtractMethod(mainWindow, "private async Task TryShowCenterMDisableConfirmationAsync");
         var centerMTransition = ExtractMethod(devicePage, "private async Task RequestCenterMTransitionAsync");
 
         Assert.Contains("_frontend.CaptureStatusAsync()", mainWindow, StringComparison.Ordinal);
@@ -1125,6 +1127,17 @@ public sealed class UiArchitectureTests
         Assert.Contains("_latestSystemStatus?.SetupStatus == FrontendSetupStatus.Complete", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_centerMDisableConfirmationRequestedForCurrentProcess", mainWindow, StringComparison.Ordinal);
         Assert.Contains("!_windowActivatedForUser || Content.XamlRoot is null || DeviceContent.XamlRoot is null", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_ = RefreshSystemStatusAsync();", windowActivated, StringComparison.Ordinal);
+        Assert.Contains("_frontend.CaptureCenterMStartupAsync()", centerMConfirmation, StringComparison.Ordinal);
+        Assert.Contains("if (centerM.State != FrontendCenterMStartupState.Enabled)", centerMConfirmation, StringComparison.Ordinal);
+        Assert.Contains("centerM.State == FrontendCenterMStartupState.Disabled", centerMConfirmation, StringComparison.Ordinal);
+        Assert.Contains("requestedAfterSetup && centerM.State != FrontendCenterMStartupState.Disabled", centerMConfirmation, StringComparison.Ordinal);
+        var centerMEnabledGate = centerMConfirmation.IndexOf("if (centerM.State != FrontendCenterMStartupState.Enabled)", StringComparison.Ordinal);
+        var nonEnabledReturn = centerMConfirmation.IndexOf("return;", centerMEnabledGate, StringComparison.Ordinal);
+        var confirmationCall = centerMConfirmation.IndexOf("DeviceContent.ConfirmCenterMDisableAfterPrerequisiteSetupAsync()", StringComparison.Ordinal);
+        Assert.True(
+            centerMEnabledGate >= 0 && nonEnabledReturn > centerMEnabledGate && confirmationCall > nonEnabledReturn,
+            "The automatic confirmation must return for every non-enabled Center M state before showing the dialog.");
         Assert.Contains("await TryShowCenterMDisableConfirmationAsync();", mainWindow, StringComparison.Ordinal);
         Assert.Contains("TryShowCenterMDisableConfirmationAsync(afterPrerequisiteSetup: true)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("RunPrerequisiteSetupAsync()", mainWindow, StringComparison.Ordinal);
