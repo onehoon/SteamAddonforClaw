@@ -10,6 +10,8 @@ PS/QAM, rumble, and lifecycle verification remain with the user after merge.
 **Product:** Standalone Steam Addon for Claw / Full PID1902  
 **Scope:** Settings-selectable Steam/BPM virtual-controller presentation: existing Steam Deck or new Sony DualSense Edge. Xbox360 stays the normal Windows output.
 
+> **Implementation reconciliation (2026-10-17):** The shipped `CanonicalViiperRuntime` creates **Xbox360, Steam Deck, and DualSense Edge** typed logical devices **detached during shared-runtime initialization**. Only the selected presentation is attached and published. Sections retaining the original PR-A/PR-B implementation history are historical; the current runtime and [VIIPER integration contract](VIIPER_INTEGRATION.md) take precedence for creation timing and failure policy.
+
 > This is an architecture/design authority for the proposed feature, **not** evidence that virtual DualSense Edge already works in Steam Input or Xbox Game Bar. The local Codex implements code and automated tests; **physical device verification belongs exclusively to the user after merge**, and is never a PR review/CI/merge blocker.
 
 ---
@@ -95,14 +97,14 @@ Current code wins over historical work-order implementation sketches. Useful imp
 - [Current model-specific WING/Center M defaults](work-order/FRONT_BUTTON_A2VM_DEVICE_DEFAULT_MAPPING_WORK_ORDER_2026-10-10.md).
 - [Fork native API authority](https://github.com/onehoon/VIIPER/blob/main/docs/libviiper/fork-api.md).
 
-### 2.2 Verified current source integration map (main, inspected 2026-10-11)
+### 2.2 Source integration map (design baseline 2026-10-11; reconciled 2026-10-17)
 
 | Existing file / component | Verified role | Edge change |
 | --- | --- | --- |
 | Devices/MSI/Claw/MsiClawAddonPresentation.cs | One actual active kind, one publisher, first attach, fresh reconcile, pause/resume, classified retirement and feedback | Add Edge kind and typed attach/publish/retire paths; use one desired-kind resolver everywhere |
 | Steam/SteamSessionRuntime.cs | SteamPresentationSnapshot; WantsSteamDeck = RunningAppId != 0 OR BigPictureActive | Keep detector/semantics unchanged; treat name as legacy meaning Steam-facing demand |
 | Hosting/AddonProcessHost.cs | First attach, Steam/BPM event reconcile, physical recovery, motion gating, front-button wiring | Pass/read saved preference, request reconcile on preference change, widen active Steam-facing conditions |
-| VirtualOutput/Viiper/CanonicalViiperRuntime.cs | Persistent one server/bus, pre-created detached Xbox360 and Deck, native attachment and teardown | Add optional Edge logical device on the SAME bus with classified ownership |
+| VirtualOutput/Viiper/CanonicalViiperRuntime.cs | Persistent one server/bus, three pre-created detached logical devices (Xbox360, Deck, Edge), native attachment and teardown | Selection-driven Edge attach/publish/retire on the SAME bus with classified ownership |
 | VirtualOutput/Viiper/CanonicalViiperNativeApi.cs | Explicit managed native exports, typed handles, callback rooting, shared ownership | Bind Edge native ABI and root callback correctly |
 | VirtualOutput/Viiper/CanonicalSteamDeckSession.cs | Typed Deck attach/status/neutral/detach and state sink | Implement similarly narrow Edge typed operations; do not copy generic lifecycle architecture |
 | VirtualOutput/Viiper/CanonicalSteamDeckInputPublisher.cs | Existing ~250 Hz report publisher and fault/join contract | Reuse scheduling pattern, add Edge-specific mapper/state sink; preserve same join-before-detach invariant |
@@ -117,7 +119,7 @@ Current code wins over historical work-order implementation sketches. Useful imp
 | CenterM/FrontButtonActionExecutor.cs | Shared SteamButton/SteamQuickAccess semantic action names | Keep action names; active presentation resolves the pulse behavior |
 | Status/Full1902ControllerBadgeEvaluator.cs | Read-only virtual controller identity projection | Add Edge active badge, no false SteamDeck label |
 
-PR-A (#754) added the managed typed Edge backend and PR-B (#755) added the production Settings selection and runtime integration. Edge is now an optional production presentation; its logical device remains lazy, and code-level integration does not establish physical Sony recognition or Steam Input compatibility.
+PR-A (#754) added the managed typed Edge backend and PR-B (#755) added the production Settings selection and runtime integration. Edge is now an optional **active presentation**, but its typed logical device is **created and verified detached during shared-runtime initialization**, regardless of selection. Code-level integration does not establish physical Sony recognition or Steam Input compatibility.
 
 ### 2.3 Invariants that cannot change
 
@@ -225,21 +227,21 @@ Upstream Edge implementation references:
 
 ### 4.2 Preferred minimal lifetime design
 
-The current shipped Runtime eagerly creates two detached logical devices (Xbox360 and Steam Deck) on one persistent server/bus. **Do not turn an experimental Edge failure into a failure of the default controller path.**
+The current shipped Runtime creates **three detached logical devices (Xbox360, Steam Deck, and DualSense Edge)** on one persistent server/bus. All three are required for `CanonicalViiperRuntime` readiness, even when Steam Deck is the saved preference. A failed Edge creation, identity verification, or detached-state proof follows the existing staged cleanup/fail-closed initialization path; there is no separate fallback VIIPER runtime.
 
-Preferred implementation: create the Edge logical device **lazily, once on first Edge selection that needs attachment**, then retain its known-owned detached handle for the remaining canonical VIIPER runtime lifetime. It uses the existing server/bus; it is never a second bus or process. On subsequent Edge switches, reuse the same typed handle if state and ownership remain known-safe.
+Implemented lifetime: create and verify the Edge typed logical device **during shared-runtime initialization** with `autoAttachLocalhost: false`; retain its known-owned handle for the canonical runtime lifetime. **Only Edge attachment and publisher activation are deferred** until the selected Steam-facing presentation requires Edge. On subsequent Edge switches, reuse the existing typed handle when ownership remains known-safe.
 
 ~~~text
 canonical VIIPER server + USB bus (existing owner)
     |
     +-- typed Xbox360 (existing; created detached at start)
     +-- typed Steam Deck (existing; created detached at start)
-    +-- typed DualSense Edge (new; created detached on first demand)
+    +-- typed DualSense Edge (created detached at startup)
             |
             +-- exactly one device attached at any instant
 ~~~
 
-If the existing native owner makes eager creation clearly simpler **without** expanding failure impact on default boot, Codex may choose that narrower implementation, but must prove normal Xbox360/Deck startup is not broken by Edge-only failures. No fallback VIIPER runtime.
+The current owner uses eager creation for all three devices and requires their detached-state proofs before declaring the runtime ready. Keep its existing staged cleanup and fail-closed policy when any required device initialization fails; do not introduce a fallback VIIPER runtime.
 
 On creation: require successful typed creation with autoAttachLocalhost=false, matching bus identity, and a **proven Detached** tracked attachment state before entering Ready-to-attach. Treat inability to establish ownership/status as the existing unsafe/fail-close boundary. Do not leave an untracked native handle and claim initialization failure was clean.
 
@@ -487,7 +489,7 @@ Never log every input packet or add a new polling diagnostic loop. Avoid marking
 Implementation work order: [DualSense Edge PR-A typed backend](work-order/DUALSENSE_EDGE_PR_A_TYPED_BACKEND_WORK_ORDER_2026-10-11.md). The VIIPER dependency was separately updated in PR #753.
 
 1. Add managed typed Edge ABI/state/callback and classified removal. **The user independently updates the VIIPER DLL/header/dependency pin; PR-A must not change dependency artifacts.**
-2. Extend same canonical VIIPER owner with lazy/optional Edge logical device and complete teardown.
+2. Extend the same canonical VIIPER owner with Edge typed lifecycle and complete teardown. **Current shipped behavior:** all three logical devices are created detached at runtime initialization; Edge attachment/activation remains selection-driven.
 3. Add Edge state mapper/publisher, native neutral, motion encoding and basic ordinary rumble callback.
 4. Add code-level tests for struct ABI, controls/M1/M2, gyro scales and neutrality, publisher stop/join, attach/retire, ownership/callback cleanup.
 5. At PR-A implementation time, the shipped Xbox360/Deck selection policy stayed unchanged; Edge became selectable in the later PR-B.
@@ -566,7 +568,7 @@ Physical ordinary DualSense success, including user's USB PnP evidence, is a **p
 
 **Implementation-time choices that should not drive a new architecture:**
 
-- Lazy one-time Edge typed creation is preferred to preserve default-mode startup safety.
+- Current implementation creates Edge once, detached, alongside Xbox360 and Steam Deck during shared-runtime initialization; only Edge attachment and publisher activation are selection-driven. Preserve the established fail-closed startup and teardown policy.
 - Implement a small Edge-specific pulse composition next to its publisher; do not generalize Deck pulse machinery into a subsystem solely to share two boolean buttons.
 - Keep the existing publisher deadline timing and native ownership facilities. Add targeted code, not a new device-interface hierarchy unless the actual code exposes a concrete duplication problem.
 
