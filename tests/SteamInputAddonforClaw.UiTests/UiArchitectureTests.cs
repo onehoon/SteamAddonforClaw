@@ -1300,13 +1300,13 @@ public sealed class UiArchitectureTests
         Assert.Contains("SettingsCard", overlayXaml, StringComparison.Ordinal);
         foreach (var required in new[]
         {
-            "Enable HUD",
+            "ClawHUD",
             "Display mode",
             "HUD size",
             "Header=\"Font\"",
             "Header=\"Alignment\"",
             "Background width",
-            "HUD opacity",
+            "ClawHUD opacity",
             "Intel VRR Range Fix",
         })
             Assert.Contains(required, overlayXaml, StringComparison.Ordinal);
@@ -1318,8 +1318,15 @@ public sealed class UiArchitectureTests
         Assert.Contains("ClawHudOpacitySlider_KeyUp", overlayXaml, StringComparison.Ordinal);
         Assert.Contains("ClawHudRetryButton", overlayXaml, StringComparison.Ordinal);
         Assert.Contains("SetClawHudEnabledAsync(true)", overlayCodeBehind, StringComparison.Ordinal);
+        var overlayDocument = XDocument.Parse(overlayXaml);
+        XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
         foreach (var sectionHeading in new[] { "ClawHUD", "Display", "Appearance", "Display compatibility" })
-            Assert.DoesNotContain($"Text=\"{sectionHeading}\"", overlayXaml, StringComparison.Ordinal);
+        {
+            Assert.DoesNotContain(overlayDocument.Descendants(), element =>
+                element.Name.LocalName == "TextBlock" &&
+                (string?)element.Attribute("Text") == sectionHeading &&
+                element.Attribute(xamlNamespace + "Uid") is null);
+        }
 
         foreach (var icon in new[]
         {
@@ -1334,7 +1341,6 @@ public sealed class UiArchitectureTests
         })
             Assert.Contains(icon, overlayXaml, StringComparison.Ordinal);
 
-        var overlayDocument = XDocument.Parse(overlayXaml);
         var vrrCard = Assert.Single(overlayDocument.Descendants(), element =>
             element.Name.LocalName == "SettingsCard" &&
             (string?)element.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Uid") == "ClawHud_IntelVrrCard");

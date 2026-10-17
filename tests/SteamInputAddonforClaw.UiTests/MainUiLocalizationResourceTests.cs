@@ -1214,6 +1214,34 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Contains("MainNav_ClawHud.Content", korean.Keys);
         Assert.False(string.IsNullOrWhiteSpace(korean["MainNav_ClawHud.Content"]));
 
+        var expectedClawHudResources = new Dictionary<string, (string English, string Korean)>(StringComparer.Ordinal)
+        {
+            ["ClawHud_PageTitle.Text"] = ("ClawHUD", "ClawHUD"),
+            ["ClawHud_PageSubtitle.Text"] = ("Configure the performance overlay and display behavior.", "ClawHUD 오버레이 설정을 변경할 수 있습니다."),
+            ["ClawHud_RetryButton.Content"] = ("Retry", "재시도"),
+            ["ClawHud_EnableCard.Header"] = ("ClawHUD", "ClawHUD"),
+            ["ClawHud_DisplayModeCard.Header"] = ("Display mode", "디스플레이 모드"),
+            ["ClawHud_DisplayModeCard.Description"] = ("Choose when the HUD is visible.", "ClawHUD의 표시 방식을 선택합니다."),
+            ["ClawHud_SizeCard.Description"] = ("Adjust the overall HUD scale.", "ClawHUD의 크기를 조절합니다."),
+            ["ClawHud_Size_Option_Default.Content"] = ("Default", "기본"),
+            ["ClawHud_FontCard.Description"] = ("Font used by the performance HUD.", "ClawHUD 폰트를 선택합니다."),
+            ["ClawHud_AlignmentCard.Header"] = ("Alignment", "정렬방식"),
+            ["ClawHud_AlignmentCard.Description"] = ("Horizontal alignment of HUD content.", "ClawHUD의 가로 정렬방식을 선택합니다."),
+            ["ClawHud_BackgroundWidthCard.Header"] = ("Background width", "ClawHUD 배경 방식"),
+            ["ClawHud_BackgroundWidthCard.Description"] = ("Choose how far the HUD background extends.", "ClawHUD의 배경 표시 방식을 선택합니다."),
+            ["ClawHud_BackgroundWidth_Option_FullWidth.Content"] = ("Full width", "전체 폭"),
+            ["ClawHud_BackgroundWidth_Option_ContentWidth.Content"] = ("Content width", "콘텐츠 폭"),
+            ["ClawHud_OpacityCard.Header"] = ("ClawHUD opacity", "ClawHUD 투명도"),
+            ["ClawHud_LocalStatus_Off"] = ("Off", "끔"),
+            ["ClawHud_LocalStatus_Starting"] = ("Starting…", "시작 중..."),
+            ["ClawHud_VrrStatus_AlreadyCorrect"] = ("Fixed", "수정됨")
+        };
+        foreach (var (key, expected) in expectedClawHudResources)
+        {
+            Assert.Equal(expected.English, english[key]);
+            Assert.Equal(expected.Korean, korean[key]);
+        }
+
         var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "OverlayPage.xaml"));
         var expectedUids = new[]
         {
@@ -1306,7 +1334,8 @@ public sealed class MainUiLocalizationResourceTests
             var key = $"ClawHud_VrrStatus_{status}";
             Assert.Contains(key, english.Keys);
             Assert.Contains(key, korean.Keys);
-            Assert.Equal(status, english[key]);
+            var expectedEnglish = status == nameof(FrontendClawHudIntelVrrStatus.AlreadyCorrect) ? "Fixed" : status;
+            Assert.Equal(expectedEnglish, english[key]);
             Assert.False(string.IsNullOrWhiteSpace(korean[key]));
         }
         Assert.Equal(9, Enum.GetNames<FrontendClawHudIntelVrrStatus>().Length);
