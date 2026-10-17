@@ -172,7 +172,7 @@ public static class Program
                 {
                     var launchMode = runtimeArgs.Contains("--background", StringComparer.OrdinalIgnoreCase) ? "Background" : "Manual";
                     AppLog.Info("App", "Application launch header.", ("Version", typeof(Program).Assembly.GetName().Version), ("LaunchMode", launchMode), ("PID", Environment.ProcessId), ("ProcessArchitecture", RuntimeInformation.ProcessArchitecture), ("OSArchitecture", RuntimeInformation.OSArchitecture), ("OS", Environment.OSVersion), ("Runtime", Environment.Version), ("ProcessPath", Environment.ProcessPath), ("BaseDirectory", AppContext.BaseDirectory));
-                    new RuntimeProcessApplication(runtimeArgs, singleInstanceGate).Run();
+                    Environment.ExitCode = new RuntimeProcessApplication(runtimeArgs, singleInstanceGate).Run();
                 }
                 catch (Exception exception)
                 {
