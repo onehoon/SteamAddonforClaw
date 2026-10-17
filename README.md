@@ -45,9 +45,7 @@ The app currently recognizes these MSI Claw models:
 
 The app checks that the device is a supported model before starting controller management. If the model cannot be identified or is not supported, controller features will not start.
 
-MSI Claw 8 EX AI+ CG3EM has been tested on physical hardware. The A2VM models are supported by the software, but equivalent full-device validation is still pending; **gyro output on the 8-inch A2VM has been verified in Steam Input and Aniimo**. Hardware-specific controls may also be unavailable on a model that does not expose the required capability.
-
-The A2VM 8's manual controller re-arm has physically restored a silent motor. A2VM 7 vibration-strength and LED support follows the shared A2VM protocol/firmware policy and has **not** been individually validated on A2VM 7 hardware.
+MSI Claw 8 EX AI+ CG3EM has been tested on physical hardware. The A2VM models are supported, with some features still awaiting full hardware validation. Gyro input has been verified on MSI Claw 8 AI+ A2VM in Steam Input and a game. Availability of LED, vibration, and other device-specific features depends on the model and firmware.
 
 ## Requirements and compatibility
 
@@ -67,7 +65,7 @@ Do not run another controller-management or virtual-controller-routing applicati
 4. To let the Addon manage the built-in controller, choose **Disable** for **MSI Center M** and confirm **Disable and Restart**. Windows must restart for this controller-authority change to take effect.
 5. After Windows starts again, the Addon runs in the background. Open the Main App to configure controls, performance settings, profiles, or ClawHUD.
 
-The optional A2VM 7/8 automatic rumble initialization and Windows session-end PID1901 preparation remain in the codebase but are disabled in the production default. Startup keeps an already-present PID1902 controller or uses the ordinary strictly verified PID1901-to-PID1902 ownership transition. Windows shutdown/restart does not issue the A2VM-only PID1901 preparation command. When the existing healthy-owned-session checks allow it, use **Controller → Vibration → Restore** to request rumble recovery manually; this does not release Addon authority or change persistent HidHide ownership.
+If the controller's motors stop vibrating, open **Controller → Vibration Strength → Vibration Recovery** and choose **Restore** after saving and closing your game. Automatic vibration recovery is not enabled by default. Use the **Left Motor** and **Right Motor** Test buttons afterward to check the motors.
 
 If you prefer the stock MSI controller behavior, leave MSI Center M enabled or use **Enable and Restart** on the Device page.
 
@@ -83,7 +81,7 @@ Supported **virtual controller presentations** are:
 | **Steam Deck** | Steam game or Big Picture, when selected by the global preference or an enabled game profile |
 | **DualSense Edge** | Steam game or Big Picture, when selected in **Controller → Controller for Steam Game** or an enabled Steam game profile |
 
-Choose the global **Steam Deck** or **DualSense Edge** option in **Controller → Controller for Steam Game**. The internal first-install preference remains Steam Deck. An enabled Steam game profile can select its own controller or **Use default** to inherit the global choice. The controller selector is locked while a Steam game or Big Picture Mode is active and shows the controller actually applied, including a game-profile override. Selection is available when neither Steam nor Big Picture is active, including normal Windows or Xbox-only gameplay. The separate **Gyroscope** switch remains available in every state. Steam game launch and exit still switch automatically to an enabled game's override and back to the global choice when Big Picture remains active. Outside Steam game and Big Picture activity, Windows continues to use Xbox 360. Only one virtual controller presentation is attached at a time. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the active presentation.
+Choose the global **Steam Deck** or **DualSense Edge** option in **Controller → Controller for Steam Game**. Steam Deck is the default. An enabled Steam game profile can select its own controller or **Use default** to inherit the global choice. The controller selector is locked while a Steam game or Big Picture Mode is active and shows the controller actually applied, including a game-profile override. Selection is available when neither Steam nor Big Picture is active, including normal Windows or Xbox-only gameplay. The separate **Gyroscope** switch remains available in every state. Steam game launch and exit still switch automatically to an enabled game's override and back to the global choice when Big Picture remains active. Outside Steam game and Big Picture activity, Windows continues to use Xbox 360. Only one virtual controller presentation is attached at a time. Button behavior configured for **Normal** or **Steam Game / Big Picture** follows the active presentation.
 
 ## Gyroscope / IMU — Steam Input configuration
 
@@ -91,13 +89,13 @@ The global **Gyroscope** switch is on by default in **Controller → Controller 
 
 DualSense Edge presentation also forwards available motion data through its existing publisher path. Edge button, PS/Quick Access, rumble, and motion behavior have not been comprehensively verified across every supported device and game.
 
-**If gyro is a priority, current A2VM 8 observations favor DualSense Edge.** Choose it at **Controller → Controller for Steam Game** or in an enabled Steam game profile. On the tested A2VM 8, DualSense Edge gyro felt smooth, while virtual Steam Deck **Gyro To Mouse** was still reported choppy with Addon **0.1.365**. The Gyroscope switch only controls sensor collection/input; it does not resolve this reported smoothness issue. This is an observation from current testing, not a guarantee for every device or game. See the [Steam Deck gyro investigation](docs/gyro/FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md).
+**If gyro is a priority, consider DualSense Edge.** On the tested MSI Claw 8 AI+ A2VM, gyro felt smoother in DualSense Edge mode, while **Gyro To Mouse** in Steam Deck mode was reported to be choppy. This can vary by game and device. The Gyroscope toggle enables motion input; gyro activation and sensitivity are configured in Steam Input.
 
-**Verified on MSI Claw 8 AI+ A2VM (8-inch):** Steam's gyro calibration screen shows live motion. All three rotation axes and all six direction signs matched the user's genuine Steam Controller in a direct calibration-screen comparison. **Gyro-to-joystick camera control worked in Aniimo** with Steam Input's gyro activation set to **Always On** (Addon build **0.1.350.0**). This confirms the tested A2VM 8 end-to-end path, not every game's configuration or quantitative gyro accuracy.
+On that same device, Steam's gyro calibration showed live motion and gyro-to-joystick camera control worked in a game when Steam Input's activation was set to **Always On**.
 
 **Configure and fine-tune gyro in Steam Input, not in the Addon.** Open the game's **Controller Layout** in Steam, configure **Gyro Behavior** (such as gyro-to-mouse or gyro-to-joystick), and adjust the **activation button/condition**, sensitivity, and other motion settings there. In particular, a gyro activation condition can prevent in-game movement **even when the gyro calibration screen shows live values**. For a quick test, select **Always On**; afterward, set your preferred activation button and sensitivity in Steam Input.
 
-A2VM 7-inch and EX/CG3EM gyro behavior has **not yet been physically verified**. See the [gyro architecture and hardware-validation record](docs/gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md#81-post-merge-physical-axissign-comparison--2026-10-10-a2vm-vs-genuine-steam-controller).
+Gyro behavior on A2VM 7-inch and EX/CG3EM devices has not yet been fully verified on physical hardware.
 
 ## MSI Center M and the built-in controller
 
@@ -125,9 +123,9 @@ For **TDP Control**, **CPU Boost**, **Maximum Processor State**, and **Windows P
 
 ### Controller
 
-At the top of **Controller**, use **Controller for Steam Game** to choose **Steam Deck** or **DualSense Edge** and toggle **Gyroscope**. Steam Deck remains the internal default, but “(Default)” is not part of its display name. The selection is used by Big Picture and by Steam games whose enabled profile uses **Use default**. Controller selection is locked during a Steam game or Big Picture and displays the actually applied controller; Gyroscope remains changeable. Both controls are available in normal Windows or Xbox-only gameplay when Runtime settings are available.
+At the top of **Controller**, use **Controller for Steam Game** to choose **Steam Deck** (the default) or **DualSense Edge** and toggle **Gyroscope**. The selection is used by Big Picture and by Steam games whose enabled profile uses **Use default**. Controller selection is locked during a Steam game or Big Picture and displays the actually applied controller; Gyroscope remains changeable. Both controls are available in normal Windows or Xbox-only gameplay when Runtime settings are available.
 
-Use **Controller** to choose actions for the **Gamebar Button** (WING) and **Center M Button**. Each has separate **Normal** and **Steam Game / Big Picture** assignments. The current controller presentation selects which assignment is used; the buttons do not have to be remapped when Steam starts or stops.
+Use **Controller** to choose actions for the **XBOX Gamebar Button** (WING) and **Center M Button**. Each has separate **Normal** and **Steam Game / Big Picture** assignments. The current controller presentation selects which assignment is used; the buttons do not have to be remapped when Steam starts or stops.
 
 Available actions depend on the assignment group:
 
@@ -145,9 +143,9 @@ The first-install defaults are **Gamebar Button: Steam Big Picture** in Normal a
 
 The **M1 / M2** section configures the rear buttons while the Addon presents an Xbox 360 controller. Each can be **Disabled** or mapped to A/B/X/Y, D-Pad directions, LB/RB, LT/RT, L3/R3, View, Menu, or Xbox Guide. The same target may be assigned to both. In Steam Game / Big Picture, M1 remains R4 and M2 remains L4; these global Xbox 360 choices do not change that Steam Deck behavior. An enabled per-game XBOX mapping can override the global M1/M2 mapping for that game.
 
-Where supported, **Joystick LED** can be enabled or disabled, with one static color and global brightness from 0% to 100%. The A2VM LED path is admitted only when the controller reports the exact firmware `0x0230`; the EX uses its exact known firmware mappings. **Vibration Strength** adjusts the left and right motors independently from 0% to 100% and includes a **Test** action for each motor. Strength writes are enabled on CG3EM and A2VM 7/8; A2VM 7 uses the shared-family policy and has not been individually hardware-tested. These controls may be unavailable when the detected device or firmware is not supported.
+Where supported, **Joystick LED** can be enabled or disabled, with one static color and brightness from 0% to 100%. **Vibration Strength** adjusts the left and right motors independently from 0% to 100%; use each motor's **Test** button to check the result. These options may be unavailable on unsupported models or firmware, and some A2VM 7 behavior is still awaiting device-specific verification.
 
-The **Vibration Strength** expander also contains **Vibration Recovery → Restore Vibration** on all three supported models. It temporarily disconnects the virtual controller, so save your game and close it first. A success message confirms software restoration only, not physical motor output; run **Left Test** and **Right Test** afterward. Manual Restore is available on all three models; automatic A2VM boot-time rumble cycling is disabled by default.
+The **Vibration Strength** section also includes **Vibration Recovery → Restore** for all three supported models. It temporarily disconnects the virtual controller, so save and close your game first. A success message does not guarantee that the motors are working; use both **Test** buttons afterward. Automatic vibration recovery is not enabled by default.
 
 ### Steam
 
@@ -194,17 +192,28 @@ Use **Shortcut** to add, edit, delete, and drag to reorder items shown in Quick 
 - Capture the primary display as a JPEG screenshot.
 - Open Steam Big Picture, the Steam client, or the Xbox app.
 
-The **Application (.exe)** and **PowerShell** Add/Edit panels include **Run as administrator**, off by default. When enabled, the action uses the Addon's existing administrator permission and does not show a second UAC prompt. With the option off, the Addon requests the same user's normal (Medium-integrity) token; if that token is unavailable, the action fails instead of running elevated. Steam, Big Picture, Xbox, and website actions always use this normal-user launch path and have no administrator option. Screenshot continues to use its existing capture path.
+For **Application (.exe)** and **PowerShell** shortcuts, **Run as administrator** is off by default. Turn it on only when the action needs administrator privileges. Other shortcut types have no administrator option.
 
-The Screenshot action captures the primary display as a JPEG. Its save folder is configured inside that Screenshot Shortcut's Add/Edit dialog: choose a custom folder or use the default Windows `Pictures\Screenshots` folder. **Browse** stages a folder, **Use default** stages the default location, **Open folder** opens the currently selected location, and **Save** commits the folder with the Shortcut; **Cancel** discards staged changes. The normal editor allows at most one Screenshot Shortcut. A shortcut displayed in the Overlay runs the action you configured here; the Overlay receives only the tile and never the folder path.
+The Screenshot action captures the primary display as a JPEG. Choose a custom save folder with **Browse**, or use the default Windows `Pictures\Screenshots` folder with **Use default**. **Open folder** opens the selected location. Click **Save** to keep your changes; **Cancel** discards them. You can configure one Screenshot shortcut.
 
 Shortcut tiles use an action-specific Fluent icon by default. In the Main App's Add/Edit dialog, choose a curated icon or restore the action default; the icon appears before the tile title in both the Main App and Overlay.
 
 ### Tweaks
 
-The **Tweaks** page reads Windows state when opened and after each change. It keeps mixed, unavailable, and unsupported states distinct from a verified **Enabled** or **Disabled** state. A consolidated safety notice appears at most once per local calendar day. The app does not automatically restart Windows, sign out, or restart Explorer; some existing Windows settings may require one of those actions to become fully effective.
+The **Tweaks** page lets you change supported Windows features and registry settings. Review the safety notice before using it; it can appear once per day. Some changes require a Windows or Explorer restart, which the Addon does not perform automatically. The app shows when a change is pending, unsupported, or controlled by Windows policy.
 
-The **Registry Tweaks** group includes **Faster Menus**, **Classic Context Menu**, **Disable Password on Wake**, **Disable Edge Background**, and **Disable Startup App Delay**. Edge background policies do not immediately close existing Edge processes. Startup App Delay configures two Explorer values for future logins; actual startup changes may vary.
+Under **Gaming Performance**:
+- **Memory Integrity** — turns Windows kernel memory protection on or off. **Turning it off reduces security.** Turning it on can affect incompatible drivers or applications.
+- **Virtual Machine Platform** — turns the Windows virtualization feature on or off. Disabling it may prevent virtualization-dependent software from working.
+
+Under **Registry Tweaks**:
+- **Faster Menus** — reduces submenu delay and disables menu animation.
+- **Classic Context Menu** — uses the classic Windows 11 right-click menu.
+- **Disable Password on Wake** — skips sign-in after sleep. **Anyone with physical access could open your desktop.**
+- **Disable Edge Background** — disables Edge Startup Boost and background mode; already-running Edge processes may remain until closed.
+- **Disable Startup App Delay** — removes configured delays for startup apps; startup improvements vary.
+
+For settings named **Disable ...**, switching the option **on** applies the disabling behavior described by its name. Turning it off reverses that option where Windows allows it.
 
 ### Settings
 
@@ -212,21 +221,25 @@ The **Registry Tweaks** group includes **Faster Menus**, **Classic Context Menu*
 
 Choose **Check** to check again and download an available update. When a downloaded update is ready, the button changes to **Install update**. Selecting it restarts the Addon so the update can be applied at the next safe startup. If no update is available, the app reports that it is up to date.
 
-#### Windows Gaming Full Screen Experience
+#### XBOX Mode (Full Screen Experience)
 
-Select **Off**, **Xbox**, or **Steam Big Picture** as the Windows gaming home. **Off** disables the Addon-selected gaming home. **Start on Windows startup** controls whether Windows starts directly in the selected gaming home. If Windows is already set to another app, **Other Windows app** shows that current selection; it cannot be selected as a new Addon-managed option, and the Addon does not manage its startup behavior.
+Select **Off**, **XBOX**, or **Steam Big Picture** as the Windows gaming home. **Off** disables the Addon-selected gaming home. **Start on Windows startup** controls whether Windows starts directly in the selected gaming home. If Windows is already set to another app, **Other Windows app** shows that current selection; it cannot be selected as a new Addon-managed option, and the Addon does not manage its startup behavior.
+
+#### App theme
+
+Choose **System**, **Light**, or **Dark** for the Main App's appearance.
 
 #### Show only current power source
 
 When enabled, Quick Settings Overlay shows controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values.
 
+#### Logging
+
+Choose the log detail level (**Off**, **Info**, or **Debug**). **Open folder** opens the folder containing app logs, which may be useful when reporting a problem.
+
 #### Required Components
 
 View whether components needed by controller features are ready. This is a status area, not a manual driver-install panel. Follow any setup or restart prompt shown by the app.
-
-#### Developer Menu
-
-Developer Menu is reserved for developer diagnostics and is not needed for normal setup or use.
 
 ## Game profiles and setting priority
 
@@ -295,17 +308,17 @@ The built-in controller's face buttons, D-Pad, bumpers, triggers, sticks, and st
 | Menu / Start | Menu function | Menu / Start |
 | M1 / M2 | R4 / L4 | Configurable in Controller; Disabled by default |
 
-WING and Center M are configurable front buttons; they are not part of the ordinary gamepad mapping table. In Steam Deck presentation, the Addon forwards fresh gyro and accelerometer data to Steam Input. **Steam Input owns activation, gyro-to-mouse/joystick mapping, sensitivity and all fine-tuning**. The 8-inch A2VM has passed direct Steam Input and Aniimo gyro testing; A2VM 7-inch and EX/CG3EM gyro validation is still pending. See [Gyroscope / IMU](#gyroscope--imu--steam-input-configuration).
+WING and Center M are configurable front buttons; they are not part of the ordinary gamepad mapping table. Steam Deck and DualSense Edge presentations can forward available gyro and accelerometer data to Steam Input. **Configure activation, gyro-to-mouse/joystick behavior and sensitivity in Steam Input**, not in the Addon. See [Gyroscope / IMU](#gyroscope--imu--steam-input-configuration).
 
 ## Background operation and updates
 
 Closing the Main App window does not stop the background Addon or controller presentation. The notification-area icon provides **Open** and **Restart Addon**. Use **Open** to bring back the Main App; use **Restart Addon** if you need to restart the running Addon. The tray menu does not provide a general **Quit** command. To return controller management to MSI Center M, use **Device → MSI Center M → Enable and Restart**; use the normal Windows uninstall path to remove the app.
 
-The Addon checks for and downloads updates in the background after startup. This does not interrupt the current session. The downloaded update is applied on a later safe Addon startup. A2VM 7/8 do not run the optional automatic rumble mode cycle during startup or special PID1901 preparation at Windows session end in the production default. You can use **Controller → Vibration → Restore** when the existing ownership and lifecycle checks allow manual recovery. You can also use **Settings → Application updates → Check** to check and download now, then choose **Install update** when it becomes available. If checking or downloading fails, the Addon continues running; try **Check** again later.
+The Addon checks for and downloads updates in the background after startup without interrupting your current session. Downloaded updates are applied on a later safe Addon startup. You can also select **Settings → Application updates → Check** to check manually, then **Install update** when it is ready. If checking or downloading fails, the Addon continues running; try **Check** again later.
 
 ## Sleep, resume, and restart
 
-The Addon is designed to recover its controller presentation and settings after Windows sleep, hibernate, resume, and restart. Resume uses normal ownership recovery and does not perform the disabled optional A2VM rumble mode cycle. After waking, Windows may take a short time to reconnect the built-in controller. Wait for the device to settle before changing controller ownership or starting another controller utility.
+The Addon is designed to recover its controller and settings after Windows sleep, hibernate, resume, and restart. After waking, Windows may take a short time to reconnect the built-in controller. Wait for the device to settle before changing controller ownership or starting another controller utility.
 
 If the controller has not returned after a short wait, try **Restart Addon** from the notification-area icon. If you want to stop Addon controller management, use **Device → MSI Center M → Enable and Restart** and let Windows restart.
 
@@ -325,7 +338,7 @@ Wait briefly for Windows to reconnect the controller, then use **Restart Addon**
 
 ### Motors do not vibrate
 
-While the Addon manages the controller, use **Controller → Vibration Strength** and run **Left Test** and **Right Test**. If the motors remain silent, save your game and close it, then choose **Vibration Recovery → Restore Vibration** and retry both tests. The action temporarily disconnects the virtual controller. A success message means the software mode cycle, ownership, and presentation were restored; it cannot confirm physical motor output. If recovery fails, the Addon does not attach a virtual controller to an unproven physical input state; use **Device → MSI Center M → Enable and Restart** to return authority to MSI when available.
+While the Addon manages the controller, use **Controller → Vibration Strength** and run **Left Test** and **Right Test**. If the motors remain silent, save your game and close it, then choose **Vibration Recovery → Restore** and retry both tests. The action temporarily disconnects the virtual controller. A success message does not confirm the motors are working. If recovery fails, try **Device → MSI Center M → Enable and Restart** to return controller management to MSI when available.
 
 ### WING or Center M performs the wrong action
 
@@ -363,8 +376,8 @@ Open **Settings → Required Components** to see the reported status. Follow the
 - The XBOX catalog includes recognized installed titles, not every app in Microsoft Store or Game Pass.
 - Steam profile tracking depends on Steam continuing to report the game or shortcut as active. Some launcher chains can cause a profile to stop applying when Steam loses that association.
 - Quick Settings Overlay is separate from Steam Quick Access. The Addon does not inject an Addon tab into Steam's menu.
-- **Steam Deck and DualSense Edge gyro / motion output are implemented.** A2VM 8 Steam Deck gyro direction/sign and Steam Input gyro-to-joystick gameplay have been tested, but Steam Deck Gyro To Mouse was still reported choppy in Addon 0.1.365. Current A2VM 8 observations favor DualSense Edge when gyro is needed; Edge controls and compatibility remain unverified across all devices and games. A2VM 7 and EX/CG3EM gyro validation remains pending. Activation and tuning are handled in **Steam Input**, not in the Addon.
-- A2VM 7 vibration-strength support and A2VM 7/8 `0x0230` LED writes follow shared-family and exact-firmware policy; A2VM 7 strength behavior and physical LED effects have not been individually validated. Unknown firmware remains unsupported. Automatic A2VM rumble mode cycling is disabled by default; manual Restore does not itself verify physical motor output. SteamOS rumble is outside this Windows Addon's control.
+- **Steam Deck and DualSense Edge** support motion input. On a tested A2VM 8, Steam Deck Gyro To Mouse could feel choppy; DualSense Edge was smoother in that comparison. Results may differ by game and device. Configure gyro activation and sensitivity in **Steam Input**.
+- Joystick LED and vibration features depend on the device and firmware; some A2VM 7 behavior remains unverified. Automatic vibration recovery is disabled by default. A successful manual **Restore** does not itself prove that the motors work.
 - A general Device-page Fan Control is not currently available as a user feature.
 - The product supports one interactive Windows user and session; Fast User Switching, Remote Desktop sessions, and multi-user use are not supported.
 
