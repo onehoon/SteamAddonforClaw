@@ -18,6 +18,12 @@
   <data name="HowToUse_Loading.Text" xml:space="preserve">
     <value>Loading documentation…</value>
   </data>
+  <data name="MainWindow_Common_Ok" xml:space="preserve"><value>OK</value></data>
+  <data name="MainWindow_PrerequisiteSetup_AlreadyInProgress" xml:space="preserve"><value>Another setup operation is already in progress.</value></data>
+  <data name="MainWindow_PrerequisiteSetup_Failed" xml:space="preserve"><value>Setup couldn't be completed. Check Settings &gt; Required Components or the application log for details.</value></data>
+  <data name="MainWindow_PrerequisiteSetup_Title" xml:space="preserve"><value>Setup unavailable</value></data>
+  <data name="MainWindow_PrerequisiteSetupBusy_ProgressText.Text" xml:space="preserve"><value>Installing required components…</value></data>
+  <data name="MainWindow_PrerequisiteSetupBusy_WaitText.Text" xml:space="preserve"><value>Please wait. This may take a moment.</value></data>
   <data name="Settings_AppTheme_Description" xml:space="preserve">
     <value>Choose the main app appearance.</value>
   </data>

@@ -223,6 +223,60 @@ public sealed class MainUiLocalizationResourceTests
     }
 
     [Fact]
+    public void Prerequisite_setup_progress_and_result_dialog_localize_without_changing_result_flow()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var mainWindow = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
+        var methodStart = source.IndexOf("private async Task HandlePrerequisiteSetupResultAsync", StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("private async Task TryShowCenterMDisableConfirmationAsync", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var resultHandler = source[methodStart..methodEnd];
+
+        var progressTexts = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["MainWindow_PrerequisiteSetupBusy_ProgressText"] = "Installing required components…",
+            ["MainWindow_PrerequisiteSetupBusy_WaitText"] = "Please wait. This may take a moment."
+        };
+        foreach (var (uid, fallback) in progressTexts)
+        {
+            var element = Assert.Single(mainWindow.Descendants(), candidate =>
+                (string?)candidate.Attribute(XamlNamespace + "Uid") == uid);
+            Assert.Equal(fallback, (string?)element.Attribute("Text"));
+            Assert.Equal(fallback, english[uid + ".Text"]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[uid + ".Text"]));
+            Assert.Contains(uid + ".Text", english.Keys);
+            Assert.Contains(uid + ".Text", korean.Keys);
+        }
+
+        var runtimeMessages = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["MainWindow_PrerequisiteSetup_AlreadyInProgress"] = "Another setup operation is already in progress.",
+            ["MainWindow_PrerequisiteSetup_Failed"] = "Setup couldn't be completed. Check Settings > Required Components or the application log for details.",
+            ["MainWindow_PrerequisiteSetup_Title"] = "Setup unavailable",
+            ["MainWindow_Common_Ok"] = "OK"
+        };
+        foreach (var (key, fallback) in runtimeMessages)
+        {
+            Assert.Contains($"\"{key}\"", resultHandler, StringComparison.Ordinal);
+            Assert.Contains(fallback, resultHandler, StringComparison.Ordinal);
+            Assert.Equal(fallback, english[key]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+        }
+
+        Assert.Contains("MainUiStrings.Get(", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("Title = MainUiStrings.Get(", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("CloseButtonText = MainUiStrings.Get(", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("FrontendPrerequisiteSetupResultKind.Blocked", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("FrontendPrerequisiteSetupResultKind.AlreadyInProgress", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("FrontendPrerequisiteSetupResultKind.Failed", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("TryShowCenterMDisableConfirmationAsync(afterPrerequisiteSetup: true)", resultHandler, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Steam_navigation_localizes_only_content_and_keeps_Profile_identity()
     {
         var root = FindRepositoryRoot();
