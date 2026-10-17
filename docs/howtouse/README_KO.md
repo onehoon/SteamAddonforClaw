@@ -119,7 +119,7 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 ### Controller
 
-페이지 맨 위의 **Controller for Steam Game** 영역에서 기본값인 **Steam Deck** 또는 **DualSense Edge**를 선택하고 **Gyroscope**를 켜거나 끕니다. Steam 게임/Big Picture 중에는 컨트롤러 선택만 잠기고 실제 적용된 컨트롤러가 표시됩니다. 자이로 토글은 Steam 게임, Big Picture, Xbox 게임, 일반 Windows 상태에서 변경할 수 있습니다. Runtime 상태를 읽을 수 없을 때는 컨트롤러 선택을 잠급니다.
+페이지 맨 위의 **Controller for Steam Game** 영역에서 기본값인 **Steam Deck** 또는 **DualSense Edge**를 선택하고 **Gyroscope**를 켜거나 끕니다. Steam 게임/Big Picture 중에는 컨트롤러 선택만 잠기고 실제 적용된 컨트롤러가 표시됩니다. 자이로 토글은 Steam 게임, Big Picture, Xbox 게임, 일반 Windows 상태에서 변경할 수 있습니다. 앱에서 설정 상태를 확인할 수 없으면 컨트롤러 선택이 잠길 수 있습니다.
 
 **Controller**에서 **XBOX Gamebar Button**(WING)과 **Center M Button**의 동작을 설정합니다. 각 버튼은 **Normal**과 **Steam Game / Big Picture**에서 서로 다른 동작을 가질 수 있습니다. 현재 컨트롤러 표현에 따라 사용할 설정이 자동으로 선택됩니다.
 
@@ -137,7 +137,7 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 최초 설치 기본값은 **Gamebar Button: Normal에서는 Steam Big Picture, Steam Game / Big Picture에서는 Steam Button**입니다. **Center M Button은 두 그룹 모두 Quick Settings Overlay**입니다. 각 모드에서 **Gamebar Button**과 **Center M Button**에는 서로 다른 동작을 지정해야 합니다.
 
-**M1 / M2**에서는 Xbox 360 컨트롤러로 표시되는 동안의 후면 버튼 동작을 설정합니다. 각각 **Disabled**, A/B/X/Y, D-Pad 방향, LB/RB, LT/RT, L3/R3, View, Menu, Xbox Guide 중 선택할 수 있습니다. 두 버튼을 같은 대상으로 지정해도 됩니다. Steam Game / Big Picture에서는 M1은 R4, M2는 L4로 유지되며 이 전역 Xbox 360 설정은 Steam Deck 동작을 바꾸지 않습니다. XBOX 게임에서 게임별 M1/M2 설정을 켜면 전역 매핑 대신 사용할 수 있습니다.
+**M1 / M2**에서는 Xbox 360 컨트롤러로 표시되는 동안의 후면 버튼 동작을 설정합니다. 각각 **Disabled**, A/B/X/Y, D-Pad 방향, LB/RB, LT/RT, L3/R3, View, Menu, Xbox Guide 중 선택할 수 있습니다. 두 버튼을 같은 대상으로 지정해도 됩니다. Steam Game / Big Picture에서는 Steam Deck과 DualSense Edge 모두 M1은 R4, M2는 L4로 유지되며 전역 Xbox 360 설정은 이 동작을 바꾸지 않습니다. XBOX 게임에서 게임별 M1/M2 설정을 켜면 전역 매핑 대신 사용할 수 있습니다.
 
 기기에서 지원하는 경우 **Joystick LED**를 켜거나 끄고 하나의 고정 색상과 0%~100% 밝기를 설정할 수 있습니다. **Vibration Strength**에서는 좌우 모터를 각각 0%~100%로 조절하고 각 **Test** 버튼으로 실제 진동을 확인합니다. 모델·펌웨어에 따라 일부 설정은 사용할 수 없으며, A2VM 7의 일부 동작은 기기별 실기 검증이 진행 중입니다.
 
@@ -192,7 +192,7 @@ Intel XeFG를 사용하는 경우 PresentMon이 드라이버에서 생성된 모
 
 스크린샷은 기본 디스플레이를 JPEG 파일로 저장합니다. **Browse**로 사용자 지정 폴더를 선택하거나 **Use default**로 Windows `Pictures\Screenshots` 폴더를 사용할 수 있습니다. **Open folder**는 선택된 폴더를 열며, **Save**를 눌러야 변경 사항이 저장됩니다. 스크린샷 바로가기는 하나만 추가할 수 있습니다.
 
-바로가기의 아이콘은 동작에 맞춰 자동 설정되지만, 추가·편집 창에서 다른 아이콘을 선택하거나 기본 아이콘으로 되돌릴 수 있습니다. Overlay에는 설정한 바로가기와 아이콘이 표시됩니다. 세부 설정은 메인 앱에서 편집하세요.
+바로가기의 아이콘은 동작에 맞춰 자동 설정되지만, 추가·편집 창에서 다른 아이콘을 선택하거나 기본 아이콘으로 되돌릴 수 있습니다. 스크린샷을 제외한 바로가기에서는 **Close Overlay after launch**로 동작 실행 후 Overlay를 닫을지도 설정할 수 있습니다. Overlay에는 설정한 바로가기와 아이콘이 표시됩니다. 세부 설정은 메인 앱에서 편집하세요.
 
 ### Tweaks
 
@@ -284,7 +284,7 @@ Quick Settings Overlay는 컨트롤러로 조작하는 Addon의 별도 설정 �
 | --- | --- | --- |
 | **Steam Quick Access Menu** (Steam Quick Access) | Steam | Steam 자체 Quick Access 화면. Controller에서 이 동작을 선택하면 Steam에 Quick Access 버튼을 전달합니다. |
 | **Quick Settings Overlay** | Steam Addon for Claw | Addon의 Device, Profile, Controller, Shortcut, Setting 탭 |
-| **ClawHUD** | Steam Addon for Claw / 포함된 ClawHUD 런타임 | 화면 위의 성능 정보 표시. 설정 메뉴가 아닙니다. |
+| **ClawHUD** | Steam Addon for Claw | 화면 위의 성능 정보 표시. 설정 메뉴가 아닙니다. |
 | **Steam Button** | Steam | Steam 시스템 버튼 입력. Quick Access 명령과 다르며 Addon Overlay를 열지 않습니다. |
 
 Addon 설정 탭을 Steam Quick Access Menu 안에 삽입하지 않습니다.
@@ -293,16 +293,17 @@ Addon 설정 탭을 Steam Quick Access Menu 안에 삽입하지 않습니다.
 
 내장 컨트롤러의 기본 버튼, D-Pad, 범퍼, 트리거, 스틱, 스틱 클릭은 대응하는 표준 게임패드 입력으로 전달됩니다. 컨트롤러 표현이 바뀌면 Windows에서 보이는 컨트롤러 종류가 달라지지만 기본 입력의 의미는 같습니다.
 
-| 내장 컨트롤 | Steam Deck 스타일 표현 | Xbox 360 표현 |
-| --- | --- | --- |
-| A / B / X / Y, D-Pad | 각각 대응하는 컨트롤 | 각각 대응하는 컨트롤 |
-| LB / RB | L1 / R1 | LB / RB |
-| LT / RT 아날로그 입력 | L2 / R2 아날로그 트리거 | LT / RT 아날로그 트리거 |
-| LT / RT 끝까지 누름 | L2 / R2 디지털 Full Pull | 별도 디지털 Full Pull 출력 없음 — XInput의 아날로그 LT / RT 값을 사용 |
-| 좌/우 스틱, L3 / R3 | 각각 대응하는 스틱 및 클릭 | 각각 대응하는 스틱 및 클릭 |
-| View / Back | View / Options 동작 | View |
-| Menu / Start | Menu 동작 | Menu / Start |
-| M1 / M2 | R4 / L4 | Controller에서 설정, 기본값은 Disabled |
+| 내장 컨트롤 | Steam Deck | DualSense Edge | Xbox 360 |
+| --- | --- | --- | --- |
+| A / B / X / Y | 각각 대응하는 버튼 | Cross / Circle / Square / Triangle | A / B / X / Y |
+| D-Pad | 각각 대응하는 방향 | 각각 대응하는 방향 | 각각 대응하는 방향 |
+| LB / RB | L1 / R1 | L1 / R1 | LB / RB |
+| LT / RT 아날로그 입력 | L2 / R2 아날로그 트리거 | L2 / R2 아날로그 트리거 | LT / RT 아날로그 트리거 |
+| LT / RT 끝까지 누름 | L2 / R2 디지털 Full Pull | L2 / R2 디지털 입력 | 별도 디지털 Full Pull 출력 없음 |
+| 좌/우 스틱, L3 / R3 | 각각 대응하는 스틱 및 클릭 | 각각 대응하는 스틱 및 클릭 | 각각 대응하는 스틱 및 클릭 |
+| View / Back | View / Options 동작 | Create | View |
+| Menu / Start | Menu 동작 | Options | Menu / Start |
+| M1 / M2 | R4 / L4 | R4 / L4 | Controller에서 설정, 기본값은 Disabled |
 
 WING과 Center M은 별도로 설정하는 전면 버튼이며 일반 게임패드 버튼 매핑 표에 포함되지 않습니다. **Steam Deck과 DualSense Edge 모드에서는 자이로/모션 출력을 지원합니다.** 자이로 활성화 조건, Gyro To Mouse·조이스틱 동작 및 감도는 Addon이 아닌 Steam Input에서 설정하세요.
 
@@ -377,7 +378,7 @@ Addon이 컨트롤러를 관리하는 상태에서 **Controller → Vibration St
 
 MSI Center M으로 컨트롤러 관리를 돌리려면 **Device**에서 **Enable**을 선택하고 **Enable and Restart**를 확인하세요. Windows가 다시 시작될 때까지 기다린 후 MSI 기본 컨트롤러 환경을 사용하세요.
 
-앱을 제거하려면 **Windows 설정 → 앱 → 설치된 앱**에서 일반적인 제거 항목을 사용해 **Uninstall**을 선택합니다. 제거 전에 안전한 컨트롤러 전환을 준비합니다. 준비가 완료되지 않았다는 메시지가 나오면 컨트롤러 구성 요소를 강제로 제거하지 말고 안내된 문제를 해결한 뒤 다시 시도하세요. 재설치를 위해 Addon 설정, 게임 프로필, 바로가기, 로그는 제거 후에도 보존됩니다. Addon이 관리하던 ClawHUD 런타임은 앱 제거 시 함께 제거됩니다.
+앱을 제거하려면 **Windows 설정 → 앱 → 설치된 앱**에서 일반적인 제거 항목을 사용해 **Uninstall**을 선택합니다. 제거 전에 안전한 컨트롤러 전환을 준비합니다. 준비가 완료되지 않았다는 메시지가 나오면 컨트롤러 구성 요소를 강제로 제거하지 말고 안내된 문제를 해결한 뒤 다시 시도하세요. 재설치를 위해 Addon 설정, 게임 프로필, 바로가기, 로그는 제거 후에도 보존됩니다. Addon에 포함된 ClawHUD는 앱 제거 시 함께 제거됩니다.
 
 ## 라이선스
 
