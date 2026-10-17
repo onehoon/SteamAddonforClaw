@@ -238,8 +238,14 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
         return CreateControl(new QueueStatusProvider(snapshots), executor);
     }
 
-    private static InProcessAddonFrontendControl CreateControl(ISystemStatusProvider status, FakeExecutor executor) =>
-        new(null!, status, null, executor, () => "test-runtime.exe");
+    private static InProcessAddonFrontendControl CreateControl(ISystemStatusProvider status, FakeExecutor executor)
+    {
+        var settings = new StartupSettingsCoordinator(
+            new AppSettings(),
+            new SettingsStore(Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}.json")),
+            new NoOpStartupManager());
+        return new(settings, status, null, executor, () => "test-runtime.exe");
+    }
 
     private sealed class ThrowingStatusProvider(SystemStatusSnapshot initial) : ISystemStatusProvider
     {

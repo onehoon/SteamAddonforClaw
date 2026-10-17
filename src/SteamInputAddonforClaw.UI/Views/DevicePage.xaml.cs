@@ -35,6 +35,9 @@ public sealed partial class DevicePage : UserControl
     private bool _tdpDraftDirty;
     private FrontendCenterMStartupSnapshot _centerMStartupSnapshot = FrontendCenterMStartupSnapshot.Unavailable;
     private bool _centerMStartupBusy;
+    private FrontendStartupTaskSnapshot _startupTaskSnapshot = FrontendStartupTaskSnapshot.Unknown;
+    private bool _startupTaskRuntimeResponsive;
+    private bool _startupTaskRepairInProgress;
     private FrontendBatteryChargeLimitSnapshot _batteryChargeLimitSnapshot = FrontendBatteryChargeLimitSnapshot.Unavailable;
     private bool _suppressBatteryChargeLimitEvents;
     private bool _batteryChargeLimitDraftDirty;
@@ -61,6 +64,7 @@ public sealed partial class DevicePage : UserControl
     public DevicePage()
     {
         InitializeComponent();
+        RenderStartupTaskStatus();
         CpuBoostAcComboBox.ItemsSource = Modes;
         CpuBoostDcComboBox.ItemsSource = Modes;
         MaximumProcessorStateAcComboBox.ItemsSource = MaximumProcessorStatePercentages;
@@ -780,12 +784,79 @@ public sealed partial class DevicePage : UserControl
     /// <summary>Renders the compact device identity/support line at the top of the page from the
     /// authoritative frontend status snapshot. This is identity/context, not a status dashboard --
     /// it reuses the existing <see cref="DeviceSummaryPresentation"/> formatting rather than restating it.</summary>
-    internal void RenderDeviceSummary(FrontendStatusSnapshot snapshot)
+    internal void RenderDeviceSummary(FrontendStatusSnapshot snapshot, bool runtimeResponsive = true)
     {
         DeviceManufacturerText.Text = DeviceSummaryPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
         DeviceModelText.Text = snapshot.Device.Model;
         DeviceSupportText.Text = DeviceSummaryPresentation.FormatControllerBadge(snapshot.Hardware.Status, snapshot.ControllerBadge);
         DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoard} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
+        _startupTaskRuntimeResponsive = runtimeResponsive;
+        if (!_startupTaskRepairInProgress)
+            _startupTaskSnapshot = snapshot.StartupTask;
+        RenderStartupTaskStatus();
+    }
+
+    private void RenderStartupTaskStatus()
+    {
+        var resourceKey = DeviceSummaryPresentation.StartupTaskStatusResourceKey(_startupTaskSnapshot, _startupTaskRepairInProgress);
+        var fallback = resourceKey switch
+        {
+            "Device_AutoStart_Verified" => "Auto start · OK",
+            "Device_AutoStart_NeedsAttention" => "Auto start · Error",
+            "Device_AutoStart_Repairing" => "Auto start · Repairing…",
+            _ => "Auto start · Unavailable"
+        };
+        AutoStartStatusText.Text = MainUiStrings.Get(resourceKey, fallback);
+        AutoStartRepairButton.Visibility = DeviceSummaryPresentation.ShouldShowStartupTaskRepair(
+            _startupTaskSnapshot,
+            _startupTaskRuntimeResponsive)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AutoStartRepairButton.IsEnabled = DeviceSummaryPresentation.CanRepairStartupTask(
+            _startupTaskSnapshot,
+            _startupTaskRuntimeResponsive,
+            _startupTaskRepairInProgress);
+
+        var issueKey = DeviceSummaryPresentation.StartupTaskIssueResourceKey(_startupTaskSnapshot.Issue);
+        var tooltip = issueKey is not null
+            ? MainUiStrings.Get(issueKey, "The startup task could not be verified or repaired.")
+            : _startupTaskSnapshot.State == FrontendStartupTaskState.Verified
+                ? MainUiStrings.Get("Device_AutoStart_VerifiedHint", "The required Windows startup task was verified.")
+                : _startupTaskRuntimeResponsive
+                    ? MainUiStrings.Get("Device_AutoStart_UnknownHint", "The startup task has not been verified yet. Select Repair to check it.")
+                    : MainUiStrings.Get("Device_AutoStart_RuntimeUnavailable", "The Runtime connection is unavailable.");
+        ToolTipService.SetToolTip(AutoStartStatusText, tooltip);
+    }
+
+    private async void AutoStartRepairButton_Click(object sender, RoutedEventArgs e) => await RepairStartupTaskAsync();
+
+    private async Task RepairStartupTaskAsync()
+    {
+        if (_frontend is null || !DeviceSummaryPresentation.CanRepairStartupTask(
+                _startupTaskSnapshot,
+                _startupTaskRuntimeResponsive,
+                _startupTaskRepairInProgress))
+            return;
+
+        _startupTaskRepairInProgress = true;
+        RenderStartupTaskStatus();
+        try
+        {
+            _startupTaskSnapshot = await _frontend.RepairStartupTaskAsync();
+            _startupTaskRuntimeResponsive = true;
+        }
+        catch (Exception exception)
+        {
+            _startupTaskSnapshot = FrontendStartupTaskSnapshot.Unknown;
+            _startupTaskRuntimeResponsive = false;
+            AppLog.Warn("Device", "Mandatory startup task repair request failed.", exception,
+                ("Reason", exception.GetType().Name));
+        }
+        finally
+        {
+            _startupTaskRepairInProgress = false;
+            RenderStartupTaskStatus();
+        }
     }
 
     // ---- MSI Center M controller-authority card (moved here from the Controller page) ----

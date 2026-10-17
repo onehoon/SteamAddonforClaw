@@ -33,6 +33,19 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     }
 
     [Fact]
+    public void Enabled_synchronization_does_not_register_when_task_read_fails()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 1 };
+
+        var result = Manager(store).Synchronize(true);
+
+        Assert.False(result.Success);
+        Assert.Equal(StartupTaskFailureReason.ReadFailed, result.FailureReason);
+        Assert.Equal(0, store.RegisterCalls);
+        Assert.Equal(0, store.DeleteCalls);
+    }
+
+    [Fact]
     public void Missing_task_is_registered_directly_once_and_exact_contract_is_verified()
     {
         var store = new FakeTaskStore();
@@ -90,7 +103,10 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     {
         var store = new FakeTaskStore { NextRegister = (StartupTaskWriteOutcome)outcome };
 
-        Assert.False(Manager(store).Synchronize(true).Success);
+        var result = Manager(store).Synchronize(true);
+
+        Assert.False(result.Success);
+        Assert.Equal(StartupTaskFailureReason.RegistrationFailed, result.FailureReason);
         Assert.Equal(1, store.RegisterCalls);
     }
 
@@ -102,7 +118,10 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             RegisteredReadback = new(true, @"C:\wrong.exe", "--background", User, 3, 0, false, false, "PT0S")
         };
 
-        Assert.False(Manager(store).Synchronize(true).Success);
+        var result = Manager(store).Synchronize(true);
+
+        Assert.False(result.Success);
+        Assert.Equal(StartupTaskFailureReason.ReadbackUnverified, result.FailureReason);
         Assert.Equal(1, store.RegisterCalls);
     }
 
@@ -123,7 +142,10 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             RegisteredReadback = new(false, _exe, "--background", User, 3, 1, false, false, "PT0S")
         };
 
-        Assert.False(Manager(store).Synchronize(true).Success);
+        var result = Manager(store).Synchronize(true);
+
+        Assert.False(result.Success);
+        Assert.Equal(StartupTaskFailureReason.ReadbackUnverified, result.FailureReason);
         Assert.Equal(1, store.RegisterCalls);
     }
 
@@ -133,7 +155,10 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         File.Delete(_exe);
         var store = new FakeTaskStore();
 
-        Assert.False(Manager(store).Synchronize(true).Success);
+        var result = Manager(store).Synchronize(true);
+
+        Assert.False(result.Success);
+        Assert.Equal(StartupTaskFailureReason.StableExecutableMissing, result.FailureReason);
         Assert.Equal(0, store.RegisterCalls);
     }
 

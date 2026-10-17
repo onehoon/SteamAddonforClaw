@@ -494,6 +494,15 @@ public sealed record FrontendStatusSnapshot(
     bool CanInstallRequiredComponents)
 {
     public FrontendControllerBadgeState ControllerBadge { get; init; } = FrontendControllerBadgeState.Unavailable;
+    public FrontendStartupTaskSnapshot StartupTask { get; init; } = FrontendStartupTaskSnapshot.Unknown;
+}
+
+public enum FrontendStartupTaskState { Unknown, Verified, NeedsAttention }
+public enum FrontendStartupTaskIssue { None, ReadFailed, StableExecutableMissing, RegistrationFailed, ReadbackUnverified }
+public sealed record FrontendStartupTaskSnapshot(FrontendStartupTaskState State, FrontendStartupTaskIssue Issue)
+{
+    public static readonly FrontendStartupTaskSnapshot Unknown =
+        new(FrontendStartupTaskState.Unknown, FrontendStartupTaskIssue.None);
 }
 
 public enum FrontendControllerBadgeState
@@ -559,6 +568,8 @@ public interface IAddonFrontendControl
             FrontendShortcutEditorSnapshot.Unavailable("Shortcut editing is unavailable.")));
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
+    Task<FrontendStartupTaskSnapshot> RepairStartupTaskAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendStartupTaskSnapshot.Unknown);
     Task<FrontendWindowsTweaksSnapshot> CaptureWindowsTweaksAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendWindowsTweaksSnapshot.Unavailable);
     Task<FrontendWindowsTweakMutationResult> SetWindowsTweakAsync(

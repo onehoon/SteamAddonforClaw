@@ -97,7 +97,9 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
 
         // 1. Read-only verification first: an already-compliant task returns Success with no
         //    RegisterTaskDefinition call.
-        var current = SafeRead();
+        if (!TryRead(out var current))
+            return StartupRegistrationResult.Failed(StartupTaskFailureReason.ReadFailed);
+
         if (current is not null && IsCompliant(current, configuration))
         {
             AppLog.Info("TaskScheduler", "Startup task already compliant.", ("TaskFound", true), ("TaskCompliant", true));
@@ -111,12 +113,14 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         {
             if (write == StartupTaskWriteOutcome.AccessDenied)
                 AppLog.Warn("TaskScheduler", "High Runtime startup task registration was denied; no secondary elevation fallback is available.", null);
-            return StartupRegistrationResult.Failed();
+            return StartupRegistrationResult.Failed(StartupTaskFailureReason.RegistrationFailed);
         }
 
         var verified = ReadBackVerifyWithBoundedSettle(configuration);
         AppLog.Info("TaskScheduler", "Startup task registered.", ("ReadbackVerified", verified));
-        return verified ? StartupRegistrationResult.Enabled() : StartupRegistrationResult.Failed();
+        return verified
+            ? StartupRegistrationResult.Enabled()
+            : StartupRegistrationResult.Failed(StartupTaskFailureReason.ReadbackUnverified);
     }
 
     /// <summary>Remove the ONE Addon-owned task from the High Runtime. Read-only first (already absent
@@ -127,7 +131,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         if (!TryRead(out var current))
         {
             AppLog.Warn("TaskScheduler", "Startup task removal aborted; the owned task could not be read.");
-            return StartupRegistrationResult.Failed();
+            return StartupRegistrationResult.Failed(StartupTaskFailureReason.ReadFailed);
         }
         if (current is null)
         {
@@ -136,10 +140,12 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         }
 
         try { _taskStore.Delete(); }
-        catch (Exception exception) { AppLog.Error("TaskScheduler", "Startup task deletion failed.", exception); return StartupRegistrationResult.Failed(); }
+        catch (Exception exception) { AppLog.Error("TaskScheduler", "Startup task deletion failed.", exception); return StartupRegistrationResult.Failed(StartupTaskFailureReason.RegistrationFailed); }
         var absent = ReadBackVerifyAbsentWithBoundedSettle();
         AppLog.Info("TaskScheduler", "Startup task deleted.", ("ReadbackVerified", absent));
-        return absent ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
+        return absent
+            ? StartupRegistrationResult.Disabled()
+            : StartupRegistrationResult.Failed(StartupTaskFailureReason.ReadbackUnverified);
     }
 
     /// <summary>PR11 section 12 / PR12 section 11: read-only, bounded. Re-reads on a short interval
@@ -381,13 +387,26 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
 
 internal sealed record ScheduledTaskConfiguration(string TaskName, string ExecutablePath, string UserId);
 
-public sealed record StartupRegistrationResult(bool Success, string Message)
+public enum StartupTaskFailureReason
+{
+    None,
+    ReadFailed,
+    StableExecutableMissing,
+    RegistrationFailed,
+    ReadbackUnverified
+}
+
+public sealed record StartupRegistrationResult(
+    bool Success,
+    string Message,
+    StartupTaskFailureReason FailureReason = StartupTaskFailureReason.None)
 {
     public static StartupRegistrationResult Enabled() => new(true, "Launch at Windows startup is enabled.");
 
     public static StartupRegistrationResult Disabled() => new(true, "Launch at Windows startup is disabled.");
 
-    public static StartupRegistrationResult NotInstalled() => new(false, "Windows startup is available after Velopack installation.");
+    public static StartupRegistrationResult NotInstalled() => new(false, "Windows startup is available after Velopack installation.", StartupTaskFailureReason.StableExecutableMissing);
 
-    public static StartupRegistrationResult Failed() => new(false, "Windows startup setting could not be applied.");
+    public static StartupRegistrationResult Failed(StartupTaskFailureReason reason = StartupTaskFailureReason.RegistrationFailed) =>
+        new(false, "Windows startup setting could not be applied.", reason);
 }

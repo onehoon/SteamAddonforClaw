@@ -34,7 +34,19 @@ public sealed class MainUiLocalizationResourceTests
             "MainNav_Shortcut.Content",
             "MainNav_HowToUse.Content",
             "HowToUse_Loading.Text",
-            "Settings_AppTheme_Description"
+            "Settings_AppTheme_Description",
+            "Device_AutoStart_Verified",
+            "Device_AutoStart_NeedsAttention",
+            "Device_AutoStart_Unknown",
+            "Device_AutoStart_Repairing",
+            "Device_AutoStartRepairButton.Content",
+            "Device_AutoStart_VerifiedHint",
+            "Device_AutoStart_UnknownHint",
+            "Device_AutoStart_RuntimeUnavailable",
+            "Device_AutoStart_Issue_ReadFailed",
+            "Device_AutoStart_Issue_StableExecutableMissing",
+            "Device_AutoStart_Issue_RegistrationFailed",
+            "Device_AutoStart_Issue_ReadbackUnverified"
         };
 
         Assert.Equal(english.Keys.OrderBy(key => key, StringComparer.Ordinal), korean.Keys.OrderBy(key => key, StringComparer.Ordinal));
@@ -44,6 +56,12 @@ public sealed class MainUiLocalizationResourceTests
         }
         Assert.All(english.Values, value => Assert.False(string.IsNullOrWhiteSpace(value)));
         Assert.All(korean.Values, value => Assert.False(string.IsNullOrWhiteSpace(value)));
+        Assert.Equal("Auto start · OK", english["Device_AutoStart_Verified"]);
+        Assert.Equal("Auto start · Error", english["Device_AutoStart_NeedsAttention"]);
+        Assert.Equal("Auto start · Unavailable", english["Device_AutoStart_Unknown"]);
+        Assert.Equal("자동 시작 · 정상", korean["Device_AutoStart_Verified"]);
+        Assert.Equal("자동 시작 · 오류", korean["Device_AutoStart_NeedsAttention"]);
+        Assert.Equal("자동 시작 · 확인 불가", korean["Device_AutoStart_Unknown"]);
     }
 
     [Fact]
@@ -623,7 +641,7 @@ public sealed class MainUiLocalizationResourceTests
     }
 
     [Fact]
-    public void Device_xaml_text_uses_unique_resource_uids_and_excludes_the_summary_card()
+    public void Device_xaml_text_uses_unique_resource_uids_and_localizes_only_the_repair_button_in_summary()
     {
         var root = FindRepositoryRoot();
         var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml"));
@@ -636,6 +654,7 @@ public sealed class MainUiLocalizationResourceTests
             "Device_CenterMStartupStatusText",
             "Device_CenterMStartupEnableButton",
             "Device_CenterMStartupDisableButton",
+            "Device_AutoStartRepairButton",
             "Device_TdpExpander",
             "Device_TdpAcCard",
             "Device_TdpDcCard",
@@ -671,7 +690,9 @@ public sealed class MainUiLocalizationResourceTests
 
         var summaryCard = Assert.Single(document.Descendants(), element =>
             (string?)element.Attribute(XamlNamespace + "Name") == "DeviceSummaryCard");
-        Assert.DoesNotContain(summaryCard.DescendantsAndSelf(), element => element.Attribute(XamlNamespace + "Uid") is not null);
+        Assert.Equal(new[] { "Device_AutoStartRepairButton" }, summaryCard.DescendantsAndSelf()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .Select(element => (string)element.Attribute(XamlNamespace + "Uid")!));
         Assert.Equal(
             new[]
             {
@@ -684,8 +705,12 @@ public sealed class MainUiLocalizationResourceTests
                 "ColumnDefinition(Width=Auto)",
                 "TextBlock(Name=DeviceManufacturerText,FontSize=18,FontWeight=SemiBold,VerticalAlignment=Center)",
                 "TextBlock(Name=DeviceModelText,Grid.Column=1,FontSize=18,FontWeight=SemiBold,TextWrapping=Wrap,VerticalAlignment=Center)",
-                "Border(Grid.Column=2,Padding=8,3,Background={ThemeResource SubtleFillColorSecondaryBrush},CornerRadius=12,HorizontalAlignment=Right,VerticalAlignment=Center)",
+                "StackPanel(Grid.Column=2,Spacing=4,HorizontalAlignment=Right,VerticalAlignment=Center)",
+                "Border(Padding=8,3,Background={ThemeResource SubtleFillColorSecondaryBrush},CornerRadius=12,HorizontalAlignment=Right,VerticalAlignment=Center)",
                 "TextBlock(Name=DeviceSupportText,FontSize=13,FontWeight=SemiBold,TextAlignment=Center,TextWrapping=Wrap,VerticalAlignment=Center)",
+                "StackPanel(Orientation=Horizontal,Spacing=6,HorizontalAlignment=Right,VerticalAlignment=Center)",
+                "TextBlock(Name=AutoStartStatusText,FontSize=12,TextWrapping=Wrap,VerticalAlignment=Center)",
+                "Button(Name=AutoStartRepairButton,Uid=Device_AutoStartRepairButton,Content=Repair,Padding=8,2,MinHeight=24,FontSize=12,Visibility=Collapsed,Click=AutoStartRepairButton_Click)",
                 "TextBlock(Name=DeviceBoardGpuText,Opacity=0.7,TextWrapping=Wrap)"
             },
             summaryCard.DescendantsAndSelf().Select(element =>

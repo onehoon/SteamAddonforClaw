@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Profiles;
@@ -983,7 +984,37 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         var snapshot = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
         var setup = _setupExecutor.Evaluate(snapshot);
-        return FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(snapshot), setup);
+        return FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(snapshot), setup) with
+        {
+            StartupTask = MapStartupTask(_settings.LatestStartupRegistration)
+        };
+    }
+
+    public async Task<FrontendStartupTaskSnapshot> RepairStartupTaskAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var result = await Task.Run(_settings.EnsureStartupRegistration, cancellationToken).ConfigureAwait(false);
+        var snapshot = MapStartupTask(result);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return snapshot;
+    }
+
+    private static FrontendStartupTaskSnapshot MapStartupTask(StartupRegistrationResult? result)
+    {
+        if (result is null)
+            return FrontendStartupTaskSnapshot.Unknown;
+        if (result.Success)
+            return new(FrontendStartupTaskState.Verified, FrontendStartupTaskIssue.None);
+
+        var issue = result.FailureReason switch
+        {
+            StartupTaskFailureReason.ReadFailed => FrontendStartupTaskIssue.ReadFailed,
+            StartupTaskFailureReason.StableExecutableMissing => FrontendStartupTaskIssue.StableExecutableMissing,
+            StartupTaskFailureReason.ReadbackUnverified => FrontendStartupTaskIssue.ReadbackUnverified,
+            _ => FrontendStartupTaskIssue.RegistrationFailed
+        };
+        return new(FrontendStartupTaskState.NeedsAttention, issue);
     }
 
     public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default)

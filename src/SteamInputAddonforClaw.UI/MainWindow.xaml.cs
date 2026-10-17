@@ -783,7 +783,7 @@ public sealed partial class MainWindow : Window
                 {
                     var unavailableStatus = DeviceSummaryPresentation.WithUnavailableControllerBadge(lastStatus);
                     _latestSystemStatus = unavailableStatus;
-                    DeviceContent.RenderDeviceSummary(unavailableStatus);
+                    DeviceContent.RenderDeviceSummary(unavailableStatus, runtimeResponsive: false);
                 }
                 AppLog.Debug("Status", "System status refresh skipped because Runtime transport is unavailable.",
                     ("Reason", exception.Message));

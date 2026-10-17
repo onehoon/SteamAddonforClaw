@@ -695,4 +695,16 @@ These settings are reversible where Windows and policy permit. Windows policy or
   <data name="Settings_RequiredComponents_ReadyCount" xml:space="preserve">
     <value>{0} of {1} ready</value>
   </data>
+  <data name="Device_AutoStart_Verified" xml:space="preserve"><value>Auto start · OK</value></data>
+  <data name="Device_AutoStart_NeedsAttention" xml:space="preserve"><value>Auto start · Error</value></data>
+  <data name="Device_AutoStart_Unknown" xml:space="preserve"><value>Auto start · Unavailable</value></data>
+  <data name="Device_AutoStart_Repairing" xml:space="preserve"><value>Auto start · Repairing…</value></data>
+  <data name="Device_AutoStartRepairButton.Content" xml:space="preserve"><value>Repair</value></data>
+  <data name="Device_AutoStart_VerifiedHint" xml:space="preserve"><value>The required Windows logon task matches the current startup contract.</value></data>
+  <data name="Device_AutoStart_UnknownHint" xml:space="preserve"><value>The startup task has not been verified in this Runtime session. Select Repair to check it.</value></data>
+  <data name="Device_AutoStart_RuntimeUnavailable" xml:space="preserve"><value>The Runtime connection is unavailable. Reconnect before trying again.</value></data>
+  <data name="Device_AutoStart_Issue_ReadFailed" xml:space="preserve"><value>Task Scheduler could not be read, so no task change was made.</value></data>
+  <data name="Device_AutoStart_Issue_StableExecutableMissing" xml:space="preserve"><value>The stable installed application path is unavailable.</value></data>
+  <data name="Device_AutoStart_Issue_RegistrationFailed" xml:space="preserve"><value>Windows could not create or update the startup task.</value></data>
+  <data name="Device_AutoStart_Issue_ReadbackUnverified" xml:space="preserve"><value>The startup task could not be verified after the repair attempt.</value></data>
 </root>
