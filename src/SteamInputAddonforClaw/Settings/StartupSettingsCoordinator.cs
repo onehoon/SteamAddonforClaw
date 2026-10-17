@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Contracts.ControllerVibration;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Install;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Settings;
 
@@ -39,7 +40,24 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     /// exists. Background startup is not a user preference -- there is nothing to persist and no OFF
     /// request. A failed repair is returned as-is; the already-running Runtime is never intentionally
     /// exited for it.</summary>
-    public StartupRegistrationResult EnsureStartupRegistration() => _startupManager.Synchronize(true);
+    public StartupRegistrationResult? LatestStartupRegistration { get; private set; }
+
+    public StartupRegistrationResult EnsureStartupRegistration()
+    {
+        StartupRegistrationResult result;
+        try
+        {
+            result = _startupManager.Synchronize(true);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("TaskScheduler", "Startup task verification or repair failed.", exception);
+            result = StartupRegistrationResult.Failed(StartupTaskFailureReason.RegistrationFailed);
+        }
+
+        LatestStartupRegistration = result;
+        return result;
+    }
 
     /// <summary>Uninstall preparation only: remove the owned startup task. Named narrowly so ordinary
     /// feature code cannot look like it can turn application startup on and off.</summary>
