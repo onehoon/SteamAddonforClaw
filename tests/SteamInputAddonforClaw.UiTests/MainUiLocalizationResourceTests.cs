@@ -56,12 +56,14 @@ public sealed class MainUiLocalizationResourceTests
         }
         Assert.All(english.Values, value => Assert.False(string.IsNullOrWhiteSpace(value)));
         Assert.All(korean.Values, value => Assert.False(string.IsNullOrWhiteSpace(value)));
-        Assert.Equal("Auto start · OK", english["Device_AutoStart_Verified"]);
-        Assert.Equal("Auto start · Error", english["Device_AutoStart_NeedsAttention"]);
-        Assert.Equal("Auto start · Unavailable", english["Device_AutoStart_Unknown"]);
-        Assert.Equal("자동 시작 · 정상", korean["Device_AutoStart_Verified"]);
-        Assert.Equal("자동 시작 · 오류", korean["Device_AutoStart_NeedsAttention"]);
-        Assert.Equal("자동 시작 · 확인 불가", korean["Device_AutoStart_Unknown"]);
+        Assert.Equal("Auto start OK", english["Device_AutoStart_Verified"]);
+        Assert.Equal("Auto start Error", english["Device_AutoStart_NeedsAttention"]);
+        Assert.Equal("Auto start Unavailable", english["Device_AutoStart_Unknown"]);
+        Assert.Equal("Auto start Repairing…", english["Device_AutoStart_Repairing"]);
+        Assert.Equal("자동 시작 정상", korean["Device_AutoStart_Verified"]);
+        Assert.Equal("자동 시작 오류", korean["Device_AutoStart_NeedsAttention"]);
+        Assert.Equal("자동 시작 확인 불가", korean["Device_AutoStart_Unknown"]);
+        Assert.Equal("자동 시작 복구 중…", korean["Device_AutoStart_Repairing"]);
     }
 
     [Fact]
@@ -697,21 +699,25 @@ public sealed class MainUiLocalizationResourceTests
             new[]
             {
                 "Border(Name=DeviceSummaryCard,Padding=18,16,Background={ThemeResource CardBackgroundFillColorDefaultBrush},BorderBrush={ThemeResource CardStrokeColorDefaultBrush},BorderThickness=1,CornerRadius=8)",
-                "StackPanel(Spacing=4)",
-                "Grid(ColumnSpacing=8)",
+                "Grid(ColumnSpacing=8,RowSpacing=4)",
+                "Grid.RowDefinitions()",
+                "RowDefinition(Height=Auto)",
+                "RowDefinition(Height=Auto)",
                 "Grid.ColumnDefinitions()",
                 "ColumnDefinition(Width=Auto)",
                 "ColumnDefinition(Width=*)",
                 "ColumnDefinition(Width=Auto)",
                 "TextBlock(Name=DeviceManufacturerText,FontSize=18,FontWeight=SemiBold,VerticalAlignment=Center)",
                 "TextBlock(Name=DeviceModelText,Grid.Column=1,FontSize=18,FontWeight=SemiBold,TextWrapping=Wrap,VerticalAlignment=Center)",
-                "StackPanel(Grid.Column=2,Spacing=4,HorizontalAlignment=Right,VerticalAlignment=Center)",
-                "Border(Padding=8,3,Background={ThemeResource SubtleFillColorSecondaryBrush},CornerRadius=12,HorizontalAlignment=Right,VerticalAlignment=Center)",
-                "TextBlock(Name=DeviceSupportText,FontSize=13,FontWeight=SemiBold,TextAlignment=Center,TextWrapping=Wrap,VerticalAlignment=Center)",
+                "TextBlock(Name=DeviceBoardGpuText,Grid.Row=1,Grid.ColumnSpan=2,Opacity=0.7,TextWrapping=Wrap)",
+                "StackPanel(Grid.RowSpan=2,Grid.Column=2,Spacing=6,HorizontalAlignment=Right,VerticalAlignment=Center)",
                 "StackPanel(Orientation=Horizontal,Spacing=6,HorizontalAlignment=Right,VerticalAlignment=Center)",
-                "TextBlock(Name=AutoStartStatusText,FontSize=12,TextWrapping=Wrap,VerticalAlignment=Center)",
+                "Ellipse(Name=DeviceSupportIndicator,Width=8,Height=8,Style={StaticResource DeviceSummaryIndicatorNeutralStyle},VerticalAlignment=Center)",
+                "TextBlock(Name=DeviceSupportText,FontSize=13,FontWeight=SemiBold,TextAlignment=Right,TextWrapping=Wrap,VerticalAlignment=Center)",
+                "StackPanel(Orientation=Horizontal,Spacing=6,HorizontalAlignment=Right,VerticalAlignment=Center)",
+                "Ellipse(Name=AutoStartStatusIndicator,Width=8,Height=8,Style={StaticResource DeviceSummaryIndicatorNeutralStyle},VerticalAlignment=Center)",
+                "TextBlock(Name=AutoStartStatusText,FontSize=12,TextAlignment=Right,TextWrapping=Wrap,VerticalAlignment=Center)",
                 "Button(Name=AutoStartRepairButton,Uid=Device_AutoStartRepairButton,Content=Repair,Padding=8,2,MinHeight=24,FontSize=12,Visibility=Collapsed,Click=AutoStartRepairButton_Click)",
-                "TextBlock(Name=DeviceBoardGpuText,Opacity=0.7,TextWrapping=Wrap)"
             },
             summaryCard.DescendantsAndSelf().Select(element =>
                 $"{element.Name.LocalName}({string.Join(",", element.Attributes().Select(attribute => $"{attribute.Name.LocalName}={attribute.Value}"))})"));

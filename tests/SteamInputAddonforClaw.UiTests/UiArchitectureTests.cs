@@ -663,14 +663,43 @@ public sealed class UiArchitectureTests
         Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "DeviceSupportText");
         Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "AutoStartStatusText");
         Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "AutoStartRepairButton");
+        Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "DeviceSupportIndicator");
+        Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "AutoStartStatusIndicator");
+        Assert.Equal(2, summary.Descendants().Count(element => element.Name.LocalName == "Ellipse"));
+        Assert.DoesNotContain(summary.Descendants(), element =>
+            element.Name.LocalName == "Border" && element.Descendants().Any(child =>
+                (string?)child.Attribute(x + "Name") == "DeviceSupportText"));
+        var statusGroup = Assert.Single(summary.Descendants(), element =>
+            element.Name.LocalName == "StackPanel" && (string?)element.Attribute("Grid.RowSpan") == "2");
+        Assert.Equal("Center", (string?)statusGroup.Attribute("VerticalAlignment"));
         Assert.True(xaml.ToString().IndexOf("x:Name=\"DeviceSupportText\"", StringComparison.Ordinal)
             < xaml.ToString().IndexOf("x:Name=\"AutoStartStatusText\"", StringComparison.Ordinal));
+        Assert.Contains("SystemFillColorSuccessBrush", xaml.ToString(), StringComparison.Ordinal);
+        Assert.Contains("SystemFillColorCautionBrush", xaml.ToString(), StringComparison.Ordinal);
+        Assert.Contains("SystemFillColorCriticalBrush", xaml.ToString(), StringComparison.Ordinal);
+        Assert.Contains("TextFillColorSecondaryBrush", xaml.ToString(), StringComparison.Ordinal);
+        foreach (var styleName in new[]
+                 {
+                     "DeviceSummaryIndicatorNeutralStyle",
+                     "DeviceSummaryIndicatorSuccessStyle",
+                     "DeviceSummaryIndicatorCautionStyle",
+                     "DeviceSummaryIndicatorCriticalStyle"
+                 })
+        {
+            Assert.Contains(xaml.Descendants(), element =>
+                element.Name.LocalName == "Style" && (string?)element.Attribute(x + "Key") == styleName);
+        }
 
         var codeBehind = File.ReadAllText(codePath);
         Assert.Contains("RepairStartupTaskAsync()", codeBehind, StringComparison.Ordinal);
         Assert.Contains("StartupTaskIssueResourceKey", codeBehind, StringComparison.Ordinal);
         Assert.Contains("_startupTaskRepairInProgress", codeBehind, StringComparison.Ordinal);
         Assert.Contains("if (!_startupTaskRepairInProgress)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("ApplyIndicatorTone(DeviceSupportIndicator", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("ApplyIndicatorTone(AutoStartStatusIndicator", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("DeviceStatusIndicatorTone.Success => \"DeviceSummaryIndicatorSuccessStyle\"", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("DeviceStatusIndicatorTone.Caution => \"DeviceSummaryIndicatorCautionStyle\"", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("DeviceStatusIndicatorTone.Critical => \"DeviceSummaryIndicatorCriticalStyle\"", codeBehind, StringComparison.Ordinal);
         Assert.Contains("runtimeResponsive: false", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs")), StringComparison.Ordinal);
     }
 

@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml.Shapes;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.UI;
@@ -789,6 +790,8 @@ public sealed partial class DevicePage : UserControl
         DeviceManufacturerText.Text = DeviceSummaryPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
         DeviceModelText.Text = snapshot.Device.Model;
         DeviceSupportText.Text = DeviceSummaryPresentation.FormatControllerBadge(snapshot.Hardware.Status, snapshot.ControllerBadge);
+        ApplyIndicatorTone(DeviceSupportIndicator, DeviceSummaryPresentation.ControllerIndicatorTone(
+            snapshot.Hardware.Status, snapshot.ControllerBadge));
         DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoard} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
         _startupTaskRuntimeResponsive = runtimeResponsive;
         if (!_startupTaskRepairInProgress)
@@ -801,12 +804,14 @@ public sealed partial class DevicePage : UserControl
         var resourceKey = DeviceSummaryPresentation.StartupTaskStatusResourceKey(_startupTaskSnapshot, _startupTaskRepairInProgress);
         var fallback = resourceKey switch
         {
-            "Device_AutoStart_Verified" => "Auto start · OK",
-            "Device_AutoStart_NeedsAttention" => "Auto start · Error",
-            "Device_AutoStart_Repairing" => "Auto start · Repairing…",
-            _ => "Auto start · Unavailable"
+            "Device_AutoStart_Verified" => "Auto start OK",
+            "Device_AutoStart_NeedsAttention" => "Auto start Error",
+            "Device_AutoStart_Repairing" => "Auto start Repairing…",
+            _ => "Auto start Unavailable"
         };
         AutoStartStatusText.Text = MainUiStrings.Get(resourceKey, fallback);
+        ApplyIndicatorTone(AutoStartStatusIndicator,
+            DeviceSummaryPresentation.StartupTaskIndicatorTone(_startupTaskSnapshot, _startupTaskRepairInProgress));
         AutoStartRepairButton.Visibility = DeviceSummaryPresentation.ShouldShowStartupTaskRepair(
             _startupTaskSnapshot,
             _startupTaskRuntimeResponsive)
@@ -826,6 +831,18 @@ public sealed partial class DevicePage : UserControl
                     ? MainUiStrings.Get("Device_AutoStart_UnknownHint", "The startup task has not been verified yet. Select Repair to check it.")
                     : MainUiStrings.Get("Device_AutoStart_RuntimeUnavailable", "The Runtime connection is unavailable.");
         ToolTipService.SetToolTip(AutoStartStatusText, tooltip);
+    }
+
+    private void ApplyIndicatorTone(Ellipse indicator, DeviceStatusIndicatorTone tone)
+    {
+        var styleKey = tone switch
+        {
+            DeviceStatusIndicatorTone.Success => "DeviceSummaryIndicatorSuccessStyle",
+            DeviceStatusIndicatorTone.Caution => "DeviceSummaryIndicatorCautionStyle",
+            DeviceStatusIndicatorTone.Critical => "DeviceSummaryIndicatorCriticalStyle",
+            _ => "DeviceSummaryIndicatorNeutralStyle"
+        };
+        indicator.Style = (Style)Resources[styleKey];
     }
 
     private async void AutoStartRepairButton_Click(object sender, RoutedEventArgs e) => await RepairStartupTaskAsync();
