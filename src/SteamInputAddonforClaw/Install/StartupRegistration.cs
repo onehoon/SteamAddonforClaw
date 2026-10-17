@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Xml;
 using Microsoft.Win32;
 using SteamInputAddonforClaw.Diagnostics;
 
@@ -27,7 +28,9 @@ internal sealed record OwnedStartupTaskState(
     // must have no scheduler execution-time limit.
     bool DisallowStartIfOnBatteries,
     bool StopIfGoingOnBatteries,
-    string ExecutionTimeLimit);
+    string ExecutionTimeLimit,
+    int RestartCount,
+    string RestartInterval);
 
 /// <summary>Narrow seam over the Task Scheduler COM API for the one Addon-owned task, so the
 /// register/verify policy can be unit tested without a real scheduler.</summary>
@@ -47,6 +50,8 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     internal const int TaskLogonInteractiveToken = 3;
     internal const int TaskRunLevelHighest = 1;
     internal const int StartupTaskPriority = 2;
+    internal const int RestartOnFailureCount = 3;
+    internal const string RestartOnFailureInterval = "PT1M";
 
     private readonly Func<string> _stableExecutablePathProvider;
     private readonly Func<string> _currentUserIdentityProvider;
@@ -213,7 +218,17 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         // Runtime guarantee -- treat it as drift and repair it (review [P1]).
         && !state.DisallowStartIfOnBatteries
         && !state.StopIfGoingOnBatteries
-        && string.Equals(state.ExecutionTimeLimit, NoExecutionTimeLimit, StringComparison.OrdinalIgnoreCase);
+        && string.Equals(state.ExecutionTimeLimit, NoExecutionTimeLimit, StringComparison.OrdinalIgnoreCase)
+        && state.RestartCount == RestartOnFailureCount
+        && RestartIntervalsEqual(state.RestartInterval, RestartOnFailureInterval);
+
+    private static bool RestartIntervalsEqual(string actual, string expected)
+    {
+        if (string.IsNullOrWhiteSpace(actual)) return false;
+        try { return XmlConvert.ToTimeSpan(actual) == XmlConvert.ToTimeSpan(expected); }
+        catch (FormatException) { return false; }
+        catch (OverflowException) { return false; }
+    }
 
     internal static ScheduledTaskConfiguration CreateTaskConfiguration(string stableExecutablePath, string currentUserId) =>
         new(TaskName, stableExecutablePath, currentUserId);
@@ -295,9 +310,11 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
             bool disallowOnBatteries = (bool)settings.DisallowStartIfOnBatteries;
             bool stopGoingOnBatteries = (bool)settings.StopIfGoingOnBatteries;
             string executionTimeLimit = (string)(settings.ExecutionTimeLimit ?? string.Empty);
+            int restartCount = (int)settings.RestartCount;
+            string restartInterval = (string)(settings.RestartInterval ?? string.Empty);
 
             return new OwnedStartupTaskState(enabled, actionPath, actionArguments, logonTriggerUserId, logonType, runLevel,
-                disallowOnBatteries, stopGoingOnBatteries, executionTimeLimit);
+                disallowOnBatteries, stopGoingOnBatteries, executionTimeLimit, restartCount, restartInterval);
         }
         catch (Exception exception) when (IsExactMissingTaskException(exception))
         {
@@ -331,6 +348,8 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
             settings.DisallowStartIfOnBatteries = false;
             settings.StopIfGoingOnBatteries = false;
             settings.ExecutionTimeLimit = WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit;
+            settings.RestartCount = WindowsTaskSchedulerStartupManager.RestartOnFailureCount;
+            settings.RestartInterval = WindowsTaskSchedulerStartupManager.RestartOnFailureInterval;
 
             dynamic logonTrigger = taskDefinition.Triggers.Create(TaskTriggerLogon);
             logonTrigger.UserId = configuration.UserId;

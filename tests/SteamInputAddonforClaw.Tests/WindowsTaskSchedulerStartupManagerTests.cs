@@ -16,7 +16,9 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
 
     private OwnedStartupTaskState Compliant() =>
         new(true, _exe, "--background", User, 3, WindowsTaskSchedulerStartupManager.TaskRunLevelHighest,
-            DisallowStartIfOnBatteries: false, StopIfGoingOnBatteries: false, ExecutionTimeLimit: "PT0S");
+            DisallowStartIfOnBatteries: false, StopIfGoingOnBatteries: false, ExecutionTimeLimit: "PT0S",
+            RestartCount: WindowsTaskSchedulerStartupManager.RestartOnFailureCount,
+            RestartInterval: WindowsTaskSchedulerStartupManager.RestartOnFailureInterval);
 
     private WindowsTaskSchedulerStartupManager Manager(FakeTaskStore store) =>
         new(() => _exe, () => User, store,
@@ -61,6 +63,8 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         Assert.False(store.Current.DisallowStartIfOnBatteries);
         Assert.False(store.Current.StopIfGoingOnBatteries);
         Assert.Equal("PT0S", store.Current.ExecutionTimeLimit);
+        Assert.Equal(3, store.Current.RestartCount);
+        Assert.Equal("PT1M", store.Current.RestartInterval);
     }
 
     [Theory]
@@ -73,6 +77,8 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     [InlineData("battery-disallow")]
     [InlineData("battery-stop")]
     [InlineData("execution-limit")]
+    [InlineData("restart-count")]
+    [InlineData("restart-interval")]
     public void Drifted_task_is_repaired_with_one_direct_write(string drift)
     {
         var compliant = Compliant();
@@ -86,7 +92,9 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             "trigger-user" => compliant with { LogonTriggerUserId = @"OTHER\user" },
             "battery-disallow" => compliant with { DisallowStartIfOnBatteries = true },
             "battery-stop" => compliant with { StopIfGoingOnBatteries = true },
-            _ => compliant with { ExecutionTimeLimit = "PT72H" },
+            "execution-limit" => compliant with { ExecutionTimeLimit = "PT72H" },
+            "restart-count" => compliant with { RestartCount = 0 },
+            _ => compliant with { RestartInterval = string.Empty },
         };
         var store = new FakeTaskStore { Current = changed };
 
@@ -94,6 +102,34 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         Assert.Equal(1, store.RegisterCalls);
         Assert.True(WindowsTaskSchedulerStartupManager.IsCompliant(store.Current!,
             WindowsTaskSchedulerStartupManager.CreateTaskConfiguration(_exe, User)));
+    }
+
+    [Fact]
+    public void Equivalent_scheduler_interval_normalization_does_not_rewrite_the_task()
+    {
+        var store = new FakeTaskStore { Current = Compliant() with { RestartInterval = "PT60S" } };
+
+        Assert.True(Manager(store).Synchronize(true).Success);
+        Assert.Equal(0, store.RegisterCalls);
+    }
+
+    [Theory]
+    [InlineData("restart-count")]
+    [InlineData("restart-interval")]
+    public void Restart_policy_readback_missing_either_value_prevents_false_success(string missing)
+    {
+        var readback = missing switch
+        {
+            "restart-count" => Compliant() with { RestartCount = 0 },
+            _ => Compliant() with { RestartInterval = string.Empty },
+        };
+        var store = new FakeTaskStore { RegisteredReadback = readback };
+
+        var result = Manager(store).Synchronize(true);
+
+        Assert.False(result.Success);
+        Assert.Equal(StartupTaskFailureReason.ReadbackUnverified, result.FailureReason);
+        Assert.Equal(1, store.RegisterCalls);
     }
 
     [Theory]
@@ -115,7 +151,7 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     {
         var store = new FakeTaskStore
         {
-            RegisteredReadback = new(true, @"C:\wrong.exe", "--background", User, 3, 0, false, false, "PT0S")
+            RegisteredReadback = new(true, @"C:\wrong.exe", "--background", User, 3, 0, false, false, "PT0S", 3, "PT1M")
         };
 
         var result = Manager(store).Synchronize(true);
@@ -139,7 +175,7 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     {
         var store = new FakeTaskStore
         {
-            RegisteredReadback = new(false, _exe, "--background", User, 3, 1, false, false, "PT0S")
+            RegisteredReadback = new(false, _exe, "--background", User, 3, 1, false, false, "PT0S", 3, "PT1M")
         };
 
         var result = Manager(store).Synchronize(true);
@@ -270,7 +306,9 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             LastConfiguration = configuration;
             var intended = new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId,
                 WindowsTaskSchedulerStartupManager.TaskLogonInteractiveToken, WindowsTaskSchedulerStartupManager.TaskRunLevelHighest,
-                false, false, WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit);
+                false, false, WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit,
+                WindowsTaskSchedulerStartupManager.RestartOnFailureCount,
+                WindowsTaskSchedulerStartupManager.RestartOnFailureInterval);
             if (NextRegister == StartupTaskWriteOutcome.Registered)
                 Current = RegisteredReadback ?? intended;
             return NextRegister;
