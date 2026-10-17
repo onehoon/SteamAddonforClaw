@@ -123,7 +123,7 @@ For **TDP Control**, **CPU Boost**, **Maximum Processor State**, and **Windows P
 
 ### Controller
 
-At the top of **Controller**, use **Controller for Steam Game** to choose **Steam Deck** (the default) or **DualSense Edge** and toggle **Gyroscope**. The selection is used by Big Picture and by Steam games whose enabled profile uses **Use default**. Controller selection is locked during a Steam game or Big Picture and displays the actually applied controller; Gyroscope remains changeable. Both controls are available in normal Windows or Xbox-only gameplay when Runtime settings are available.
+At the top of **Controller**, use **Controller for Steam Game** to choose **Steam Deck** (the default) or **DualSense Edge** and toggle **Gyroscope**. The selection is used by Big Picture and by Steam games whose enabled profile uses **Use default**. Controller selection is locked during a Steam game or Big Picture and displays the actually applied controller; Gyroscope remains changeable. Both controls are available in normal Windows or Xbox-only gameplay when the app can verify their settings.
 
 Use **Controller** to choose actions for the **XBOX Gamebar Button** (WING) and **Center M Button**. Each has separate **Normal** and **Steam Game / Big Picture** assignments. The current controller presentation selects which assignment is used; the buttons do not have to be remapped when Steam starts or stops.
 
@@ -137,11 +137,11 @@ Available actions depend on the assignment group:
 | **Steam Big Picture** | Opens Steam Big Picture. Available in Normal assignments. |
 | **Xbox** | Opens the Xbox app. Available in Normal assignments. |
 | **Keyboard/Hotkey** | Sends optional Ctrl, Shift, Alt, or Windows modifiers with one configured key. |
-| **Launch Application** | Starts a selected executable, optionally with arguments. Its **Run as administrator** option is off by default; when enabled, the app uses the Runtime's existing administrator permission. |
+| **Launch Application** | Starts a selected executable, optionally with arguments. Turn on **Run as administrator** only if the app needs elevated permissions. |
 
 The first-install defaults are **Gamebar Button: Steam Big Picture** in Normal and **Steam Button** in Steam Game / Big Picture; **Center M Button: Quick Settings Overlay** in both groups. In each mode, **Gamebar Button** and **Center M Button** must use different actions.
 
-The **M1 / M2** section configures the rear buttons while the Addon presents an Xbox 360 controller. Each can be **Disabled** or mapped to A/B/X/Y, D-Pad directions, LB/RB, LT/RT, L3/R3, View, Menu, or Xbox Guide. The same target may be assigned to both. In Steam Game / Big Picture, M1 remains R4 and M2 remains L4; these global Xbox 360 choices do not change that Steam Deck behavior. An enabled per-game XBOX mapping can override the global M1/M2 mapping for that game.
+The **M1 / M2** section configures the rear buttons while the Addon presents an Xbox 360 controller. Each can be **Disabled** or mapped to A/B/X/Y, D-Pad directions, LB/RB, LT/RT, L3/R3, View, Menu, or Xbox Guide. The same target may be assigned to both. In Steam Game / Big Picture, M1 remains R4 and M2 remains L4 for both Steam Deck and DualSense Edge; the global Xbox 360 mappings do not change that behavior. An enabled per-game XBOX mapping can override the global M1/M2 mapping for that game.
 
 Where supported, **Joystick LED** can be enabled or disabled, with one static color and brightness from 0% to 100%. **Vibration Strength** adjusts the left and right motors independently from 0% to 100%; use each motor's **Test** button to check the result. These options may be unavailable on unsupported models or firmware, and some A2VM 7 behavior is still awaiting device-specific verification.
 
@@ -196,7 +196,7 @@ For **Application (.exe)** and **PowerShell** shortcuts, **Run as administrator*
 
 The Screenshot action captures the primary display as a JPEG. Choose a custom save folder with **Browse**, or use the default Windows `Pictures\Screenshots` folder with **Use default**. **Open folder** opens the selected location. Click **Save** to keep your changes; **Cancel** discards them. You can configure one Screenshot shortcut.
 
-Shortcut tiles use an action-specific Fluent icon by default. In the Main App's Add/Edit dialog, choose a curated icon or restore the action default; the icon appears before the tile title in both the Main App and Overlay.
+Shortcut tiles have an icon appropriate to their action. In the Main App's Add/Edit dialog, you can choose another icon or restore the default. For non-screenshot shortcuts, **Close Overlay after launch** lets you choose whether the Overlay closes after the action runs.
 
 ### Tweaks
 
@@ -288,7 +288,7 @@ These are separate interfaces:
 | --- | --- | --- |
 | **Steam Quick Access Menu** (Steam Quick Access) | Steam | Steam's native Quick Access interface. The Controller action sends Steam the Quick Access button. |
 | **Quick Settings Overlay** | Steam Addon for Claw | The Addon's own Device, Profile, Controller, Shortcut, and Setting tabs. |
-| **ClawHUD** | Steam Addon for Claw / included ClawHUD runtime | A performance display over the screen. It is not a settings menu. |
+| **ClawHUD** | Steam Addon for Claw | A performance display over the screen. It is not a settings menu. |
 | **Steam Button** | Steam | The Steam system-button input. It is not the Quick Access command and does not open the Addon's Overlay. |
 
 The Addon does not place its own settings tab inside Steam's Quick Access Menu.
@@ -297,16 +297,17 @@ The Addon does not place its own settings tab inside Steam's Quick Access Menu.
 
 The built-in controller's face buttons, D-Pad, bumpers, triggers, sticks, and stick clicks are passed through as their corresponding standard gamepad controls. The current presentation changes the type of controller Windows sees, not the basic meaning of those controls.
 
-| Built-in control | Steam Deck-style presentation | Xbox 360 presentation |
-| --- | --- | --- |
-| A / B / X / Y, D-Pad | Corresponding controls | Corresponding controls |
-| LB / RB | L1 / R1 | LB / RB |
-| LT / RT analog travel | L2 / R2 analog triggers | LT / RT analog triggers |
-| LT / RT fully pressed | L2 / R2 digital full pull | No separate digital full-pull output; XInput uses the analog LT / RT values |
-| Left/right sticks and L3 / R3 | Corresponding sticks and clicks | Corresponding sticks and clicks |
-| View / Back | View / Options function | View |
-| Menu / Start | Menu function | Menu / Start |
-| M1 / M2 | R4 / L4 | Configurable in Controller; Disabled by default |
+| Built-in control | Steam Deck | DualSense Edge | Xbox 360 |
+| --- | --- | --- | --- |
+| A / B / X / Y | Corresponding buttons | Cross / Circle / Square / Triangle | A / B / X / Y |
+| D-Pad | Corresponding directions | Corresponding directions | Corresponding directions |
+| LB / RB | L1 / R1 | L1 / R1 | LB / RB |
+| LT / RT analog travel | L2 / R2 analog triggers | L2 / R2 analog triggers | LT / RT analog triggers |
+| LT / RT fully pressed | L2 / R2 digital full pull | L2 / R2 digital press | No separate digital full-pull output |
+| Left/right sticks and L3 / R3 | Corresponding sticks and clicks | Corresponding sticks and clicks | Corresponding sticks and clicks |
+| View / Back | View / Options function | Create | View |
+| Menu / Start | Menu function | Options | Menu / Start |
+| M1 / M2 | R4 / L4 | R4 / L4 | Configurable in Controller; Disabled by default |
 
 WING and Center M are configurable front buttons; they are not part of the ordinary gamepad mapping table. Steam Deck and DualSense Edge presentations can forward available gyro and accelerometer data to Steam Input. **Configure activation, gyro-to-mouse/joystick behavior and sensitivity in Steam Input**, not in the Addon. See [Gyroscope / IMU](#gyroscope--imu--steam-input-configuration).
 
@@ -385,7 +386,7 @@ Open **Settings → Required Components** to see the reported status. Follow the
 
 To return controller management to MSI Center M, open **Device**, choose **Enable**, and confirm **Enable and Restart**. Let Windows restart before using the stock controller environment.
 
-To remove the app, use its normal entry in **Windows Settings → Apps → Installed apps** and choose **Uninstall**. The uninstaller prepares a safe controller handoff; if it reports that preparation did not complete, do not force-remove controller components—resolve the reported issue and retry. Your Addon settings, game profiles, shortcuts, and logs are retained after uninstall so they are available if you reinstall. The managed ClawHUD runtime is removed with the app.
+To remove the app, use its normal entry in **Windows Settings → Apps → Installed apps** and choose **Uninstall**. The uninstaller prepares a safe controller handoff; if it reports that preparation did not complete, do not force-remove controller components—resolve the reported issue and retry. Your Addon settings, game profiles, shortcuts, and logs are retained after uninstall so they are available if you reinstall. The included ClawHUD is removed with the app.
 
 ## License
 
