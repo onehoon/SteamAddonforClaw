@@ -25,7 +25,7 @@ Steam/Big Picture, Settings selects Steam Deck (default) or DualSense Edge
 | Steam/BPM presentation | Steam Deck (default) or DualSense Edge (experimental), by Settings preference |
 | Regular Windows routing target | Typed Xbox360 |
 | Game Bar policy | Native Win+G/Game Bar path protected during active routing; no foreground-driven presentation switch |
-| Addon integration | One canonical runtime/owner; Deck and Edge share the Steam-facing selector; Edge device creation is lazy |
+| Addon integration | One canonical runtime/owner; Xbox360, Steam Deck, and Edge logical devices are all created detached at initialization; only the selected presentation is attached |
 | Edge status | PR-A (#754) and PR-B (#755) merged; selectable production path, experimental pending physical validation |
 | Hardware status | EX basic non-gyro input validated; Edge recognition, controls, motion, PS/QAM, rumble, and lifecycle evidence remain pending |
 | Rumble | Production callback/authority/STOP wiring implemented; hardware validation pending |
@@ -129,19 +129,21 @@ bool `AttachUSBDevice` / `DetachUSBDevice` surface remains available, but
 production presentation attachment uses the classified attachment/query surface.
 
 `CanonicalViiperRuntime` production initialization owns one USB server, one
-caller-owned bus, and persistent detached-ready Xbox360 and Steam Deck logical
-devices. The Edge logical device is created only when an Edge presentation is
-requested. The selector attaches and publishes exactly one device at a time:
-Xbox360 for regular Windows use, or the Settings-selected Steam Deck (default)
-or DualSense Edge (experimental) for Steam/Big Picture. It does not subscribe
-`GameBarForegroundWatcher` or switch presentation based on Game Bar foreground.
+caller-owned bus, and three persistent logical devices: Xbox360, Steam Deck,
+and DualSense Edge. All three are created detached (`autoAttachLocalhost: false`)
+and verified before the shared runtime becomes ready. The selector attaches and
+publishes exactly one device at a time: Xbox360 for regular Windows use, or
+the Settings-selected Steam Deck (default) or DualSense Edge (experimental) for
+Steam/Big Picture. It does not subscribe `GameBarForegroundWatcher` or switch
+presentation based on Game Bar foreground.
 
-The DualSense Edge backend is an optional lazy extension of this same runtime.
-Its four typed exports are resolved only on explicit Edge use, and its logical
-device is created only on explicit Edge demand. PR-A (#754) added the typed
-backend and PR-B (#755) added the production Settings selection and runtime
-integration. Normal startup and the default Steam Deck selection do not create
-or require the Edge logical device.
+DualSense Edge **attachment and active presentation** are deferred until Edge
+is selected; its **logical device creation is not lazy**. Shared-runtime
+initialization creates and verifies the detached Edge device even when the
+Settings preference remains Steam Deck. Failure to create or verify any of the
+three required logical devices follows the runtime's existing fail-closed
+initialization/cleanup path. PR-A (#754) added the typed backend and PR-B (#755)
+added the production Settings selection and runtime integration.
 
 The Edge output callback uses only valid ordinary two-motor rumble and forwards
 it to the shared physical rumble sink. LED callback values are unused; LED-only
@@ -214,8 +216,9 @@ unknown.
 
 1. Load the pinned `libVIIPER.dll` for process lifetime.
 2. Initialize one `CanonicalViiperRuntime`: one server, one caller-owned bus,
-   and detached-ready Xbox360 and Steam Deck logical devices. Create the Edge
-   logical device lazily when an Edge presentation is requested.
+   and three persistent logical devices (Xbox360, Steam Deck, DualSense Edge),
+   all created and verified detached before runtime readiness. Selecting Edge
+   later attaches its already-existing logical device rather than creating it.
 3. Use the current presentation selector: Xbox360 for regular Windows use;
    during Steam/Big Picture, Steam Deck by default or DualSense Edge when the
    experimental Settings preference is selected. Keep exactly one attached
