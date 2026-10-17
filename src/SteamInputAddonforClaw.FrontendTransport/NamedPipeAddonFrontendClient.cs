@@ -39,6 +39,7 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     }
     public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) => SendAsync<FrontendBootstrapSnapshot>(FrontendRpcMethod.GetBootstrap, null, t);
     public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) => SendAsync<FrontendStatusSnapshot>(FrontendRpcMethod.CaptureStatus, null, t);
+    public Task<FrontendStartupTaskSnapshot> RepairStartupTaskAsync(CancellationToken t = default) => SendAsync<FrontendStartupTaskSnapshot>(FrontendRpcMethod.RepairStartupTask, null, t);
     public Task<FrontendWindowsTweaksSnapshot> CaptureWindowsTweaksAsync(CancellationToken t = default) => SendAsync<FrontendWindowsTweaksSnapshot>(FrontendRpcMethod.CaptureWindowsTweaks, null, t);
     public Task<FrontendWindowsTweakMutationResult> SetWindowsTweakAsync(FrontendWindowsTweakId id, bool enabled, CancellationToken t = default) => SendAsync<FrontendWindowsTweakMutationResult>(FrontendRpcMethod.SetWindowsTweak, FrontendWireCodec.Payload(new SetWindowsTweakRequest(id, enabled)), t);
     public Task<bool> AcknowledgeWindowsTweaksWarningAsync(DateOnly localDate, CancellationToken t = default) => SendAsync<bool>(FrontendRpcMethod.AcknowledgeWindowsTweaksWarning, FrontendWireCodec.Payload(new AcknowledgeWindowsTweaksWarningRequest(localDate)), t);

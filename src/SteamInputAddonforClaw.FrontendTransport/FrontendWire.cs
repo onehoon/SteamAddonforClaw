@@ -189,7 +189,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 83: add the controller gyroscope preference mutation and settings projection.
 // Version 84: add Device-only Maximum Processor State capture/mutations and its Device aggregate child.
 // Version 85: distinguish unknown favorite state in Steam and XBOX catalog entries.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 85; }
+// Version 86 adds the typed mandatory-startup-task status and user-initiated repair RPC.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 86; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -242,7 +243,8 @@ internal enum FrontendRpcMethod
     SetXboxGameProfileGpuMinimumClockDc, RunDeveloperRumbleRearm,
     SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled, SetGyroscopeEnabled,
     CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning,
-    CaptureMaximumProcessorState, SetDeviceMaximumProcessorStateEnabled, SetDeviceMaximumProcessorStateAc, SetDeviceMaximumProcessorStateDc
+    CaptureMaximumProcessorState, SetDeviceMaximumProcessorStateEnabled, SetDeviceMaximumProcessorStateAc, SetDeviceMaximumProcessorStateDc,
+    RepairStartupTask
 }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }

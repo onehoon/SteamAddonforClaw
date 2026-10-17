@@ -51,7 +51,8 @@ public sealed class DeviceSummaryPresentationTests
             FrontendAddonOperationalStatus.Ready, "Ready", true,
             FrontendSetupStatus.Complete, "Complete", false)
         {
-            ControllerBadge = FrontendControllerBadgeState.SteamDeckActive
+            ControllerBadge = FrontendControllerBadgeState.SteamDeckActive,
+            StartupTask = new(FrontendStartupTaskState.NeedsAttention, FrontendStartupTaskIssue.ReadFailed)
         };
 
         var unavailable = DeviceSummaryPresentation.WithUnavailableControllerBadge(snapshot);
@@ -64,5 +65,51 @@ public sealed class DeviceSummaryPresentationTests
         Assert.Equal(snapshot.AddonStatus, unavailable.AddonStatus);
         Assert.Equal(snapshot.SetupStatus, unavailable.SetupStatus);
         Assert.Equal(snapshot.CanInstallRequiredComponents, unavailable.CanInstallRequiredComponents);
+        Assert.Equal(FrontendStartupTaskSnapshot.Unknown, unavailable.StartupTask);
+    }
+
+    [Theory]
+    [InlineData(FrontendStartupTaskState.Unknown, false, "Device_AutoStart_Unknown")]
+    [InlineData(FrontendStartupTaskState.Verified, false, "Device_AutoStart_Verified")]
+    [InlineData(FrontendStartupTaskState.NeedsAttention, false, "Device_AutoStart_NeedsAttention")]
+    [InlineData(FrontendStartupTaskState.NeedsAttention, true, "Device_AutoStart_Repairing")]
+    public void StartupTaskStatusResourceKey_maps_the_typed_state(
+        FrontendStartupTaskState state,
+        bool repairing,
+        string expected) =>
+        Assert.Equal(expected, DeviceSummaryPresentation.StartupTaskStatusResourceKey(
+            new FrontendStartupTaskSnapshot(state, FrontendStartupTaskIssue.None), repairing));
+
+    [Theory]
+    [InlineData(FrontendStartupTaskIssue.ReadFailed, "Device_AutoStart_Issue_ReadFailed")]
+    [InlineData(FrontendStartupTaskIssue.StableExecutableMissing, "Device_AutoStart_Issue_StableExecutableMissing")]
+    [InlineData(FrontendStartupTaskIssue.RegistrationFailed, "Device_AutoStart_Issue_RegistrationFailed")]
+    [InlineData(FrontendStartupTaskIssue.ReadbackUnverified, "Device_AutoStart_Issue_ReadbackUnverified")]
+    [InlineData(FrontendStartupTaskIssue.None, null)]
+    public void StartupTaskIssueResourceKey_preserves_the_failure_cause(
+        FrontendStartupTaskIssue issue,
+        string? expected) =>
+        Assert.Equal(expected, DeviceSummaryPresentation.StartupTaskIssueResourceKey(issue));
+
+    [Theory]
+    [InlineData(FrontendStartupTaskState.Unknown, true, false, true, true)]
+    [InlineData(FrontendStartupTaskState.NeedsAttention, true, false, true, true)]
+    [InlineData(FrontendStartupTaskState.Verified, true, false, false, false)]
+    [InlineData(FrontendStartupTaskState.Unknown, false, false, false, false)]
+    [InlineData(FrontendStartupTaskState.NeedsAttention, false, false, true, false)]
+    [InlineData(FrontendStartupTaskState.NeedsAttention, true, true, true, false)]
+    public void StartupTaskRepair_visibility_and_enabled_state_follow_runtime_availability(
+        FrontendStartupTaskState state,
+        bool runtimeResponsive,
+        bool repairing,
+        bool expectedVisible,
+        bool expectedCanRepair)
+    {
+        var snapshot = new FrontendStartupTaskSnapshot(state, FrontendStartupTaskIssue.None);
+
+        Assert.Equal(expectedVisible,
+            DeviceSummaryPresentation.ShouldShowStartupTaskRepair(snapshot, runtimeResponsive));
+        Assert.Equal(expectedCanRepair,
+            DeviceSummaryPresentation.CanRepairStartupTask(snapshot, runtimeResponsive, repairing));
     }
 }

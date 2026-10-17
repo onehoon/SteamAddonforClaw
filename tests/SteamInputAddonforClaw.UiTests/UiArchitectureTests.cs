@@ -644,9 +644,34 @@ public sealed class UiArchitectureTests
         Assert.Contains("exception is not FrontendProtocolException", refresh, StringComparison.Ordinal);
         Assert.Contains("exception is not FrontendRemoteException", refresh, StringComparison.Ordinal);
         Assert.Contains("WithUnavailableControllerBadge(lastStatus)", refresh, StringComparison.Ordinal);
-        Assert.Contains("DeviceContent.RenderDeviceSummary(unavailableStatus)", refresh, StringComparison.Ordinal);
+        Assert.Contains("DeviceContent.RenderDeviceSummary(unavailableStatus, runtimeResponsive: false)", refresh, StringComparison.Ordinal);
         Assert.Contains("FormatControllerBadge(snapshot.Hardware.Status, snapshot.ControllerBadge)", devicePage, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureStatusAsync", devicePage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Device_summary_shows_startup_status_and_repair_action_beside_controller_status()
+    {
+        var root = FindRepositoryRoot();
+        var xamlPath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml");
+        var codePath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs");
+        var xaml = XDocument.Load(xamlPath);
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var summary = Assert.Single(xaml.Descendants(), element =>
+            (string?)element.Attribute(x + "Name") == "DeviceSummaryCard");
+
+        Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "DeviceSupportText");
+        Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "AutoStartStatusText");
+        Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "AutoStartRepairButton");
+        Assert.True(xaml.ToString().IndexOf("x:Name=\"DeviceSupportText\"", StringComparison.Ordinal)
+            < xaml.ToString().IndexOf("x:Name=\"AutoStartStatusText\"", StringComparison.Ordinal));
+
+        var codeBehind = File.ReadAllText(codePath);
+        Assert.Contains("RepairStartupTaskAsync()", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("StartupTaskIssueResourceKey", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("_startupTaskRepairInProgress", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("if (!_startupTaskRepairInProgress)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("runtimeResponsive: false", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs")), StringComparison.Ordinal);
     }
 
     [Fact]

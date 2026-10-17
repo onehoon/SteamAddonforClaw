@@ -13,9 +13,15 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <TextBlock x:Name="DeviceManufacturerText" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
                         <TextBlock x:Name="DeviceModelText" Grid.Column="1" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" />
-                        <Border Grid.Column="2" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <TextBlock x:Name="DeviceSupportText" FontSize="13" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" VerticalAlignment="Center" />
-                        </Border>
+                        <StackPanel Grid.Column="2" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <Border Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock x:Name="DeviceSupportText" FontSize="13" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock x:Name="AutoStartStatusText" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <Button x:Name="AutoStartRepairButton" x:Uid="Device_AutoStartRepairButton" Content="Repair" Padding="8,2" MinHeight="24" FontSize="12" Visibility="Collapsed" Click="AutoStartRepairButton_Click" />
+                            </StackPanel>
+                        </StackPanel>
                     </Grid>
                     <TextBlock x:Name="DeviceBoardGpuText" Opacity="0.7" TextWrapping="Wrap" />
                 </StackPanel>

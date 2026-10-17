@@ -35,7 +35,7 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.Equal(
             FrontendWindowsTweakCatalog.All.Select(item => item.Id),
             FrontendWindowsTweaksSnapshot.Unavailable.Tweaks.Select(item => item.Id));
-        Assert.Equal(85, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(7, (int)FrontendWindowsTweakState.Unknown);
         Assert.Equal(8, (int)FrontendWindowsTweakState.Mixed);
     }

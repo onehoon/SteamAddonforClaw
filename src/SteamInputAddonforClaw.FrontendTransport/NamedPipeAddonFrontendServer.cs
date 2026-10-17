@@ -82,7 +82,9 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                 await operationGate.WaitAsync(requestCts.Token).ConfigureAwait(false);
                 try
                 {
-                    var payload = await InvokeAsync(message.Method!.Value, message.Payload, requestCts.Token).ConfigureAwait(false);
+                    var payload = message.Method!.Value == FrontendRpcMethod.RepairStartupTask
+                        ? FrontendWireCodec.Payload(await _inner.RepairStartupTaskAsync(requestCts.Token).ConfigureAwait(false))
+                        : await InvokeAsync(message.Method.Value, message.Payload, requestCts.Token).ConfigureAwait(false);
                     if (message.Method.Value == FrontendRpcMethod.OpenClawSensorProbe) probeSessionMayBeOpen = true;
                     else if (message.Method.Value == FrontendRpcMethod.CloseClawSensorProbe) probeSessionMayBeOpen = false;
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, message.Method, Payload: payload)).ConfigureAwait(false);
@@ -158,6 +160,12 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                 {
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.UnsupportedMethod, "Unsupported method."))).ConfigureAwait(false);
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
+                    continue;
+                }
+                if (message.Payload is not null && message.Method.Value == FrontendRpcMethod.RepairStartupTask)
+                {
+                    requests.TryRemove(id, out var invalidStartupRepairCts); invalidStartupRepairCts?.Dispose();
+                    await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
                     continue;
                 }
                 if (message.Payload is not null && message.Method.Value == FrontendRpcMethod.CaptureWindowsTweaks)

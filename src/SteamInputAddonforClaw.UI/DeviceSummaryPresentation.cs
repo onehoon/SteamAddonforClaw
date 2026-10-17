@@ -43,5 +43,40 @@ internal static class DeviceSummaryPresentation
     }
 
     internal static FrontendStatusSnapshot WithUnavailableControllerBadge(FrontendStatusSnapshot snapshot) =>
-        snapshot with { ControllerBadge = FrontendControllerBadgeState.Unavailable };
+        snapshot with
+        {
+            ControllerBadge = FrontendControllerBadgeState.Unavailable,
+            StartupTask = FrontendStartupTaskSnapshot.Unknown
+        };
+
+    internal static string StartupTaskStatusResourceKey(FrontendStartupTaskSnapshot snapshot, bool repairing) =>
+        repairing
+            ? "Device_AutoStart_Repairing"
+            : snapshot.State switch
+            {
+                FrontendStartupTaskState.Verified => "Device_AutoStart_Verified",
+                FrontendStartupTaskState.NeedsAttention => "Device_AutoStart_NeedsAttention",
+                _ => "Device_AutoStart_Unknown"
+            };
+
+    internal static string? StartupTaskIssueResourceKey(FrontendStartupTaskIssue issue) => issue switch
+    {
+        FrontendStartupTaskIssue.ReadFailed => "Device_AutoStart_Issue_ReadFailed",
+        FrontendStartupTaskIssue.StableExecutableMissing => "Device_AutoStart_Issue_StableExecutableMissing",
+        FrontendStartupTaskIssue.RegistrationFailed => "Device_AutoStart_Issue_RegistrationFailed",
+        FrontendStartupTaskIssue.ReadbackUnverified => "Device_AutoStart_Issue_ReadbackUnverified",
+        _ => null
+    };
+
+    internal static bool ShouldShowStartupTaskRepair(
+        FrontendStartupTaskSnapshot snapshot,
+        bool runtimeResponsive) =>
+        snapshot.State == FrontendStartupTaskState.NeedsAttention
+        || snapshot.State == FrontendStartupTaskState.Unknown && runtimeResponsive;
+
+    internal static bool CanRepairStartupTask(
+        FrontendStartupTaskSnapshot snapshot,
+        bool runtimeResponsive,
+        bool repairing) =>
+        snapshot.State != FrontendStartupTaskState.Verified && runtimeResponsive && !repairing;
 }
