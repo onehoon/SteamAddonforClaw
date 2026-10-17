@@ -73,6 +73,7 @@ public sealed partial class ProfilePage : UserControl
             var scannedCatalog = await _frontend.ScanProfileGamesAsync();
             _catalog = scannedCatalog;
             _catalogLoaded = true;
+            FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown);
             ApplyCatalogFilter();
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
             if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo(MainUiStrings.Get("Steam_Catalog_NoGames", "No installed Steam games were found.")); else ClearError(); } else { await CaptureSelectedAsync(_selectedGame.AppId); }
@@ -98,8 +99,22 @@ public sealed partial class ProfilePage : UserControl
     private void ApplyCatalogFilter()
     {
         var query = GameSearchBox.Text.Trim();
-        GameGrid.ItemsSource = _catalog.Where(x => query.Length == 0 || x.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || x.AppId.ToString().Contains(query, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(x => x.Favorite).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.AppId).Select(x => new GameCardItem(x)).ToArray();
+        GameGrid.ItemsSource = FilterAndSort(_catalog, query).Select(x => new GameCardItem(x)).ToArray();
+    }
+
+    internal static IReadOnlyList<FrontendProfileGameCatalogEntry> FilterAndSort(
+        IEnumerable<FrontendProfileGameCatalogEntry> games,
+        string? query)
+    {
+        var search = query?.Trim() ?? string.Empty;
+        return games
+            .Where(game => search.Length == 0
+                || game.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || game.AppId.ToString().Contains(search, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(game => game.FavoriteStateKnown && game.Favorite)
+            .ThenBy(game => game.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(game => game.AppId)
+            .ToArray();
     }
     private async void GameCardButton_Click(object sender, RoutedEventArgs e)
     {
@@ -110,7 +125,7 @@ public sealed partial class ProfilePage : UserControl
     private void BackButton_Click(object sender, RoutedEventArgs e) { CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); DetailPanel.Visibility = Visibility.Collapsed; CatalogPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Visible; }
     private async void FavoriteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_frontend is null || (sender as Button)?.Tag is not FrontendProfileGameCatalogEntry game) return;
+        if (_frontend is null || (sender as Button)?.Tag is not FrontendProfileGameCatalogEntry { FavoriteStateKnown: true } game) return;
         try
         {
             var result = await _frontend.SetGameProfileFavoriteAsync(game.AppId, !game.Favorite, game.Name);
@@ -473,6 +488,10 @@ public sealed partial class ProfilePage : UserControl
         public uint AppId => Game.AppId;
         public string Name => Game.Name;
         public bool Favorite => Game.Favorite;
-        public string FavoriteGlyph => Game.Favorite ? "★" : "☆";
+        public bool FavoriteStateKnown => Game.FavoriteStateKnown;
+        public string FavoriteGlyph => GetFavoriteGlyph(Game.Favorite, Game.FavoriteStateKnown);
     }
+
+    internal static string GetFavoriteGlyph(bool favorite, bool stateKnown) =>
+        !stateKnown ? "—" : favorite ? "★" : "☆";
 }

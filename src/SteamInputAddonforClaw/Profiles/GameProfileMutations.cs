@@ -184,11 +184,12 @@ internal sealed class GameProfileMutations
         }
     }
 
-    internal IReadOnlySet<uint> CaptureFavoriteAppIds()
+    internal IReadOnlySet<uint>? CaptureFavoriteAppIds()
     {
         lock (_gate.Sync)
         {
             var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return null;
             return loaded.Document.Games.Where(x => x.Value.Favorite && uint.TryParse(x.Key, out _)).Select(x => uint.Parse(x.Key, System.Globalization.CultureInfo.InvariantCulture)).ToHashSet();
         }
     }

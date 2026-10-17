@@ -188,7 +188,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 82: return only the updated Windows Tweak row from a mutation; no full-page recapture is included.
 // Version 83: add the controller gyroscope preference mutation and settings projection.
 // Version 84: add Device-only Maximum Processor State capture/mutations and its Device aggregate child.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 84; }
+// Version 85: distinguish unknown favorite state in Steam and XBOX catalog entries.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 85; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

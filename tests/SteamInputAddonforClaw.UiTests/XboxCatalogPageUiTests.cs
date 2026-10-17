@@ -297,17 +297,28 @@ public sealed class XboxCatalogPageUiTests
             new("store:z", "Beta"),
             new("store:a", "alpha"),
             new("store:q:internal-only", "Hidden key game"),
-            new("pfn:two", "Alpha")
+            new("pfn:two", "Alpha"),
+            new("store:unknown", "Unknown favorite", Favorite: true, FavoriteStateKnown: false)
         ];
 
         Assert.Empty(XboxPage.FilterAndSort(games, "internal-only"));
         var sorted = XboxPage.FilterAndSort(games, null);
-        Assert.Equal(new[] { "Alpha", "alpha", "Beta", "Hidden key game" }, sorted.Select(game => game.DisplayName));
+        Assert.Equal(new[] { "Alpha", "alpha", "Beta", "Hidden key game", "Unknown favorite" }, sorted.Select(game => game.DisplayName));
         Assert.Equal("pfn:two", sorted[0].Key);
 
         var withFavorite = games[0] with { Favorite = true };
         var favoritesFirst = XboxPage.FilterAndSort(games.Select(game => game.Key == games[0].Key ? withFavorite : game), null);
         Assert.Equal(withFavorite.Key, favoritesFirst[0].Key);
+        Assert.Equal("—", XboxPage.GetFavoriteGlyph(favorite: false, stateKnown: false));
+        Assert.Equal("★", XboxPage.GetFavoriteGlyph(favorite: true, stateKnown: true));
+        Assert.Equal("☆", XboxPage.GetFavoriteGlyph(favorite: false, stateKnown: true));
+        Assert.Single(XboxPage.FilterAndSort(games, "unknown"));
+
+        var xaml = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml"));
+        var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
+        Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FavoriteStateKnown: true", code, StringComparison.Ordinal);
+        Assert.Contains("FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown)", code, StringComparison.Ordinal);
     }
 
     [Fact]

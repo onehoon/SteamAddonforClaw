@@ -191,6 +191,7 @@
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
   <data name="Steam_Catalog_RefreshFailed" xml:space="preserve"><value>Game catalog could not be refreshed.</value></data>
   <data name="Steam_CatalogTitle.Text" xml:space="preserve"><value>Steam</value></data>
+  <data name="Steam_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>Favorite state is unavailable because profile settings could not be read.</value></data>
   <data name="Steam_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
   <data name="Steam_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
   <data name="Steam_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
@@ -273,6 +274,7 @@
   <data name="Xbox_Catalog_NoGames" xml:space="preserve"><value>No installed XBOX games were found.</value></data>
   <data name="Xbox_Catalog_RefreshFailed" xml:space="preserve"><value>XBOX game catalog could not be refreshed.</value></data>
   <data name="Xbox_CatalogTitle.Text" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Xbox_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>Favorite state is unavailable because profile settings could not be read.</value></data>
   <data name="Xbox_ControllerMappingExpander.Description" xml:space="preserve"><value>Enable a per-game M1 / M2 override for Xbox 360 output. Off uses the global mapping.</value></data>
   <data name="Xbox_ControllerMappingExpander.Header" xml:space="preserve"><value>M1 / M2 Button Mapping</value></data>
   <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>

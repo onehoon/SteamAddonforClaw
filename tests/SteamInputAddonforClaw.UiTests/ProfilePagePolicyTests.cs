@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Views;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -19,6 +20,32 @@ public sealed class ProfilePagePolicyTests
         Assert.True(ProfilePage.ShouldPreserveDirtyTdpDraft(true, 4, 5));
         Assert.False(ProfilePage.ShouldPreserveDirtyTdpDraft(false, 4, 5));
         Assert.False(ProfilePage.ShouldPreserveDirtyTdpDraft(true, 5, 5));
+    }
+
+    [Fact]
+    public void Steam_unknown_favorite_is_neutral_disabled_and_does_not_block_catalog_browsing()
+    {
+        Assert.Equal("—", ProfilePage.GetFavoriteGlyph(favorite: false, stateKnown: false));
+        Assert.Equal("★", ProfilePage.GetFavoriteGlyph(favorite: true, stateKnown: true));
+        Assert.Equal("☆", ProfilePage.GetFavoriteGlyph(favorite: false, stateKnown: true));
+
+        var unknown = new FrontendProfileGameCatalogEntry(
+            101, "Alpha unknown", FrontendProfileGameSource.Steam, Favorite: true, FavoriteStateKnown: false);
+        var favorite = new FrontendProfileGameCatalogEntry(
+            102, "Zulu favorite", FrontendProfileGameSource.Steam, Favorite: true, FavoriteStateKnown: true);
+        var ordinary = new FrontendProfileGameCatalogEntry(
+            103, "Beta ordinary", FrontendProfileGameSource.Steam, FavoriteStateKnown: true);
+        var sorted = ProfilePage.FilterAndSort([unknown, favorite, ordinary], null);
+
+        Assert.Equal(new uint[] { 102, 101, 103 }, sorted.Select(game => game.AppId));
+        Assert.Equal(new uint[] { 101 }, ProfilePage.FilterAndSort([unknown, favorite, ordinary], "unknown").Select(game => game.AppId));
+
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FavoriteStateKnown: true", code, StringComparison.Ordinal);
+        Assert.Contains("FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown)", code, StringComparison.Ordinal);
     }
 
     [Fact]

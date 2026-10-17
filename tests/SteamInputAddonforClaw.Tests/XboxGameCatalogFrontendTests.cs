@@ -28,9 +28,13 @@ public sealed class XboxGameCatalogFrontendTests
         Assert.Equal(1, calls);
         Assert.Equal(FrontendXboxGameCatalogOutcome.Ready, snapshot.Outcome);
         Assert.Equal(
-            new[] { new FrontendXboxGameCatalogEntry("store:game-one", "Aniimo Legend"), new("pfn:game-two", "星のカービィ") },
+            new[]
+            {
+                new FrontendXboxGameCatalogEntry("store:game-one", "Aniimo Legend", FavoriteStateKnown: false),
+                new("pfn:game-two", "星のカービィ", FavoriteStateKnown: false),
+            },
             snapshot.Games.ToArray());
-        Assert.Equal(["DisplayName", "Favorite", "Key"], typeof(FrontendXboxGameCatalogEntry)
+        Assert.Equal(["DisplayName", "Favorite", "FavoriteStateKnown", "Key"], typeof(FrontendXboxGameCatalogEntry)
             .GetProperties()
             .Select(property => property.Name)
             .Order(StringComparer.Ordinal)
@@ -52,6 +56,7 @@ public sealed class XboxGameCatalogFrontendTests
         var snapshot = await control.ScanXboxGamesAsync();
 
         Assert.Equal(new[] { true, false }, snapshot.Games.Select(game => game.Favorite));
+        Assert.All(snapshot.Games, game => Assert.True(game.FavoriteStateKnown));
     }
 
     [Theory]

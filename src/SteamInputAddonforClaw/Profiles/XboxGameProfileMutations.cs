@@ -49,11 +49,12 @@ internal sealed class XboxGameProfileMutations
         }
     }
 
-    internal IReadOnlySet<string> CaptureFavoriteKeys()
+    internal IReadOnlySet<string>? CaptureFavoriteKeys()
     {
         lock (_gate.Sync)
         {
             var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return null;
             return loaded.Document.XboxGames
                 .Where(entry => entry.Value.Favorite && IsCanonicalKey(entry.Key))
                 .Select(entry => entry.Key)

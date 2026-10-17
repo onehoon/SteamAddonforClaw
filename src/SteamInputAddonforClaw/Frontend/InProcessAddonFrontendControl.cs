@@ -263,8 +263,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public async Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default)
     {
-        var favorites = _gameProfileMutations?.CaptureFavoriteAppIds() ?? new HashSet<uint>();
-        return (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).Select(x => new FrontendProfileGameCatalogEntry(x.AppId, x.Name, x.Source == ProfileGameSource.Steam ? FrontendProfileGameSource.Steam : FrontendProfileGameSource.NonSteam, favorites.Contains(x.AppId))).ToArray();
+        var favorites = _gameProfileMutations?.CaptureFavoriteAppIds();
+        return (await _scanProfileGames(cancellationToken).ConfigureAwait(false))
+            .Select(game => new FrontendProfileGameCatalogEntry(
+                game.AppId,
+                game.Name,
+                game.Source == ProfileGameSource.Steam ? FrontendProfileGameSource.Steam : FrontendProfileGameSource.NonSteam,
+                Favorite: favorites?.Contains(game.AppId) == true,
+                FavoriteStateKnown: favorites is not null))
+            .ToArray();
     }
 
     public async Task<FrontendXboxGameCatalogSnapshot> ScanXboxGamesAsync(CancellationToken cancellationToken = default)
@@ -273,7 +280,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         cancellationToken.ThrowIfCancellationRequested();
 
         var result = await _scanXboxGames(cancellationToken).ConfigureAwait(false);
-        var favorites = _xboxGameProfileMutations?.CaptureFavoriteKeys() ?? new HashSet<string>(StringComparer.Ordinal);
+        var favorites = _xboxGameProfileMutations?.CaptureFavoriteKeys();
         return result.Outcome switch
         {
             XboxInstalledGameCatalogOutcome.Completed => new(
@@ -281,7 +288,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 result.Games.Select(game => new FrontendXboxGameCatalogEntry(
                     game.Identity.Key,
                     game.Identity.DisplayName,
-                    favorites.Contains(game.Identity.Key))).ToArray(),
+                    Favorite: favorites?.Contains(game.Identity.Key) == true,
+                    FavoriteStateKnown: favorites is not null)).ToArray(),
                 null),
             XboxInstalledGameCatalogOutcome.Unavailable =>
                 FrontendXboxGameCatalogSnapshot.Unavailable("XBOX game catalog is unavailable."),

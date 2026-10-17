@@ -47,6 +47,44 @@ public sealed class MainUiLocalizationResourceTests
     }
 
     [Fact]
+    public void Steam_and_xbox_catalogs_localize_unknown_favorite_state_messages()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var expected = new[]
+        {
+            "Steam_FavoriteStateUnavailableInfoBar.Message",
+            "Xbox_FavoriteStateUnavailableInfoBar.Message"
+        };
+
+        var steam = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml"));
+        var xbox = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml"));
+        foreach (var (document, uid) in new[]
+        {
+            (steam, "Steam_FavoriteStateUnavailableInfoBar"),
+            (xbox, "Xbox_FavoriteStateUnavailableInfoBar")
+        })
+        {
+            var infoBar = Assert.Single(document.Descendants(), element =>
+                (string?)element.Attribute(XamlNamespace + "Uid") == uid);
+            Assert.False(string.IsNullOrWhiteSpace((string?)infoBar.Attribute("Message")));
+            Assert.Contains(uid + ".Message", expected);
+        }
+
+        Assert.All(expected, key =>
+        {
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.False(string.IsNullOrWhiteSpace(english[key]));
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+        });
+        Assert.Contains('확', korean[expected[0]]);
+        Assert.Contains('확', korean[expected[1]]);
+    }
+
+    [Fact]
     public void Tweaks_navigation_and_fixed_page_text_resolve_through_unique_resource_uids()
     {
         var root = FindRepositoryRoot();
@@ -756,7 +794,7 @@ public sealed class MainUiLocalizationResourceTests
         var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
         var expectedUids = new[]
         {
-            "Steam_CatalogTitle", "Steam_RefreshGamesButton", "Steam_GameSearchBox", "Steam_BackButton",
+            "Steam_CatalogTitle", "Steam_RefreshGamesButton", "Steam_GameSearchBox", "Steam_FavoriteStateUnavailableInfoBar", "Steam_BackButton",
             "Steam_VirtualControllerCard", "Steam_VirtualController_DefaultOption",
             "Steam_VirtualController_SteamDeckOption", "Steam_VirtualController_DualSenseEdgeOption",
             "Steam_TdpExpander", "Steam_TdpAcCard", "Steam_TdpDcCard",
@@ -909,7 +947,7 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Equal("XBOX", english["MainNav_Xbox.Content"]);
         var expectedUids = new[]
         {
-            "Xbox_CatalogTitle", "Xbox_RefreshGamesButton", "Xbox_GameSearchBox", "Xbox_BackButton",
+            "Xbox_CatalogTitle", "Xbox_RefreshGamesButton", "Xbox_GameSearchBox", "Xbox_FavoriteStateUnavailableInfoBar", "Xbox_BackButton",
             "Xbox_ControllerMappingExpander", "Xbox_M1Card", "Xbox_M2Card",
             "Xbox_TdpExpander", "Xbox_TdpAcCard", "Xbox_TdpDcCard",
             "Xbox_CpuBoostExpander", "Xbox_CpuBoostAcCard", "Xbox_CpuBoostDcCard",
