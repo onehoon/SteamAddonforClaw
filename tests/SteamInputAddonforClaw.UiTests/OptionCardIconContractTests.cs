@@ -37,13 +37,13 @@ public sealed class OptionCardIconContractTests
         ("XboxPage.xaml", "Intel FPS Limit", "FontIcon:EC4A"),
         ("XboxPage.xaml", "Resolution", "FontIcon:E7F4"),
 
-        ("OverlayPage.xaml", "Enable HUD", "FontIcon:E7F4"),
+        ("OverlayPage.xaml", "ClawHUD", "FontIcon:E7F4"),
         ("OverlayPage.xaml", "Display mode", "SymbolIcon:View"),
         ("OverlayPage.xaml", "HUD size", "SymbolIcon:FontSize"),
         ("OverlayPage.xaml", "Font", "SymbolIcon:Font"),
         ("OverlayPage.xaml", "Alignment", "SymbolIcon:AlignCenter"),
         ("OverlayPage.xaml", "Background width", "FontIcon:E745"),
-        ("OverlayPage.xaml", "HUD opacity", "FontIcon:E794"),
+        ("OverlayPage.xaml", "ClawHUD opacity", "FontIcon:E794"),
         ("OverlayPage.xaml", "Intel VRR Range Fix", "SymbolIcon:Repair"),
 
         ("SettingsPage.xaml", "Application updates", "FontIcon:E777"),

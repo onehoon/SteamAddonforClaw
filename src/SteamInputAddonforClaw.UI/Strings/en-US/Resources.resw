@@ -336,10 +336,10 @@
   <data name="Xbox_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
   <data name="Xbox_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
   <data name="MainNav_ClawHud.Content" xml:space="preserve"><value>ClawHUD</value></data>
-  <data name="ClawHud_PageTitle.Text" xml:space="preserve"><value>Overlay</value></data>
+  <data name="ClawHud_PageTitle.Text" xml:space="preserve"><value>ClawHUD</value></data>
   <data name="ClawHud_PageSubtitle.Text" xml:space="preserve"><value>Configure the performance overlay and display behavior.</value></data>
   <data name="ClawHud_RetryButton.Content" xml:space="preserve"><value>Retry</value></data>
-  <data name="ClawHud_EnableCard.Header" xml:space="preserve"><value>Enable HUD</value></data>
+  <data name="ClawHud_EnableCard.Header" xml:space="preserve"><value>ClawHUD</value></data>
   <data name="ClawHud_DisplayModeCard.Header" xml:space="preserve"><value>Display mode</value></data>
   <data name="ClawHud_DisplayModeCard.Description" xml:space="preserve"><value>Choose when the HUD is visible.</value></data>
   <data name="ClawHud_DisplayMode_Option_InGameOnly.Content" xml:space="preserve"><value>In game only</value></data>
@@ -360,7 +360,7 @@
   <data name="ClawHud_BackgroundWidthCard.Description" xml:space="preserve"><value>Choose how far the HUD background extends.</value></data>
   <data name="ClawHud_BackgroundWidth_Option_FullWidth.Content" xml:space="preserve"><value>Full width</value></data>
   <data name="ClawHud_BackgroundWidth_Option_ContentWidth.Content" xml:space="preserve"><value>Content width</value></data>
-  <data name="ClawHud_OpacityCard.Header" xml:space="preserve"><value>HUD opacity</value></data>
+  <data name="ClawHud_OpacityCard.Header" xml:space="preserve"><value>ClawHUD opacity</value></data>
   <data name="ClawHud_IntelVrrCard.Header" xml:space="preserve"><value>Intel VRR Range Fix</value></data>
   <data name="ClawHud_LocalStatus_Off" xml:space="preserve"><value>Off</value></data>
   <data name="ClawHud_LocalStatus_Starting" xml:space="preserve"><value>Starting…</value></data>
@@ -370,7 +370,7 @@
   <data name="ClawHud_VrrStatus_Unavailable" xml:space="preserve"><value>Unavailable</value></data>
   <data name="ClawHud_VrrStatus_UnsupportedPanel" xml:space="preserve"><value>UnsupportedPanel</value></data>
   <data name="ClawHud_VrrStatus_AmbiguousDisplay" xml:space="preserve"><value>AmbiguousDisplay</value></data>
-  <data name="ClawHud_VrrStatus_AlreadyCorrect" xml:space="preserve"><value>AlreadyCorrect</value></data>
+  <data name="ClawHud_VrrStatus_AlreadyCorrect" xml:space="preserve"><value>Fixed</value></data>
   <data name="ClawHud_VrrStatus_SkippedUserProfile" xml:space="preserve"><value>SkippedUserProfile</value></data>
   <data name="ClawHud_VrrStatus_Applied" xml:space="preserve"><value>Applied</value></data>
   <data name="ClawHud_VrrStatus_ApplyFailed" xml:space="preserve"><value>ApplyFailed</value></data>

@@ -6,7 +6,7 @@
     <ScrollViewer Padding="32">
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
-                <TextBlock x:Uid="ClawHud_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Overlay" />
+                <TextBlock x:Uid="ClawHud_PageTitle" FontSize="24" FontWeight="SemiBold" Text="ClawHUD" />
                 <TextBlock x:Uid="ClawHud_PageSubtitle" Opacity="0.7" Text="Configure the performance overlay and display behavior." TextWrapping="Wrap" />
             </StackPanel>
 
@@ -21,7 +21,7 @@
                 </InfoBar.ActionButton>
             </InfoBar>
 
-            <ctcontrols:SettingsCard x:Name="ClawHudEnabledCard" x:Uid="ClawHud_EnableCard" Header="Enable HUD">
+            <ctcontrols:SettingsCard x:Name="ClawHudEnabledCard" x:Uid="ClawHud_EnableCard" Header="ClawHUD">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
@@ -81,7 +81,7 @@
                     <ComboBoxItem x:Uid="ClawHud_BackgroundWidth_Option_ContentWidth" Content="Content width" />
                 </ComboBox>
             </ctcontrols:SettingsCard>
-            <ctcontrols:SettingsCard x:Name="ClawHudOpacityCard" x:Uid="ClawHud_OpacityCard" Header="HUD opacity">
+            <ctcontrols:SettingsCard x:Name="ClawHudOpacityCard" x:Uid="ClawHud_OpacityCard" Header="ClawHUD opacity">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE794;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
