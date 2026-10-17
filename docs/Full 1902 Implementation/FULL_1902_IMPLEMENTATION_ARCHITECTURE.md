@@ -773,7 +773,7 @@ PID1902 hidden
 
 - canonical typed API;
 - one server / one bus;
-- persistent X360 + SteamDeck devices;
+- persistent X360 + SteamDeck + DualSense Edge logical devices (created detached);
 - typed attach/detach;
 - neutral state;
 - publishers;
@@ -1071,12 +1071,12 @@ Blocking examples include:
                                                │
                                       one VIIPER Runtime
                                                │
-                                   ┌───────────┴───────────┐
-                                   │                       │
-                                 Xbox360                SteamDeck
-                               normal/default           Steam/BPM
-                                   │                       │
-                                   └───────────┬───────────┘
+                              ┌────────────────┼────────────────┐
+                              │                │                │
+                            Xbox360         SteamDeck      DualSense Edge
+                          Windows/default  Steam/BPM default  Steam/BPM option
+                              │                │                │
+                              └────────────────┼────────────────┘
                                                │
                                    exactly one attached/live
 ```
