@@ -45,7 +45,7 @@ The app currently recognizes these MSI Claw models:
 
 The app checks that the device is a supported model before starting controller management. If the model cannot be identified or is not supported, controller features will not start.
 
-MSI Claw 8 EX AI+ CG3EM has been tested on physical hardware. The A2VM models are supported, with some features still awaiting full hardware validation. Gyro input has been verified on MSI Claw 8 AI+ A2VM in Steam Input and a game. Availability of LED, vibration, and other device-specific features depends on the model and firmware.
+All three listed MSI Claw models, including **MSI Claw 7 AI+ A2VM** and **MSI Claw 8 AI+ A2VM**, have been tested on physical hardware. The supported A2VM 7/8 device features have completed hardware testing. Availability of LED, vibration, motion, and other model-specific controls still depends on the detected device and firmware; game compatibility can vary.
 
 ## Requirements and compatibility
 
@@ -95,7 +95,7 @@ On that same device, Steam's gyro calibration showed live motion and gyro-to-joy
 
 **Configure and fine-tune gyro in Steam Input, not in the Addon.** Open the game's **Controller Layout** in Steam, configure **Gyro Behavior** (such as gyro-to-mouse or gyro-to-joystick), and adjust the **activation button/condition**, sensitivity, and other motion settings there. In particular, a gyro activation condition can prevent in-game movement **even when the gyro calibration screen shows live values**. For a quick test, select **Always On**; afterward, set your preferred activation button and sensitivity in Steam Input.
 
-Gyro behavior on A2VM 7-inch and EX/CG3EM devices has not yet been fully verified on physical hardware.
+Gyro input has been verified on **both A2VM 7-inch and A2VM 8-inch** hardware. Gyro behavior on EX/CG3EM hardware has not yet been fully verified.
 
 ## MSI Center M and the built-in controller
 
@@ -143,7 +143,7 @@ The first-install defaults are **Gamebar Button: Steam Big Picture** in Normal a
 
 The **M1 / M2** section configures the rear buttons while the Addon presents an Xbox 360 controller. Each can be **Disabled** or mapped to A/B/X/Y, D-Pad directions, LB/RB, LT/RT, L3/R3, View, Menu, or Xbox Guide. The same target may be assigned to both. In Steam Game / Big Picture, M1 remains R4 and M2 remains L4 for both Steam Deck and DualSense Edge; the global Xbox 360 mappings do not change that behavior. An enabled per-game XBOX mapping can override the global M1/M2 mapping for that game.
 
-Where supported, **Joystick LED** can be enabled or disabled, with one static color and brightness from 0% to 100%. **Vibration Strength** adjusts the left and right motors independently from 0% to 100%; use each motor's **Test** button to check the result. These options may be unavailable on unsupported models or firmware, and some A2VM 7 behavior is still awaiting device-specific verification.
+Where supported, **Joystick LED** can be enabled or disabled, with one static color and brightness from 0% to 100%. **Vibration Strength** adjusts the left and right motors independently from 0% to 100%; use each motor's **Test** button to check the result. These options may be unavailable when the detected model or firmware does not support them; both A2VM models have been tested on hardware.
 
 The **Vibration Strength** section also includes **Vibration Recovery → Restore** for all three supported models. It temporarily disconnects the virtual controller, so save and close your game first. A success message does not guarantee that the motors are working; use both **Test** buttons afterward. Automatic vibration recovery is not enabled by default.
 
@@ -378,7 +378,7 @@ Open **Settings → Required Components** to see the reported status. Follow the
 - Steam profile tracking depends on Steam continuing to report the game or shortcut as active. Some launcher chains can cause a profile to stop applying when Steam loses that association.
 - Quick Settings Overlay is separate from Steam Quick Access. The Addon does not inject an Addon tab into Steam's menu.
 - **Steam Deck and DualSense Edge** support motion input. On a tested A2VM 8, Steam Deck Gyro To Mouse could feel choppy; DualSense Edge was smoother in that comparison. Results may differ by game and device. Configure gyro activation and sensitivity in **Steam Input**.
-- Joystick LED and vibration features depend on the device and firmware; some A2VM 7 behavior remains unverified. Automatic vibration recovery is disabled by default. A successful manual **Restore** does not itself prove that the motors work.
+- Joystick LED and vibration features depend on the device and firmware. The supported A2VM 7/8 functionality has been tested on physical hardware. Automatic vibration recovery is disabled by default. After a manual **Restore**, use the motor **Test** buttons to confirm vibration.
 - A general Device-page Fan Control is not currently available as a user feature.
 - The product supports one interactive Windows user and session; Fast User Switching, Remote Desktop sessions, and multi-user use are not supported.
 
