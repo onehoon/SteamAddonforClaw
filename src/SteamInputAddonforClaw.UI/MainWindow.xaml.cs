@@ -635,6 +635,7 @@ public sealed partial class MainWindow : Window
             PrimaryButtonText = "Continue",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = MainAppRoot.ActualTheme,
             XamlRoot = Content.XamlRoot
         };
 
@@ -882,6 +883,7 @@ public sealed partial class MainWindow : Window
             Title = "Setup unavailable",
             Content = message,
             CloseButtonText = "OK",
+            RequestedTheme = MainAppRoot.ActualTheme,
             XamlRoot = Content.XamlRoot
         }.ShowAsync();
     }

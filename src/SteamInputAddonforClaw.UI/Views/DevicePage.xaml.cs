@@ -893,6 +893,7 @@ public sealed partial class DevicePage : UserControl
                 centerMEnabled ? "Enable and Restart" : "Disable and Restart"),
             CloseButtonText = MainUiStrings.Get("Device_CenterM_Cancel", "Cancel"),
             DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = ActualTheme,
             XamlRoot = XamlRoot,
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
