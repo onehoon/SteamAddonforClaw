@@ -269,7 +269,7 @@ typedef struct {
 
 This is a C struct passed **by value** to native SetDualSenseDeviceState; the **33-byte on-wire state** is a different contract and must not be mistaken for managed struct size. Verify StructLayout/field offsets/sizeof and calling convention for the target x64 C ABI using deterministic automated tests, including Edge remove-result enum values.
 
-Managed binding must root DSOutputCallback while registered; clear it on retirement; release the root only after proven removal/detach/parent teardown according to existing ownership rules. Extend the existing shared _deviceOwnership/callback cleanup, not a new callback manager. Avoid unconditional required-export initialization that would make a missing experimental export disable both normal controller modes; the packaged DLL/build should remain the canonical supported dependency.
+Managed binding must root DSOutputCallback while registered; clear it on retirement; release the root only after proven removal/detach/parent teardown according to existing ownership rules. Extend the existing shared _deviceOwnership/callback cleanup, not a new callback manager. The pinned canonical DLL is required to provide the Edge typed exports; the current shared-runtime startup creates and verifies all three detached devices and fails closed if required native initialization fails. Do not introduce a partially ready fallback runtime.
 
 ---
 
