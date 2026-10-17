@@ -20,7 +20,7 @@ internal sealed class RuntimeProcessApplication
         _shouldLaunchFrontend = ApplicationLifecyclePolicy.ShouldLaunchFrontend(arguments);
     }
 
-    internal void Run()
+    internal int Run()
     {
         AppLog.Info("Runtime", "True-headless Runtime shell entered.", ("LaunchMode", _shouldLaunchFrontend ? "Manual" : "Background"));
         _messageLoop = new NativeMessageLoop();
@@ -31,14 +31,13 @@ internal sealed class RuntimeProcessApplication
         if (_shouldLaunchFrontend)
             _processHost.RequestFrontendOpen(FrontendOpenReason.InitialManualLaunch);
 
+        AddonProcessStartupOutcome? startupOutcome = null;
+        var exitCode = 0;
         try
         {
-            var outcome = _processHost.RunStartupAsync().GetAwaiter().GetResult();
-            if (outcome is AddonProcessStartupOutcome.UnsupportedHardware
-                or AddonProcessStartupOutcome.IndeterminateHardware)
-                return;
-            if (outcome != AddonProcessStartupOutcome.RuntimeReady)
-                return;
+            startupOutcome = _processHost.RunStartupAsync().GetAwaiter().GetResult();
+            if (startupOutcome != AddonProcessStartupOutcome.RuntimeReady)
+                return SelectExitCode(startupOutcome, runtimeFailed: false, controlledShutdownRequested: false);
 
             _processHost.InitializeRuntimeAsync().GetAwaiter().GetResult();
             _processHost.TryInitializeTray(RequestRestart);
@@ -48,10 +47,13 @@ internal sealed class RuntimeProcessApplication
                 // Return to GetMessageW before unrelated startup/reconcile work can hold the hook thread.
                 _processHost.StartDeferredRuntimeStartup();
             });
+            exitCode = SelectExitCode(startupOutcome, runtimeFailed: false,
+                controlledShutdownRequested: Volatile.Read(ref _shutdownRequested) != 0);
         }
         catch (Exception exception)
         {
-            AppLog.Error("Startup", "Runtime startup or message-loop execution failed; exiting cleanly.", exception);
+            AppLog.Error("Startup", "Runtime startup or message-loop execution failed; exiting with failure status.", exception);
+            exitCode = SelectExitCode(startupOutcome, runtimeFailed: true, controlledShutdownRequested: false);
         }
         finally
         {
@@ -60,6 +62,18 @@ internal sealed class RuntimeProcessApplication
             _processHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
             AppLog.Info("Runtime", "Runtime process cleanup completed.");
         }
+
+        return exitCode;
+    }
+
+    internal static int SelectExitCode(AddonProcessStartupOutcome? startupOutcome, bool runtimeFailed, bool controlledShutdownRequested)
+    {
+        if (runtimeFailed) return 1;
+        if (startupOutcome is AddonProcessStartupOutcome.UnsupportedHardware
+            or AddonProcessStartupOutcome.IndeterminateHardware
+            or AddonProcessStartupOutcome.Canceled)
+            return 0;
+        return startupOutcome == AddonProcessStartupOutcome.RuntimeReady && controlledShutdownRequested ? 0 : 1;
     }
 
     private void RequestExitForUninstall()

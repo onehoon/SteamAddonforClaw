@@ -98,4 +98,52 @@ public sealed class RuntimeProcessApplicationShutdownTests
         Assert.True(RuntimeProcessApplication.TryRequestMessageLoopExit(() => attempts++));
         Assert.Equal(2, attempts);
     }
+
+    [Theory]
+    [InlineData((int)AddonProcessStartupOutcome.UnsupportedHardware)]
+    [InlineData((int)AddonProcessStartupOutcome.IndeterminateHardware)]
+    [InlineData((int)AddonProcessStartupOutcome.Canceled)]
+    public void Intentional_non_runtime_startup_outcomes_exit_successfully(int outcome)
+    {
+        Assert.Equal(0, RuntimeProcessApplication.SelectExitCode((AddonProcessStartupOutcome)outcome,
+            runtimeFailed: false, controlledShutdownRequested: false));
+    }
+
+    [Fact]
+    public void Runtime_ready_exits_successfully_only_after_an_accepted_shutdown()
+    {
+        Assert.Equal(0, RuntimeProcessApplication.SelectExitCode(AddonProcessStartupOutcome.RuntimeReady,
+            runtimeFailed: false, controlledShutdownRequested: true));
+        Assert.Equal(1, RuntimeProcessApplication.SelectExitCode(AddonProcessStartupOutcome.RuntimeReady,
+            runtimeFailed: false, controlledShutdownRequested: false));
+    }
+
+    [Fact]
+    public void Fatal_runtime_failure_always_returns_nonzero()
+    {
+        Assert.Equal(1, RuntimeProcessApplication.SelectExitCode(AddonProcessStartupOutcome.RuntimeReady,
+            runtimeFailed: true, controlledShutdownRequested: false));
+    }
+
+    [Fact]
+    public void Runtime_result_is_propagated_to_process_exit_code_without_changing_worker_handoffs()
+    {
+        var root = RepositoryRoot();
+        var runtimeSource = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Hosting/RuntimeProcessApplication.cs"));
+        var programSource = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Program.cs"));
+
+        Assert.Contains("internal int Run()", runtimeSource, StringComparison.Ordinal);
+        Assert.Contains("runtimeFailed: true, controlledShutdownRequested: false", runtimeSource, StringComparison.Ordinal);
+        Assert.Contains("Environment.ExitCode = new RuntimeProcessApplication(runtimeArgs, singleInstanceGate).Run();", programSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("exiting cleanly", runtimeSource, StringComparison.OrdinalIgnoreCase);
+
+        foreach (var worker in new[]
+        {
+            "Environment.ExitCode = SafeUninstall.Run(",
+            "Environment.ExitCode = SteamFseRegistrationWorker.Run();",
+            "Environment.ExitCode = PrerequisiteSetupWorker.Run();",
+            "Environment.ExitCode = WindowsAppRuntimeSetupWorker.Run();",
+        })
+            Assert.Contains(worker, programSource, StringComparison.Ordinal);
+    }
 }
