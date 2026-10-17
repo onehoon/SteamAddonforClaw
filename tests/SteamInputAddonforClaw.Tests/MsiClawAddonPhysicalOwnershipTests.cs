@@ -1796,9 +1796,50 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.True(h.InputSource.StopCalled);
         Assert.Equal(new[] { MsiClawNativeMode.XInput }, h.SwitchTargets); // PID1902 -> PID1901, once
         Assert.Null(owner.LiveInputSource);
+        Assert.Equal(1, h.InputSource.StopAndConfirmCleanupCalls);
 
         // A subsequent acquisition is refused -- ownership was released for the official enable path.
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.AcquireAsync(default)).Outcome);
+    }
+
+    [Fact]
+    public async Task Release_when_directinput_cleanup_is_not_proven_preserves_ownership_and_stops_before_pid1901()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+        h.InputSource.CleanupProven = false;
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.False(release.Succeeded);
+        Assert.Equal("DirectInputCleanupUnproven", release.Reason);
+        Assert.Equal([PrimaryPnp], release.HiddenTargets);
+        Assert.Equal(1, h.InputSource.StopAndConfirmCleanupCalls);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Same(h.InputSource, owner.LiveInputSource);
+        Assert.Equal(PrimaryPnp, owner.OwnedPrimaryHiddenTarget);
+        Assert.Empty(h.SwitchTargets);
+    }
+
+    [Fact]
+    public async Task Release_when_directinput_cleanup_confirmation_throws_preserves_ownership_and_stops_before_pid1901()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+        h.InputSource.CleanupThrows = true;
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.False(release.Succeeded);
+        Assert.Equal("DirectInputCleanupUnproven", release.Reason);
+        Assert.Equal([PrimaryPnp], release.HiddenTargets);
+        Assert.Equal(1, h.InputSource.StopAndConfirmCleanupCalls);
+        Assert.False(h.InputSource.IsRunning);
+        Assert.Same(h.InputSource, owner.LiveInputSource);
+        Assert.Equal(PrimaryPnp, owner.OwnedPrimaryHiddenTarget);
+        Assert.Empty(h.SwitchTargets);
     }
 
     [Fact]
@@ -3267,6 +3308,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public MsiClawInputStartStatus StartResult { get; set; } = MsiClawInputStartStatus.Started;
         public bool FirstValidState { get; set; } = true;
         public bool CleanupProven { get; set; } = true;
+        public bool CleanupThrows { get; set; }
         public TaskCompletionSource? StopCleanupGate { get; set; }
         public bool StartCalled { get; private set; }
         public int StartCallCount { get; private set; }
@@ -3315,6 +3357,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             await StopAsync();
             if (StopCleanupGate is { } gate)
                 await gate.Task;
+            if (CleanupThrows)
+                throw new InvalidOperationException("Injected cleanup confirmation failure.");
             return CleanupProven;
         }
 

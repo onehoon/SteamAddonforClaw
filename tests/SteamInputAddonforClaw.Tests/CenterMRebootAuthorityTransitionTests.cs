@@ -1144,6 +1144,32 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Equal(0, h.StockAuthorityRestoredCalls); // suppression stays owned
     }
 
+    [Fact]
+    public async Task Unproven_physical_cleanup_stops_stock_restoration_before_baseline_hidhide_center_m_and_restart()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(
+                false, "DirectInputCleanupUnproven", [@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"]),
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
+        h.Hid.Active = true;
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: true, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Equal(new[] { "physical-release" }, h.Order);
+        Assert.Equal(0, h.StockBaselineCalls);
+        Assert.Contains(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned", h.Hid.Hidden);
+        Assert.Contains(AddonExe, h.Hid.Whitelist);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, h.Roots.Classify());
+        Assert.Equal(0, restart.Calls);
+        Assert.Equal(0, h.StockAuthorityRestoredCalls);
+    }
+
     [Fact] // NothingOwned is Succeeded=true, but the independent stock proof is still required.
     public async Task Stock_authority_restored_callback_does_not_fire_for_nothing_owned_without_stock_proof()
     {

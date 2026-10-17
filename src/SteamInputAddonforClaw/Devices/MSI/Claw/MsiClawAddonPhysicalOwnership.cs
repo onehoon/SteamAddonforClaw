@@ -618,9 +618,28 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 ("Reason", releaseReason));
             if (_ownsInputSource)
             {
-                await _inputSource.StopAsync().ConfigureAwait(false);
-                if (_inputSource.IsRunning)
-                    return new(false, "DirectInputStillRunning", targets);
+                bool cleanupProven;
+                try
+                {
+                    cleanupProven = await _inputSource.StopAndConfirmCleanupAsync().ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("ControllerOwnership", "DirectInput stock-release cleanup failed.", exception,
+                        ("Event", "DirectInputStockReleaseCleanupUnproven"),
+                        ("Reason", releaseReason), ("HiddenTargetCount", targets.Count));
+                    return new(false, "DirectInputCleanupUnproven", targets);
+                }
+
+                if (!cleanupProven || _inputSource.IsRunning)
+                {
+                    AppLog.Warn("ControllerOwnership", "DirectInput stock-release cleanup was not confirmed.", null,
+                        ("Event", "DirectInputStockReleaseCleanupUnproven"),
+                        ("Reason", releaseReason), ("CleanupProven", cleanupProven),
+                        ("InputSourceStillRunning", _inputSource.IsRunning), ("HiddenTargetCount", targets.Count));
+                    return new(false, "DirectInputCleanupUnproven", targets);
+                }
+
                 _ownsInputSource = false;
                 ClearLivePhysicalSession();
             }
