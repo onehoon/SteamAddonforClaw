@@ -8,9 +8,18 @@ namespace SteamInputAddonforClaw.Contracts.Frontend;
 
 public enum FrontendLogLevel { Off, Info, Debug }
 public enum FrontendProfileGameSource { Steam, NonSteam }
-public sealed record FrontendProfileGameCatalogEntry(uint AppId, string Name, FrontendProfileGameSource Source, bool Favorite = false);
+public sealed record FrontendProfileGameCatalogEntry(
+    uint AppId,
+    string Name,
+    FrontendProfileGameSource Source,
+    bool Favorite = false,
+    bool FavoriteStateKnown = true);
 public enum FrontendXboxGameCatalogOutcome { Ready, Unavailable, Failed }
-public sealed record FrontendXboxGameCatalogEntry(string Key, string DisplayName, bool Favorite = false);
+public sealed record FrontendXboxGameCatalogEntry(
+    string Key,
+    string DisplayName,
+    bool Favorite = false,
+    bool FavoriteStateKnown = true);
 public sealed record FrontendXboxGameCatalogSnapshot(
     FrontendXboxGameCatalogOutcome Outcome,
     IReadOnlyList<FrontendXboxGameCatalogEntry> Games,

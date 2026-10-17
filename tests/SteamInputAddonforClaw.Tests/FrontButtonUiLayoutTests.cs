@@ -85,4 +85,18 @@ public sealed class FrontButtonUiLayoutTests
         Assert.DoesNotContain("_oem1SaveChain", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("QueueOem1Mutation", mainWindow, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Executable_path_editor_keeps_typing_as_a_draft_until_focus_commit()
+    {
+        var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
+        var xaml = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
+
+        Assert.Contains("_path.LostFocus += (_, _) => page.CommitExecutablePath(this)", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("_path.TextChanged +=", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("_committedExecutablePath", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("_committedExecutablePath,", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("FrontButtonMappingInfoBar.IsOpen = true", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"FrontButtonMappingInfoBar\"", xaml, StringComparison.Ordinal);
+    }
 }

@@ -18,6 +18,12 @@
   <data name="HowToUse_Loading.Text" xml:space="preserve">
     <value>Loading documentation…</value>
   </data>
+  <data name="MainWindow_Common_Ok" xml:space="preserve"><value>OK</value></data>
+  <data name="MainWindow_PrerequisiteSetup_AlreadyInProgress" xml:space="preserve"><value>Another setup operation is already in progress.</value></data>
+  <data name="MainWindow_PrerequisiteSetup_Failed" xml:space="preserve"><value>Setup couldn't be completed. Check Settings &gt; Required Components or the application log for details.</value></data>
+  <data name="MainWindow_PrerequisiteSetup_Title" xml:space="preserve"><value>Setup unavailable</value></data>
+  <data name="MainWindow_PrerequisiteSetupBusy_ProgressText.Text" xml:space="preserve"><value>Installing required components…</value></data>
+  <data name="MainWindow_PrerequisiteSetupBusy_WaitText.Text" xml:space="preserve"><value>Please wait. This may take a moment.</value></data>
   <data name="Settings_AppTheme_Description" xml:space="preserve">
     <value>Choose the main app appearance.</value>
   </data>
@@ -158,6 +164,7 @@
   <data name="Controller_BindingEditor_RunAsAdministrator" xml:space="preserve"><value>Run as administrator</value></data>
   <data name="Controller_BindingEditor_Browse" xml:space="preserve"><value>Browse…</value></data>
   <data name="Controller_BindingEditor_PrivilegeExplanation" xml:space="preserve"><value>Runs with administrator privileges; otherwise requests normal user privileges.</value></data>
+  <data name="Controller_FrontButtonPathValidationInfoBar.Message" xml:space="preserve"><value>Enter a fully qualified path to an .exe file.</value></data>
   <data name="Controller_RestoreVibrationButton_Tooltip" xml:space="preserve"><value>Temporarily disconnects virtual controller input. Save and close your game first.</value></data>
   <data name="Controller_RestoreVibrationButton_BusyContent" xml:space="preserve"><value>Restoring…</value></data>
   <data name="Controller_RumbleRearm_Succeeded" xml:space="preserve"><value>Controller restored. Test both motors to confirm vibration.</value></data>
@@ -191,6 +198,7 @@
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
   <data name="Steam_Catalog_RefreshFailed" xml:space="preserve"><value>Game catalog could not be refreshed.</value></data>
   <data name="Steam_CatalogTitle.Text" xml:space="preserve"><value>Steam</value></data>
+  <data name="Steam_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>Favorite state is unavailable because profile settings could not be read.</value></data>
   <data name="Steam_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
   <data name="Steam_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
   <data name="Steam_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
@@ -273,6 +281,7 @@
   <data name="Xbox_Catalog_NoGames" xml:space="preserve"><value>No installed XBOX games were found.</value></data>
   <data name="Xbox_Catalog_RefreshFailed" xml:space="preserve"><value>XBOX game catalog could not be refreshed.</value></data>
   <data name="Xbox_CatalogTitle.Text" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Xbox_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>Favorite state is unavailable because profile settings could not be read.</value></data>
   <data name="Xbox_ControllerMappingExpander.Description" xml:space="preserve"><value>Enable a per-game M1 / M2 override for Xbox 360 output. Off uses the global mapping.</value></data>
   <data name="Xbox_ControllerMappingExpander.Header" xml:space="preserve"><value>M1 / M2 Button Mapping</value></data>
   <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>

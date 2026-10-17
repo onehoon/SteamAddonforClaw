@@ -18,6 +18,12 @@
   <data name="HowToUse_Loading.Text" xml:space="preserve">
     <value>로딩중입니다.</value>
   </data>
+  <data name="MainWindow_Common_Ok" xml:space="preserve"><value>확인</value></data>
+  <data name="MainWindow_PrerequisiteSetup_AlreadyInProgress" xml:space="preserve"><value>다른 설치 작업이 이미 진행 중입니다.</value></data>
+  <data name="MainWindow_PrerequisiteSetup_Failed" xml:space="preserve"><value>설치를 완료하지 못했습니다. 설정 &gt; 필수 구성 요소 또는 애플리케이션 로그를 확인하세요.</value></data>
+  <data name="MainWindow_PrerequisiteSetup_Title" xml:space="preserve"><value>설치할 수 없음</value></data>
+  <data name="MainWindow_PrerequisiteSetupBusy_ProgressText.Text" xml:space="preserve"><value>필수 구성 요소를 설치하는 중…</value></data>
+  <data name="MainWindow_PrerequisiteSetupBusy_WaitText.Text" xml:space="preserve"><value>잠시 기다려 주세요. 시간이 조금 걸릴 수 있습니다.</value></data>
   <data name="Settings_AppTheme_Description" xml:space="preserve">
     <value>Choose the main app appearance.</value>
   </data>
@@ -158,6 +164,7 @@
   <data name="Controller_BindingEditor_RunAsAdministrator" xml:space="preserve"><value>Run as administrator</value></data>
   <data name="Controller_BindingEditor_Browse" xml:space="preserve"><value>Browse…</value></data>
   <data name="Controller_BindingEditor_PrivilegeExplanation" xml:space="preserve"><value>Runs with administrator privileges; otherwise requests normal user privileges.</value></data>
+  <data name="Controller_FrontButtonPathValidationInfoBar.Message" xml:space="preserve"><value>실행 파일을 선택하려면 전체 경로가 포함된 .exe 파일을 입력하세요.</value></data>
   <data name="Controller_RestoreVibrationButton_Tooltip" xml:space="preserve"><value>Temporarily disconnects virtual controller input. Save and close your game first.</value></data>
   <data name="Controller_RestoreVibrationButton_BusyContent" xml:space="preserve"><value>Restoring…</value></data>
   <data name="Controller_RumbleRearm_Succeeded" xml:space="preserve"><value>Controller restored. Test both motors to confirm vibration.</value></data>
@@ -191,6 +198,7 @@
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
   <data name="Steam_Catalog_RefreshFailed" xml:space="preserve"><value>Game catalog could not be refreshed.</value></data>
   <data name="Steam_CatalogTitle.Text" xml:space="preserve"><value>Steam</value></data>
+  <data name="Steam_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>프로필 설정을 읽을 수 없어 즐겨찾기 상태를 확인할 수 없습니다.</value></data>
   <data name="Steam_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
   <data name="Steam_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
   <data name="Steam_CpuBoost_Mode_Disabled" xml:space="preserve"><value>Disabled</value></data>
@@ -273,6 +281,7 @@
   <data name="Xbox_Catalog_NoGames" xml:space="preserve"><value>No installed XBOX games were found.</value></data>
   <data name="Xbox_Catalog_RefreshFailed" xml:space="preserve"><value>XBOX game catalog could not be refreshed.</value></data>
   <data name="Xbox_CatalogTitle.Text" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Xbox_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>프로필 설정을 읽을 수 없어 즐겨찾기 상태를 확인할 수 없습니다.</value></data>
   <data name="Xbox_ControllerMappingExpander.Description" xml:space="preserve"><value>Enable a per-game M1 / M2 override for Xbox 360 output. Off uses the global mapping.</value></data>
   <data name="Xbox_ControllerMappingExpander.Header" xml:space="preserve"><value>M1 / M2 Button Mapping</value></data>
   <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>

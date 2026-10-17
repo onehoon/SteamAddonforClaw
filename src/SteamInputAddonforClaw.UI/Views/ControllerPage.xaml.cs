@@ -1051,6 +1051,21 @@ public sealed partial class ControllerPage : UserControl
 
     private static int ToPercent(double value) => Math.Clamp((int)Math.Round(value), 0, 100);
 
+    private void CommitExecutablePath(BindingEditor editor)
+    {
+        if (_isLoading) return;
+
+        if (FrontButtonMappingValidation.ValidateExecutablePath(editor.ExecutablePathDraft) is not null)
+        {
+            FrontButtonMappingInfoBar.IsOpen = true;
+            return;
+        }
+
+        editor.AcceptExecutablePathDraft();
+        FrontButtonMappingInfoBar.IsOpen = false;
+        RaiseEdit(editor);
+    }
+
     private void OnEditorConfigurationChanged(BindingEditor editor)
     {
         if (_isLoading) return;
@@ -1088,7 +1103,7 @@ public sealed partial class ControllerPage : UserControl
             var file = await picker.PickSingleFileAsync();
             if (file is null) return;
             editor.SetExecutablePath(file.Path);
-            OnEditorConfigurationChanged(editor);
+            CommitExecutablePath(editor);
         }
         catch (Exception exception)
         {
@@ -1199,7 +1214,9 @@ public sealed partial class ControllerPage : UserControl
             _windows.Checked += (_, _) => { RefreshHotkeyAvailability(); page.OnEditorConfigurationChanged(this); };
             _windows.Unchecked += (_, _) => { RefreshHotkeyAvailability(); page.OnEditorConfigurationChanged(this); };
             _key.SelectionChanged += (_, _) => page.OnEditorConfigurationChanged(this);
-            _path.TextChanged += (_, _) => page.OnEditorConfigurationChanged(this);
+            // Keep manually typed paths as a local draft; persist only when the field is committed.
+            // This prevents intermediate relative fragments from being rejected and reloading the page.
+            _path.LostFocus += (_, _) => page.CommitExecutablePath(this);
             _arguments.TextChanged += (_, _) => page.OnEditorConfigurationChanged(this);
             _runAsAdministrator.Checked += (_, _) => page.OnEditorConfigurationChanged(this);
             _runAsAdministrator.Unchecked += (_, _) => page.OnEditorConfigurationChanged(this);
@@ -1212,6 +1229,10 @@ public sealed partial class ControllerPage : UserControl
         internal FrontButtonAction SelectedAction =>
             ActionComboBox.SelectedItem is ComboBoxItem { Tag: FrontButtonAction action } ? action : FrontButtonAction.QuickSettingsOverlay;
 
+        internal string ExecutablePathDraft => _path.Text ?? string.Empty;
+
+        private string _committedExecutablePath = string.Empty;
+
         internal void Load(FrontButtonBinding binding)
         {
             SelectAction(binding.Action);
@@ -1222,6 +1243,7 @@ public sealed partial class ControllerPage : UserControl
             SelectKey(binding.Hotkey.Key);
             RefreshHotkeyAvailability();
             _path.Text = binding.Launch.ExecutablePath;
+            _committedExecutablePath = binding.Launch.ExecutablePath;
             _arguments.Text = binding.Launch.Arguments;
             _runAsAdministrator.IsChecked = binding.Launch.RunAsAdministrator;
             ShowConfigurationFor(binding.Action);
@@ -1232,12 +1254,14 @@ public sealed partial class ControllerPage : UserControl
             Action = SelectedAction,
             Hotkey = new FrontButtonHotkeyBinding(CaptureModifiers(), CaptureKey()),
             Launch = new FrontButtonLaunchApplicationBinding(
-                _path.Text ?? string.Empty,
+                _committedExecutablePath,
                 _arguments.Text ?? string.Empty,
                 _runAsAdministrator.IsChecked == true)
         };
 
         internal void SetExecutablePath(string path) => _path.Text = path;
+
+        internal void AcceptExecutablePathDraft() => _committedExecutablePath = ExecutablePathDraft;
 
         internal void ShowConfigurationFor(FrontButtonAction action)
         {

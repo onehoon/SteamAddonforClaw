@@ -68,7 +68,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     {
         ArgumentNullException.ThrowIfNull(mapping);
 
-        var reason = FrontButtonMappingValidation.Validate(mapping);
+        var reason = FrontButtonMappingValidation.ValidateCandidate(mapping, Settings.FrontButtonMapping);
         if (reason is not null)
         {
             SteamInputAddonforClaw.Diagnostics.AppLog.Warn("Settings", "Rejected an invalid front-button mapping candidate.", null, ("Reason", reason));

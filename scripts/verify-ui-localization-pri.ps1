@@ -147,7 +147,7 @@ try {
     $namedResources = @($resourceMap.SelectNodes(".//*[local-name()='NamedResource']"))
 
     foreach ($key in $englishKeys) {
-        if ($key -match '^(?<uid>.+)\.(?<property>Text|Content|Header|Description|PlaceholderText)$') {
+        if ($key -match '^(?<uid>.+)\.(?<property>Text|Content|Header|Description|PlaceholderText|Message)$') {
             $uriSuffix = "/Resources/$($Matches.uid)/$($Matches.property)"
         }
         else {

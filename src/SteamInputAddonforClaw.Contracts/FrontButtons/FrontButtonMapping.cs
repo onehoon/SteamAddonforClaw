@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json.Serialization;
 
 namespace SteamInputAddonforClaw.Contracts.FrontButtons;
@@ -264,6 +265,55 @@ public static class FrontButtonActionCapabilities
 public static class FrontButtonMappingValidation
 {
     public static bool IsValid(FrontButtonMappingSettings? mapping) => Validate(mapping) is null;
+
+    /// <summary>
+    /// Validates a new whole-mapping mutation without invalidating historical relative executable
+    /// paths that are already stored. Those legacy values remain non-executable and are accepted
+    /// only while the same Launch Application binding and path are left unchanged.
+    /// </summary>
+    public static string? ValidateCandidate(FrontButtonMappingSettings? candidate, FrontButtonMappingSettings? current)
+    {
+        var mappingReason = Validate(candidate);
+        if (mappingReason is not null) return mappingReason;
+        if (current is null) return "current mapping is null";
+
+        foreach (var domain in Enum.GetValues<FrontButtonDomain>())
+        foreach (var kind in Enum.GetValues<FrontButtonKind>())
+        {
+            var next = candidate!.Resolve(kind, domain);
+            if (next.Action != FrontButtonAction.LaunchApplication || !next.Launch.IsConfigured)
+                continue;
+
+            var previous = current.Resolve(kind, domain);
+            var unchangedLegacyTarget = previous.Action == FrontButtonAction.LaunchApplication
+                && string.Equals(previous.Launch.ExecutablePath, next.Launch.ExecutablePath, StringComparison.Ordinal);
+            if (unchangedLegacyTarget) continue;
+
+            var pathReason = ValidateExecutablePath(next.Launch.ExecutablePath);
+            if (pathReason is not null) return $"{domain}/{kind} {pathReason}";
+        }
+
+        return null;
+    }
+
+    /// <summary>Returns null for an incomplete (empty) path or a fully qualified .exe path.</summary>
+    public static string? ValidateExecutablePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+
+        try
+        {
+            if (!Path.IsPathFullyQualified(path)) return "application path must be fully qualified";
+            if (!string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase))
+                return "application path must target an .exe file";
+        }
+        catch (ArgumentException)
+        {
+            return "application path is invalid";
+        }
+
+        return null;
+    }
 
     /// <summary>Returns null when <paramref name="mapping"/> is a complete, in-domain, duplicate-free
     /// mapping; otherwise a short reason suitable for a log line.</summary>

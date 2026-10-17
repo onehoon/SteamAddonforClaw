@@ -47,6 +47,44 @@ public sealed class MainUiLocalizationResourceTests
     }
 
     [Fact]
+    public void Steam_and_xbox_catalogs_localize_unknown_favorite_state_messages()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var expected = new[]
+        {
+            "Steam_FavoriteStateUnavailableInfoBar.Message",
+            "Xbox_FavoriteStateUnavailableInfoBar.Message"
+        };
+
+        var steam = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml"));
+        var xbox = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml"));
+        foreach (var (document, uid) in new[]
+        {
+            (steam, "Steam_FavoriteStateUnavailableInfoBar"),
+            (xbox, "Xbox_FavoriteStateUnavailableInfoBar")
+        })
+        {
+            var infoBar = Assert.Single(document.Descendants(), element =>
+                (string?)element.Attribute(XamlNamespace + "Uid") == uid);
+            Assert.False(string.IsNullOrWhiteSpace((string?)infoBar.Attribute("Message")));
+            Assert.Contains(uid + ".Message", expected);
+        }
+
+        Assert.All(expected, key =>
+        {
+            Assert.Contains(key, english.Keys);
+            Assert.Contains(key, korean.Keys);
+            Assert.False(string.IsNullOrWhiteSpace(english[key]));
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+        });
+        Assert.Contains('확', korean[expected[0]]);
+        Assert.Contains('확', korean[expected[1]]);
+    }
+
+    [Fact]
     public void Tweaks_navigation_and_fixed_page_text_resolve_through_unique_resource_uids()
     {
         var root = FindRepositoryRoot();
@@ -182,6 +220,60 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Equal("MainNav_Device", (string?)device.Attribute(XamlNamespace + "Uid"));
         Assert.Equal("Device", (string?)device.Attribute("Content"));
         Assert.Equal("Device", (string?)device.Attribute("Tag"));
+    }
+
+    [Fact]
+    public void Prerequisite_setup_progress_and_result_dialog_localize_without_changing_result_flow()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var mainWindow = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
+        var methodStart = source.IndexOf("private async Task HandlePrerequisiteSetupResultAsync", StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("private async Task TryShowCenterMDisableConfirmationAsync", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var resultHandler = source[methodStart..methodEnd];
+
+        var progressTexts = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["MainWindow_PrerequisiteSetupBusy_ProgressText"] = "Installing required components…",
+            ["MainWindow_PrerequisiteSetupBusy_WaitText"] = "Please wait. This may take a moment."
+        };
+        foreach (var (uid, fallback) in progressTexts)
+        {
+            var element = Assert.Single(mainWindow.Descendants(), candidate =>
+                (string?)candidate.Attribute(XamlNamespace + "Uid") == uid);
+            Assert.Equal(fallback, (string?)element.Attribute("Text"));
+            Assert.Equal(fallback, english[uid + ".Text"]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[uid + ".Text"]));
+            Assert.Contains(uid + ".Text", english.Keys);
+            Assert.Contains(uid + ".Text", korean.Keys);
+        }
+
+        var runtimeMessages = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["MainWindow_PrerequisiteSetup_AlreadyInProgress"] = "Another setup operation is already in progress.",
+            ["MainWindow_PrerequisiteSetup_Failed"] = "Setup couldn't be completed. Check Settings > Required Components or the application log for details.",
+            ["MainWindow_PrerequisiteSetup_Title"] = "Setup unavailable",
+            ["MainWindow_Common_Ok"] = "OK"
+        };
+        foreach (var (key, fallback) in runtimeMessages)
+        {
+            Assert.Contains($"\"{key}\"", resultHandler, StringComparison.Ordinal);
+            Assert.Contains(fallback, resultHandler, StringComparison.Ordinal);
+            Assert.Equal(fallback, english[key]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+        }
+
+        Assert.Contains("MainUiStrings.Get(", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("Title = MainUiStrings.Get(", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("CloseButtonText = MainUiStrings.Get(", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("FrontendPrerequisiteSetupResultKind.Blocked", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("FrontendPrerequisiteSetupResultKind.AlreadyInProgress", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("FrontendPrerequisiteSetupResultKind.Failed", resultHandler, StringComparison.Ordinal);
+        Assert.Contains("TryShowCenterMDisableConfirmationAsync(afterPrerequisiteSetup: true)", resultHandler, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -626,9 +718,14 @@ public sealed class MainUiLocalizationResourceTests
         {
             var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
             Assert.StartsWith("Controller_", uid, StringComparison.Ordinal);
+            var message = (string?)element.Attribute("Message");
+            if (message is null) continue;
+
+            Assert.Equal(message, english[$"{uid}.Message"]);
+            Assert.False(string.IsNullOrWhiteSpace(korean[$"{uid}.Message"]));
         }
 
-        var localizedProperties = new[] { "Text", "Content", "Header", "Description" };
+        var localizedProperties = new[] { "Text", "Content", "Header", "Description", "Message" };
         foreach (var element in document.Descendants())
         {
             var visibleProperties = localizedProperties
@@ -661,6 +758,7 @@ public sealed class MainUiLocalizationResourceTests
             ("Controller_SteamVirtualControllerExpander.Header", "Controller for Steam Game", "Steam 게임용 컨트롤러"),
             ("Controller_SteamVirtualControllerActivity.Text", "Selection is disabled while a Steam game or Big Picture Mode is active.", "Steam 게임 또는 빅픽쳐 모드 중에는 변경 할 수 없습니다."),
             ("Controller_MappingUnavailable.Text", "Unavailable", "사용할 수 없음"),
+            ("Controller_FrontButtonPathValidationInfoBar.Message", "Enter a fully qualified path to an .exe file.", "실행 파일을 선택하려면 전체 경로가 포함된 .exe 파일을 입력하세요."),
             ("Controller_ButtonMappingHeader.Text", "Button Mapping", "버튼 맵핑"),
             ("Controller_GamebarExpander.Header", "XBOX Gamebar Button", "XBOX 게임바 버튼"),
             ("Controller_GamebarSteamCard.Header", "Steam Game / Big Picture", "Steam 게임 / Steam 빅픽쳐 모드"),
@@ -756,7 +854,7 @@ public sealed class MainUiLocalizationResourceTests
         var korean = ReadResources(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", "ko-KR", "Resources.resw"));
         var expectedUids = new[]
         {
-            "Steam_CatalogTitle", "Steam_RefreshGamesButton", "Steam_GameSearchBox", "Steam_BackButton",
+            "Steam_CatalogTitle", "Steam_RefreshGamesButton", "Steam_GameSearchBox", "Steam_FavoriteStateUnavailableInfoBar", "Steam_BackButton",
             "Steam_VirtualControllerCard", "Steam_VirtualController_DefaultOption",
             "Steam_VirtualController_SteamDeckOption", "Steam_VirtualController_DualSenseEdgeOption",
             "Steam_TdpExpander", "Steam_TdpAcCard", "Steam_TdpDcCard",
@@ -775,7 +873,7 @@ public sealed class MainUiLocalizationResourceTests
         foreach (var element in uidElements)
         {
             var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
-            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText" })
+            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText", "Message" })
             {
                 var sourceValue = (string?)element.Attribute(property);
                 if (sourceValue is null) continue;
@@ -887,7 +985,15 @@ public sealed class MainUiLocalizationResourceTests
         Assert.DoesNotContain("${feature} could not be updated.", source, StringComparison.Ordinal);
 
         var verifier = File.ReadAllText(Path.Combine(root, "scripts", "verify-ui-localization-pri.ps1"));
-        Assert.Contains("Text|Content|Header|Description|PlaceholderText", verifier, StringComparison.Ordinal);
+        var propertyPattern = Regex.Match(verifier, @"if \(\$key -match '(?<pattern>[^']+)'\)");
+        Assert.True(propertyPattern.Success, "The published PRI verifier must expose its XAML property-key pattern.");
+        var messageKeyMatch = Regex.Match(
+            "Controller_FrontButtonPathValidationInfoBar.Message",
+            propertyPattern.Groups["pattern"].Value);
+        Assert.True(messageKeyMatch.Success, "The published PRI verifier must treat Message as a XAML property resource.");
+        Assert.Equal(
+            "/Resources/Controller_FrontButtonPathValidationInfoBar/Message",
+            $"/Resources/{messageKeyMatch.Groups["uid"].Value}/{messageKeyMatch.Groups["property"].Value}");
     }
 
     [Fact]
@@ -909,7 +1015,7 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Equal("XBOX", english["MainNav_Xbox.Content"]);
         var expectedUids = new[]
         {
-            "Xbox_CatalogTitle", "Xbox_RefreshGamesButton", "Xbox_GameSearchBox", "Xbox_BackButton",
+            "Xbox_CatalogTitle", "Xbox_RefreshGamesButton", "Xbox_GameSearchBox", "Xbox_FavoriteStateUnavailableInfoBar", "Xbox_BackButton",
             "Xbox_ControllerMappingExpander", "Xbox_M1Card", "Xbox_M2Card",
             "Xbox_TdpExpander", "Xbox_TdpAcCard", "Xbox_TdpDcCard",
             "Xbox_CpuBoostExpander", "Xbox_CpuBoostAcCard", "Xbox_CpuBoostDcCard",
@@ -928,7 +1034,7 @@ public sealed class MainUiLocalizationResourceTests
         {
             var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
             Assert.StartsWith("Xbox_", uid, StringComparison.Ordinal);
-            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText" })
+            foreach (var property in new[] { "Text", "Content", "Header", "Description", "PlaceholderText", "Message" })
             {
                 var sourceValue = (string?)element.Attribute(property);
                 if (string.IsNullOrWhiteSpace(sourceValue)) continue;

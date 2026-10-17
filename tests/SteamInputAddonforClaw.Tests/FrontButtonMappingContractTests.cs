@@ -40,6 +40,58 @@ public sealed class FrontButtonMappingContractTests
     public void A2vm_defaults_are_a_valid_mapping()
         => Assert.Null(FrontButtonMappingValidation.Validate(FrontButtonMappingSettings.A2vmDefault));
 
+    [Theory]
+    [InlineData("tool.exe")]
+    [InlineData("C:tool.exe")]
+    [InlineData(@"C:\Tools\tool.txt")]
+    public void New_launch_candidates_reject_relative_or_non_executable_paths(string path)
+    {
+        var candidate = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal,
+            FrontButtonBinding.Of(FrontButtonAction.LaunchApplication) with
+            {
+                Launch = new FrontButtonLaunchApplicationBinding(path)
+            });
+
+        Assert.NotNull(FrontButtonMappingValidation.ValidateCandidate(candidate, FrontButtonMappingSettings.Default));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void New_launch_candidates_accept_fully_qualified_executables(bool runAsAdministrator)
+    {
+        var candidate = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal,
+            FrontButtonBinding.Of(FrontButtonAction.LaunchApplication) with
+            {
+                Launch = new FrontButtonLaunchApplicationBinding(@"C:\Tools\tool.EXE", "--arg", runAsAdministrator)
+            });
+
+        Assert.Null(FrontButtonMappingValidation.ValidateCandidate(candidate, FrontButtonMappingSettings.Default));
+    }
+
+    [Fact]
+    public void Unchanged_legacy_relative_target_and_hidden_non_launch_payload_remain_valid()
+    {
+        var legacyLaunch = FrontButtonBinding.Of(FrontButtonAction.LaunchApplication) with
+        {
+            Launch = new FrontButtonLaunchApplicationBinding("legacy.exe")
+        };
+        var current = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal, legacyLaunch);
+
+        Assert.Null(FrontButtonMappingValidation.ValidateCandidate(current, current));
+
+        var hiddenPayload = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal,
+            FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture) with
+            {
+                Launch = new FrontButtonLaunchApplicationBinding("legacy.exe")
+            });
+        Assert.Null(FrontButtonMappingValidation.ValidateCandidate(hiddenPayload, FrontButtonMappingSettings.Default));
+    }
+
     [Fact]
     public void Action_vocabulary_has_no_none_member()
         => Assert.DoesNotContain("None", Enum.GetNames<FrontButtonAction>());

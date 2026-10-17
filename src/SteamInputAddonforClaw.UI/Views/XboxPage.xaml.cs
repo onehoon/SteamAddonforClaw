@@ -88,6 +88,7 @@ public sealed partial class XboxPage : UserControl
             {
                 _catalog = snapshot.Games;
                 _catalogLoaded = true;
+                FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown);
             }
 
             if (!_active) return;
@@ -96,6 +97,7 @@ public sealed partial class XboxPage : UserControl
             if (snapshot.Outcome != FrontendXboxGameCatalogOutcome.Ready)
             {
                 GameGrid.ItemsSource = Array.Empty<GameCardItem>();
+                FavoriteStateInfoBar.IsOpen = false;
                 ReturnToCatalog();
                 ShowError(snapshot.FailureMessage ?? MainUiStrings.Get("Xbox_Catalog_LoadFailed", "XBOX game catalog could not be loaded."), null);
             }
@@ -116,6 +118,7 @@ public sealed partial class XboxPage : UserControl
             if (IsCurrentScan(_scanCancellation, scan) && _active)
             {
                 GameGrid.ItemsSource = Array.Empty<GameCardItem>();
+                FavoriteStateInfoBar.IsOpen = false;
                 ReturnToCatalog();
                 ShowError(MainUiStrings.Get("Xbox_Catalog_RefreshFailed", "XBOX game catalog could not be refreshed."), exception);
             }
@@ -146,7 +149,7 @@ public sealed partial class XboxPage : UserControl
     }
     private async void FavoriteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!_active || _frontend is null || (sender as Button)?.Tag is not FrontendXboxGameCatalogEntry game) return;
+        if (!_active || _frontend is null || (sender as Button)?.Tag is not FrontendXboxGameCatalogEntry { FavoriteStateKnown: true } game) return;
         try
         {
             var result = await _frontend.SetXboxGameProfileFavoriteAsync(game.Key, !game.Favorite, game.DisplayName);
@@ -547,7 +550,7 @@ public sealed partial class XboxPage : UserControl
     {
         var search = query?.Trim() ?? string.Empty;
         return games.Where(game => search.Length == 0 || game.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(game => game.Favorite)
+            .OrderByDescending(game => game.FavoriteStateKnown && game.Favorite)
             .ThenBy(game => game.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(game => game.Key, StringComparer.Ordinal)
             .ToArray();
@@ -575,6 +578,10 @@ public sealed partial class XboxPage : UserControl
         public string Key => Game.Key;
         public string DisplayName => Game.DisplayName;
         public bool Favorite => Game.Favorite;
-        public string FavoriteGlyph => Game.Favorite ? "★" : "☆";
+        public bool FavoriteStateKnown => Game.FavoriteStateKnown;
+        public string FavoriteGlyph => GetFavoriteGlyph(Game.Favorite, Game.FavoriteStateKnown);
     }
+
+    internal static string GetFavoriteGlyph(bool favorite, bool stateKnown) =>
+        !stateKnown ? "—" : favorite ? "★" : "☆";
 }

@@ -174,6 +174,21 @@ public sealed class MainUiThemeTests
     }
 
     [Fact]
+    public void Remaining_main_app_dialogs_use_their_owning_actual_theme_and_xaml_root()
+    {
+        var mainWindow = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
+        var devicePage = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml.cs"));
+
+        var developerWarning = Method(mainWindow, "private async void OnDeveloperMenuRequested", "private void MainNavigationView_SelectionChanged");
+        var prerequisiteResult = Method(mainWindow, "private async Task HandlePrerequisiteSetupResultAsync", "private async Task TryShowCenterMDisableConfirmationAsync");
+        var centerMConfirmation = Method(devicePage, "private async Task RequestCenterMTransitionAsync", "private sealed record MaximumProcessorStatePercentItem");
+
+        AssertDialogOwner(developerWarning, "RequestedTheme = MainAppRoot.ActualTheme", "XamlRoot = Content.XamlRoot");
+        AssertDialogOwner(prerequisiteResult, "RequestedTheme = MainAppRoot.ActualTheme", "XamlRoot = Content.XamlRoot");
+        AssertDialogOwner(centerMConfirmation, "RequestedTheme = ActualTheme", "XamlRoot = XamlRoot");
+    }
+
+    [Fact]
     public void Failed_save_restores_the_last_saved_selection_before_any_theme_change()
     {
         var source = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
@@ -217,6 +232,26 @@ public sealed class MainUiThemeTests
         var logDirectory = Path.Combine(root, "SteamInputAddonforClaw-Data", "logs");
         Directory.CreateDirectory(logDirectory);
         return new MainUiThemePreferenceStore(logDirectory);
+    }
+
+    private static string Method(string source, string startMarker, string endMarker)
+    {
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        var end = source.IndexOf(endMarker, start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, $"Could not locate method {startMarker}.");
+        return source[start..end];
+    }
+
+    private static void AssertDialogOwner(string source, string requestedTheme, string xamlRoot)
+    {
+        var dialogStart = source.IndexOf("new ContentDialog", StringComparison.Ordinal);
+        Assert.True(dialogStart >= 0, "The expected dialog was not found.");
+        var dialogEnd = source.IndexOf("}.ShowAsync()", dialogStart, StringComparison.Ordinal);
+        if (dialogEnd < 0) dialogEnd = source.IndexOf("};", dialogStart, StringComparison.Ordinal);
+        Assert.True(dialogEnd > dialogStart, "The expected dialog initializer was not closed.");
+        var dialog = source[dialogStart..dialogEnd];
+        Assert.Contains(requestedTheme, dialog, StringComparison.Ordinal);
+        Assert.Contains(xamlRoot, dialog, StringComparison.Ordinal);
     }
 
     private static string Source(params string[] parts)

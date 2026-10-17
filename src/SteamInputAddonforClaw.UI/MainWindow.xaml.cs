@@ -635,6 +635,7 @@ public sealed partial class MainWindow : Window
             PrimaryButtonText = "Continue",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = MainAppRoot.ActualTheme,
             XamlRoot = Content.XamlRoot
         };
 
@@ -875,13 +876,18 @@ public sealed partial class MainWindow : Window
             return;
 
         var message = resultKind == FrontendPrerequisiteSetupResultKind.AlreadyInProgress
-            ? "Another setup operation is already in progress."
-            : "Setup couldn't be completed. Check Settings > Required Components or the application log for details.";
+            ? MainUiStrings.Get(
+                "MainWindow_PrerequisiteSetup_AlreadyInProgress",
+                "Another setup operation is already in progress.")
+            : MainUiStrings.Get(
+                "MainWindow_PrerequisiteSetup_Failed",
+                "Setup couldn't be completed. Check Settings > Required Components or the application log for details.");
         await new ContentDialog
         {
-            Title = "Setup unavailable",
+            Title = MainUiStrings.Get("MainWindow_PrerequisiteSetup_Title", "Setup unavailable"),
             Content = message,
-            CloseButtonText = "OK",
+            CloseButtonText = MainUiStrings.Get("MainWindow_Common_Ok", "OK"),
+            RequestedTheme = MainAppRoot.ActualTheme,
             XamlRoot = Content.XamlRoot
         }.ShowAsync();
     }
