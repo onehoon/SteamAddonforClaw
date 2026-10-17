@@ -10,9 +10,9 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// <see cref="Xbox360DeviceStateMapper"/>, to a caller-supplied Xbox360 state sink on a monotonic
 /// absolute 4 ms / 250 Hz active or 8 ms / 125 Hz idle deadline schedule, driven by a dedicated worker thread waiting on
 /// <see cref="WindowsHighResolutionOneShotTimer"/> and re-armed via
-/// <see cref="CanonicalPublisherDeadlineMath"/>. The production worker suppresses identical idle
-/// native submissions with a bounded 250 ms refresh; explicit tick-source calls remain one write
-/// per supplied tick.
+/// <see cref="CanonicalPublisherDeadlineMath"/>. The production worker suppresses identical mapped
+/// native submissions indefinitely while idle; active production and explicit tick-source calls
+/// remain one write per tick.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -34,7 +34,6 @@ internal sealed class CanonicalXbox360InputPublisher
 {
     private static readonly TimeSpan ActiveProductionPeriod = TimeSpan.FromMilliseconds(4);
     private static readonly TimeSpan IdleProductionPeriod = TimeSpan.FromMilliseconds(8);
-    private static readonly TimeSpan IdleDuplicateRefreshInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>Test-only seam so the join-timeout fail-closed path can be exercised deterministically.</summary>
@@ -54,7 +53,6 @@ internal sealed class CanonicalXbox360InputPublisher
     private int _faultReported;
     private Xbox360DeviceState _lastAcceptedState;
     private bool _hasLastAcceptedState;
-    private long _lastSuccessfulSubmissionTimestamp;
 
     // Production path only: dedicated worker thread driven by a real Windows high-resolution
     // one-shot timer, re-armed each iteration against the deadline schedule below. Never used when a
@@ -121,7 +119,6 @@ internal sealed class CanonicalXbox360InputPublisher
         Interlocked.Exchange(ref _faultReported, 0);
         _lastAcceptedState = default;
         _hasLastAcceptedState = false;
-        _lastSuccessfulSubmissionTimestamp = 0;
 
         if (_ticks is not null)
         {
@@ -336,7 +333,7 @@ internal sealed class CanonicalXbox360InputPublisher
 
     /// <summary>
     /// Applies the production worker's cached 250-Hz decision before publishing one mapped state.
-    /// Kept internal so tests can exercise this exact per-tick decision with a controlled clock.
+    /// Kept internal so tests can exercise this exact per-tick idle/active submission policy.
     /// </summary>
     internal bool PublishProductionStateOnce()
     {
@@ -359,8 +356,7 @@ internal sealed class CanonicalXbox360InputPublisher
 
         if (allowIdleDuplicateSkip &&
             _hasLastAcceptedState &&
-            StatesEqual(mapped, _lastAcceptedState) &&
-            Stopwatch.GetElapsedTime(_lastSuccessfulSubmissionTimestamp, _timestampProvider()) < IdleDuplicateRefreshInterval)
+            StatesEqual(mapped, _lastAcceptedState))
         {
             return true;
         }
@@ -373,7 +369,6 @@ internal sealed class CanonicalXbox360InputPublisher
 
         _lastAcceptedState = mapped;
         _hasLastAcceptedState = true;
-        _lastSuccessfulSubmissionTimestamp = _timestampProvider();
         _publishedStateCount++;
         return true;
     }

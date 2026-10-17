@@ -187,7 +187,7 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
-    public void Production_idle_state_refreshes_after_250ms_with_controlled_monotonic_time()
+    public void Production_idle_equal_state_is_never_refreshed_by_elapsed_time()
     {
         var origin = 123_456L;
         var now = origin;
@@ -203,15 +203,19 @@ public sealed class CanonicalXbox360InputPublisherTests
         Assert.True(publisher.PublishProductionStateOnce());
         Assert.Equal(1, sink.Count);
 
-        now = checked(origin + Stopwatch.Frequency / 4 - 1);
-        Assert.True(publisher.PublishProductionStateOnce());
-        Assert.Equal(1, sink.Count);
-        Assert.Equal(1, publisher.PublishedStateCount);
-
-        now = checked(origin + Stopwatch.Frequency / 4);
-        Assert.True(publisher.PublishProductionStateOnce());
-        Assert.Equal(2, sink.Count);
-        Assert.Equal(2, publisher.PublishedStateCount);
+        foreach (var elapsedTicks in new[]
+        {
+            Stopwatch.Frequency / 4 - 1,
+            Stopwatch.Frequency / 4,
+            Stopwatch.Frequency,
+            Stopwatch.Frequency * 60L * 60L,
+        })
+        {
+            now = checked(origin + elapsedTicks);
+            Assert.True(publisher.PublishProductionStateOnce());
+            Assert.Equal(1, sink.Count);
+            Assert.Equal(1, publisher.PublishedStateCount);
+        }
     }
 
     [Fact]
@@ -296,17 +300,18 @@ public sealed class CanonicalXbox360InputPublisherTests
         requires250Hz = true;
         Assert.True(publisher.PublishProductionStateOnce());
         Assert.True(publisher.PublishProductionStateOnce());
-        Assert.Equal(3, sink.Count);
-        Assert.Equal(3, publisher.PublishedStateCount);
+        Assert.True(publisher.PublishProductionStateOnce());
+        Assert.Equal(4, sink.Count);
+        Assert.Equal(4, publisher.PublishedStateCount);
 
         requires250Hz = false;
         Assert.True(publisher.PublishProductionStateOnce());
-        Assert.Equal(3, sink.Count);
-        Assert.Equal(3, publisher.PublishedStateCount);
+        Assert.Equal(4, sink.Count);
+        Assert.Equal(4, publisher.PublishedStateCount);
     }
 
     [Fact]
-    public void Production_rejected_changed_state_is_not_counted_as_accepted()
+    public void Production_rejected_changed_state_does_not_replace_accepted_state_cache()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
         var sink = new FakeSink();
@@ -336,36 +341,6 @@ public sealed class CanonicalXbox360InputPublisherTests
         Assert.True(publisher.PublishProductionStateOnce());
         Assert.Equal(2, sink.Count);
         Assert.Equal(1, publisher.PublishedStateCount);
-    }
-
-    [Fact]
-    public void Production_rejected_idle_refresh_does_not_advance_success_timestamp()
-    {
-        var origin = 123_456L;
-        var now = origin;
-        var sink = new FakeSink();
-        var faults = 0;
-        var publisher = new CanonicalXbox360InputPublisher(
-            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
-            sink.SetState,
-            fault: _ => faults++,
-            timestampProvider: () => Volatile.Read(ref now),
-            requires250Hz: static () => false);
-
-        Assert.True(publisher.PublishProductionStateOnce());
-        now = checked(origin + Stopwatch.Frequency / 4);
-        sink.Accept = false;
-        Assert.False(publisher.PublishProductionStateOnce());
-        Assert.Equal(1, publisher.PublishedStateCount);
-        Assert.Equal(1, faults);
-
-        // The worker exits after rejection; exercise its same deterministic tick seam to verify
-        // that only the last successful timestamp governs the next refresh decision.
-        now = checked(now + Stopwatch.Frequency / 1000);
-        sink.Accept = true;
-        Assert.True(publisher.PublishProductionStateOnce());
-        Assert.Equal(3, sink.Count);
-        Assert.Equal(2, publisher.PublishedStateCount);
     }
 
     [Fact]
@@ -683,7 +658,7 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
-    public async Task Production_idle_worker_skips_equal_native_state_until_refresh_deadline()
+    public async Task Production_idle_worker_skips_equal_native_state_and_republishes_after_restart()
     {
         var origin = 123_456L;
         var arms = new ConcurrentQueue<(WindowsHighResolutionOneShotTimer Timer, long Deadline, long Now)>();
