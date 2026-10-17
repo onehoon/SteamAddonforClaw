@@ -16,18 +16,26 @@ For exact native signatures and layouts, use the generated
 `dist/libVIIPER/libVIIPER.h` from the same VIIPER build. Do not use the legacy
 repository-root compatibility header as the Addon ABI source.
 
-## 2. Current Addon target
+## 2. Current Full1902 Addon presentations
 
-The Addon has one active Steam virtual-output target:
+The standalone Full1902 Addon creates one canonical VIIPER runtime, one
+caller-owned USB bus, and three persistent typed logical devices during runtime
+initialization. **All three start detached** (`autoAttachLocalhost: false`):
 
-```text
-Steam Deck — VID=0x28DE, PID=0x1205
-```
+- Xbox360 — regular Windows presentation;
+- Steam Deck — VID=0x28DE, PID=0x1205, default Steam/BPM presentation;
+- DualSense Edge — experimental Settings-selected Steam/BPM presentation.
 
-New runtime composition must instantiate the canonical Steam Deck stage. Do
-not add target selection, silent fallback, or a second active Steam output.
-Game Bar foreground is not a target-selection event: the same canonical Steam
-Deck presentation remains authoritative for the full active Steam route.
+DualSense Edge logical-device creation is required during shared-runtime
+initialization; **only its attachment/publisher activation is deferred** until
+the presentation is selected. Exactly one of these virtual presentations is
+attached/live at a stable point. Game Bar foreground does not select or switch
+the presentation.
+
+Do not introduce a second simultaneously attached virtual controller, an
+unrequested selector, or a silent fallback after an attach/native/teardown
+failure. Keep the Deck-specific exact PnP identity and ownership checks for the
+Deck path; do not infer Edge readiness from the Deck identity.
 
 ## 3. Source and ABI rules
 
