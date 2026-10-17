@@ -666,7 +666,7 @@ public sealed class MainUiLocalizationResourceTests
             Assert.StartsWith("Controller_", uid, StringComparison.Ordinal);
         }
 
-        var localizedProperties = new[] { "Text", "Content", "Header", "Description" };
+        var localizedProperties = new[] { "Text", "Content", "Header", "Description", "Message" };
         foreach (var element in document.Descendants())
         {
             var visibleProperties = localizedProperties
@@ -699,6 +699,7 @@ public sealed class MainUiLocalizationResourceTests
             ("Controller_SteamVirtualControllerExpander.Header", "Controller for Steam Game", "Steam 게임용 컨트롤러"),
             ("Controller_SteamVirtualControllerActivity.Text", "Selection is disabled while a Steam game or Big Picture Mode is active.", "Steam 게임 또는 빅픽쳐 모드 중에는 변경 할 수 없습니다."),
             ("Controller_MappingUnavailable.Text", "Unavailable", "사용할 수 없음"),
+            ("Controller_FrontButtonPathValidationInfoBar.Message", "Enter a fully qualified path to an .exe file.", "실행 파일을 선택하려면 전체 경로가 포함된 .exe 파일을 입력하세요."),
             ("Controller_ButtonMappingHeader.Text", "Button Mapping", "버튼 맵핑"),
             ("Controller_GamebarExpander.Header", "XBOX Gamebar Button", "XBOX 게임바 버튼"),
             ("Controller_GamebarSteamCard.Header", "Steam Game / Big Picture", "Steam 게임 / Steam 빅픽쳐 모드"),

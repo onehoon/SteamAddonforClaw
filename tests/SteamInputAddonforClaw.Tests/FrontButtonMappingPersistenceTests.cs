@@ -191,6 +191,23 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void New_relative_executable_candidate_is_rejected_without_writing()
+    {
+        var coordinator = NewCoordinator();
+        var initialSettings = File.ReadAllText(PathName);
+        var relativeLaunch = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal,
+            FrontButtonBinding.Of(FrontButtonAction.LaunchApplication) with
+            {
+                Launch = new FrontButtonLaunchApplicationBinding("tool.exe")
+            });
+
+        Assert.False(coordinator.ChangeFrontButtonMapping(relativeLaunch));
+        Assert.Equal(FrontButtonMappingSettings.Default, coordinator.FrontButtonMapping);
+        Assert.Equal(initialSettings, File.ReadAllText(PathName));
+    }
+
+    [Fact]
     public void Domain_invalid_candidate_is_rejected()
     {
         var coordinator = NewCoordinator();
@@ -199,6 +216,35 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
 
         Assert.False(coordinator.ChangeFrontButtonMapping(invalid));
         Assert.Equal(FrontButtonMappingSettings.Default, coordinator.FrontButtonMapping);
+    }
+
+    [Fact]
+    public void Legacy_relative_launch_path_does_not_reset_other_mappings_or_block_unrelated_edits()
+    {
+        var initial = NewCoordinator();
+        var withExecutable = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal,
+            FrontButtonBinding.Of(FrontButtonAction.LaunchApplication) with
+            {
+                Launch = new FrontButtonLaunchApplicationBinding(@"C:\Tools\Tool.exe")
+            });
+        Assert.True(initial.ChangeFrontButtonMapping(withExecutable));
+
+        var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(PathName))!.AsObject();
+        document["FrontButtonMapping"]!["Normal"]!["Gamebar"]!["Launch"]!["ExecutablePath"] = "legacy.exe";
+        File.WriteAllText(PathName, document.ToJsonString());
+
+        var reloaded = NewCoordinator();
+        Assert.Equal("legacy.exe", reloaded.FrontButtonMapping.Resolve(FrontButtonKind.Gamebar, FrontButtonDomain.Normal).Launch.ExecutablePath);
+
+        var unrelatedEdit = reloaded.FrontButtonMapping.With(
+            FrontButtonKind.CenterM, FrontButtonDomain.Steam, FrontButtonBinding.Of(FrontButtonAction.SteamQuickAccess));
+        Assert.True(reloaded.ChangeFrontButtonMapping(unrelatedEdit));
+
+        var saved = new SettingsStore(PathName).Load().FrontButtonMapping;
+        Assert.Equal("legacy.exe", saved.Resolve(FrontButtonKind.Gamebar, FrontButtonDomain.Normal).Launch.ExecutablePath);
+        Assert.Equal(FrontButtonAction.SteamQuickAccess, saved.Resolve(FrontButtonKind.CenterM, FrontButtonDomain.Steam).Action);
+        Assert.Equal(FrontButtonAction.SteamButton, saved.Resolve(FrontButtonKind.Gamebar, FrontButtonDomain.Steam).Action);
     }
 
     [Fact]

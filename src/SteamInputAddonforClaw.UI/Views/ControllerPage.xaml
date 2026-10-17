@@ -76,6 +76,13 @@
                     </ctcontrols:SettingsExpander.Items>
                 </ctcontrols:SettingsExpander>
                 </StackPanel>
+                <InfoBar
+                    x:Name="FrontButtonMappingInfoBar"
+                    x:Uid="Controller_FrontButtonPathValidationInfoBar"
+                    IsOpen="False"
+                    IsClosable="False"
+                    Severity="Warning"
+                    Message="Enter a fully qualified path to an .exe file." />
 
                 <ctcontrols:SettingsExpander
                     x:Name="BackButtonMappingExpander"

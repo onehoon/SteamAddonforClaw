@@ -20,12 +20,17 @@ public sealed class FrontButtonActionExecutorLauncherTests
     [InlineData(@"C:\Users\test\shortcut.lnk")]
     [InlineData(@"C:\Users\test\script.ps1")]
     [InlineData(@"C:\Users\test\noextension")]
+    [InlineData("tool.exe")]
+    [InlineData("C:tool.exe")]
     public void Launch_refuses_a_non_executable_target(string path)
     {
         var application = new FrontButtonLaunchApplicationBinding(path);
+        var launchAttempted = false;
+        var launcher = new UserProcessLauncher((_, _) => { launchAttempted = true; return true; });
 
-        var exception = Assert.Throws<InvalidOperationException>(() => Oem1ApplicationLauncher.Launch(application));
+        var exception = Assert.Throws<InvalidOperationException>(() => Oem1ApplicationLauncher.Launch(application, launcher));
         Assert.Contains(".exe", exception.Message);
+        Assert.False(launchAttempted);
     }
 
     [Fact]
@@ -42,8 +47,10 @@ public sealed class FrontButtonActionExecutorLauncherTests
         Assert.Throws<ArgumentNullException>(() => Oem1ApplicationLauncher.Launch(null!));
     }
 
-    [Fact]
-    public void Application_adapter_passes_path_arguments_and_admin_choice_to_the_shared_launcher()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Application_adapter_passes_absolute_path_arguments_and_admin_choice(bool runAsAdministrator)
     {
         ProcessStartInfo? captured = null;
         bool? requestedAdmin = null;
@@ -53,7 +60,7 @@ public sealed class FrontButtonActionExecutorLauncherTests
             requestedAdmin = runAsAdministrator;
             return true;
         });
-        var binding = new FrontButtonLaunchApplicationBinding(@"C:\Tools\Tool.exe", "--example", true);
+        var binding = new FrontButtonLaunchApplicationBinding(@"C:\Tools\Tool.exe", "--example", runAsAdministrator);
 
         Oem1ApplicationLauncher.Launch(binding, launcher);
 
@@ -61,7 +68,7 @@ public sealed class FrontButtonActionExecutorLauncherTests
         Assert.Equal(@"C:\Tools\Tool.exe", captured!.FileName);
         Assert.Equal("--example", captured.Arguments);
         Assert.False(captured.UseShellExecute);
-        Assert.True(requestedAdmin);
+        Assert.Equal(runAsAdministrator, requestedAdmin);
     }
 
     [Fact]

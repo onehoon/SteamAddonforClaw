@@ -158,6 +158,7 @@
   <data name="Controller_BindingEditor_RunAsAdministrator" xml:space="preserve"><value>Run as administrator</value></data>
   <data name="Controller_BindingEditor_Browse" xml:space="preserve"><value>Browse…</value></data>
   <data name="Controller_BindingEditor_PrivilegeExplanation" xml:space="preserve"><value>Runs with administrator privileges; otherwise requests normal user privileges.</value></data>
+  <data name="Controller_FrontButtonPathValidationInfoBar.Message" xml:space="preserve"><value>Enter a fully qualified path to an .exe file.</value></data>
   <data name="Controller_RestoreVibrationButton_Tooltip" xml:space="preserve"><value>Temporarily disconnects virtual controller input. Save and close your game first.</value></data>
   <data name="Controller_RestoreVibrationButton_BusyContent" xml:space="preserve"><value>Restoring…</value></data>
   <data name="Controller_RumbleRearm_Succeeded" xml:space="preserve"><value>Controller restored. Test both motors to confirm vibration.</value></data>

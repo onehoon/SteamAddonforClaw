@@ -1,4 +1,3 @@
-using System.IO;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Processes;
 
@@ -28,8 +27,8 @@ internal static class Oem1ApplicationLauncher
         // An unfinished configuration is not a failure -- there is simply nothing to launch.
         if (!application.IsConfigured) return;
 
-        if (!string.Equals(Path.GetExtension(application.ExecutablePath), ".exe", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The OEM1 application action requires an .exe target.");
+        if (FrontButtonMappingValidation.ValidateExecutablePath(application.ExecutablePath) is { } pathReason)
+            throw new InvalidOperationException($"The OEM1 application action requires a fully qualified .exe target: {pathReason}.");
 
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
