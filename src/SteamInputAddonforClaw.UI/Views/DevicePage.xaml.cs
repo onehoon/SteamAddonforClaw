@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -512,7 +514,13 @@ public sealed partial class DevicePage : UserControl
         foreach (var entry in result.Entries)
         {
             var content = new StackPanel { Spacing = 4 };
-            content.Children.Add(new TextBlock { Text = entry.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+            content.Children.Add(new TextBlock
+            {
+                Text = entry.Name,
+                FontSize = 16,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap
+            });
             content.Children.Add(new TextBlock
             {
                 Text = MainUiStrings.Format("Device_MsiUpdates_LatestVersion",
@@ -530,14 +538,34 @@ public sealed partial class DevicePage : UserControl
                     Opacity = 0.75
                 });
             if (!string.IsNullOrWhiteSpace(entry.Description))
-                content.Children.Add(new TextBlock { Text = entry.Description, TextWrapping = TextWrapping.Wrap, Opacity = 0.75 });
+                content.Children.Add(new TextBlock
+                {
+                    Text = FormatMsiCatalogDescription(entry.Description),
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.85
+                });
             panel.Children.Add(new Border
             {
-                Padding = new Thickness(12),
-                CornerRadius = new CornerRadius(6),
+                Style = (Style)Resources["MsiCatalogEntryCardStyle"],
                 Child = content
             });
         }
+    }
+
+    internal static string FormatMsiCatalogDescription(string description)
+    {
+        if (string.IsNullOrWhiteSpace(description)) return string.Empty;
+
+        var decoded = WebUtility.HtmlDecode(description)
+            .Replace('\u00a0', ' ')
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+        var withLineBreaks = Regex.Replace(decoded, @"<\s*br\s*/?\s*>", "\n", RegexOptions.IgnoreCase);
+        var plainText = Regex.Replace(withLineBreaks, @"</?[A-Za-z][^>]*>", string.Empty);
+        var lines = plainText.Split('\n')
+            .Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim());
+
+        return string.Join(Environment.NewLine, lines).Trim();
     }
 
     private async void MaximumProcessorStateEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)

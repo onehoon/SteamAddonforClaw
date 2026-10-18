@@ -95,7 +95,7 @@
   <data name="Device_MsiUpdatesUtilitiesTab.Header" xml:space="preserve"><value>유틸리티</value></data>
   <data name="Device_MsiUpdates_Checking" xml:space="preserve"><value>MSI 카탈로그를 확인하는 중…</value></data>
   <data name="Device_MsiUpdates_NotChecked" xml:space="preserve"><value>업데이트 확인을 눌러 MSI 카탈로그 항목을 불러오세요.</value></data>
-  <data name="Device_MsiUpdates_Completed" xml:space="preserve"><value>카탈로그 항목을 불러왔습니다. 설치된 버전과 기기 적용 가능 여부는 확인하지 않았습니다.</value></data>
+  <data name="Device_MsiUpdates_Completed" xml:space="preserve"><value>카탈로그 항목을 불러왔습니다.</value></data>
   <data name="Device_MsiUpdates_PartialFailure" xml:space="preserve"><value>일부 카탈로그를 불러오지 못했습니다. 해당 탭을 확인하세요.</value></data>
   <data name="Device_MsiUpdates_Unavailable" xml:space="preserve"><value>이 기기 또는 MSI 설치 환경에서 MSI 카탈로그를 사용할 수 없습니다.</value></data>
   <data name="Device_MsiUpdates_Failed" xml:space="preserve"><value>카탈로그 확인에 실패했습니다. 다시 시도할 수 있습니다.</value></data>

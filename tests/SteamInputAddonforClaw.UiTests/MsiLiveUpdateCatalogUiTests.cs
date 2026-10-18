@@ -65,6 +65,33 @@ public sealed class MsiLiveUpdateCatalogUiTests
         });
     }
 
+    [Fact]
+    public void Catalog_description_decodes_entities_strips_markup_and_preserves_breaks()
+    {
+        var formatted = SteamInputAddonforClaw.Views.DevicePage.FormatMsiCatalogDescription(
+            "Steps: &lt;b&gt;Install&lt;/b&gt; ISH_SW&gt;OS Components.<br> 1. Run SetupISS.exe.<br/> 2. Restart.");
+
+        Assert.Equal(
+            string.Join(Environment.NewLine,
+                "Steps: Install ISH_SW>OS Components.",
+                "1. Run SetupISS.exe.",
+                "2. Restart."),
+            formatted);
+    }
+
+    [Fact]
+    public void Catalog_entries_use_the_app_theme_card_style()
+    {
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml");
+        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml.cs");
+
+        Assert.Contains("x:Key=\"MsiCatalogEntryCardStyle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("{ThemeResource CardBackgroundFillColorDefaultBrush}", xaml, StringComparison.Ordinal);
+        Assert.Contains("{ThemeResource CardStrokeColorDefaultBrush}", xaml, StringComparison.Ordinal);
+        Assert.Contains("Style = (Style)Resources[\"MsiCatalogEntryCardStyle\"]", code, StringComparison.Ordinal);
+        Assert.Contains("Text = FormatMsiCatalogDescription(entry.Description)", code, StringComparison.Ordinal);
+    }
+
     private static string[] ReadResources(string culture)
     {
         var document = XDocument.Load(Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Strings", culture, "Resources.resw"));

@@ -95,7 +95,7 @@
   <data name="Device_MsiUpdatesUtilitiesTab.Header" xml:space="preserve"><value>Utilities</value></data>
   <data name="Device_MsiUpdates_Checking" xml:space="preserve"><value>Checking MSI catalog…</value></data>
   <data name="Device_MsiUpdates_NotChecked" xml:space="preserve"><value>Select Check for updates to load MSI catalog records.</value></data>
-  <data name="Device_MsiUpdates_Completed" xml:space="preserve"><value>Catalog records loaded. Installed versions and device applicability were not checked.</value></data>
+  <data name="Device_MsiUpdates_Completed" xml:space="preserve"><value>Catalog records loaded.</value></data>
   <data name="Device_MsiUpdates_PartialFailure" xml:space="preserve"><value>Some catalog categories could not be loaded. Check the affected tabs.</value></data>
   <data name="Device_MsiUpdates_Unavailable" xml:space="preserve"><value>The MSI catalog is unavailable for this device or MSI installation.</value></data>
   <data name="Device_MsiUpdates_Failed" xml:space="preserve"><value>The catalog query failed. You can try again.</value></data>
