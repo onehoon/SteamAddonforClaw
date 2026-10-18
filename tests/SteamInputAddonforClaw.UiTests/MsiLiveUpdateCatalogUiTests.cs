@@ -29,7 +29,7 @@ public sealed class MsiLiveUpdateCatalogUiTests
         var click = ExtractMethod(code, "private async void MsiUpdatesCheckButton_Click(");
 
         Assert.Contains("Click=\"MsiUpdatesCheckButton_Click\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsAddTabButtonVisible=\"False\" CanDragTabs=\"False\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsAddTabButtonVisible=\"False\" CanReorderTabs=\"False\" CanDragTabs=\"False\"", xaml, StringComparison.Ordinal);
         Assert.Equal(4, xaml.Split("<TabViewItem ", StringSplitOptions.None).Length - 1);
         Assert.All(new[] { "Bios", "Firmware", "Drivers", "Utilities" }, name =>
             Assert.Contains($"Device_MsiUpdates{name}Tab", xaml, StringComparison.Ordinal));

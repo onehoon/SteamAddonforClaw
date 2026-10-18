@@ -61,7 +61,7 @@
                                 <TextBlock x:Name="MsiUpdatesStatusText" VerticalAlignment="Center" TextWrapping="Wrap" />
                             </StackPanel>
                             <TextBlock x:Name="MsiUpdatesLastCheckedText" TextWrapping="Wrap" Opacity="0.7" Visibility="Collapsed" />
-                            <TabView x:Name="MsiUpdatesTabView" IsAddTabButtonVisible="False" CanDragTabs="False" MaxHeight="420">
+                            <TabView x:Name="MsiUpdatesTabView" IsAddTabButtonVisible="False" CanReorderTabs="False" CanDragTabs="False" MaxHeight="420">
                                 <TabViewItem x:Uid="Device_MsiUpdatesBiosTab" Header="BIOS" IsClosable="False">
                                     <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesBiosEntriesPanel" Spacing="8" /></ScrollViewer>
                                 </TabViewItem>

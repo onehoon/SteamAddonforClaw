@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.MSI.LiveUpdate;
+using SteamInputAddonforClaw.MsiLiveUpdateHelper;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -330,6 +332,71 @@ public sealed class MsiLiveUpdateCatalogTests
         Assert.Equal(CheckedAt, mapped.CheckedAtUtc);
     }
 
+    [Fact]
+    public void Oem_request_body_uses_the_verified_json_fields_and_values()
+    {
+        var body = MsiLiveUpdateOemRequestReflection.CreateRequestJson(
+            value => JsonSerializer.Serialize(value),
+            "Claw 8 AI+ A2VM",
+            "kr",
+            "driver",
+            "win11");
+
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        Assert.Equal(4, root.EnumerateObject().Count());
+        Assert.Equal("Claw 8 AI+ A2VM", root.GetProperty("product_title").GetString());
+        Assert.Equal("kr", root.GetProperty("country_code").GetString());
+        Assert.Equal("driver", root.GetProperty("type").GetString());
+        Assert.Equal("win11", root.GetProperty("os").GetString());
+    }
+
+    [Fact]
+    public void Oem_reflection_invocation_maps_the_verified_header_arguments_in_order()
+    {
+        var api = new FakeOemApi();
+        var method = typeof(FakeOemApi).GetMethod(nameof(FakeOemApi.GetPostRequest), BindingFlags.Instance | BindingFlags.Public)!;
+
+        var result = MsiLiveUpdateOemRequestReflection.InvokeGetPostRequest(
+            method,
+            api,
+            "Claw 8 AI+ A2VM",
+            "kr",
+            "utility",
+            "win11");
+
+        Assert.Equal("request-created", result);
+        Assert.Equal(["Claw 8 AI+ A2VM", "kr", "utility", "win11"], api.Arguments!);
+    }
+
+    [Fact]
+    public void Oem_request_body_is_set_on_the_signing_configuration_before_transport_invocation()
+    {
+        var api = new FakeOemApi();
+
+        MsiLiveUpdateOemRequestReflection.SetRequestJsonData(api, "{\"type\":\"bios\"}");
+
+        Assert.Equal("{\"type\":\"bios\"}", api.AwsApiGatewayRequest.JsonData);
+    }
+
+    [Fact]
+    public void Elevated_helper_uses_tested_oem_request_contract_and_rejects_user_registry_candidates()
+    {
+        var source = ReadHelperSource();
+
+        Assert.Contains("MsiLiveUpdateOemRequestReflection.CreateRequestJson", source, StringComparison.Ordinal);
+        Assert.Contains("MsiLiveUpdateOemRequestReflection.SetRequestJsonData(api, requestJson)", source, StringComparison.Ordinal);
+        Assert.Contains("MsiLiveUpdateOemRequestReflection.InvokeGetPostRequest", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("requestMethod.Invoke(api", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("RegistryHive.CurrentUser", source, StringComparison.Ordinal);
+        Assert.Contains("Directory.Exists(fullPath) && IsTrustedInstallationRoot(fullPath)", source, StringComparison.Ordinal);
+        Assert.Contains("FileAttributes.ReparsePoint", source, StringComparison.Ordinal);
+        Assert.Contains("GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner)", source, StringComparison.Ordinal);
+        Assert.Contains("IsProtectedRegularFile(host)", source, StringComparison.Ordinal);
+        Assert.Contains("IsProtectedRegularFile(api)", source, StringComparison.Ordinal);
+        Assert.Contains("new FileInfo(path).GetAccessControl", source, StringComparison.Ordinal);
+    }
+
     private static MsiLiveUpdateCatalogQueryResult Parse(string output) =>
         MsiLiveUpdateCatalogResultParser.ParseHelperOutput(output, Request, CheckedAt);
 
@@ -343,5 +410,33 @@ public sealed class MsiLiveUpdateCatalogTests
             errorKind = (string?)null
         });
         return JsonSerializer.Serialize(new { status = "Completed", categories });
+    }
+
+    private static string ReadHelperSource()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
+                return File.ReadAllText(Path.Combine(directory.FullName, "src", "SteamInputAddonforClaw.MsiLiveUpdateHelper", "Program.cs"));
+        }
+
+        throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+
+    private sealed class FakeOemApi
+    {
+        public FakeOemRequestConfiguration AwsApiGatewayRequest { get; } = new();
+        public string[]? Arguments { get; private set; }
+
+        public string GetPostRequest(string product_title, string country_code, string type, string os)
+        {
+            Arguments = [product_title, country_code, type, os];
+            return "request-created";
+        }
+    }
+
+    private sealed class FakeOemRequestConfiguration
+    {
+        public string JsonData { get; set; } = string.Empty;
     }
 }

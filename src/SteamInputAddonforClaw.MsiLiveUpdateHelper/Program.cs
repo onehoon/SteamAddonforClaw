@@ -1,5 +1,7 @@
 using System.Net;
 using System.Reflection;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
@@ -54,6 +56,7 @@ internal static class Program
                     ?? throw new MissingMethodException("The MSI catalog request method is unavailable.");
                 if (requestMethod.ReturnType != typeof(WebRequest))
                     throw new MissingMethodException("The MSI catalog request method has an unexpected return type.");
+                MsiLiveUpdateOemRequestReflection.ValidateGetPostRequest(requestMethod);
             }
             catch (Exception exception)
             {
@@ -66,8 +69,20 @@ internal static class Program
             {
                 try
                 {
-                    var webRequest = (WebRequest?)requestMethod.Invoke(api,
-                        [request.ProductTitle, request.CountryCode, category, request.OperatingSystem])
+                    var requestJson = MsiLiveUpdateOemRequestReflection.CreateRequestJson(
+                        serializer.Serialize,
+                        request.ProductTitle,
+                        request.CountryCode,
+                        category,
+                        request.OperatingSystem);
+                    MsiLiveUpdateOemRequestReflection.SetRequestJsonData(api, requestJson);
+                    var webRequest = (WebRequest?)MsiLiveUpdateOemRequestReflection.InvokeGetPostRequest(
+                        requestMethod,
+                        api,
+                        request.ProductTitle,
+                        request.CountryCode,
+                        category,
+                        request.OperatingSystem)
                         ?? throw new InvalidOperationException("RequestCreationFailed");
                     using var response = webRequest.GetResponse();
                     var body = ReadBounded(response.GetResponseStream(), MaxResponseBytes);
@@ -151,7 +166,12 @@ internal static class MsiLiveUpdateAssemblyResolver
         {
             var host = Path.Combine(root, LiveUpdateHostName);
             var api = Path.Combine(root, ApiAssemblyName);
-            if (File.Exists(host) && File.Exists(api)) return api;
+            if (IsTrustedInstallationRoot(root)
+                && File.Exists(host)
+                && File.Exists(api)
+                && IsProtectedRegularFile(host)
+                && IsProtectedRegularFile(api))
+                return api;
         }
         return null;
     }
@@ -181,12 +201,6 @@ internal static class MsiLiveUpdateAssemblyResolver
 
             using var msi = localMachine.OpenSubKey(@"SOFTWARE\MSI\MSI Center M");
             AddMsiRegistryRoots(msi, roots);
-        }
-
-        using (var currentUser = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64))
-        using (var uninstall = currentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"))
-        {
-            if (uninstall is not null) AddRegisteredProductRoots(uninstall, roots);
         }
 
         foreach (var root in roots) yield return root;
@@ -222,10 +236,165 @@ internal static class MsiLiveUpdateAssemblyResolver
         try
         {
             var fullPath = Path.GetFullPath(normalized);
-            if (Directory.Exists(fullPath)) roots.Add(fullPath);
+            if (Directory.Exists(fullPath) && IsTrustedInstallationRoot(fullPath)) roots.Add(fullPath);
         }
         catch { }
     }
+
+    private static bool IsTrustedInstallationRoot(string path)
+    {
+        string fullPath;
+        try
+        {
+            fullPath = NormalizePath(path);
+        }
+        catch
+        {
+            return false;
+        }
+
+        var trustedRoots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+        };
+
+        foreach (var trustedRootValue in trustedRoots)
+        {
+            if (string.IsNullOrWhiteSpace(trustedRootValue)) continue;
+            string trustedRoot;
+            try
+            {
+                trustedRoot = NormalizePath(trustedRootValue);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!IsPathWithin(fullPath, trustedRoot)) continue;
+            return AreDirectoryAncestorsProtected(fullPath, trustedRoot);
+        }
+
+        return false;
+    }
+
+    private static bool AreDirectoryAncestorsProtected(string path, string trustedRoot)
+    {
+        var unprivilegedSids = GetUnelevatedUserSids();
+        DirectoryInfo? current = new DirectoryInfo(path);
+        while (current is not null)
+        {
+            if (!IsDirectoryProtected(current, unprivilegedSids)) return false;
+            if (string.Equals(NormalizePath(current.FullName), trustedRoot, StringComparison.OrdinalIgnoreCase))
+                return true;
+            current = current.Parent;
+        }
+
+        return false;
+    }
+
+    private static HashSet<string> GetUnelevatedUserSids()
+    {
+        var sids = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null).Value,
+            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null).Value,
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null).Value,
+            new SecurityIdentifier(WellKnownSidType.InteractiveSid, null).Value,
+            new SecurityIdentifier(WellKnownSidType.CreatorOwnerSid, null).Value
+        };
+
+        using (var identity = WindowsIdentity.GetCurrent())
+        {
+            if (identity.User is not null) sids.Add(identity.User.Value);
+            if (identity.Groups is not null)
+            {
+                foreach (IdentityReference group in identity.Groups)
+                {
+                    var sid = (SecurityIdentifier)group.Translate(typeof(SecurityIdentifier));
+                    if (sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)) continue;
+                    sids.Add(sid.Value);
+                }
+            }
+        }
+
+        return sids;
+    }
+
+    private static bool IsDirectoryProtected(DirectoryInfo directory, HashSet<string> unprivilegedSids)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(directory.FullName);
+            if ((attributes & FileAttributes.Directory) == 0 || (attributes & FileAttributes.ReparsePoint) != 0)
+                return false;
+
+            var security = directory.GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
+            return IsFileSystemObjectProtected(security, unprivilegedSids);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsProtectedRegularFile(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) return false;
+
+            var security = new FileInfo(path).GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
+            return IsFileSystemObjectProtected(security, GetUnelevatedUserSids());
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsFileSystemObjectProtected(FileSystemSecurity security, HashSet<string> unprivilegedSids)
+    {
+        var owner = security.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        if (owner is null || unprivilegedSids.Contains(owner.Value)) return false;
+
+        var writeRights = FileSystemRights.Write
+            | FileSystemRights.Modify
+            | FileSystemRights.FullControl
+            | FileSystemRights.CreateFiles
+            | FileSystemRights.CreateDirectories
+            | FileSystemRights.Delete
+            | FileSystemRights.DeleteSubdirectoriesAndFiles
+            | FileSystemRights.ChangePermissions
+            | FileSystemRights.TakeOwnership
+            | FileSystemRights.WriteAttributes
+            | FileSystemRights.WriteExtendedAttributes;
+
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType != AccessControlType.Allow || (rule.FileSystemRights & writeRights) == 0)
+                continue;
+            if (unprivilegedSids.Contains(((SecurityIdentifier)rule.IdentityReference).Value)) return false;
+        }
+
+        return true;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var pathRoot = Path.GetPathRoot(fullPath) ?? string.Empty;
+        return fullPath.Length > pathRoot.Length
+            ? fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            : fullPath;
+    }
+
+    private static bool IsPathWithin(string path, string root) =>
+        string.Equals(path, root, StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
     private static bool TryGetExecutablePath(string? imagePath, out string executable)
     {

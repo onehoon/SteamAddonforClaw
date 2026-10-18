@@ -23,4 +23,8 @@
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.FseHome\SteamInputAddonforClaw.FseHome.csproj" />
     <ProjectReference Include="..\..\tools\RumbleProbe\RumbleProbe.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\SteamInputAddonforClaw.MsiLiveUpdateHelper\MsiLiveUpdateOemRequestReflection.cs" Link="MsiLiveUpdateOemRequestReflection.cs" />
+  </ItemGroup>
 </Project>
