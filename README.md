@@ -109,6 +109,8 @@ This is a Windows-startup change, not an instant in-session toggle. The confirma
 
 The Device page shows the detected manufacturer and model, compatibility status, board identifier, and detected GPU names. Its **MSI Center M** setting controls which app manages the built-in controller; see [MSI Center M and the built-in controller](#msi-center-m-and-the-built-in-controller).
 
+The collapsed **MSI Updates** panel can manually query MSI's published catalog for BIOS, firmware, drivers, and utilities on supported MSI Claw models. These are catalog records only: the app does not compare installed versions or verify that an entry applies to this device, and it does not download or install packages. The query uses the original MSI Live Update component when available; it does not start MSI Center M or its services.
+
 The page also provides device-wide performance and battery controls:
 
 - **TDP Control** — enables processor power-limit management. **PL1** is the sustained power limit and **PL2** is the higher short-duration limit. Values are separate for **Plugged in** and **On battery**. Available ranges depend on the detected Claw model. When available, the first setup may start from the existing MSI Center M Manual TDP values.
