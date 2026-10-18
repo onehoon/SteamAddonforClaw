@@ -24,7 +24,9 @@ internal sealed record MsiLiveUpdateCatalogQueryResult(
     string? OperatingSystem,
     IReadOnlyList<MsiLiveUpdateCatalogCategoryResult> Categories,
     DateTimeOffset? CheckedAtUtc,
-    string? ErrorKind = null);
+    string? ErrorKind = null,
+    string? HelperTokenElevation = null,
+    string? ResolverDiagnostics = null);
 internal sealed record MsiLiveUpdateCatalogRequest(string ProductTitle, string CountryCode, string OperatingSystem);
 
 internal static class MsiLiveUpdateCatalogDevicePolicy
@@ -307,8 +309,14 @@ internal static class MsiLiveUpdateCatalogResultParser
         {
             using var document = JsonDocument.Parse(output, new JsonDocumentOptions { MaxDepth = 24 });
             var root = document.RootElement;
+            string? helperTokenElevation = null;
+            string? resolverDiagnostics = null;
             if (!TryGetString(root, "status", out var status)) return Failed("MalformedHelperResponse");
             var errorKind = TryGetString(root, "errorKind", out var error) ? SafeErrorKind(error) : null;
+            helperTokenElevation = TryGetString(root, "helperTokenElevation", out var elevation)
+                && (elevation is "Administrator" or "NotElevated" or "Unknown") ? elevation : null;
+            resolverDiagnostics = TryGetString(root, "resolverDiagnostics", out var diagnostics)
+                ? SafeResolverDiagnostics(diagnostics) : null;
             if (status == "Unavailable") return Unavailable(errorKind ?? "OemDllUnavailable");
             if (status != "Completed" || !TryGetProperty(root, "categories", out var categoriesElement)
                 || categoriesElement.ValueKind != JsonValueKind.Array)
@@ -350,12 +358,15 @@ internal static class MsiLiveUpdateCatalogResultParser
             var state = failedCount == 0
                 ? MsiLiveUpdateCatalogState.Completed
                 : failedCount == mapped.Count ? MsiLiveUpdateCatalogState.Failed : MsiLiveUpdateCatalogState.PartialFailure;
-            return new(state, request.ProductTitle, request.CountryCode, request.OperatingSystem, mapped, checkedAtUtc);
+            return new(state, request.ProductTitle, request.CountryCode, request.OperatingSystem, mapped, checkedAtUtc,
+                HelperTokenElevation: helperTokenElevation, ResolverDiagnostics: resolverDiagnostics);
 
             MsiLiveUpdateCatalogQueryResult Failed(string reason) =>
-                new(MsiLiveUpdateCatalogState.Failed, request.ProductTitle, request.CountryCode, request.OperatingSystem, [], checkedAtUtc, reason);
+                new(MsiLiveUpdateCatalogState.Failed, request.ProductTitle, request.CountryCode, request.OperatingSystem,
+                    [], checkedAtUtc, reason, helperTokenElevation, resolverDiagnostics);
             MsiLiveUpdateCatalogQueryResult Unavailable(string reason) =>
-                new(MsiLiveUpdateCatalogState.Unavailable, request.ProductTitle, request.CountryCode, request.OperatingSystem, [], null, reason);
+                new(MsiLiveUpdateCatalogState.Unavailable, request.ProductTitle, request.CountryCode, request.OperatingSystem,
+                    [], null, reason, helperTokenElevation, resolverDiagnostics);
         }
         catch (JsonException)
         {
@@ -398,6 +409,20 @@ internal static class MsiLiveUpdateCatalogResultParser
         {
             return FailedCategory(category, "MalformedCatalogResponse");
         }
+    }
+
+    private static string SafeResolverDiagnostics(string value)
+    {
+        for (var index = 0; index + 2 < value.Length; index++)
+        {
+            if (char.IsLetter(value[index]) && value[index + 1] == ':' && (value[index + 2] is '\\' or '/'))
+                return "RejectedUnsafePath";
+        }
+        if (value.StartsWith("\\\\", StringComparison.Ordinal)) return "RejectedUnsafePath";
+
+        var safe = new string(value.Where(static character => char.IsLetterOrDigit(character)
+            || character is ' ' or '.' or '_' or '-' or '/' or '\\' or ':' or '=' or ';' or '|').Take(1024).ToArray());
+        return safe.Length == 0 ? "Unavailable" : safe;
     }
 
     private static bool TryGetAnyString(JsonElement element, string[] names, int maxLength, out string? value)

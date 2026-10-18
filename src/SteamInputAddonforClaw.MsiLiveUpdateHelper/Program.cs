@@ -1,6 +1,8 @@
 using System.Net;
 using System.Reflection;
 using System.Security.AccessControl;
+using System.Security;
+using System.Security.Principal;
 using System.Text;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
@@ -17,18 +19,26 @@ internal static class Program
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         var serializer = new JavaScriptSerializer { MaxJsonLength = 12 * 1024 * 1024 };
+        var tokenElevation = MsiLiveUpdateProcessDiagnostics.GetTokenElevation();
+        var resolverDiagnostics = "NotRun";
         try
         {
             if (!TryReadRequest(args, out var request))
             {
-                Console.WriteLine(serializer.Serialize(new { status = "Failed", errorKind = "InvalidRequest" }));
+                Console.WriteLine(serializer.Serialize(new { status = "Failed", errorKind = "InvalidRequest", helperTokenElevation = tokenElevation }));
                 return 2;
             }
 
-            var assemblyPath = MsiLiveUpdateAssemblyResolver.Resolve();
+            var assemblyPath = MsiLiveUpdateAssemblyResolver.Resolve(out resolverDiagnostics);
             if (assemblyPath is null)
             {
-                Console.WriteLine(serializer.Serialize(new { status = "Unavailable", errorKind = "OemDllUnavailable" }));
+                Console.WriteLine(serializer.Serialize(new
+                {
+                    status = "Unavailable",
+                    errorKind = "OemDllUnavailable",
+                    helperTokenElevation = tokenElevation,
+                    resolverDiagnostics
+                }));
                 return 0;
             }
 
@@ -59,7 +69,13 @@ internal static class Program
             }
             catch (Exception exception)
             {
-                Console.WriteLine(serializer.Serialize(new { status = "Unavailable", errorKind = SafeExceptionKind(exception) }));
+                Console.WriteLine(serializer.Serialize(new
+                {
+                    status = "Unavailable",
+                    errorKind = SafeExceptionKind(exception),
+                    helperTokenElevation = tokenElevation,
+                    resolverDiagnostics
+                }));
                 return 0;
             }
 
@@ -94,12 +110,24 @@ internal static class Program
                 }
             }
 
-            Console.WriteLine(serializer.Serialize(new { status = "Completed", categories = results }));
+            Console.WriteLine(serializer.Serialize(new
+            {
+                status = "Completed",
+                categories = results,
+                helperTokenElevation = tokenElevation,
+                resolverDiagnostics
+            }));
             return 0;
         }
         catch (Exception exception)
         {
-            Console.WriteLine(serializer.Serialize(new { status = "Failed", errorKind = SafeExceptionKind(exception) }));
+            Console.WriteLine(serializer.Serialize(new
+            {
+                status = "Failed",
+                errorKind = SafeExceptionKind(exception),
+                helperTokenElevation = tokenElevation,
+                resolverDiagnostics
+            }));
             return 1;
         }
     }
@@ -158,28 +186,63 @@ internal static class MsiLiveUpdateAssemblyResolver
 {
     private const string LiveUpdateHostName = "MSI_Center_M_Server_LiveUpdate.exe";
     private const string ApiAssemblyName = "API_LiveUpdate.dll";
+    private const int MaximumLoggedCandidates = 8;
 
-    internal static string? Resolve()
+    internal static string? Resolve(out string diagnostics)
     {
-        foreach (var root in EnumerateRegisteredRoots())
+        (string Source, string Path)[] candidates;
+        try
         {
-            var host = Path.Combine(root, LiveUpdateHostName);
-            var api = Path.Combine(root, ApiAssemblyName);
-            if (IsTrustedInstallationRoot(root)
-                && File.Exists(host)
-                && File.Exists(api)
-                && IsProtectedRegularFile(host)
-                && IsProtectedRegularFile(api))
-                return api;
+            candidates = EnumerateRegisteredRoots().ToArray();
         }
-        return null;
+        catch (UnauthorizedAccessException)
+        {
+            diagnostics = "registry=AccessDenied";
+            throw;
+        }
+        catch (SecurityException)
+        {
+            diagnostics = "registry=AccessDenied";
+            throw;
+        }
+        catch
+        {
+            diagnostics = "registry=InspectionFailed";
+            throw;
+        }
+
+        var inspected = new List<string>(Math.Min(candidates.Length, MaximumLoggedCandidates));
+        string? resolvedAssembly = null;
+        foreach (var candidate in candidates)
+        {
+            var result = InspectCandidate(candidate.Path, out var assemblyPath, out var scope, out var relativeRoot);
+            var detail = $"{candidate.Source}:{scope}:{relativeRoot}:{result}";
+            if (inspected.Count < MaximumLoggedCandidates)
+            {
+                inspected.Add(detail);
+            }
+
+            if (result != "Accepted") continue;
+            if (inspected.Count == MaximumLoggedCandidates && !inspected.Contains(detail))
+                inspected[MaximumLoggedCandidates - 1] = detail;
+            resolvedAssembly = assemblyPath;
+            break;
+        }
+
+        var omitted = Math.Max(0, candidates.Length - inspected.Count);
+        diagnostics = $"registrations={candidates.Length};" +
+            (inspected.Count == 0 ? "candidates=none" : "candidates=" + string.Join("|", inspected)) +
+            (omitted == 0 ? string.Empty : $";notDetailed={omitted}");
+        diagnostics = diagnostics.Length <= 1024 ? diagnostics : diagnostics.Substring(0, 1024);
+        return resolvedAssembly;
     }
 
-    private static IEnumerable<string> EnumerateRegisteredRoots()
+    private static IEnumerable<(string Source, string Path)> EnumerateRegisteredRoots()
     {
-        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var roots = new List<(string Source, string Path)>();
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
+            var viewName = view == RegistryView.Registry64 ? "64" : "32";
             using var localMachine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
             using var services = localMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services");
             if (services is not null)
@@ -190,143 +253,194 @@ internal static class MsiLiveUpdateAssemblyResolver
                     var imagePath = service?.GetValue("ImagePath") as string;
                     if (TryGetExecutablePath(imagePath, out var executable)
                         && string.Equals(Path.GetFileName(executable), LiveUpdateHostName, StringComparison.OrdinalIgnoreCase))
-                        AddRoot(roots, Path.GetDirectoryName(executable));
+                        AddRoot(roots, Path.GetDirectoryName(executable), "Service" + viewName);
                 }
             }
 
             using var uninstall = localMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
             if (uninstall is not null)
-                AddRegisteredProductRoots(uninstall, roots);
+                AddRegisteredProductRoots(uninstall, roots, viewName);
 
             using var msi = localMachine.OpenSubKey(@"SOFTWARE\MSI\MSI Center M");
-            AddMsiRegistryRoots(msi, roots);
+            AddMsiRegistryRoots(msi, roots, viewName);
         }
 
         foreach (var root in roots) yield return root;
     }
 
-    private static void AddRegisteredProductRoots(RegistryKey uninstall, HashSet<string> roots)
+    private static void AddRegisteredProductRoots(RegistryKey uninstall, List<(string Source, string Path)> roots, string viewName)
     {
         foreach (var subKeyName in uninstall.GetSubKeyNames())
         {
             using var product = uninstall.OpenSubKey(subKeyName);
             var displayName = product?.GetValue("DisplayName") as string;
-            if (!string.Equals(displayName?.Trim(), "MSI Center M", StringComparison.OrdinalIgnoreCase)) continue;
-            AddRoot(roots, product?.GetValue("InstallLocation") as string);
+            if (!MsiLiveUpdateProductRegistration.IsSupportedDisplayName(displayName)) continue;
+            AddRoot(roots, product?.GetValue("InstallLocation") as string, "Uninstall" + viewName);
         }
     }
 
-    private static void AddMsiRegistryRoots(RegistryKey? msi, HashSet<string> roots)
+    private static void AddMsiRegistryRoots(RegistryKey? msi, List<(string Source, string Path)> roots, string viewName)
     {
         if (msi is null) return;
         foreach (var valueName in new[] { "InstallLocation", "InstallPath", "InstallDir", "Path" })
-            AddRoot(roots, msi.GetValue(valueName) as string);
+            AddRoot(roots, msi.GetValue(valueName) as string, "MsiRegistry" + viewName);
         using var liveUpdate = msi.OpenSubKey("LiveUpdate");
         if (liveUpdate is not null)
             foreach (var valueName in new[] { "InstallLocation", "InstallPath", "InstallDir", "Path" })
-                AddRoot(roots, liveUpdate.GetValue(valueName) as string);
+                AddRoot(roots, liveUpdate.GetValue(valueName) as string, "MsiRegistry" + viewName);
     }
 
-    private static void AddRoot(HashSet<string> roots, string? path)
+    private static void AddRoot(List<(string Source, string Path)> roots, string? path, string source)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
-        var normalized = Environment.ExpandEnvironmentVariables(path!.Trim().Trim('"'));
-        if (!Path.IsPathRooted(normalized) || normalized.StartsWith(@"\\", StringComparison.Ordinal)) return;
-        try
-        {
-            var fullPath = Path.GetFullPath(normalized);
-            if (Directory.Exists(fullPath) && IsTrustedInstallationRoot(fullPath)) roots.Add(fullPath);
-        }
-        catch { }
+        roots.Add((source, Environment.ExpandEnvironmentVariables(path!.Trim().Trim('"'))));
     }
 
-    private static bool IsTrustedInstallationRoot(string path)
+    private static string InspectCandidate(string candidatePath, out string? assemblyPath, out string scope, out string relativeRoot)
     {
+        assemblyPath = null;
+        scope = "Unknown";
+        relativeRoot = "-";
         string fullPath;
         try
         {
-            fullPath = NormalizePath(path);
+            if (!Path.IsPathRooted(candidatePath) || candidatePath.StartsWith(@"\\", StringComparison.Ordinal))
+                return "InvalidPath";
+            fullPath = NormalizePath(candidatePath);
         }
         catch
         {
-            return false;
+            return "InvalidPath";
         }
 
         var trustedRoots = new[]
         {
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+            (Scope: "ProgramFiles", Path: Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)),
+            (Scope: "ProgramFilesX86", Path: Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86))
         };
 
-        foreach (var trustedRootValue in trustedRoots)
+        string? trustedRoot = null;
+        foreach (var trustedRootCandidate in trustedRoots)
         {
-            if (string.IsNullOrWhiteSpace(trustedRootValue)) continue;
-            string trustedRoot;
+            if (string.IsNullOrWhiteSpace(trustedRootCandidate.Path)) continue;
             try
             {
-                trustedRoot = NormalizePath(trustedRootValue);
+                var normalizedTrustedRoot = NormalizePath(trustedRootCandidate.Path);
+                if (!IsPathWithin(fullPath, normalizedTrustedRoot)) continue;
+                scope = trustedRootCandidate.Scope;
+                trustedRoot = normalizedTrustedRoot;
+                relativeRoot = SanitizeRelativePath(fullPath.Substring(trustedRoot.Length)
+                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                break;
             }
             catch
             {
-                continue;
+                return "PathInspectionFailed";
             }
-
-            if (!IsPathWithin(fullPath, trustedRoot)) continue;
-            return AreDirectoryAncestorsProtected(fullPath, trustedRoot);
         }
 
-        return false;
+        if (trustedRoot is null) return "OutsideProgramFiles";
+
+        var directoryPresence = CheckDirectoryPresence(fullPath);
+        if (directoryPresence != "Present") return directoryPresence;
+
+        var rootSafety = CheckDirectoryAncestorsProtected(fullPath, trustedRoot);
+        if (rootSafety != "Protected") return rootSafety;
+
+        var host = Path.Combine(fullPath, LiveUpdateHostName);
+        var api = Path.Combine(fullPath, ApiAssemblyName);
+        var hostSafety = CheckProtectedRegularFile(host);
+        if (hostSafety != "Protected") return "Host" + hostSafety;
+        var apiSafety = CheckProtectedRegularFile(api);
+        if (apiSafety != "Protected") return "Api" + apiSafety;
+
+        assemblyPath = api;
+        return "Accepted";
     }
 
-    private static bool AreDirectoryAncestorsProtected(string path, string trustedRoot)
+    private static string CheckDirectoryPresence(string path)
     {
-        var unprivilegedSids = MsiLiveUpdatePathSecurity.GetUnelevatedUserSids();
-        DirectoryInfo? current = new DirectoryInfo(path);
-        while (current is not null)
+        try
         {
-            if (!IsDirectoryProtected(current, unprivilegedSids)) return false;
-            if (string.Equals(NormalizePath(current.FullName), trustedRoot, StringComparison.OrdinalIgnoreCase))
-                return true;
-            current = current.Parent;
+            var attributes = File.GetAttributes(path);
+            return (attributes & FileAttributes.Directory) != 0 ? "Present" : "NotDirectory";
         }
-
-        return false;
+        catch (FileNotFoundException) { return "DirectoryMissing"; }
+        catch (DirectoryNotFoundException) { return "DirectoryMissing"; }
+        catch (UnauthorizedAccessException) { return "DirectoryAccessDenied"; }
+        catch (SecurityException) { return "DirectoryAccessDenied"; }
+        catch { return "DirectoryInspectionFailed"; }
     }
 
-    private static bool IsDirectoryProtected(DirectoryInfo directory, HashSet<string> unprivilegedSids)
+    private static string CheckDirectoryAncestorsProtected(string path, string trustedRoot)
+    {
+        HashSet<string> unprivilegedSids;
+        try { unprivilegedSids = MsiLiveUpdatePathSecurity.GetUnelevatedUserSids(); }
+        catch (UnauthorizedAccessException) { return "TokenAccessDenied"; }
+        catch (SecurityException) { return "TokenAccessDenied"; }
+        catch { return "TokenInspectionFailed"; }
+
+        try
+        {
+            DirectoryInfo? current = new DirectoryInfo(path);
+            while (current is not null)
+            {
+                var safety = CheckDirectory(current, unprivilegedSids);
+                if (safety != "Protected") return safety;
+                if (string.Equals(NormalizePath(current.FullName), trustedRoot, StringComparison.OrdinalIgnoreCase))
+                    return "Protected";
+                current = current.Parent;
+            }
+            return "DirectoryChainIncomplete";
+        }
+        catch (UnauthorizedAccessException) { return "DirectoryAccessDenied"; }
+        catch (SecurityException) { return "DirectoryAccessDenied"; }
+        catch { return "DirectoryInspectionFailed"; }
+    }
+
+    private static string CheckDirectory(DirectoryInfo directory, HashSet<string> unprivilegedSids)
     {
         try
         {
             var attributes = File.GetAttributes(directory.FullName);
             if ((attributes & FileAttributes.Directory) == 0 || (attributes & FileAttributes.ReparsePoint) != 0)
-                return false;
+                return (attributes & FileAttributes.ReparsePoint) != 0 ? "DirectoryReparsePoint" : "NotDirectory";
 
             var security = directory.GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
-            return MsiLiveUpdatePathSecurity.IsFileSystemObjectProtected(security, unprivilegedSids);
+            return MsiLiveUpdatePathSecurity.IsFileSystemObjectProtected(security, unprivilegedSids)
+                ? "Protected"
+                : "DirectoryAclWritable";
         }
-        catch
-        {
-            return false;
-        }
+        catch (UnauthorizedAccessException) { return "DirectoryAccessDenied"; }
+        catch (SecurityException) { return "DirectoryAccessDenied"; }
+        catch { return "DirectoryInspectionFailed"; }
     }
 
-    private static bool IsProtectedRegularFile(string path)
+    private static string CheckProtectedRegularFile(string path)
     {
         try
         {
             var attributes = File.GetAttributes(path);
-            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) return false;
+            if ((attributes & FileAttributes.ReparsePoint) != 0) return "ReparsePoint";
+            if ((attributes & FileAttributes.Directory) != 0) return "NotRegularFile";
 
             var security = new FileInfo(path).GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
             return MsiLiveUpdatePathSecurity.IsFileSystemObjectProtected(
                 security,
-                MsiLiveUpdatePathSecurity.GetUnelevatedUserSids());
+                MsiLiveUpdatePathSecurity.GetUnelevatedUserSids())
+                ? "Protected"
+                : "AclWritable";
         }
-        catch
-        {
-            return false;
-        }
+        catch (FileNotFoundException) { return "Missing"; }
+        catch (DirectoryNotFoundException) { return "Missing"; }
+        catch (UnauthorizedAccessException) { return "AccessDenied"; }
+        catch (SecurityException) { return "AccessDenied"; }
+        catch { return "InspectionFailed"; }
     }
+
+    private static string SanitizeRelativePath(string path) =>
+        new string(path.Select(character => char.IsLetterOrDigit(character) || character is ' ' or '.' or '_' or '-' or '\\' or '/'
+            ? character : '_').Take(96).ToArray());
 
     private static string NormalizePath(string path)
     {
@@ -360,5 +474,23 @@ internal static class MsiLiveUpdateAssemblyResolver
             executable = value.Substring(0, exeEnd + 4).Trim();
         }
         return Path.IsPathRooted(executable) && !executable.StartsWith(@"\\", StringComparison.Ordinal);
+    }
+}
+
+internal static class MsiLiveUpdateProcessDiagnostics
+{
+    internal static string GetTokenElevation()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)
+                ? "Administrator"
+                : "NotElevated";
+        }
+        catch
+        {
+            return "Unknown";
+        }
     }
 }

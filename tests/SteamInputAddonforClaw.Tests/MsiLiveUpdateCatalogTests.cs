@@ -16,6 +16,17 @@ public sealed class MsiLiveUpdateCatalogTests
     private static readonly DateTimeOffset CheckedAt = new(2026, 10, 18, 12, 30, 0, TimeSpan.Zero);
 
     [Theory]
+    [InlineData("MSI Center M", true)]
+    [InlineData("MSI Center M SDK", true)]
+    [InlineData(" msi center m sdk ", true)]
+    [InlineData("MSI Center M Service", false)]
+    [InlineData(null, false)]
+    public void Uninstall_registration_accepts_only_known_MSI_product_names(string? displayName, bool expected)
+    {
+        Assert.Equal(expected, MsiLiveUpdateProductRegistration.IsSupportedDisplayName(displayName));
+    }
+
+    [Theory]
     [InlineData(" Claw 8 AI+ A2VM/MT- ", "Claw 8 AI+ A2VM")]
     [InlineData("Claw 8 AI+ A2VM\\SKU", "Claw 8 AI+ A2VM")]
     [InlineData("  Claw 8 AI+ A2VM  ", "Claw 8 AI+ A2VM")]
@@ -160,6 +171,44 @@ public sealed class MsiLiveUpdateCatalogTests
         Assert.Equal(MsiLiveUpdateCatalogState.Unavailable, result.State);
         Assert.Null(result.CheckedAtUtc);
         Assert.Empty(result.Categories);
+    }
+
+    [Fact]
+    public void Parser_preserves_helper_elevation_and_bounded_resolver_diagnostics()
+    {
+        var result = Parse("{\"status\":\"Unavailable\",\"errorKind\":\"OemDllUnavailable\","
+            + "\"helperTokenElevation\":\"Administrator\","
+            + "\"resolverDiagnostics\":\"registrations=1;candidates=Uninstall32:ProgramFilesX86:MSI/MSI Center M:ApiMissing\"}");
+
+        Assert.Equal("Administrator", result.HelperTokenElevation);
+        Assert.Equal("registrations=1;candidates=Uninstall32:ProgramFilesX86:MSI/MSI Center M:ApiMissing", result.ResolverDiagnostics);
+    }
+
+    [Fact]
+    public void Parser_preserves_helper_diagnostics_for_completed_queries()
+    {
+        const string output = "{\"status\":\"Completed\",\"helperTokenElevation\":\"NotElevated\","
+            + "\"resolverDiagnostics\":\"registrations=1;candidates=Service64:ProgramFilesX86:MSI/MSI Center M:Accepted\","
+            + "\"categories\":["
+            + "{\"category\":\"bios\",\"transportSucceeded\":true,\"responseJson\":\"[]\"},"
+            + "{\"category\":\"firmware\",\"transportSucceeded\":true,\"responseJson\":\"[]\"},"
+            + "{\"category\":\"driver\",\"transportSucceeded\":true,\"responseJson\":\"[]\"},"
+            + "{\"category\":\"utility\",\"transportSucceeded\":true,\"responseJson\":\"[]\"}]}";
+
+        var result = Parse(output);
+
+        Assert.Equal("NotElevated", result.HelperTokenElevation);
+        Assert.Contains(":Accepted", result.ResolverDiagnostics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parser_rejects_absolute_paths_in_helper_resolver_diagnostics()
+    {
+        var result = Parse("{\"status\":\"Unavailable\",\"errorKind\":\"OemDllUnavailable\","
+            + "\"resolverDiagnostics\":\"C:\\\\Users\\\\onehoon\\\\secret\"}");
+
+        Assert.Equal("RejectedUnsafePath", result.ResolverDiagnostics);
+        Assert.DoesNotContain("onehoon", result.ResolverDiagnostics, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -382,7 +431,7 @@ public sealed class MsiLiveUpdateCatalogTests
     }
 
     [Fact]
-    public void Elevated_helper_uses_tested_oem_request_contract_and_rejects_user_registry_candidates()
+    public void Helper_uses_tested_oem_request_contract_and_rejects_user_registry_candidates()
     {
         var source = ReadHelperSource();
 
@@ -391,12 +440,30 @@ public sealed class MsiLiveUpdateCatalogTests
         Assert.Contains("MsiLiveUpdateOemRequestReflection.InvokeGetPostRequest", source, StringComparison.Ordinal);
         Assert.DoesNotContain("requestMethod.Invoke(api", source, StringComparison.Ordinal);
         Assert.DoesNotContain("RegistryHive.CurrentUser", source, StringComparison.Ordinal);
-        Assert.Contains("Directory.Exists(fullPath) && IsTrustedInstallationRoot(fullPath)", source, StringComparison.Ordinal);
+        Assert.Contains("DirectoryMissing", source, StringComparison.Ordinal);
+        Assert.Contains("OutsideProgramFiles", source, StringComparison.Ordinal);
+        Assert.Contains("DirectoryAclWritable", source, StringComparison.Ordinal);
+        Assert.Contains("DirectoryAccessDenied", source, StringComparison.Ordinal);
         Assert.Contains("FileAttributes.ReparsePoint", source, StringComparison.Ordinal);
         Assert.Contains("GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner)", source, StringComparison.Ordinal);
-        Assert.Contains("IsProtectedRegularFile(host)", source, StringComparison.Ordinal);
-        Assert.Contains("IsProtectedRegularFile(api)", source, StringComparison.Ordinal);
+        Assert.Contains("CheckProtectedRegularFile(host)", source, StringComparison.Ordinal);
+        Assert.Contains("CheckProtectedRegularFile(api)", source, StringComparison.Ordinal);
         Assert.Contains("new FileInfo(path).GetAccessControl", source, StringComparison.Ordinal);
+        Assert.Contains("GetTokenElevation", source, StringComparison.Ordinal);
+        Assert.Contains("helperTokenElevation", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Verb = \"runas\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Catalog_helper_inherits_parent_token_without_requesting_elevation()
+    {
+        var root = FindRepositoryRoot();
+        var manifest = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.MsiLiveUpdateHelper", "app.manifest"));
+        var client = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw", "Devices", "MSI", "LiveUpdate", "MsiLiveUpdateCatalogClient.cs"));
+
+        Assert.Contains("requestedExecutionLevel level=\"asInvoker\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = false", client, StringComparison.Ordinal);
+        Assert.DoesNotContain("Verb = \"runas\"", client, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -455,12 +522,13 @@ public sealed class MsiLiveUpdateCatalogTests
 
     private static string ReadHelperSource()
     {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
-                return File.ReadAllText(Path.Combine(directory.FullName, "src", "SteamInputAddonforClaw.MsiLiveUpdateHelper", "Program.cs"));
-        }
+        return File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.MsiLiveUpdateHelper", "Program.cs"));
+    }
 
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+            if (File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx"))) return directory.FullName;
         throw new DirectoryNotFoundException("Repository root was not found.");
     }
 
