@@ -49,6 +49,37 @@
                 </Grid>
             </Border>
 
+            <ctcontrols:SettingsExpander x:Name="MsiUpdatesExpander" x:Uid="Device_MsiUpdatesExpander" Header="MSI Updates" IsExpanded="False">
+                <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE895;" /></ctcontrols:SettingsExpander.HeaderIcon>
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard ContentAlignment="Vertical">
+                        <StackPanel Spacing="10">
+                            <TextBlock x:Uid="Device_MsiUpdatesCatalogOnly" Text="Catalog records only. Installed versions and device applicability are not checked." TextWrapping="Wrap" Opacity="0.8" />
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <Button x:Name="MsiUpdatesCheckButton" x:Uid="Device_MsiUpdatesCheckButton" Content="Check for updates" Click="MsiUpdatesCheckButton_Click" />
+                                <ProgressRing x:Name="MsiUpdatesProgressRing" Width="20" Height="20" IsActive="False" Visibility="Collapsed" />
+                                <TextBlock x:Name="MsiUpdatesStatusText" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <TextBlock x:Name="MsiUpdatesLastCheckedText" TextWrapping="Wrap" Opacity="0.7" Visibility="Collapsed" />
+                            <TabView x:Name="MsiUpdatesTabView" IsAddTabButtonVisible="False" CanReorderTabs="False" CanDragTabs="False" MaxHeight="420">
+                                <TabViewItem x:Uid="Device_MsiUpdatesBiosTab" Header="BIOS" IsClosable="False">
+                                    <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesBiosEntriesPanel" Spacing="8" /></ScrollViewer>
+                                </TabViewItem>
+                                <TabViewItem x:Uid="Device_MsiUpdatesFirmwareTab" Header="Firmware" IsClosable="False">
+                                    <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesFirmwareEntriesPanel" Spacing="8" /></ScrollViewer>
+                                </TabViewItem>
+                                <TabViewItem x:Uid="Device_MsiUpdatesDriversTab" Header="Drivers" IsClosable="False">
+                                    <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesDriverEntriesPanel" Spacing="8" /></ScrollViewer>
+                                </TabViewItem>
+                                <TabViewItem x:Uid="Device_MsiUpdatesUtilitiesTab" Header="Utilities" IsClosable="False">
+                                    <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesUtilityEntriesPanel" Spacing="8" /></ScrollViewer>
+                                </TabViewItem>
+                            </TabView>
+                        </StackPanel>
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
+
             <InfoBar x:Name="CenterMStartupInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Informational" />
             <ctcontrols:SettingsCard x:Name="CenterMStartupCard" x:Uid="Device_CenterMStartupCard" Header="MSI Center M"
                 Description="Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.">

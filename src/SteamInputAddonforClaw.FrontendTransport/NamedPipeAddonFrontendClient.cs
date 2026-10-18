@@ -80,6 +80,7 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     public Task<FrontendTdpMutationResult> SetDeviceTdpAsync(FrontendTdpConfiguration configuration, CancellationToken t = default) => SendAsync<FrontendTdpMutationResult>(FrontendRpcMethod.SetDeviceTdp, FrontendWireCodec.Payload(new SetDeviceTdpRequest(configuration)), t);
     public Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken t = default) => SendAsync<FrontendTdpMutationResult>(FrontendRpcMethod.SetDeviceTdpEnabled, FrontendWireCodec.Payload(new SetDeviceTdpEnabledRequest(enabled)), t);
     public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) => SendAsync<FrontendDeviceQuickSettingsSnapshot>(FrontendRpcMethod.CaptureDeviceQuickSettings, null, t);
+    public Task<FrontendMsiLiveUpdateCatalogSnapshot> RequestMsiLiveUpdateCatalogAsync(CancellationToken t = default) => SendAsync<FrontendMsiLiveUpdateCatalogSnapshot>(FrontendRpcMethod.RequestMsiLiveUpdateCatalog, null, t);
     // SF-V2-04: concrete Main UI / Overlay implementations of the shared Quick Settings seam, so the
     // pipe carries the SF-V2-03 typed contract instead of falling back to the fail-closed interface
     // default. Product validation/dispatch stays in QuickSettingsMutationAdapter on the server side.

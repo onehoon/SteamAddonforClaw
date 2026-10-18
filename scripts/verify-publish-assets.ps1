@@ -17,6 +17,7 @@ if (-not (Test-Path -LiteralPath $PublishDirectory -PathType Container)) {
 $requiredAssets = @(
     'SteamInputAddonforClaw.exe',
     'SteamInputAddonforClaw.TdpHelper.exe',
+    'SteamInputAddonforClaw.MsiLiveUpdateHelper.exe',
     'Dependencies\Viiper\libVIIPER.dll',
     'Dependencies\Viiper\PROVENANCE.md',
     'Dependencies\Viiper\libVIIPER.h',
@@ -53,6 +54,11 @@ $missingAssets = foreach ($asset in $requiredAssets) {
 
 if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
+}
+
+$bundledMsiLiveUpdateDll = @(Get-ChildItem -LiteralPath $PublishDirectory -Recurse -File -Filter 'API_LiveUpdate.dll')
+if ($bundledMsiLiveUpdateDll.Count -gt 0) {
+    throw 'Publish output must not bundle MSI proprietary API_LiveUpdate.dll.'
 }
 
 $retiredQamDirectory = Join-Path $PublishDirectory 'qam'

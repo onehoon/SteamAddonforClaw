@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Devices.MSI.LiveUpdate;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Profiles.Performance;
@@ -46,6 +47,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly object _fanProbeGate = new();
     private FanProbeSession? _fanProbe;
     private readonly MsiClawBatteryChargeLimitHardware? _batteryChargeLimitHardware;
+    private readonly MsiLiveUpdateCatalogClient _msiLiveUpdateCatalogClient = new();
     private readonly MsiClawBatteryChargeLimitRuntime? _batteryChargeLimitRuntime;
     private readonly MsiClawVibrationStrengthClient? _controllerVibrationStrengthClient;
     private readonly Func<bool>? _controllerVibrationTestAvailable;
@@ -2162,6 +2164,61 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         catch (Exception exception) { AppLog.Warn("Device", "Maximum Processor State snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
 
         return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, batteryChargeLimit, maximumProcessorState);
+    }
+
+    public async Task<FrontendMsiLiveUpdateCatalogSnapshot> RequestMsiLiveUpdateCatalogAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var startedAt = Stopwatch.GetTimestamp();
+        FrontendHardwareSnapshot hardware;
+        try
+        {
+            var status = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
+            hardware = FrontendSnapshotMapper.Map(status).Hardware;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
+        {
+            AppLog.Debug("Device", "MSI catalog query skipped because device identity could not be resolved.",
+                ("Reason", exception.GetType().Name));
+            return FrontendMsiLiveUpdateCatalogSnapshot.Unavailable("DeviceIdentityUnavailable");
+        }
+
+        if (!MsiLiveUpdateCatalogDevicePolicy.IsSupported(hardware.Status, hardware.Family, hardware.Model))
+        {
+            AppLog.Info("Device", "MSI catalog query skipped for unsupported or unresolved hardware.",
+                ("HardwareStatus", hardware.Status), ("Model", hardware.Model ?? "Unknown"));
+            return FrontendMsiLiveUpdateCatalogSnapshot.Unavailable("UnsupportedDevice");
+        }
+
+        MsiLiveUpdateCatalogQueryResult result;
+        try { result = await _msiLiveUpdateCatalogClient.QueryAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
+        {
+            result = new(MsiLiveUpdateCatalogState.Failed, null, null, null, [], DateTimeOffset.UtcNow,
+                new string(exception.GetType().Name.Where(char.IsLetterOrDigit).Take(64).ToArray()));
+        }
+
+        var snapshot = MsiLiveUpdateCatalogContractMapper.Map(result);
+        object? CatalogCount(FrontendMsiLiveUpdateCatalogCategory category)
+        {
+            var item = snapshot.Categories.FirstOrDefault(candidate => candidate.Category == category);
+            return item is null || item.State == FrontendMsiLiveUpdateCatalogCategoryState.Failed
+                ? null
+                : item.Entries.Count;
+        }
+        AppLog.Info("Device", "MSI catalog query completed.",
+            ("Model", hardware.Model!), ("State", snapshot.State),
+            ("ElapsedMs", (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds),
+            ("BiosCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Bios)),
+            ("FirmwareCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Firmware)),
+            ("DriverCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Driver)),
+            ("UtilityCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Utility)),
+            ("Failure", snapshot.ErrorKind ?? string.Join(',', snapshot.Categories.Where(category => category.ErrorKind is not null)
+                .Select(category => $"{category.Category}:{category.ErrorKind}"))));
+        return snapshot;
     }
 
     /// <summary>Captures Device settings or the Runtime-selected active Steam/XBOX profile. The

@@ -69,7 +69,7 @@ public sealed class FrontendContractTests
     {
         const string retiredSurfaceFragment = "Gpu" + "Frequency" + "Probe";
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.DoesNotContain(typeof(IAddonFrontendControl).GetMethods(),
             method => method.Name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
         Assert.DoesNotContain(Enum.GetNames<FrontendRpcMethod>(),
