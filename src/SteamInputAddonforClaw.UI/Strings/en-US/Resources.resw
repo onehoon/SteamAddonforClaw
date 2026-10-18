@@ -87,7 +87,7 @@
   <data name="Device_MaximumProcessorStateDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_MaximumProcessorStateExpander.Description" xml:space="preserve"><value>Set the Windows maximum processor performance state to 99% or 100%. This is not a CPU utilization limit. Turning this off stops applying the setting but does not restore the previous value.</value></data>
   <data name="Device_MaximumProcessorStateExpander.Header" xml:space="preserve"><value>Maximum Processor State</value></data>
-  <data name="MsiUpdates_CatalogOnly.Text" xml:space="preserve"><value>Catalog records only. Installed versions and device applicability are not checked.</value></data>
+  <data name="MsiUpdates_CatalogOnly.Text" xml:space="preserve"><value>MSI catalog only · no installed-version or device-applicability check.</value></data>
   <data name="MsiUpdates_CheckButton.Content" xml:space="preserve"><value>Check for updates</value></data>
   <data name="MsiUpdates_BiosTab.Header" xml:space="preserve"><value>BIOS</value></data>
   <data name="MsiUpdates_FirmwareTab.Header" xml:space="preserve"><value>Firmware</value></data>
@@ -99,15 +99,13 @@
   <data name="MsiUpdates_PartialFailure" xml:space="preserve"><value>Some catalog categories could not be loaded. Check the affected tabs.</value></data>
   <data name="MsiUpdates_Unavailable" xml:space="preserve"><value>The MSI catalog is unavailable for this device or MSI installation.</value></data>
   <data name="MsiUpdates_Failed" xml:space="preserve"><value>The catalog query failed. You can try again.</value></data>
-  <data name="MsiUpdates_LastChecked" xml:space="preserve"><value>Last checked: {0}</value></data>
   <data name="MsiUpdates_CategoryFailed" xml:space="preserve"><value>Catalog request failed for this category.</value></data>
   <data name="MsiUpdates_NoEntries" xml:space="preserve"><value>No catalog entries.</value></data>
   <data name="MsiUpdates_NotCheckedCategory" xml:space="preserve"><value>No catalog loaded yet.</value></data>
   <data name="MsiUpdates_UnavailableCategory" xml:space="preserve"><value>Catalog data is unavailable.</value></data>
   <data name="MsiUpdates_NoData" xml:space="preserve"><value>No catalog data was returned for this category.</value></data>
-  <data name="MsiUpdates_LatestVersion" xml:space="preserve"><value>Latest published version: {0}</value></data>
-  <data name="MsiUpdates_ReleaseDate" xml:space="preserve"><value>Release date: {0}</value></data>
-  <data name="MsiUpdates_VersionNotProvided" xml:space="preserve"><value>Not provided</value></data>
+  <data name="MsiUpdates_LatestVersion" xml:space="preserve"><value>Latest {0}</value></data>
+  <data name="MsiUpdates_ReleaseDate" xml:space="preserve"><value>Released {0}</value></data>
   <data name="Device_PageTitle.Text" xml:space="preserve"><value>Device</value></data>
   <data name="Device_PowerMode_InitializationFailed" xml:space="preserve"><value>Windows Power Mode could not be initialized.</value></data>
   <data name="Device_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>

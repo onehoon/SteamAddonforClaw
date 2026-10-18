@@ -685,6 +685,7 @@ public sealed partial class MainWindow : Window
 
         var wasController = ControllerPageHost.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
+        var wasMsiUpdates = MsiUpdatesPageHost.Visibility == Visibility.Visible;
         var wasProfile = ProfilePageHost.Visibility == Visibility.Visible;
         var wasXbox = XboxPageHost.Visibility == Visibility.Visible;
         var wasShortcut = ShortcutPageHost.Visibility == Visibility.Visible;
@@ -702,6 +703,8 @@ public sealed partial class MainWindow : Window
         DeveloperContentHost.Visibility = DeveloperContentHost.Content is null ? Visibility.Collapsed : Visibility.Visible;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
         MsiUpdatesPageHost.Visibility = page == MainNavigationPage.MsiUpdates ? Visibility.Visible : Visibility.Collapsed;
+        if (page == MainNavigationPage.MsiUpdates && !wasMsiUpdates) _msiUpdatesContent!.Activate();
+        else if (wasMsiUpdates && page != MainNavigationPage.MsiUpdates) _msiUpdatesContent?.Deactivate();
         ProfilePageHost.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         XboxPageHost.Visibility = page == MainNavigationPage.Xbox ? Visibility.Visible : Visibility.Collapsed;
         ControllerPageHost.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
