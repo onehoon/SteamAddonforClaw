@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.MSI.LiveUpdate;
@@ -397,6 +399,45 @@ public sealed class MsiLiveUpdateCatalogTests
         Assert.Contains("new FileInfo(path).GetAccessControl", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Protected_path_acl_accepts_builtin_users_read_and_execute()
+    {
+        var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+        var security = CreateAclWithOwnerAndRule(users, FileSystemRights.ReadAndExecute);
+
+        Assert.True(MsiLiveUpdatePathSecurity.IsFileSystemObjectProtected(
+            security,
+            MsiLiveUpdatePathSecurity.GetUnelevatedUserSids()));
+    }
+
+    [Theory]
+    [InlineData(FileSystemRights.Write)]
+    [InlineData(FileSystemRights.Modify)]
+    public void Protected_path_acl_rejects_builtin_users_write_access(FileSystemRights rights)
+    {
+        var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+        var security = CreateAclWithOwnerAndRule(users, rights);
+
+        Assert.False(MsiLiveUpdatePathSecurity.IsFileSystemObjectProtected(
+            security,
+            MsiLiveUpdatePathSecurity.GetUnelevatedUserSids()));
+    }
+
+    [Fact]
+    public void Protected_path_acl_ignores_creator_owner_inherit_only_placeholder()
+    {
+        var creatorOwner = new SecurityIdentifier(WellKnownSidType.CreatorOwnerSid, null);
+        var security = CreateAclWithOwnerAndRule(
+            creatorOwner,
+            FileSystemRights.Modify,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.InheritOnly);
+        var unprivilegedSids = MsiLiveUpdatePathSecurity.GetUnelevatedUserSids();
+
+        Assert.DoesNotContain(creatorOwner.Value, unprivilegedSids);
+        Assert.True(MsiLiveUpdatePathSecurity.IsFileSystemObjectProtected(security, unprivilegedSids));
+    }
+
     private static MsiLiveUpdateCatalogQueryResult Parse(string output) =>
         MsiLiveUpdateCatalogResultParser.ParseHelperOutput(output, Request, CheckedAt);
 
@@ -421,6 +462,23 @@ public sealed class MsiLiveUpdateCatalogTests
         }
 
         throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+
+    private static DirectorySecurity CreateAclWithOwnerAndRule(
+        SecurityIdentifier ruleSid,
+        FileSystemRights rights,
+        InheritanceFlags inheritanceFlags = InheritanceFlags.None,
+        PropagationFlags propagationFlags = PropagationFlags.None)
+    {
+        var security = new DirectorySecurity();
+        security.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
+        security.AddAccessRule(new FileSystemAccessRule(
+            ruleSid,
+            rights,
+            inheritanceFlags,
+            propagationFlags,
+            AccessControlType.Allow));
+        return security;
     }
 
     private sealed class FakeOemApi

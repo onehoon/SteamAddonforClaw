@@ -1,7 +1,6 @@
 using System.Net;
 using System.Reflection;
 using System.Security.AccessControl;
-using System.Security.Principal;
 using System.Text;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
@@ -281,7 +280,7 @@ internal static class MsiLiveUpdateAssemblyResolver
 
     private static bool AreDirectoryAncestorsProtected(string path, string trustedRoot)
     {
-        var unprivilegedSids = GetUnelevatedUserSids();
+        var unprivilegedSids = MsiLiveUpdatePathSecurity.GetUnelevatedUserSids();
         DirectoryInfo? current = new DirectoryInfo(path);
         while (current is not null)
         {
@@ -294,34 +293,6 @@ internal static class MsiLiveUpdateAssemblyResolver
         return false;
     }
 
-    private static HashSet<string> GetUnelevatedUserSids()
-    {
-        var sids = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            new SecurityIdentifier(WellKnownSidType.WorldSid, null).Value,
-            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null).Value,
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null).Value,
-            new SecurityIdentifier(WellKnownSidType.InteractiveSid, null).Value,
-            new SecurityIdentifier(WellKnownSidType.CreatorOwnerSid, null).Value
-        };
-
-        using (var identity = WindowsIdentity.GetCurrent())
-        {
-            if (identity.User is not null) sids.Add(identity.User.Value);
-            if (identity.Groups is not null)
-            {
-                foreach (IdentityReference group in identity.Groups)
-                {
-                    var sid = (SecurityIdentifier)group.Translate(typeof(SecurityIdentifier));
-                    if (sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)) continue;
-                    sids.Add(sid.Value);
-                }
-            }
-        }
-
-        return sids;
-    }
-
     private static bool IsDirectoryProtected(DirectoryInfo directory, HashSet<string> unprivilegedSids)
     {
         try
@@ -331,7 +302,7 @@ internal static class MsiLiveUpdateAssemblyResolver
                 return false;
 
             var security = directory.GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
-            return IsFileSystemObjectProtected(security, unprivilegedSids);
+            return MsiLiveUpdatePathSecurity.IsFileSystemObjectProtected(security, unprivilegedSids);
         }
         catch
         {
@@ -347,39 +318,14 @@ internal static class MsiLiveUpdateAssemblyResolver
             if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) return false;
 
             var security = new FileInfo(path).GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
-            return IsFileSystemObjectProtected(security, GetUnelevatedUserSids());
+            return MsiLiveUpdatePathSecurity.IsFileSystemObjectProtected(
+                security,
+                MsiLiveUpdatePathSecurity.GetUnelevatedUserSids());
         }
         catch
         {
             return false;
         }
-    }
-
-    private static bool IsFileSystemObjectProtected(FileSystemSecurity security, HashSet<string> unprivilegedSids)
-    {
-        var owner = security.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
-        if (owner is null || unprivilegedSids.Contains(owner.Value)) return false;
-
-        var writeRights = FileSystemRights.Write
-            | FileSystemRights.Modify
-            | FileSystemRights.FullControl
-            | FileSystemRights.CreateFiles
-            | FileSystemRights.CreateDirectories
-            | FileSystemRights.Delete
-            | FileSystemRights.DeleteSubdirectoriesAndFiles
-            | FileSystemRights.ChangePermissions
-            | FileSystemRights.TakeOwnership
-            | FileSystemRights.WriteAttributes
-            | FileSystemRights.WriteExtendedAttributes;
-
-        foreach (FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
-        {
-            if (rule.AccessControlType != AccessControlType.Allow || (rule.FileSystemRights & writeRights) == 0)
-                continue;
-            if (unprivilegedSids.Contains(((SecurityIdentifier)rule.IdentityReference).Value)) return false;
-        }
-
-        return true;
     }
 
     private static string NormalizePath(string path)

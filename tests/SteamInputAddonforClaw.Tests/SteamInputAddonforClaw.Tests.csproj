@@ -26,5 +26,6 @@
 
   <ItemGroup>
     <Compile Include="..\..\src\SteamInputAddonforClaw.MsiLiveUpdateHelper\MsiLiveUpdateOemRequestReflection.cs" Link="MsiLiveUpdateOemRequestReflection.cs" />
+    <Compile Include="..\..\src\SteamInputAddonforClaw.MsiLiveUpdateHelper\MsiLiveUpdatePathSecurity.cs" Link="MsiLiveUpdatePathSecurity.cs" />
   </ItemGroup>
 </Project>
