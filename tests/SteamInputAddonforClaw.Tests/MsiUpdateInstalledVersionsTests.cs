@@ -606,6 +606,80 @@ public sealed class MsiUpdateInstalledVersionsTests
     }
 
     [Fact]
+    public void Realtek_audio_driver_matches_only_the_unique_observed_A2VM_codec_device()
+    {
+        var codecId = @"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1462146C&REV_1000\5&2F390E51&0&0001";
+        var codec = Device(codecId,
+            [@"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1462146C&REV_1000",
+             @"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1462146C",
+             @"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256"],
+            "MEDIA", "Realtek(R) Audio", "6.0.9738.1", 0x10EC, 0x0256)
+            with { DriverProvider = "Realtek Semiconductor Corp.", InfName = null };
+        var intelDevice = Device(GpuDeviceId, [GpuDeviceId], "DISPLAY", "Intel Arc Graphics", "32.0.100.1", 0x8086, 0x1234);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+        [
+            new("Realtek Audio Driver", "6.0.9738.1", null, null),
+            new("Intel Arc Graphics Driver", "32.0.100.4", null, null, DeviceId: GpuDeviceId)
+        ]));
+        var intel = new IntelDsaCatalogResult(true,
+            [IntelPackage("930514", "Intel Arc Graphics", false,
+                IntelComponent("Graphics", "32.0.101.9150", "VEN_8086&DEV_1234"))]);
+        var diagnostics = new List<MsiUpdateCatalogMatchDiagnostic>();
+
+        var entries = MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(codec, intelDevice), onDiagnostic: diagnostics.Add)
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries;
+        var entry = Assert.Single(entries, item => item.Name == "Realtek Audio Driver");
+
+        Assert.Equal("6.0.9738.1", entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, entry.InstalledVersionConfidence);
+        Assert.DoesNotContain(entries, item => item.Name == "Intel Arc Graphics Driver");
+        Assert.Contains(entries, item => item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa
+            && item.Version == "32.0.101.9150");
+        Assert.Contains(diagnostics, item => item.Name == "Realtek Audio Driver"
+            && item.Outcome == "HeuristicFamily" && item.Confidence == FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic
+            && item.CandidateCount == 1 && item.VersionCount == 1);
+    }
+
+    [Fact]
+    public void Realtek_audio_driver_family_fallback_rejects_provider_class_and_candidate_ambiguity()
+    {
+        var codecId = @"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1462146C&REV_1000\5&2F390E51&0&0001";
+        var hardwareIds = new[]
+        {
+            @"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1462146C&REV_1000",
+            @"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256"
+        };
+        var realtekCodec = Device(codecId, hardwareIds, "MEDIA", "Realtek(R) Audio", "6.0.9738.1", 0x10EC, 0x0256)
+            with { DriverProvider = "Realtek Semiconductor Corp.", InfName = null };
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+            [new("Realtek Audio Driver", "6.0.9738.1", null, null)]));
+        var collisions = new[]
+        {
+            realtekCodec with { DriverProvider = "Intel Corporation" },
+            realtekCodec with { WmiDeviceClass = "SYSTEM", ClassName = "SYSTEM" },
+            realtekCodec with { WmiDeviceName = "Realtek Audio Effects Component", FriendlyName = "Realtek Audio Effects Component" },
+            realtekCodec with { HardwareIds = [@"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0257"] }
+        };
+
+        foreach (var collision in collisions)
+        {
+            var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"),
+                    Inventory(collision))
+                .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+            Assert.Null(entry.InstalledVersion);
+            Assert.Null(entry.InstalledVersionConfidence);
+        }
+
+        var secondCodecId = @"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1462146C&REV_1000\SECOND";
+        var secondCodec = realtekCodec with { DeviceId = secondCodecId };
+        var ambiguous = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"),
+                Inventory(realtekCodec, secondCodec))
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+        Assert.Null(ambiguous.InstalledVersion);
+        Assert.Null(ambiguous.InstalledVersionConfidence);
+    }
+
+    [Fact]
     public void MSI_driver_diagnostics_distinguish_missing_identity_no_present_match_and_missing_version()
     {
         var matchingId = @"PCI\VEN_8086&DEV_1234";

@@ -844,6 +844,9 @@ internal static class MsiUpdateCatalogComposer
                 : MsiInstalledVersionResolution.Unknown("NoMatchingPresentDevice");
         }
 
+        if (string.Equals(entry.Name.Trim(), "Realtek Audio Driver", StringComparison.OrdinalIgnoreCase))
+            return ResolveRealtekAudioDriverInstalledVersion(inventory);
+
         var family = KnownMsiIntelDriverNames
             .FirstOrDefault(candidate => string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase));
         if (family.Name is null) return MsiInstalledVersionResolution.Unknown("NoUsableIdentity");
@@ -867,6 +870,50 @@ internal static class MsiUpdateCatalogComposer
         return MsiInstalledVersionResolution.Matched(familyDevice.DriverVersion,
             FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, "HeuristicFamily", 1, 1);
     }
+
+    private static MsiInstalledVersionResolution ResolveRealtekAudioDriverInstalledVersion(
+        MsiUpdateInstalledInventory inventory)
+    {
+        var candidates = inventory.PnpDevices.Where(IsObservedRealtekAudioCodec)
+            .GroupBy(device => device.DeviceId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        if (candidates.Length == 0)
+            return MsiInstalledVersionResolution.Unknown("NoMatchingPresentDevice");
+
+        if (candidates.Length != 1)
+        {
+            var distinctVersionCount = candidates.Select(device => device.DriverVersion)
+                .Where(version => !string.IsNullOrWhiteSpace(version))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            return MsiInstalledVersionResolution.Unknown("AmbiguousMatches", candidates.Length, distinctVersionCount);
+        }
+
+        var candidate = candidates[0];
+        if (string.IsNullOrWhiteSpace(candidate.DriverVersion))
+            return MsiInstalledVersionResolution.Unknown("MissingDriverVersion", 1);
+        return MsiInstalledVersionResolution.Matched(candidate.DriverVersion,
+            FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, "HeuristicFamily", 1, 1);
+    }
+
+    private static bool IsObservedRealtekAudioCodec(MsiUpdateInstalledPnpDevice device)
+    {
+        if (string.IsNullOrWhiteSpace(device.DriverProvider)
+            || !device.DriverProvider.StartsWith("Realtek", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var deviceClass = FirstNonEmpty(device.WmiDeviceClass, device.ClassName);
+        if (!string.Equals(deviceClass, "MEDIA", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var deviceName = FirstNonEmpty(device.WmiDeviceName, device.FriendlyName);
+        if (!string.Equals(deviceName, "Realtek(R) Audio", StringComparison.OrdinalIgnoreCase)) return false;
+
+        return device.HardwareIds.Any(IsObservedRealtekAudioCodecHardwareId);
+    }
+
+    private static bool IsObservedRealtekAudioCodecHardwareId(string hardwareId) =>
+        Regex.IsMatch(hardwareId,
+            @"^INTELAUDIO\\FUNC_01&VEN_10EC&DEV_0256(?:&|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static MsiInstalledVersionResolution ResolveDriverCandidates(
         IReadOnlyList<MsiUpdateInstalledPnpDevice> candidates,
