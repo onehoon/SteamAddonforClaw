@@ -99,8 +99,8 @@ public sealed partial class OverlayWindow
             Style = OverlayQamResources.Style("QamFlatButtonStyle"),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(0),
-            MinHeight = 0,
+            Padding = OverlayQamResources.Get("QamRowPadding", new Thickness(16, 10, 16, 10)),
+            MinHeight = OverlayQamResources.Get("QamRowMinHeight", 42.0),
             BorderThickness = new Thickness(0),
             Background = OverlayQamResources.Brush("QamSectionBrush"),
         };
@@ -108,6 +108,7 @@ public sealed partial class OverlayWindow
         headerButton.Click += (_, _) => ToggleSettingCard(id);
 
         var header = OverlayRowChrome.Create(headerButton);
+        header.Padding = new Thickness(0);
         var row = new OverlayRow(header, new OverlayRowCapabilities(
             IsSelectable: () => true,
             Activate: () => ToggleSettingCard(id)));

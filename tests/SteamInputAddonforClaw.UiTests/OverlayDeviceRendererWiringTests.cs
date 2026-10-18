@@ -832,6 +832,32 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Setting_expandable_headers_use_a_full_height_button_hover_surface()
+    {
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var createCardStart = clawHud.IndexOf("private SettingCardView CreateSettingCard", StringComparison.Ordinal);
+        var createCardEnd = clawHud.IndexOf("private List<OverlayRow> BuildSettingRows", createCardStart, StringComparison.Ordinal);
+        var createCard = clawHud[createCardStart..createCardEnd];
+        var headerButtonStart = createCard.IndexOf("var headerButton = new Button", StringComparison.Ordinal);
+        var headerChromeStart = createCard.IndexOf("var header = OverlayRowChrome.Create(headerButton);", headerButtonStart, StringComparison.Ordinal);
+        var headerButton = createCard[headerButtonStart..headerChromeStart];
+
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", headerButton);
+        Assert.Contains("Padding = OverlayQamResources.Get(\"QamRowPadding\", new Thickness(16, 10, 16, 10))", headerButton);
+        Assert.Contains("MinHeight = OverlayQamResources.Get(\"QamRowMinHeight\", 42.0)", headerButton);
+        Assert.DoesNotContain("Padding = new Thickness(0)", headerButton);
+        Assert.Contains("var header = OverlayRowChrome.Create(headerButton);", createCard);
+        Assert.Contains("header.Padding = new Thickness(0);", createCard);
+        Assert.Contains("headerButton.Click += (_, _) => ToggleSettingCard(id);", createCard);
+        Assert.Contains("AutomationProperties.SetName(headerButton, $\"{title}, expand settings\")", createCard);
+        Assert.Contains("RegisterRowPointerSelection(header);", createCard);
+        Assert.Contains("QamDetailMargin", createCard);
+        Assert.Contains("QamRowSpacing", createCard);
+        Assert.DoesNotContain("PointerEntered", createCard);
+        Assert.DoesNotContain("PointerExited", createCard);
+    }
+
+    [Fact]
     public void Quick_settings_setting_card_uses_the_existing_runtime_preference_and_dynamic_row_remap()
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
