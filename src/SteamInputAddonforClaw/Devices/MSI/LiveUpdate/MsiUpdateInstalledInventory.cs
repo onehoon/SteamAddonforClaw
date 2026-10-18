@@ -307,6 +307,16 @@ internal sealed record IntelDsaResolvedDriver(
     MsiUpdateInstalledPnpDevice Device,
     string MatchReason);
 
+internal sealed record MsiUpdateCatalogMatchDiagnostic(
+    MsiLiveUpdateCatalogCategory Category,
+    string? Name,
+    string VersionSource,
+    string Outcome,
+    FrontendMsiLiveUpdateInstalledVersionConfidence? Confidence = null,
+    int CandidateCount = 0,
+    int VersionCount = 0,
+    int FilteredCount = 0);
+
 internal static class IntelDsaHardwareMatcher
 {
     internal static IReadOnlyList<IntelDsaResolvedDriver> Resolve(
@@ -379,6 +389,9 @@ internal static class IntelDsaHardwareMatcher
         }
         return false;
     }
+
+    internal static bool HasComparableHardwareIdentity(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && TryParseHardwarePattern(value, out _);
 
     private static IntelDsaResolvedDriver? SelectBestCandidate(
         IGrouping<(string DeviceId, IntelDsaComponentFamily Family), (IntelDsaResolvedDriver Result, int Specificity, string? VersionForOrdering)> group)
@@ -574,11 +587,45 @@ internal static class IntelDsaHardwareMatcher
 
 internal static class MsiUpdateCatalogComposer
 {
+    private static readonly (string Name, IntelDsaComponentFamily Family)[] KnownMsiIntelDriverNames =
+    [
+        ("Intel Graphics Driver", IntelDsaComponentFamily.Graphics),
+        ("Intel Arc Display Driver", IntelDsaComponentFamily.Graphics),
+        ("Intel Arc Graphics Driver", IntelDsaComponentFamily.Graphics),
+        ("Intel Wireless LAN Driver", IntelDsaComponentFamily.Wireless),
+        ("Intel Bluetooth Driver", IntelDsaComponentFamily.Bluetooth),
+        ("Intel NPU Driver", IntelDsaComponentFamily.Npu)
+    ];
+
+    private static readonly string[] ExcludedUtilityNames =
+    [
+        "MSI App Player Installer CN",
+        "Intel Graphics Software",
+        "MSI App Player Installer"
+    ];
+
+    private sealed record MsiInstalledVersionResolution(
+        string? Version,
+        FrontendMsiLiveUpdateInstalledVersionConfidence? Confidence,
+        string Outcome,
+        int CandidateCount,
+        int VersionCount)
+    {
+        internal static MsiInstalledVersionResolution Matched(string version,
+            FrontendMsiLiveUpdateInstalledVersionConfidence confidence, string outcome,
+            int candidateCount, int versionCount = 1) =>
+            new(version, confidence, outcome, candidateCount, versionCount);
+
+        internal static MsiInstalledVersionResolution Unknown(string outcome, int candidateCount = 0, int versionCount = 0) =>
+            new(null, null, outcome, candidateCount, versionCount);
+    }
+
     internal static FrontendMsiLiveUpdateCatalogSnapshot Compose(
         MsiLiveUpdateCatalogQueryResult msi,
         IntelDsaCatalogResult intel,
         MsiUpdateInstalledInventory inventory,
-        Action<IntelDsaResolvedDriver>? onIntelMatch = null)
+        Action<IntelDsaResolvedDriver>? onIntelMatch = null,
+        Action<MsiUpdateCatalogMatchDiagnostic>? onDiagnostic = null)
     {
         var msiSource = MapMsiSource(msi);
         var intelSource = new FrontendMsiLiveUpdateSourceSnapshot(
@@ -613,12 +660,34 @@ internal static class MsiUpdateCatalogComposer
             }
 
             var sourceEntries = source.Entries.ToList();
-            if (sourceCategory == MsiLiveUpdateCatalogCategory.Driver && intel.Succeeded)
+            if (sourceCategory == MsiLiveUpdateCatalogCategory.Utility)
             {
-                foreach (var resolved in intelRows)
-                    sourceEntries.RemoveAll(entry => IsExactMsiDuplicate(entry, resolved));
+                var retained = sourceEntries.Where(entry => !IsExcludedUtility(entry)).ToList();
+                var excludedCount = sourceEntries.Count - retained.Count;
+                if (excludedCount > 0)
+                    onDiagnostic?.Invoke(new(sourceCategory, null, "MSI", "ExcludedByPolicy", FilteredCount: excludedCount));
+                sourceEntries = retained;
             }
-            var entries = sourceEntries.Select(entry => MapMsiEntry(sourceCategory, entry, inventory)).ToList();
+
+            var entries = new List<FrontendMsiLiveUpdateCatalogEntry>(sourceEntries.Count
+                + (sourceCategory == MsiLiveUpdateCatalogCategory.Driver ? intelRows.Count : 0));
+            foreach (var entry in sourceEntries)
+            {
+                if (sourceCategory == MsiLiveUpdateCatalogCategory.Driver)
+                {
+                    var duplicate = EvaluateIntelDuplicate(entry, intelRows, intel.Succeeded);
+                    if (duplicate.Outcome != "NotApplicable")
+                        onDiagnostic?.Invoke(new(sourceCategory, entry.Name, "MSI/IntelDsa", duplicate.Outcome,
+                            CandidateCount: duplicate.CandidateCount, VersionCount: duplicate.VersionCount));
+                    if (duplicate.Suppress) continue;
+                }
+
+                var mapped = MapMsiEntry(sourceCategory, entry, inventory, out var match);
+                entries.Add(mapped);
+                if (sourceCategory is MsiLiveUpdateCatalogCategory.Driver or MsiLiveUpdateCatalogCategory.Utility)
+                    onDiagnostic?.Invoke(new(sourceCategory, entry.Name, "MSI", match.Outcome, match.Confidence,
+                        match.CandidateCount, match.VersionCount));
+            }
             var categoryState = source.State switch
             {
                 MsiLiveUpdateCatalogCategoryState.Success => FrontendMsiLiveUpdateCatalogCategoryState.Success,
@@ -672,7 +741,8 @@ internal static class MsiUpdateCatalogComposer
     private static FrontendMsiLiveUpdateCatalogEntry MapMsiEntry(
         MsiLiveUpdateCatalogCategory category,
         MsiLiveUpdateCatalogEntry entry,
-        MsiUpdateInstalledInventory inventory)
+        MsiUpdateInstalledInventory inventory,
+        out MsiInstalledVersionResolution match)
     {
         var latestVersion = entry.DriverVersion ?? entry.PackageVersion ?? entry.Version;
         if (string.Equals(latestVersion, "UWP", StringComparison.OrdinalIgnoreCase)) latestVersion = null;
@@ -681,12 +751,12 @@ internal static class MsiUpdateCatalogComposer
             : !string.IsNullOrWhiteSpace(entry.PackageVersion)
                 ? FrontendMsiLiveUpdateVersionKind.Package
                 : FrontendMsiLiveUpdateVersionKind.Catalog;
-        var installed = ResolveMsiInstalledVersion(category, entry, inventory);
+        match = ResolveMsiInstalledVersion(category, entry, inventory);
         return new(entry.Name, latestVersion, entry.ReleaseDate, entry.Description,
-            installed?.Version, FrontendMsiLiveUpdateVersionSource.Msi, versionKind, installed?.Confidence);
+            match.Version, FrontendMsiLiveUpdateVersionSource.Msi, versionKind, match.Confidence);
     }
 
-    private static (string Version, FrontendMsiLiveUpdateInstalledVersionConfidence Confidence)? ResolveMsiInstalledVersion(
+    private static MsiInstalledVersionResolution ResolveMsiInstalledVersion(
         MsiLiveUpdateCatalogCategory category,
         MsiLiveUpdateCatalogEntry entry,
         MsiUpdateInstalledInventory inventory)
@@ -703,67 +773,201 @@ internal static class MsiUpdateCatalogComposer
                 {
                     var match = Regex.Match(installed, $@"(?<![A-Z0-9])(?<version>{board}\.[0-9A-F]+T?)(?![A-Z0-9])",
                         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-                    if (match.Success) return (match.Groups["version"].Value, FrontendMsiLiveUpdateInstalledVersionConfidence.Exact);
+                    if (match.Success) return MsiInstalledVersionResolution.Matched(
+                        match.Groups["version"].Value, FrontendMsiLiveUpdateInstalledVersionConfidence.Exact,
+                        "ExactBiosIdentity", 1);
                 }
             }
-            return null;
+            return MsiInstalledVersionResolution.Unknown("NoMatchingPresentDevice");
         }
 
         if (category == MsiLiveUpdateCatalogCategory.Firmware && IsControllerFirmware(entry))
-            return inventory.ControllerFirmware is { } controller ? (controller.Version, controller.Confidence) : null;
+            return inventory.ControllerFirmware is { } controller
+                ? MsiInstalledVersionResolution.Matched(controller.Version, controller.Confidence, "ExactControllerIdentity", 1)
+                : MsiInstalledVersionResolution.Unknown("NoMatchingPresentDevice");
 
         if (category == MsiLiveUpdateCatalogCategory.Driver)
-        {
-            IEnumerable<MsiUpdateInstalledPnpDevice> matches;
-            if (!string.IsNullOrWhiteSpace(entry.DeviceId))
-            {
-                matches = inventory.PnpDevices.Where(device =>
-                    string.Equals(device.DeviceId, entry.DeviceId, StringComparison.OrdinalIgnoreCase)
-                    || device.HardwareIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase)
-                    || device.CompatibleIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase)
-                    || IntelDsaHardwareMatcher.TryMatchDetectionValue(entry.DeviceId,
-                        device.HardwareIds.Concat(device.CompatibleIds), out _));
-            }
-            else if (!string.IsNullOrWhiteSpace(entry.InfName))
-            {
-                matches = inventory.PnpDevices.Where(device =>
-                    string.Equals(device.InfName, entry.InfName, StringComparison.OrdinalIgnoreCase));
-            }
-            else return null;
-
-            var matchedDevices = matches.ToArray();
-            var versions = matchedDevices.Select(device => device.DriverVersion)
-                .Where(version => !string.IsNullOrWhiteSpace(version))
-                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            return versions.Length == 1
-                ? (versions[0]!, matchedDevices.Length == 1
-                    ? FrontendMsiLiveUpdateInstalledVersionConfidence.Exact
-                    : FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic)
-                : null;
-        }
+            return ResolveMsiDriverInstalledVersion(entry, inventory);
 
         if (category == MsiLiveUpdateCatalogCategory.Utility)
         {
-            var registryVersions = inventory.Software.Where(installed =>
+            var registryMatches = inventory.Software.Where(installed =>
                 entry.Guid is not null && (string.Equals(installed.ProductCode, entry.Guid, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(installed.RegistryKeyName, $"{{{entry.Guid}}}", StringComparison.OrdinalIgnoreCase))
-                || entry.UpgradeGuid is not null && string.Equals(installed.UpgradeCode, entry.UpgradeGuid, StringComparison.OrdinalIgnoreCase))
+                || entry.UpgradeGuid is not null && string.Equals(installed.UpgradeCode, entry.UpgradeGuid, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var packageMatches = inventory.Packages.Where(package =>
+                    string.Equals(entry.Name, package.Name, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(entry.Name, package.FamilyName, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var registryVersions = registryMatches
                 .Select(installed => installed.DisplayVersion)
                 .Where(version => !string.IsNullOrWhiteSpace(version))
                 .Cast<string>();
-            var packageVersions = inventory.Packages.Where(package =>
-                    string.Equals(entry.Name, package.Name, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(entry.Name, package.FamilyName, StringComparison.OrdinalIgnoreCase))
+            var packageVersions = packageMatches
                 .Select(package => package.Version)
                 .Where(version => !string.IsNullOrWhiteSpace(version));
             var versions = registryVersions.Concat(packageVersions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            return versions.Length == 1
-                ? (versions[0]!, FrontendMsiLiveUpdateInstalledVersionConfidence.Exact)
-                : null;
+            if (versions.Length == 1)
+            {
+                var outcome = registryMatches.Length > 0 && packageMatches.Length > 0
+                    ? "MatchedRegistryAndAppx"
+                    : registryMatches.Length > 0 ? "MatchedRegistry" : "MatchedAppx";
+                return MsiInstalledVersionResolution.Matched(versions[0],
+                    FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, outcome,
+                    registryMatches.Length + packageMatches.Length, versions.Length);
+            }
+            return MsiInstalledVersionResolution.Unknown(versions.Length > 1 ? "AmbiguousMatches" : "Unmatched",
+                registryMatches.Length + packageMatches.Length, versions.Length);
         }
 
-        return null;
+        return MsiInstalledVersionResolution.Unknown("NotApplicable");
     }
+
+    private static MsiInstalledVersionResolution ResolveMsiDriverInstalledVersion(
+        MsiLiveUpdateCatalogEntry entry,
+        MsiUpdateInstalledInventory inventory)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.DeviceId))
+        {
+            var hardwareMatches = inventory.PnpDevices.Where(device => IsMsiDeviceIdMatch(entry.DeviceId, device)).ToArray();
+            if (hardwareMatches.Length > 0) return ResolveDriverCandidates(hardwareMatches, "ExactHardwareId");
+            if (IntelDsaHardwareMatcher.HasComparableHardwareIdentity(entry.DeviceId))
+                return MsiInstalledVersionResolution.Unknown("NoMatchingPresentDevice");
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.InfName))
+        {
+            var infMatches = inventory.PnpDevices.Where(device =>
+                string.Equals(device.InfName, entry.InfName, StringComparison.OrdinalIgnoreCase)).ToArray();
+            return infMatches.Length > 0
+                ? ResolveDriverCandidates(infMatches, "ExactInf")
+                : MsiInstalledVersionResolution.Unknown("NoMatchingPresentDevice");
+        }
+
+        if (string.Equals(entry.Name.Trim(), "Realtek Audio Driver", StringComparison.OrdinalIgnoreCase))
+            return ResolveRealtekAudioDriverInstalledVersion(inventory);
+
+        var family = KnownMsiIntelDriverNames
+            .FirstOrDefault(candidate => string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (family.Name is null) return MsiInstalledVersionResolution.Unknown("NoUsableIdentity");
+
+        var familyMatches = inventory.PnpDevices.Where(device => MatchesKnownIntelFamily(family.Family, device))
+            .GroupBy(device => device.DeviceId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        if (familyMatches.Length == 0) return MsiInstalledVersionResolution.Unknown("NoMatchingPresentDevice");
+        if (familyMatches.Length != 1)
+        {
+            var distinctVersionCount = familyMatches.Select(device => device.DriverVersion)
+                .Where(version => !string.IsNullOrWhiteSpace(version))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            return MsiInstalledVersionResolution.Unknown("AmbiguousMatches", familyMatches.Length, distinctVersionCount);
+        }
+
+        var familyDevice = familyMatches[0];
+        if (string.IsNullOrWhiteSpace(familyDevice.DriverVersion))
+            return MsiInstalledVersionResolution.Unknown("MissingDriverVersion", 1);
+        return MsiInstalledVersionResolution.Matched(familyDevice.DriverVersion,
+            FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, "HeuristicFamily", 1, 1);
+    }
+
+    private static MsiInstalledVersionResolution ResolveRealtekAudioDriverInstalledVersion(
+        MsiUpdateInstalledInventory inventory)
+    {
+        var candidates = inventory.PnpDevices.Where(IsObservedRealtekAudioCodec)
+            .GroupBy(device => device.DeviceId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        if (candidates.Length == 0)
+            return MsiInstalledVersionResolution.Unknown("NoMatchingPresentDevice");
+
+        if (candidates.Length != 1)
+        {
+            var distinctVersionCount = candidates.Select(device => device.DriverVersion)
+                .Where(version => !string.IsNullOrWhiteSpace(version))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            return MsiInstalledVersionResolution.Unknown("AmbiguousMatches", candidates.Length, distinctVersionCount);
+        }
+
+        var candidate = candidates[0];
+        if (string.IsNullOrWhiteSpace(candidate.DriverVersion))
+            return MsiInstalledVersionResolution.Unknown("MissingDriverVersion", 1);
+        return MsiInstalledVersionResolution.Matched(candidate.DriverVersion,
+            FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, "HeuristicFamily", 1, 1);
+    }
+
+    private static bool IsObservedRealtekAudioCodec(MsiUpdateInstalledPnpDevice device)
+    {
+        if (string.IsNullOrWhiteSpace(device.DriverProvider)
+            || !device.DriverProvider.StartsWith("Realtek", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var deviceClass = FirstNonEmpty(device.WmiDeviceClass, device.ClassName);
+        if (!string.Equals(deviceClass, "MEDIA", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var deviceName = FirstNonEmpty(device.WmiDeviceName, device.FriendlyName);
+        if (!string.Equals(deviceName, "Realtek(R) Audio", StringComparison.OrdinalIgnoreCase)) return false;
+
+        return device.HardwareIds.Any(IsObservedRealtekAudioCodecHardwareId);
+    }
+
+    private static bool IsObservedRealtekAudioCodecHardwareId(string hardwareId) =>
+        Regex.IsMatch(hardwareId,
+            @"^INTELAUDIO\\FUNC_01&VEN_10EC&DEV_0256(?:&|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static MsiInstalledVersionResolution ResolveDriverCandidates(
+        IReadOnlyList<MsiUpdateInstalledPnpDevice> candidates,
+        string exactOutcome)
+    {
+        var matchedDevices = candidates.GroupBy(device => device.DeviceId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First()).ToArray();
+        var versions = matchedDevices.Select(device => device.DriverVersion)
+            .Where(version => !string.IsNullOrWhiteSpace(version))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (versions.Length == 0)
+            return MsiInstalledVersionResolution.Unknown("MissingDriverVersion", matchedDevices.Length);
+        if (versions.Length > 1)
+            return MsiInstalledVersionResolution.Unknown("AmbiguousMatches", matchedDevices.Length, versions.Length);
+        return MsiInstalledVersionResolution.Matched(versions[0]!,
+            matchedDevices.Length == 1
+                ? FrontendMsiLiveUpdateInstalledVersionConfidence.Exact
+                : FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic,
+            exactOutcome, matchedDevices.Length, versions.Length);
+    }
+
+    private static bool MatchesKnownIntelFamily(IntelDsaComponentFamily family, MsiUpdateInstalledPnpDevice device)
+    {
+        var provider = device.DriverProvider;
+        if (string.IsNullOrWhiteSpace(provider) || !provider.StartsWith("Intel", StringComparison.OrdinalIgnoreCase)) return false;
+        var deviceClass = FirstNonEmpty(device.WmiDeviceClass, device.ClassName);
+        var deviceName = FirstNonEmpty(device.WmiDeviceName, device.FriendlyName);
+        if (string.IsNullOrWhiteSpace(deviceName)) return false;
+
+        return family switch
+        {
+            IntelDsaComponentFamily.Graphics => string.Equals(deviceClass, "DISPLAY", StringComparison.OrdinalIgnoreCase)
+                && (ContainsToken(deviceName, "Arc") || ContainsPhrase(deviceName, "UHD Graphics")
+                    || ContainsPhrase(deviceName, "Iris Xe")),
+            IntelDsaComponentFamily.Wireless => string.Equals(deviceClass, "NET", StringComparison.OrdinalIgnoreCase)
+                && (ContainsPhrase(deviceName, "Wi-Fi") || ContainsPhrase(deviceName, "Wireless")),
+            IntelDsaComponentFamily.Bluetooth => string.Equals(deviceClass, "BLUETOOTH", StringComparison.OrdinalIgnoreCase)
+                && ContainsPhrase(deviceName, "Bluetooth"),
+            IntelDsaComponentFamily.Npu => (string.Equals(deviceClass, "SYSTEM", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(deviceClass, "PROCESSOR", StringComparison.OrdinalIgnoreCase))
+                && (ContainsToken(deviceName, "NPU") || ContainsPhrase(deviceName, "AI Boost")),
+            _ => false
+        };
+    }
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+    private static bool ContainsToken(string value, string token) =>
+        Regex.IsMatch(value, $@"(?<![A-Z0-9]){Regex.Escape(token)}(?![A-Z0-9])",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static bool ContainsPhrase(string value, string phrase) =>
+        value.Contains(phrase, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsBiosImage(MsiLiveUpdateCatalogEntry entry)
     {
@@ -801,26 +1005,62 @@ internal static class MsiUpdateCatalogComposer
         return safe.Length == 0 ? null : safe;
     }
 
-    private static bool IsExactMsiDuplicate(MsiLiveUpdateCatalogEntry entry, IntelDsaResolvedDriver intelEntry)
+    private static MsiIntelDuplicateEvaluation EvaluateIntelDuplicate(
+        MsiLiveUpdateCatalogEntry entry,
+        IReadOnlyList<IntelDsaResolvedDriver> intelRows,
+        bool intelQuerySucceeded)
     {
-        if (entry.DeviceId is null) return false;
-        var sameDevice = string.Equals(entry.DeviceId, intelEntry.Device.DeviceId, StringComparison.OrdinalIgnoreCase)
-            || intelEntry.Device.HardwareIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase)
-            || IntelDsaHardwareMatcher.TryMatchDetectionValue(entry.DeviceId,
-                intelEntry.Device.HardwareIds.Concat(intelEntry.Device.CompatibleIds), out _);
-        if (!sameDevice) return false;
-        return intelEntry.Family switch
+        var family = KnownMsiIntelDriverNames
+            .FirstOrDefault(candidate => string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (family.Name is null) return new(false, "NotApplicable", 0);
+        if (!intelQuerySucceeded) return new(false, "RetainedNoDsa", 0);
+
+        var familyRows = intelRows.Where(candidate => candidate.Family == family.Family).ToArray();
+        var distinctDevices = familyRows.Select(candidate => candidate.Device.DeviceId)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (distinctDevices.Length == 0) return new(false, "RetainedNoDsa", 0);
+
+        if (!string.IsNullOrWhiteSpace(entry.DeviceId))
         {
-            IntelDsaComponentFamily.Graphics => ContainsAny(entry.Name, "graphics", "display", "arc"),
-            IntelDsaComponentFamily.Wireless => ContainsAny(entry.Name, "wireless", "wi-fi", "wifi"),
-            IntelDsaComponentFamily.Bluetooth => entry.Name.Contains("bluetooth", StringComparison.OrdinalIgnoreCase),
-            IntelDsaComponentFamily.Npu => ContainsAny(entry.Name, "npu", "ai boost"),
-            _ => false
-        };
+            var identityMatches = familyRows.Where(candidate => IsMsiDeviceIdMatch(entry.DeviceId, candidate.Device)).ToArray();
+            if (identityMatches.Length > 0)
+            {
+                var matchedDeviceCount = identityMatches.Select(candidate => candidate.Device.DeviceId)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                var matchedVersionCount = identityMatches.Select(candidate => candidate.LatestVersion)
+                    .Where(version => !string.IsNullOrWhiteSpace(version))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                return new(true, "SuppressedByExactIdentity", matchedDeviceCount, matchedVersionCount);
+            }
+
+            if (IntelDsaHardwareMatcher.HasComparableHardwareIdentity(entry.DeviceId))
+                return new(false, "RetainedConflictingIdentity", distinctDevices.Length,
+                    CountDistinctVersions(familyRows.Select(candidate => candidate.LatestVersion)));
+        }
+
+        return distinctDevices.Length == 1
+            ? new(true, "SuppressedByUniqueDsaFamily", 1,
+                CountDistinctVersions(familyRows.Select(candidate => candidate.LatestVersion)))
+            : new(false, "RetainedAmbiguousFamily", distinctDevices.Length,
+                CountDistinctVersions(familyRows.Select(candidate => candidate.LatestVersion)));
     }
 
-    private static bool ContainsAny(string value, params string[] candidates) =>
-        candidates.Any(candidate => value.Contains(candidate, StringComparison.OrdinalIgnoreCase));
+    private static int CountDistinctVersions(IEnumerable<string?> versions) => versions
+        .Where(version => !string.IsNullOrWhiteSpace(version))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Count();
+
+    private static bool IsMsiDeviceIdMatch(string deviceId, MsiUpdateInstalledPnpDevice device) =>
+        string.Equals(device.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
+        || device.HardwareIds.Contains(deviceId, StringComparer.OrdinalIgnoreCase)
+        || device.CompatibleIds.Contains(deviceId, StringComparer.OrdinalIgnoreCase)
+        || IntelDsaHardwareMatcher.TryMatchDetectionValue(deviceId,
+            device.HardwareIds.Concat(device.CompatibleIds), out _);
+
+    private static bool IsExcludedUtility(MsiLiveUpdateCatalogEntry entry) =>
+        ExcludedUtilityNames.Contains(entry.Name.Trim(), StringComparer.OrdinalIgnoreCase);
+
+    private sealed record MsiIntelDuplicateEvaluation(bool Suppress, string Outcome, int CandidateCount, int VersionCount = 0);
 
     private static FrontendMsiLiveUpdateSourceSnapshot MapMsiSource(MsiLiveUpdateCatalogQueryResult result)
     {
