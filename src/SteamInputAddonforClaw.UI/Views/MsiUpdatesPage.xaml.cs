@@ -1,5 +1,4 @@
-using System.Net;
-using System.Text.RegularExpressions;
+using System.Globalization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -9,44 +8,102 @@ namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class MsiUpdatesPage : UserControl
 {
+    private readonly string[] _categoryTabBaseHeaders;
     private IAddonFrontendControl? _frontend;
+    private CancellationTokenSource? _requestCancellation;
+    private bool _isActive;
     private bool _msiUpdatesBusy;
-    private FrontendMsiLiveUpdateCatalogSnapshot _msiUpdatesSnapshot = new(
-        FrontendMsiLiveUpdateCatalogState.NotChecked, null, null, null, [], null);
+    private FrontendMsiLiveUpdateCatalogSnapshot _msiUpdatesSnapshot = CreateNotCheckedSnapshot();
 
     public MsiUpdatesPage()
     {
         InitializeComponent();
+        _categoryTabBaseHeaders =
+        [
+            ReadHeader(MsiUpdatesBiosTab, "BIOS"),
+            ReadHeader(MsiUpdatesFirmwareTab, "Firmware"),
+            ReadHeader(MsiUpdatesDriversTab, "Drivers"),
+            ReadHeader(MsiUpdatesUtilitiesTab, "Utilities")
+        ];
         RenderMsiLiveUpdateCatalog();
     }
 
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
 
-    private async void MsiUpdatesCheckButton_Click(object sender, RoutedEventArgs e)
+    internal void Activate()
     {
-        if (_frontend is null || _msiUpdatesBusy) return;
-        _msiUpdatesBusy = true;
+        _isActive = true;
+        _msiUpdatesBusy = false;
+        _msiUpdatesSnapshot = CreateNotCheckedSnapshot();
+        MsiUpdatesTabView.SelectedIndex = 0;
+        MsiUpdatesScrollViewer.ChangeView(null, 0, null);
         RenderMsiLiveUpdateCatalog();
+    }
+
+    internal void Deactivate()
+    {
+        _isActive = false;
+        var requestCancellation = _requestCancellation;
+        _requestCancellation = null;
+        _msiUpdatesBusy = false;
         try
         {
-            _msiUpdatesSnapshot = await _frontend.RequestMsiLiveUpdateCatalogAsync();
+            requestCancellation?.Cancel();
         }
-        catch (Exception exception)
+        catch (ObjectDisposedException)
         {
-            AppLog.Debug("MsiUpdates", "MSI catalog query request failed.", ("Reason", exception.GetType().Name));
-            _msiUpdatesSnapshot = new(FrontendMsiLiveUpdateCatalogState.Failed, null, null, null, [],
-                DateTimeOffset.UtcNow, "RuntimeRequestFailed");
-        }
-        finally
-        {
-            _msiUpdatesBusy = false;
-            RenderMsiLiveUpdateCatalog();
+            // The request completed while the page was being deactivated.
         }
     }
 
+    private async void MsiUpdatesCheckButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_frontend is null || !_isActive || _msiUpdatesBusy) return;
+
+        var requestCancellation = new CancellationTokenSource();
+        _requestCancellation = requestCancellation;
+        _msiUpdatesBusy = true;
+        _msiUpdatesSnapshot = CreateNotCheckedSnapshot();
+        RenderMsiLiveUpdateCatalog();
+
+        try
+        {
+            var result = await _frontend.RequestMsiLiveUpdateCatalogAsync(requestCancellation.Token);
+            if (IsCurrentRequest(requestCancellation))
+                _msiUpdatesSnapshot = result;
+        }
+        catch (OperationCanceledException) when (requestCancellation.IsCancellationRequested)
+        {
+            // Navigation cancellation is not a catalog failure.
+        }
+        catch (Exception exception)
+        {
+            if (IsCurrentRequest(requestCancellation))
+            {
+                AppLog.Debug("MsiUpdates", "MSI catalog query request failed.", ("Reason", exception.GetType().Name));
+                _msiUpdatesSnapshot = new(FrontendMsiLiveUpdateCatalogState.Failed, null, null, null, [],
+                    DateTimeOffset.UtcNow, "RuntimeRequestFailed");
+            }
+        }
+        finally
+        {
+            if (IsCurrentRequest(requestCancellation))
+            {
+                _requestCancellation = null;
+                _msiUpdatesBusy = false;
+                RenderMsiLiveUpdateCatalog();
+            }
+
+            requestCancellation.Dispose();
+        }
+    }
+
+    private bool IsCurrentRequest(CancellationTokenSource requestCancellation) =>
+        _isActive && ReferenceEquals(_requestCancellation, requestCancellation);
+
     private void RenderMsiLiveUpdateCatalog()
     {
-        MsiUpdatesCheckButton.IsEnabled = !_msiUpdatesBusy;
+        MsiUpdatesCheckButton.IsEnabled = _isActive && !_msiUpdatesBusy;
         MsiUpdatesProgressRing.IsActive = _msiUpdatesBusy;
         MsiUpdatesProgressRing.Visibility = _msiUpdatesBusy ? Visibility.Visible : Visibility.Collapsed;
         MsiUpdatesStatusText.Text = _msiUpdatesBusy
@@ -60,22 +117,34 @@ public sealed partial class MsiUpdatesPage : UserControl
                 _ => MainUiStrings.Get("MsiUpdates_Failed", "The catalog query failed. You can try again.")
             };
 
-        if (_msiUpdatesSnapshot.CheckedAtUtc is { } checkedAt)
-        {
-            MsiUpdatesLastCheckedText.Text = MainUiStrings.Format("MsiUpdates_LastChecked",
-                "Last checked: {0}", checkedAt.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture));
-            MsiUpdatesLastCheckedText.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            MsiUpdatesLastCheckedText.Text = string.Empty;
-            MsiUpdatesLastCheckedText.Visibility = Visibility.Collapsed;
-        }
-
+        RenderCategoryTabHeaders();
         RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Bios, MsiUpdatesBiosEntriesPanel);
         RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Firmware, MsiUpdatesFirmwareEntriesPanel);
         RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Driver, MsiUpdatesDriverEntriesPanel);
         RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Utility, MsiUpdatesUtilityEntriesPanel);
+    }
+
+    private void RenderCategoryTabHeaders()
+    {
+        MsiUpdatesBiosTab.Header = FormatCategoryHeader(_categoryTabBaseHeaders[0], FindCategory(FrontendMsiLiveUpdateCatalogCategory.Bios));
+        MsiUpdatesFirmwareTab.Header = FormatCategoryHeader(_categoryTabBaseHeaders[1], FindCategory(FrontendMsiLiveUpdateCatalogCategory.Firmware));
+        MsiUpdatesDriversTab.Header = FormatCategoryHeader(_categoryTabBaseHeaders[2], FindCategory(FrontendMsiLiveUpdateCatalogCategory.Driver));
+        MsiUpdatesUtilitiesTab.Header = FormatCategoryHeader(_categoryTabBaseHeaders[3], FindCategory(FrontendMsiLiveUpdateCatalogCategory.Utility));
+    }
+
+    private FrontendMsiLiveUpdateCatalogCategorySnapshot? FindCategory(FrontendMsiLiveUpdateCatalogCategory category) =>
+        _msiUpdatesSnapshot.Categories.FirstOrDefault(item => item.Category == category);
+
+    internal static string FormatCategoryHeader(
+        string localizedBaseHeader,
+        FrontendMsiLiveUpdateCatalogCategorySnapshot? category)
+    {
+        if (category is null || category.State is not (
+                FrontendMsiLiveUpdateCatalogCategoryState.Success or
+                FrontendMsiLiveUpdateCatalogCategoryState.Empty))
+            return localizedBaseHeader;
+
+        return $"{localizedBaseHeader} ({category.Entries.Count.ToString(CultureInfo.CurrentCulture)})";
     }
 
     private void RenderMsiLiveUpdateCategory(
@@ -83,7 +152,7 @@ public sealed partial class MsiUpdatesPage : UserControl
         StackPanel panel)
     {
         panel.Children.Clear();
-        var result = _msiUpdatesSnapshot.Categories.FirstOrDefault(item => item.Category == category);
+        var result = FindCategory(category);
         if (result?.State == FrontendMsiLiveUpdateCatalogCategoryState.Failed)
         {
             panel.Children.Add(new TextBlock
@@ -93,7 +162,8 @@ public sealed partial class MsiUpdatesPage : UserControl
             });
             return;
         }
-        if (result?.State == FrontendMsiLiveUpdateCatalogCategoryState.Empty)
+        if (result?.State == FrontendMsiLiveUpdateCatalogCategoryState.Empty ||
+            result?.State == FrontendMsiLiveUpdateCatalogCategoryState.Success && result.Entries.Count == 0)
         {
             panel.Children.Add(new TextBlock
             {
@@ -130,50 +200,57 @@ public sealed partial class MsiUpdatesPage : UserControl
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap
             });
-            content.Children.Add(new TextBlock
+
+            var metadata = new List<string>(capacity: 2);
+            if (!string.IsNullOrWhiteSpace(entry.Version))
             {
-                Text = MainUiStrings.Format("MsiUpdates_LatestVersion",
-                    "Latest published version: {0}",
-                    string.IsNullOrWhiteSpace(entry.Version)
-                        ? MainUiStrings.Get("MsiUpdates_VersionNotProvided", "Not provided")
-                        : entry.Version),
-                TextWrapping = TextWrapping.Wrap
-            });
+                metadata.Add(MainUiStrings.Format("MsiUpdates_LatestVersion", "Latest {0}", entry.Version.Trim()));
+            }
             if (!string.IsNullOrWhiteSpace(entry.ReleaseDate))
+            {
+                metadata.Add(MainUiStrings.Format("MsiUpdates_ReleaseDate", "Released {0}", FormatCatalogReleaseDate(entry.ReleaseDate)));
+            }
+            if (metadata.Count > 0)
+            {
                 content.Children.Add(new TextBlock
                 {
-                    Text = MainUiStrings.Format("MsiUpdates_ReleaseDate", "Release date: {0}", entry.ReleaseDate),
+                    Text = string.Join(" · ", metadata),
+                    FontSize = 12,
                     TextWrapping = TextWrapping.Wrap,
                     Opacity = 0.75
                 });
-            if (!string.IsNullOrWhiteSpace(entry.Description))
-                content.Children.Add(new TextBlock
-                {
-                    Text = FormatMsiCatalogDescription(entry.Description),
-                    TextWrapping = TextWrapping.Wrap,
-                    Opacity = 0.85
-                });
+            }
+
+            var cardContent = new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
+            cardContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            cardContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            cardContent.Children.Add(content);
             panel.Children.Add(new Border
             {
                 Style = (Style)Resources["MsiCatalogEntryCardStyle"],
-                Child = content
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Child = cardContent
             });
         }
     }
 
-    internal static string FormatMsiCatalogDescription(string description)
+    internal static string FormatCatalogReleaseDate(string releaseDate)
     {
-        if (string.IsNullOrWhiteSpace(description)) return string.Empty;
+        var value = releaseDate.Trim();
+        if (value.Length >= 10 &&
+            (value.Length == 10 || value[10] is 'T' or 't' or ' ') &&
+            DateOnly.TryParseExact(value[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var date))
+        {
+            return date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
 
-        var decoded = WebUtility.HtmlDecode(description)
-            .Replace('\u00a0', ' ')
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n');
-        var withLineBreaks = Regex.Replace(decoded, @"<\s*br\s*/?\s*>", "\n", RegexOptions.IgnoreCase);
-        var plainText = Regex.Replace(withLineBreaks, @"</?[A-Za-z][^>]*>", string.Empty);
-        var lines = plainText.Split('\n')
-            .Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim());
-
-        return string.Join(Environment.NewLine, lines).Trim();
+        return value;
     }
+
+    private static string ReadHeader(TabViewItem tab, string fallback) =>
+        tab.Header?.ToString() is { Length: > 0 } header ? header : fallback;
+
+    private static FrontendMsiLiveUpdateCatalogSnapshot CreateNotCheckedSnapshot() =>
+        new(FrontendMsiLiveUpdateCatalogState.NotChecked, null, null, null, [], null);
 }
