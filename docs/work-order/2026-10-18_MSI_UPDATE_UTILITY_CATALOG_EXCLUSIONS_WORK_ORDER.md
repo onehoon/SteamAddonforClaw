@@ -1,3 +1,7 @@
+> **SUPERSEDED / CONSOLIDATED (2026-10-18):** Do not implement this earlier utility-only work order as a separate PR. The active single-PR instruction now combines the three Utility exclusions with PR #836 follow-up MSI/Intel DSA duplicate consolidation, local installed-version match improvements and bounded diagnostics: [Post-836 combined work order](docs/work-order/2026-10-18_MSI_UPDATE_POST_836_MATCHING_AND_UTILITY_EXCLUSIONS_WORK_ORDER.md). The historical text below is retained for context only.
+
+---
+
 # Work Order — Exclude Three MSI Utility Catalog Rows Before Installed-Version Matching
 
 **Date:** 2026-10-18  
