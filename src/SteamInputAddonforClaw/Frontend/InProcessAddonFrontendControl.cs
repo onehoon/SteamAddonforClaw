@@ -2213,6 +2213,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             AppLog.Debug("MsiUpdates", "Intel DSA candidate matched a present device by exact hardware identity.",
                 ("Source", "IntelDsa"), ("PackageId", match.PackageId), ("Component", match.Family),
                 ("VersionKind", match.VersionKind), ("HardwareId", hardwareId), ("MatchReason", match.MatchReason));
+        }, diagnostic =>
+        {
+            AppLog.Debug("MsiUpdates", "MSI catalog local match outcome.",
+                ("Category", diagnostic.Category), ("Name", SafeMsiCatalogDiagnosticName(diagnostic.Name)),
+                ("VersionSource", diagnostic.VersionSource), ("Outcome", diagnostic.Outcome),
+                ("Confidence", diagnostic.Confidence?.ToString() ?? "Unknown"),
+                ("CandidateCount", diagnostic.CandidateCount), ("VersionCount", diagnostic.VersionCount));
         });
         object? CatalogCount(FrontendMsiLiveUpdateCatalogCategory category)
         {
@@ -2237,6 +2244,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             ("Failure", snapshot.ErrorKind ?? string.Join(',', snapshot.Categories.Where(category => category.ErrorKind is not null)
                 .Select(category => $"{category.Category}:{category.ErrorKind}"))));
         return snapshot;
+    }
+
+    private static string? SafeMsiCatalogDiagnosticName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var safe = new string(value.Trim().Where(static character => char.IsLetterOrDigit(character)
+            || character is ' ' or '.' or '_' or '-' or '(' or ')' or '+' or '&').Take(96).ToArray());
+        return safe.Length == 0 ? null : safe;
     }
 
     private async Task<MsiLiveUpdateCatalogQueryResult> QueryMsiCatalogSafelyAsync(CancellationToken cancellationToken)
