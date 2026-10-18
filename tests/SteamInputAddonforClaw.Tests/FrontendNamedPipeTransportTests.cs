@@ -67,7 +67,7 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task Windows_tweak_mutation_round_trips_one_updated_row_over_protocol_86()
+    public async Task Windows_tweak_mutation_round_trips_one_updated_row_over_protocol_87()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
@@ -76,7 +76,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetWindowsTweakAsync(FrontendWindowsTweakId.DisableEdgeBackground, true);
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.True(result.Succeeded);
         Assert.Equal(FrontendWindowsTweakId.DisableEdgeBackground, result.UpdatedTweak.Id);
         Assert.Equal(FrontendWindowsTweakState.Enabled, result.UpdatedTweak.State);
@@ -93,7 +93,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetSteamVirtualControllerAsync(SteamVirtualControllerPreference.DualSenseEdge);
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, fake.LastSteamVirtualControllerPreference);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, result.SteamVirtualController);
     }
@@ -108,13 +108,13 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetGyroscopeEnabledAsync(false);
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.False(fake.LastGyroscopeEnabled);
         Assert.False(result.GyroscopeEnabled);
     }
 
     [Fact]
-    public async Task Experimental_touchpad_preference_round_trips_typed_bool_over_protocol_86()
+    public async Task Experimental_touchpad_preference_round_trips_typed_bool_over_protocol_87()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
@@ -123,7 +123,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetExperimentalVirtualTouchpadEnabledAsync(true);
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal((int)FrontendRpcMethod.SetGameProfileSteamVirtualController + 1,
             (int)FrontendRpcMethod.SetExperimentalVirtualTouchpadEnabled);
         Assert.True(fake.LastExperimentalVirtualTouchpadEnabled);
@@ -145,7 +145,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
@@ -268,7 +268,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -332,7 +332,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -422,7 +422,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.RunDeveloperRumbleRearmAsync();
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.DeveloperRumbleRearmResult, result);
         Assert.Equal(1, fake.DeveloperRumbleRearmCount);
         Assert.False(result.PhysicalMotorEffectVerified);
@@ -503,6 +503,35 @@ public sealed class FrontendNamedPipeTransportTests
 
         Assert.Equivalent(fake.DeviceQuickSettingsSnapshot, snapshot, strict: true);
         Assert.Equal(1, fake.CaptureDeviceQuickSettingsCount);
+    }
+
+    [Fact]
+    public async Task Msi_live_update_catalog_request_round_trips_read_only_category_results()
+    {
+        var snapshot = new FrontendMsiLiveUpdateCatalogSnapshot(
+            FrontendMsiLiveUpdateCatalogState.Completed,
+            "Claw 8 AI+ A2VM",
+            "kr",
+            "win11",
+            [
+                new(FrontendMsiLiveUpdateCatalogCategory.Bios, FrontendMsiLiveUpdateCatalogCategoryState.Success,
+                    [new("Intel ME FW Update Tool", "ME20011.1815(LNL)", "2026-08-07", null)]),
+                new(FrontendMsiLiveUpdateCatalogCategory.Firmware, FrontendMsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(FrontendMsiLiveUpdateCatalogCategory.Driver, FrontendMsiLiveUpdateCatalogCategoryState.Failed, [], "TransportFailed"),
+                new(FrontendMsiLiveUpdateCatalogCategory.Utility, FrontendMsiLiveUpdateCatalogCategoryState.Empty, [])
+            ],
+            new DateTimeOffset(2026, 10, 18, 12, 30, 0, TimeSpan.Zero));
+        var fake = new RecordingFrontendControl { MsiLiveUpdateCatalogSnapshot = snapshot };
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var received = await client.RequestMsiLiveUpdateCatalogAsync();
+
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equivalent(snapshot, received, strict: true);
+        Assert.Equal("Intel ME FW Update Tool", received.Categories[0].Entries[0].Name);
+        Assert.Equal(1, fake.MsiLiveUpdateCatalogRequestCount);
     }
 
     [Fact]
@@ -777,7 +806,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
-        Assert.Equal(86, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(87, FrontendTransportProtocol.CurrentVersion);
         await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
     }
 
@@ -1743,13 +1772,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 86 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 87 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":86,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":86,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":86,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":87,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":87,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":87,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -2257,6 +2286,10 @@ public sealed class FrontendNamedPipeTransportTests
             new(true, true, true, true, 70, true, 70, null));
         public int CaptureDeviceQuickSettingsCount { get; private set; }
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) { TotalCalls++; CaptureDeviceQuickSettingsCount++; return Task.FromResult(DeviceQuickSettingsSnapshot); }
+        public FrontendMsiLiveUpdateCatalogSnapshot MsiLiveUpdateCatalogSnapshot { get; set; } = FrontendMsiLiveUpdateCatalogSnapshot.Unavailable();
+        public int MsiLiveUpdateCatalogRequestCount { get; private set; }
+        public Task<FrontendMsiLiveUpdateCatalogSnapshot> RequestMsiLiveUpdateCatalogAsync(CancellationToken t = default)
+        { TotalCalls++; MsiLiveUpdateCatalogRequestCount++; return Task.FromResult(MsiLiveUpdateCatalogSnapshot); }
         public FrontendMaximumProcessorStateSnapshot MaximumProcessorStateSnapshot { get; } = new(
             new(FrontendMaximumProcessorStateReadStatus.Known, 85, 99),
             new(FrontendMaximumProcessorStateReadStatus.Known, 90, 100), true, true, true, null);

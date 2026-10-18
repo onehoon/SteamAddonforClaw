@@ -22,6 +22,9 @@
     <!-- MSI Center M startup Enable/Disable helper (work order PR1): not linked, built and copied
          alongside this app's output so CenterMStartupHelperClient can launch it as a child process. -->
     <ProjectReference Include="..\SteamInputAddonforClaw.CenterMStartupHelper\SteamInputAddonforClaw.CenterMStartupHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <!-- MSI Live Update catalog helper (read-only catalog query only): x86/.NET Framework 4.8
+         is required by the original user-installed OEM assembly and is launched on demand. -->
+    <ProjectReference Include="..\SteamInputAddonforClaw.MsiLiveUpdateHelper\SteamInputAddonforClaw.MsiLiveUpdateHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="RuntimeIdentifier" />
   </ItemGroup>
 
   <Target Name="PublishTdpHelper" BeforeTargets="CopyTdpHelperOutput">
@@ -48,6 +51,15 @@
     <Error Text="MSI Center M startup helper publish output not found." Condition="!Exists('%(CenterMStartupHelperOutput.Identity)')" />
     <Copy SourceFiles="@(CenterMStartupHelperOutput)" DestinationFolder="$(OutDir)" />
     <Copy SourceFiles="@(CenterMStartupHelperOutput)" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != ''" />
+  </Target>
+
+  <Target Name="CopyMsiLiveUpdateHelperOutput" AfterTargets="Build;Publish">
+    <ItemGroup>
+      <MsiLiveUpdateHelperOutput Include="..\SteamInputAddonforClaw.MsiLiveUpdateHelper\bin\$(Configuration)\net48\SteamInputAddonforClaw.MsiLiveUpdateHelper.exe" />
+    </ItemGroup>
+    <Error Text="MSI Live Update helper output not found." Condition="!Exists('%(MsiLiveUpdateHelperOutput.Identity)')" />
+    <Copy SourceFiles="@(MsiLiveUpdateHelperOutput)" DestinationFolder="$(OutDir)" />
+    <Copy SourceFiles="@(MsiLiveUpdateHelperOutput)" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != ''" />
   </Target>
 
   <ItemGroup>

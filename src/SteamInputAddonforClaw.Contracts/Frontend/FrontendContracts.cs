@@ -696,6 +696,10 @@ public interface IAddonFrontendControl
     /// or mutate anything, and one child capture failing must not discard healthy siblings.</summary>
     Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendDeviceQuickSettingsSnapshot.Unavailable);
+    /// <summary>Runs one user-requested, read-only MSI Live Update catalog query. It does not
+    /// inspect installed versions, mutate device state, or participate in Quick Settings capture.</summary>
+    Task<FrontendMsiLiveUpdateCatalogSnapshot> RequestMsiLiveUpdateCatalogAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendMsiLiveUpdateCatalogSnapshot.Unavailable());
     /// <summary>Shared Quick Settings product projection (Shared Frontend V2, SF-V2-03): captures one
     /// page's rows in the closed shared product shape. Read-only, like <see
     /// cref="CaptureDeviceQuickSettingsAsync"/> -- must not persist/mutate/reconcile. The default

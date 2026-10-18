@@ -22,6 +22,7 @@ function New-Fixture {
     $files = @{
         'SteamInputAddonforClaw.exe' = 'runtime'
         'SteamInputAddonforClaw.TdpHelper.exe' = 'tdp helper'
+        'SteamInputAddonforClaw.MsiLiveUpdateHelper.exe' = 'read-only MSI catalog helper'
         'Dependencies\Viiper\libVIIPER.dll' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.dll')
         'Dependencies\Viiper\PROVENANCE.md' = (Join-Path $dependencyRoot 'Viiper\PROVENANCE.md')
         'Dependencies\Viiper\libVIIPER.h' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.h')
@@ -225,6 +226,19 @@ try {
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'SteamInputAddonforClaw.TdpHelper.exe')
     Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing TDP helper artifact' -Asset 'SteamInputAddonforClaw.TdpHelper.exe'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Remove-Item -LiteralPath (Join-Path $root 'SteamInputAddonforClaw.MsiLiveUpdateHelper.exe')
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing MSI catalog helper artifact' -Asset 'SteamInputAddonforClaw.MsiLiveUpdateHelper.exe'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'API_LiveUpdate.dll') -Value 'forbidden OEM proprietary DLL'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'must not bundle MSI proprietary API_LiveUpdate.dll') {
+        throw 'Expected bundled MSI API_LiveUpdate.dll to be rejected.'
+    }
 
     Write-Host 'Publish asset verification tests passed.'
 }

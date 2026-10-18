@@ -190,7 +190,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 84: add Device-only Maximum Processor State capture/mutations and its Device aggregate child.
 // Version 85: distinguish unknown favorite state in Steam and XBOX catalog entries.
 // Version 86 adds the typed mandatory-startup-task status and user-initiated repair RPC.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 86; }
+// Version 87 adds the user-initiated, read-only MSI Live Update catalog query RPC.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 87; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -244,7 +245,7 @@ internal enum FrontendRpcMethod
     SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled, SetGyroscopeEnabled,
     CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning,
     CaptureMaximumProcessorState, SetDeviceMaximumProcessorStateEnabled, SetDeviceMaximumProcessorStateAc, SetDeviceMaximumProcessorStateDc,
-    RepairStartupTask
+    RepairStartupTask, RequestMsiLiveUpdateCatalog
 }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
