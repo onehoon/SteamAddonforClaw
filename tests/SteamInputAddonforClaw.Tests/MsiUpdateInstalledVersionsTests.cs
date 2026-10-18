@@ -432,6 +432,122 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal("32.0.101.9150", entry.Version);
     }
 
+    [Theory]
+    [InlineData("Intel Graphics Driver", "Graphics", "PCI", "VEN_8086&DEV_1234", "DISPLAY", "Intel Arc Graphics", 0x8086, 0x1234)]
+    [InlineData("Intel Wireless LAN Driver", "Wireless", "PCI", "VEN_8086&DEV_5678", "NET", "Intel Wi-Fi 7", 0x8086, 0x5678)]
+    [InlineData("Intel Bluetooth Driver", "Bluetooth", "USB", "VID_8087&PID_0033", "Bluetooth", "Intel Wireless Bluetooth", 0x8087, 0x0033)]
+    [InlineData("Intel NPU Driver", "OtherDrivers", "PCI", "VEN_8086&DEV_643E", "System", "Intel AI Boost NPU", 0x8086, 0x643E)]
+    public void Intel_DSA_unique_family_replaces_known_MSI_row_without_device_id(
+        string msiName, string category, string bus, string detectionValue, string deviceClass,
+        string deviceName, ushort vendorId, ushort productId)
+    {
+        var deviceId = $"{bus}\\{detectionValue}";
+        var device = Device(deviceId, [deviceId], deviceClass, deviceName, "1.2.3.4", vendorId, productId);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+            [new(msiName, "2.0.0.0", null, null)]));
+        var intelVersion = category == "OtherDrivers" ? null : "3.0.0.0";
+        var packageName = category == "OtherDrivers" ? "Intel NPU Driver" : $"Intel {category}";
+        var package = IntelPackage("family-match", packageName, false,
+            IntelComponent(category, intelVersion, detectionValue), version: "3.0.0.0");
+
+        var driver = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            new(true, [package]), Inventory(device)).Categories,
+            item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
+
+        var entry = Assert.Single(driver.Entries);
+        Assert.Equal(FrontendMsiLiveUpdateVersionSource.IntelDsa, entry.LatestVersionSource);
+        Assert.Equal("3.0.0.0", entry.Version);
+    }
+
+    [Fact]
+    public void Intel_DSA_keeps_known_MSI_family_when_DSA_has_no_match_or_query_fails()
+    {
+        var deviceId = @"PCI\VEN_8086&DEV_1234";
+        var device = Device(deviceId, [deviceId], "DISPLAY", "Intel Arc Graphics", "1.0.0.0", 0x8086, 0x1234);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+            [new("Intel Graphics Driver", "2.0.0.0", null, null)]));
+        var wrongDeviceDsa = new IntelDsaCatalogResult(true,
+            [IntelPackage("wrong-device", "Intel Arc Graphics", false,
+                IntelComponent("Graphics", "3.0.0.0", "VEN_8086&DEV_9999"))]);
+
+        foreach (var intel in new[] { wrongDeviceDsa, IntelDsaCatalogResult.Failed("Http403") })
+        {
+            var driver = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(device)).Categories,
+                item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
+            var entry = Assert.Single(driver.Entries);
+
+            Assert.Equal("Intel Graphics Driver", entry.Name);
+            Assert.Equal(FrontendMsiLiveUpdateVersionSource.Msi, entry.LatestVersionSource);
+        }
+    }
+
+    [Fact]
+    public void Intel_DSA_does_not_hide_a_known_MSI_family_with_conflicting_subsystem_identity()
+    {
+        var deviceId = @"PCI\VEN_8086&DEV_1234&SUBSYS_11112222";
+        var device = Device(deviceId, [deviceId], "DISPLAY", "Intel Arc Graphics", "1.0.0.0", 0x8086, 0x1234);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+            [new("Intel Graphics Driver", "2.0.0.0", null, null,
+                DeviceId: @"PCI\VEN_8086&DEV_1234&SUBSYS_33334444")]));
+        var intel = new IntelDsaCatalogResult(true,
+            [IntelPackage("graphics", "Intel Arc Graphics", false,
+                IntelComponent("Graphics", "3.0.0.0", "VEN_8086&DEV_1234"))]);
+
+        var driver = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(device)).Categories,
+            item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
+
+        Assert.Equal(2, driver.Entries.Count);
+        Assert.Contains(driver.Entries, item => item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.Msi);
+        Assert.Contains(driver.Entries, item => item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa);
+    }
+
+    [Fact]
+    public void Intel_DSA_does_not_use_family_fallback_when_multiple_present_devices_match()
+    {
+        var firstId = @"PCI\VEN_8086&DEV_1234";
+        var secondId = @"PCI\VEN_8086&DEV_5678";
+        var first = Device(firstId, [firstId], "DISPLAY", "Intel Arc A", "1.0.0.0", 0x8086, 0x1234);
+        var second = Device(secondId, [secondId], "DISPLAY", "Intel Arc B", "1.0.0.1", 0x8086, 0x5678);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+            [new("Intel Graphics Driver", "2.0.0.0", null, null)]));
+        var intel = new IntelDsaCatalogResult(true,
+            [IntelPackage("graphics", "Intel Arc Graphics", false,
+                IntelComponent("Graphics", "3.0.0.0", "VEN_8086&DEV_1234", "VEN_8086&DEV_5678"))]);
+
+        var driver = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(first, second)).Categories,
+            item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
+
+        Assert.Equal(3, driver.Entries.Count);
+        Assert.Contains(driver.Entries, item => item.Name == "Intel Graphics Driver"
+            && item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.Msi);
+        Assert.Equal(2, driver.Entries.Count(item => item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa));
+    }
+
+    [Fact]
+    public void Intel_DSA_family_fallback_preserves_other_Intel_and_non_Intel_driver_rows()
+    {
+        var deviceId = @"PCI\VEN_8086&DEV_1234";
+        var device = Device(deviceId, [deviceId], "DISPLAY", "Intel Arc Graphics", "1.0.0.0", 0x8086, 0x1234);
+        var retainedNames = new[]
+        {
+            "Intel Chipset Driver", "Intel IPF Driver", "Intel Management Engine Driver",
+            "Intel Smart Sound Technology", "Realtek Audio Driver"
+        };
+        var rows = retainedNames.Select(name => new MsiLiveUpdateCatalogEntry(name, "2.0.0.0", null, null)).ToList();
+        rows.Add(new("Intel Graphics Driver", "2.0.0.0", null, null));
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success, rows));
+        var intel = new IntelDsaCatalogResult(true,
+            [IntelPackage("graphics", "Intel Arc Graphics", false,
+                IntelComponent("Graphics", "3.0.0.0", "VEN_8086&DEV_1234"))]);
+
+        var entries = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(device)).Categories,
+            item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries;
+
+        Assert.Equal(6, entries.Count);
+        Assert.All(retainedNames, name => Assert.Contains(entries, item => item.Name == name));
+        Assert.DoesNotContain(entries, item => item.Name == "Intel Graphics Driver");
+    }
+
     [Fact]
     public void Local_BIOS_PnP_registry_and_controller_revisions_are_projected_only_with_matching_identity()
     {

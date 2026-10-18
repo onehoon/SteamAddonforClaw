@@ -380,6 +380,9 @@ internal static class IntelDsaHardwareMatcher
         return false;
     }
 
+    internal static bool HasComparableHardwareIdentity(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && TryParseHardwarePattern(value, out _);
+
     private static IntelDsaResolvedDriver? SelectBestCandidate(
         IGrouping<(string DeviceId, IntelDsaComponentFamily Family), (IntelDsaResolvedDriver Result, int Specificity, string? VersionForOrdering)> group)
     {
@@ -574,6 +577,16 @@ internal static class IntelDsaHardwareMatcher
 
 internal static class MsiUpdateCatalogComposer
 {
+    private static readonly (string Name, IntelDsaComponentFamily Family)[] KnownMsiIntelDriverNames =
+    [
+        ("Intel Graphics Driver", IntelDsaComponentFamily.Graphics),
+        ("Intel Arc Display Driver", IntelDsaComponentFamily.Graphics),
+        ("Intel Arc Graphics Driver", IntelDsaComponentFamily.Graphics),
+        ("Intel Wireless LAN Driver", IntelDsaComponentFamily.Wireless),
+        ("Intel Bluetooth Driver", IntelDsaComponentFamily.Bluetooth),
+        ("Intel NPU Driver", IntelDsaComponentFamily.Npu)
+    ];
+
     internal static FrontendMsiLiveUpdateCatalogSnapshot Compose(
         MsiLiveUpdateCatalogQueryResult msi,
         IntelDsaCatalogResult intel,
@@ -613,10 +626,10 @@ internal static class MsiUpdateCatalogComposer
             }
 
             var sourceEntries = source.Entries.ToList();
-            if (sourceCategory == MsiLiveUpdateCatalogCategory.Driver && intel.Succeeded)
+            if (sourceCategory == MsiLiveUpdateCatalogCategory.Driver)
             {
-                foreach (var resolved in intelRows)
-                    sourceEntries.RemoveAll(entry => IsExactMsiDuplicate(entry, resolved));
+                sourceEntries = sourceEntries.Where(entry =>
+                    !EvaluateIntelDuplicate(entry, intelRows, intel.Succeeded).Suppress).ToList();
             }
             var entries = sourceEntries.Select(entry => MapMsiEntry(sourceCategory, entry, inventory)).ToList();
             var categoryState = source.State switch
@@ -801,26 +814,43 @@ internal static class MsiUpdateCatalogComposer
         return safe.Length == 0 ? null : safe;
     }
 
-    private static bool IsExactMsiDuplicate(MsiLiveUpdateCatalogEntry entry, IntelDsaResolvedDriver intelEntry)
+    private static MsiIntelDuplicateEvaluation EvaluateIntelDuplicate(
+        MsiLiveUpdateCatalogEntry entry,
+        IReadOnlyList<IntelDsaResolvedDriver> intelRows,
+        bool intelQuerySucceeded)
     {
-        if (entry.DeviceId is null) return false;
-        var sameDevice = string.Equals(entry.DeviceId, intelEntry.Device.DeviceId, StringComparison.OrdinalIgnoreCase)
-            || intelEntry.Device.HardwareIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase)
-            || IntelDsaHardwareMatcher.TryMatchDetectionValue(entry.DeviceId,
-                intelEntry.Device.HardwareIds.Concat(intelEntry.Device.CompatibleIds), out _);
-        if (!sameDevice) return false;
-        return intelEntry.Family switch
+        var family = KnownMsiIntelDriverNames
+            .FirstOrDefault(candidate => string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (family.Name is null) return new(false, "NotApplicable", 0);
+        if (!intelQuerySucceeded) return new(false, "RetainedNoDsa", 0);
+
+        var familyRows = intelRows.Where(candidate => candidate.Family == family.Family).ToArray();
+        var distinctDevices = familyRows.Select(candidate => candidate.Device.DeviceId)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (distinctDevices.Length == 0) return new(false, "RetainedNoDsa", 0);
+
+        if (!string.IsNullOrWhiteSpace(entry.DeviceId))
         {
-            IntelDsaComponentFamily.Graphics => ContainsAny(entry.Name, "graphics", "display", "arc"),
-            IntelDsaComponentFamily.Wireless => ContainsAny(entry.Name, "wireless", "wi-fi", "wifi"),
-            IntelDsaComponentFamily.Bluetooth => entry.Name.Contains("bluetooth", StringComparison.OrdinalIgnoreCase),
-            IntelDsaComponentFamily.Npu => ContainsAny(entry.Name, "npu", "ai boost"),
-            _ => false
-        };
+            var matchesDevice = familyRows.Any(candidate => IsMsiDeviceIdMatch(entry.DeviceId, candidate.Device));
+            if (matchesDevice) return new(true, "SuppressedByExactIdentity", distinctDevices.Length);
+
+            if (IntelDsaHardwareMatcher.HasComparableHardwareIdentity(entry.DeviceId))
+                return new(false, "RetainedConflictingIdentity", distinctDevices.Length);
+        }
+
+        return distinctDevices.Length == 1
+            ? new(true, "SuppressedByUniqueDsaFamily", 1)
+            : new(false, "RetainedAmbiguousFamily", distinctDevices.Length);
     }
 
-    private static bool ContainsAny(string value, params string[] candidates) =>
-        candidates.Any(candidate => value.Contains(candidate, StringComparison.OrdinalIgnoreCase));
+    private static bool IsMsiDeviceIdMatch(string deviceId, MsiUpdateInstalledPnpDevice device) =>
+        string.Equals(device.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
+        || device.HardwareIds.Contains(deviceId, StringComparer.OrdinalIgnoreCase)
+        || device.CompatibleIds.Contains(deviceId, StringComparer.OrdinalIgnoreCase)
+        || IntelDsaHardwareMatcher.TryMatchDetectionValue(deviceId,
+            device.HardwareIds.Concat(device.CompatibleIds), out _);
+
+    private sealed record MsiIntelDuplicateEvaluation(bool Suppress, string Outcome, int CandidateCount);
 
     private static FrontendMsiLiveUpdateSourceSnapshot MapMsiSource(MsiLiveUpdateCatalogQueryResult result)
     {
