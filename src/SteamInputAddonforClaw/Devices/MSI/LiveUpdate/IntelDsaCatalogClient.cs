@@ -301,7 +301,10 @@ internal sealed class IntelDsaCatalogClient
 
     private static bool IsExplicitWindowsVersionLabel(string value)
     {
-        var normalized = value.Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+        var normalized = value.Replace(" ", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
         return normalized.Contains("windows10", StringComparison.Ordinal)
             || normalized.Contains("win10", StringComparison.Ordinal)
             || normalized.Contains("windows11", StringComparison.Ordinal)

@@ -234,13 +234,8 @@ public sealed partial class MsiUpdatesPage : UserControl
 
             if (!string.IsNullOrWhiteSpace(entry.Version))
             {
-                var latestKey = entry.LatestVersionKind == FrontendMsiLiveUpdateVersionKind.Package
-                    ? "MsiUpdates_LatestIntelPackage"
-                    : "MsiUpdates_LatestVersion";
-                var latestFallback = entry.LatestVersionKind == FrontendMsiLiveUpdateVersionKind.Package
-                    ? "Latest Intel package {0}"
-                    : "Latest {0}";
-                metadata.Add(MainUiStrings.Format(latestKey, latestFallback, entry.Version.Trim()));
+                var latestLabel = GetLatestVersionLabel(entry);
+                metadata.Add(MainUiStrings.Format(latestLabel.ResourceKey, latestLabel.EnglishFallback, entry.Version.Trim()));
             }
             else metadata.Add(MainUiStrings.Get("MsiUpdates_LatestUnavailable", "Latest version unavailable"));
 
@@ -289,6 +284,16 @@ public sealed partial class MsiUpdatesPage : UserControl
         }
 
         return value;
+    }
+
+    internal static (string ResourceKey, string EnglishFallback) GetLatestVersionLabel(
+        FrontendMsiLiveUpdateCatalogEntry entry)
+    {
+        var isIntelPackage = entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa
+            && entry.LatestVersionKind == FrontendMsiLiveUpdateVersionKind.Package;
+        return isIntelPackage
+            ? ("MsiUpdates_LatestIntelPackage", "Latest Intel package {0}")
+            : ("MsiUpdates_LatestVersion", "Latest {0}");
     }
 
     private static string ReadHeader(TabViewItem tab, string fallback) =>

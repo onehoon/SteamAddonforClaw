@@ -237,6 +237,28 @@ public sealed class MsiUpdateInstalledVersionsTests
     }
 
     [Fact]
+    public void Intel_matcher_reads_hyphenated_OS_override_labels_from_the_catalog_archive()
+    {
+        var archive = CreateArchive(
+        [
+            Package("win10", "Intel Wi-Fi", "99.0.0.0", false,
+                Component("Wireless", "99.0.0.0", ["VEN_8086&DEV_5678"], [],
+                    new Dictionary<string, object> { ["windows-10-22h2-64"] = new { } })),
+            Package("win11", "Intel Wi-Fi", "24.70.0.3", false,
+                Component("Wireless", "24.70.0.3", ["VEN_8086&DEV_5678"], [],
+                    new Dictionary<string, object> { ["windows-11-24h2-64"] = new { } }))
+        ]);
+        var packages = IntelDsaCatalogClient.ParseArchive(archive).Packages;
+        var deviceId = @"PCI\VEN_8086&DEV_5678&SUBSYS_146C1462&REV_04";
+        var device = Device(deviceId, [deviceId], "NET", "Intel Wi-Fi", "24.60.0.1", 0x8086, 0x5678);
+
+        var match = Assert.Single(IntelDsaHardwareMatcher.Resolve(new(true, packages), Inventory(device), "win11"));
+
+        Assert.Equal("win11", match.PackageId);
+        Assert.Equal("24.70.0.3", match.LatestVersion);
+    }
+
+    [Fact]
     public void Intel_matcher_keeps_segment_wildcards_local_and_prefers_more_specific_identity()
     {
         var device = Device(GpuDeviceId, [GpuDeviceId, GpuCompatibleId], "DISPLAY", "Intel Arc", "32.0.0.0", 0x8086, 0x1234);
@@ -323,6 +345,26 @@ public sealed class MsiUpdateInstalledVersionsTests
 
         Assert.Equal(FrontendMsiLiveUpdateCatalogState.PartialFailure, combined.State);
         Assert.Null(entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateVersionSource.Msi, entry.LatestVersionSource);
+    }
+
+    [Fact]
+    public void MSI_base_HardwareId_resolves_only_the_matching_installed_driver_version()
+    {
+        var matchingId = @"PCI\VEN_8086&DEV_64A0&SUBSYS_146C1462&REV_04";
+        var unrelatedId = @"PCI\VEN_8086&DEV_1234&SUBSYS_146C1462&REV_04";
+        var matchingDevice = Device(matchingId, [matchingId], "DISPLAY", "Intel Arc Graphics", "32.0.100.1", 0x8086, 0x64A0);
+        var unrelatedDevice = Device(unrelatedId, [unrelatedId], "DISPLAY", "Other Intel Graphics", "99.0.0.1", 0x8086, 0x1234);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+            [new("Intel Arc Graphics Driver", "32.0.101.9150", null, null, DeviceId: @"PCI\VEN_8086&DEV_64A0")]));
+
+        var driver = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"),
+                Inventory(matchingDevice, unrelatedDevice)).Categories,
+            category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
+        var entry = Assert.Single(driver.Entries);
+
+        Assert.Equal("32.0.100.1", entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, entry.InstalledVersionConfidence);
         Assert.Equal(FrontendMsiLiveUpdateVersionSource.Msi, entry.LatestVersionSource);
     }
 
@@ -516,12 +558,14 @@ public sealed class MsiUpdateInstalledVersionsTests
         OperatingSystemOverrides = operatingSystemOverrides
     };
 
-    private static object Component(string category, string? version, string[] detectionValues, string[] operatingSystems) => new
+    private static object Component(string category, string? version, string[] detectionValues, string[] operatingSystems,
+        object? operatingSystemOverrides = null) => new
     {
         Category = category,
         Version = version,
         DetectionValues = detectionValues,
-        SupportedOperatingSystems = operatingSystems
+        SupportedOperatingSystems = operatingSystems,
+        OperatingSystemOverrides = operatingSystemOverrides
     };
 
     private static byte[] CreateArchive(IEnumerable<object> packages, string? meta = null,

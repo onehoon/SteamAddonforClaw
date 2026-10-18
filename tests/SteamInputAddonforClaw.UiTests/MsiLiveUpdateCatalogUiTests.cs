@@ -221,6 +221,30 @@ public sealed class MsiLiveUpdateCatalogUiTests
         Assert.DoesNotContain("UpToDate", code, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Catalog_labels_only_Intel_DSA_package_versions_as_Intel_packages()
+    {
+        var msiPackage = new FrontendMsiLiveUpdateCatalogEntry("MSI Utility", "3.0.2608.3101", null, null,
+            LatestVersionSource: FrontendMsiLiveUpdateVersionSource.Msi,
+            LatestVersionKind: FrontendMsiLiveUpdateVersionKind.Package);
+        var intelNpuPackage = new FrontendMsiLiveUpdateCatalogEntry("Intel NPU", "32.0.100.5540", null, null,
+            LatestVersionSource: FrontendMsiLiveUpdateVersionSource.IntelDsa,
+            LatestVersionKind: FrontendMsiLiveUpdateVersionKind.Package);
+        var msiLabel = MsiUpdatesPage.GetLatestVersionLabel(msiPackage);
+        var intelLabel = MsiUpdatesPage.GetLatestVersionLabel(intelNpuPackage);
+        var english = ReadResourceMap("en-US");
+        var korean = ReadResourceMap("ko-KR");
+
+        Assert.Equal("MsiUpdates_LatestVersion", msiLabel.ResourceKey);
+        Assert.Equal("Latest {0}", msiLabel.EnglishFallback);
+        Assert.Equal("MsiUpdates_LatestIntelPackage", intelLabel.ResourceKey);
+        Assert.Equal("Latest Intel package {0}", intelLabel.EnglishFallback);
+        Assert.Equal("Latest {0}", english[msiLabel.ResourceKey]);
+        Assert.Equal("최신 {0}", korean[msiLabel.ResourceKey]);
+        Assert.Equal("Latest Intel package {0}", english[intelLabel.ResourceKey]);
+        Assert.Equal("최신 Intel 패키지 {0}", korean[intelLabel.ResourceKey]);
+    }
+
     private static XDocument ReadMsiPageXaml() =>
         XDocument.Load(Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml"));
 

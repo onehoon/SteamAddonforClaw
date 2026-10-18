@@ -449,7 +449,10 @@ internal static class IntelDsaHardwareMatcher
 
     private static IReadOnlyList<string> NormalizeWindowsVersions(string value)
     {
-        var normalized = value.Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+        var normalized = value.Replace(" ", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
         var result = new List<string>(2);
         if (normalized.Contains("windows10", StringComparison.Ordinal) || normalized.Contains("win10", StringComparison.Ordinal))
             result.Add("win10");
@@ -716,7 +719,10 @@ internal static class MsiUpdateCatalogComposer
             {
                 matches = inventory.PnpDevices.Where(device =>
                     string.Equals(device.DeviceId, entry.DeviceId, StringComparison.OrdinalIgnoreCase)
-                    || device.HardwareIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase));
+                    || device.HardwareIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase)
+                    || device.CompatibleIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase)
+                    || IntelDsaHardwareMatcher.TryMatchDetectionValue(entry.DeviceId,
+                        device.HardwareIds.Concat(device.CompatibleIds), out _));
             }
             else if (!string.IsNullOrWhiteSpace(entry.InfName))
             {
