@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net48</TargetFramework>
+    <RuntimeIdentifiers>win-x86</RuntimeIdentifiers>
     <PlatformTarget>x86</PlatformTarget>
     <Prefer32Bit>true</Prefer32Bit>
     <AssemblyName>SteamInputAddonforClaw.MsiLiveUpdateHelper</AssemblyName>
