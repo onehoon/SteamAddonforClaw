@@ -44,10 +44,6 @@ public sealed partial class DevicePage : UserControl
     private bool _batteryChargeLimitDraftDirty;
     private bool _batteryChargeLimitMutationBusy;
     private int _batteryChargeLimitDraftPercent = 60;
-    private bool _msiUpdatesBusy;
-    private FrontendMsiLiveUpdateCatalogSnapshot _msiUpdatesSnapshot = new(
-        FrontendMsiLiveUpdateCatalogState.NotChecked, null, null, null, [], null);
-
     private static readonly CpuBoostModeItem[] Modes =
     [
         new(CpuBoostMode.Disabled, MainUiStrings.Get("Device_CpuBoost_Mode_Disabled", "Disabled")),
@@ -76,7 +72,6 @@ public sealed partial class DevicePage : UserControl
         PowerModeAcComboBox.ItemsSource = PowerModes;
         PowerModeDcComboBox.ItemsSource = PowerModes;
         UpdateMaximumProcessorStateEditability();
-        RenderMsiLiveUpdateCatalog();
     }
 
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
@@ -409,135 +404,6 @@ public sealed partial class DevicePage : UserControl
         MaximumProcessorStateEnabledToggleSwitch.IsEnabled = editable;
         MaximumProcessorStateAcComboBox.IsEnabled = editable && _maximumProcessorStateSnapshot.Enabled;
         MaximumProcessorStateDcComboBox.IsEnabled = editable && _maximumProcessorStateSnapshot.Enabled;
-    }
-
-    private async void MsiUpdatesCheckButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_frontend is null || _msiUpdatesBusy) return;
-        _msiUpdatesBusy = true;
-        RenderMsiLiveUpdateCatalog();
-        try
-        {
-            _msiUpdatesSnapshot = await _frontend.RequestMsiLiveUpdateCatalogAsync();
-        }
-        catch (Exception exception)
-        {
-            AppLog.Debug("Device", "MSI catalog query request failed.", ("Reason", exception.GetType().Name));
-            _msiUpdatesSnapshot = new(FrontendMsiLiveUpdateCatalogState.Failed, null, null, null, [],
-                DateTimeOffset.UtcNow, "RuntimeRequestFailed");
-        }
-        finally
-        {
-            _msiUpdatesBusy = false;
-            RenderMsiLiveUpdateCatalog();
-        }
-    }
-
-    private void RenderMsiLiveUpdateCatalog()
-    {
-        MsiUpdatesCheckButton.IsEnabled = !_msiUpdatesBusy;
-        MsiUpdatesProgressRing.IsActive = _msiUpdatesBusy;
-        MsiUpdatesProgressRing.Visibility = _msiUpdatesBusy ? Visibility.Visible : Visibility.Collapsed;
-        MsiUpdatesStatusText.Text = _msiUpdatesBusy
-            ? MainUiStrings.Get("Device_MsiUpdates_Checking", "Checking MSI catalog…")
-            : _msiUpdatesSnapshot.State switch
-            {
-                FrontendMsiLiveUpdateCatalogState.NotChecked => MainUiStrings.Get("Device_MsiUpdates_NotChecked", "Select Check for updates to load MSI catalog records."),
-                FrontendMsiLiveUpdateCatalogState.Completed => MainUiStrings.Get("Device_MsiUpdates_Completed", "Catalog records loaded. Installed versions and device applicability were not checked."),
-                FrontendMsiLiveUpdateCatalogState.PartialFailure => MainUiStrings.Get("Device_MsiUpdates_PartialFailure", "Some catalog categories could not be loaded. Check the affected tabs."),
-                FrontendMsiLiveUpdateCatalogState.Unavailable => MainUiStrings.Get("Device_MsiUpdates_Unavailable", "The MSI catalog is unavailable for this device or MSI installation."),
-                _ => MainUiStrings.Get("Device_MsiUpdates_Failed", "The catalog query failed. You can try again.")
-            };
-
-        if (_msiUpdatesSnapshot.CheckedAtUtc is { } checkedAt)
-        {
-            MsiUpdatesLastCheckedText.Text = MainUiStrings.Format("Device_MsiUpdates_LastChecked",
-                "Last checked: {0}", checkedAt.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture));
-            MsiUpdatesLastCheckedText.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            MsiUpdatesLastCheckedText.Text = string.Empty;
-            MsiUpdatesLastCheckedText.Visibility = Visibility.Collapsed;
-        }
-
-        RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Bios, MsiUpdatesBiosEntriesPanel);
-        RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Firmware, MsiUpdatesFirmwareEntriesPanel);
-        RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Driver, MsiUpdatesDriverEntriesPanel);
-        RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Utility, MsiUpdatesUtilityEntriesPanel);
-    }
-
-    private void RenderMsiLiveUpdateCategory(
-        FrontendMsiLiveUpdateCatalogCategory category,
-        StackPanel panel)
-    {
-        panel.Children.Clear();
-        var result = _msiUpdatesSnapshot.Categories.FirstOrDefault(item => item.Category == category);
-        if (result?.State == FrontendMsiLiveUpdateCatalogCategoryState.Failed)
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = MainUiStrings.Get("Device_MsiUpdates_CategoryFailed", "Catalog request failed for this category."),
-                TextWrapping = TextWrapping.Wrap
-            });
-            return;
-        }
-        if (result?.State == FrontendMsiLiveUpdateCatalogCategoryState.Empty)
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = MainUiStrings.Get("Device_MsiUpdates_NoEntries", "No catalog entries."),
-                TextWrapping = TextWrapping.Wrap
-            });
-            return;
-        }
-        if (result is null)
-        {
-            var messageKey = _msiUpdatesSnapshot.State switch
-            {
-                FrontendMsiLiveUpdateCatalogState.NotChecked => "Device_MsiUpdates_NotCheckedCategory",
-                FrontendMsiLiveUpdateCatalogState.Unavailable => "Device_MsiUpdates_UnavailableCategory",
-                _ => "Device_MsiUpdates_NoData"
-            };
-            var fallback = _msiUpdatesSnapshot.State switch
-            {
-                FrontendMsiLiveUpdateCatalogState.NotChecked => "No catalog loaded yet.",
-                FrontendMsiLiveUpdateCatalogState.Unavailable => "Catalog data is unavailable.",
-                _ => "No catalog data was returned for this category."
-            };
-            panel.Children.Add(new TextBlock { Text = MainUiStrings.Get(messageKey, fallback), TextWrapping = TextWrapping.Wrap });
-            return;
-        }
-
-        foreach (var entry in result.Entries)
-        {
-            var content = new StackPanel { Spacing = 4 };
-            content.Children.Add(new TextBlock { Text = entry.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-            content.Children.Add(new TextBlock
-            {
-                Text = MainUiStrings.Format("Device_MsiUpdates_LatestVersion",
-                    "Latest published version: {0}",
-                    string.IsNullOrWhiteSpace(entry.Version)
-                        ? MainUiStrings.Get("Device_MsiUpdates_VersionNotProvided", "Not provided")
-                        : entry.Version),
-                TextWrapping = TextWrapping.Wrap
-            });
-            if (!string.IsNullOrWhiteSpace(entry.ReleaseDate))
-                content.Children.Add(new TextBlock
-                {
-                    Text = MainUiStrings.Format("Device_MsiUpdates_ReleaseDate", "Release date: {0}", entry.ReleaseDate),
-                    TextWrapping = TextWrapping.Wrap,
-                    Opacity = 0.75
-                });
-            if (!string.IsNullOrWhiteSpace(entry.Description))
-                content.Children.Add(new TextBlock { Text = entry.Description, TextWrapping = TextWrapping.Wrap, Opacity = 0.75 });
-            panel.Children.Add(new Border
-            {
-                Padding = new Thickness(12),
-                CornerRadius = new CornerRadius(6),
-                Child = content
-            });
-        }
     }
 
     private async void MaximumProcessorStateEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)

@@ -2216,6 +2216,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             ("FirmwareCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Firmware)),
             ("DriverCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Driver)),
             ("UtilityCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Utility)),
+            ("HelperTokenElevation", result.HelperTokenElevation ?? "NotReported"),
+            ("ResolverDiagnostics", result.ResolverDiagnostics ?? "NotReported"),
             ("Failure", snapshot.ErrorKind ?? string.Join(',', snapshot.Categories.Where(category => category.ErrorKind is not null)
                 .Select(category => $"{category.Category}:{category.ErrorKind}"))));
         return snapshot;

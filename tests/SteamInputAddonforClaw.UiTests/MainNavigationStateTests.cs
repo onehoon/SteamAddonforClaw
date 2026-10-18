@@ -123,6 +123,16 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void Msi_updates_navigation_tag_opens_its_own_top_level_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.MsiUpdates, navigation.SelectNavigationItem(false, "MsiUpdates"));
+        Assert.Equal(MainNavigationPage.MsiUpdates, navigation.CurrentPage);
+        Assert.Null(navigation.GetMouseBackDestination());
+    }
+
+    [Fact]
     public void Profile_navigation_tag_opens_profile_page()
     {
         var navigation = new MainNavigationState();

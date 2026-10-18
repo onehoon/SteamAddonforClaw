@@ -652,13 +652,6 @@ public sealed class MainUiLocalizationResourceTests
         var expectedUids = new[]
         {
             "Device_PageTitle",
-            "Device_MsiUpdatesExpander",
-            "Device_MsiUpdatesCatalogOnly",
-            "Device_MsiUpdatesCheckButton",
-            "Device_MsiUpdatesBiosTab",
-            "Device_MsiUpdatesFirmwareTab",
-            "Device_MsiUpdatesDriversTab",
-            "Device_MsiUpdatesUtilitiesTab",
             "Device_CenterMStartupCard",
             "Device_CenterMStartupStatusText",
             "Device_CenterMStartupEnableButton",

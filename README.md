@@ -2,7 +2,7 @@
 
 Steam Addon for Claw adds controller integration and game-specific performance controls for supported MSI Claw handhelds. It can present the built-in controller as a Steam Deck or DualSense Edge while Steam gaming is active, and as an Xbox 360 controller otherwise. You can choose a global Steam controller and an optional per-game Steam override, configure the controller's front and rear buttons, set per-game performance options, and use a performance HUD, shortcuts, a separate Quick Settings Overlay, and Windows gaming-home behavior.
 
-This guide describes the features currently exposed by the app. The Main App includes **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **Tweaks**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
+This guide describes the features currently exposed by the app. The Main App includes **Device**, **MSI Update**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **Tweaks**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
 
 ## Table of contents
 
@@ -14,6 +14,7 @@ This guide describes the features currently exposed by the app. The Main App inc
 - [MSI Center M and the built-in controller](#msi-center-m-and-the-built-in-controller)
 - [Main App guide](#main-app-guide)
   - [Device](#device)
+  - [MSI Update](#msi-update)
   - [Controller](#controller)
   - [Steam](#steam)
   - [XBOX](#xbox)
@@ -109,8 +110,6 @@ This is a Windows-startup change, not an instant in-session toggle. The confirma
 
 The Device page shows the detected manufacturer and model, compatibility status, board identifier, and detected GPU names. Its **MSI Center M** setting controls which app manages the built-in controller; see [MSI Center M and the built-in controller](#msi-center-m-and-the-built-in-controller).
 
-The collapsed **MSI Updates** panel can manually query MSI's published catalog for BIOS, firmware, drivers, and utilities on supported MSI Claw models. These are catalog records only: the app does not compare installed versions or verify that an entry applies to this device, and it does not download or install packages. The query uses the original MSI Live Update component when available; it does not start MSI Center M or its services.
-
 The page also provides device-wide performance and battery controls:
 
 - **TDP Control** — enables processor power-limit management. **PL1** is the sustained power limit and **PL2** is the higher short-duration limit. Values are separate for **Plugged in** and **On battery**. Available ranges depend on the detected Claw model. When available, the first setup may start from the existing MSI Center M Manual TDP values.
@@ -122,6 +121,10 @@ The page also provides device-wide performance and battery controls:
 For **TDP Control**, **CPU Boost**, **Maximum Processor State**, and **Windows Power Mode**, turning the feature off means the Addon stops managing that setting. It does not necessarily restore the exact Windows or MSI value that existed before the Addon managed it. Your saved choices are kept so you can enable the feature again later.
 
 **Battery charge limit** is different: its switch directly enables or disables the MSI charge-limit function. The selected percentage remains saved for later use.
+
+### MSI Update
+
+The **MSI Update** page can manually query MSI's published catalog for BIOS, firmware, drivers, and utilities on supported MSI Claw models. These are catalog records only: the app does not compare installed versions or verify that an entry applies to this device, and it does not download or install packages. The query uses the original MSI Live Update component when available; it does not start MSI Center M or its services.
 
 ### Controller
 
