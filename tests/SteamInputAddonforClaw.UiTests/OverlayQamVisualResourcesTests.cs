@@ -107,7 +107,7 @@ public sealed class OverlayQamVisualResourcesTests
         AssertResourceValue(resources, "QamRowCornerRadius", "2");
         Assert.Equal("#1AFFFFFF", Resource(resources, "QamSeparatorBrush").Attribute("Color")?.Value);
         AssertResourceValue(resources, "QamSectionSeparatorThickness", "0,1,0,0");
-        AssertResourceValue(resources, "QamSectionPadding", "16,0,16,0");
+        AssertResourceValue(resources, "QamSectionPadding", "16,12,16,12");
         Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value == "QamRowSeparatorThickness");
         Assert.Contains("BorderThickness = OverlayQamResources.Get(\"QamSelectionBorderThickness\", new Thickness(0))", rowChrome);
         Assert.DoesNotContain("QamSeparatorBrush", rowChrome);
@@ -127,7 +127,7 @@ public sealed class OverlayQamVisualResourcesTests
         AssertResourceValue(resources, "QamRailHintIconSize", "16");
         AssertResourceValue(resources, "QamRailHintGap", "6");
         Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value == "QamRailHintMargin");
-        AssertResourceValue(resources, "QamSectionSpacing", "24");
+        AssertResourceValue(resources, "QamSectionSpacing", "0");
         AssertResourceValue(resources, "QamSectionHeaderSpacing", "4");
         AssertResourceValue(resources, "QamRowSpacing", "0");
         AssertResourceValue(resources, "QamSliderHeight", "22");
@@ -143,6 +143,41 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value is "QamContentPadding" or "QamPageContentSpacing");
         Assert.Equal("#26FFFFFF", Resource(resources, "QamSelectedFillBrush").Attribute("Color")?.Value);
         Assert.DoesNotContain("Footer", xaml.ToString());
+    }
+
+    [Fact]
+    public void Section_vertical_spacing_uses_shared_balanced_padding_and_preserves_separator_ownership()
+    {
+        var root = RepoRoot();
+        var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var quickSettings = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
+        var controller = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs"));
+        var clawHud = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs"));
+        var sectionCardStart = quickSettings.IndexOf("private static Border CreateOverlaySectionCard", StringComparison.Ordinal);
+        var sectionCardEnd = quickSettings.IndexOf("private bool TryCreateQuickSettingsRow", sectionCardStart, StringComparison.Ordinal);
+        var sectionCard = quickSettings[sectionCardStart..sectionCardEnd];
+        var separatorStart = quickSettings.IndexOf("private static void SetOverlaySectionSeparator", StringComparison.Ordinal);
+        var separatorEnd = quickSettings.IndexOf("private static void ApplyQuickSettingsSectionSeparators", separatorStart, StringComparison.Ordinal);
+        var separator = quickSettings[separatorStart..separatorEnd];
+
+        AssertResourceValue(resources, "QamSectionSpacing", "0");
+        AssertResourceValue(resources, "QamSectionPadding", "16,12,16,12");
+        Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", quickSettings);
+        Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", controller);
+        Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", clawHud);
+        Assert.Contains("Padding = OverlayQamResources.Get(\"QamSectionPadding\", new Thickness(16, 12, 16, 12))", sectionCard);
+        Assert.Contains("SetOverlaySectionSeparator(rendered.Card, hasFeature)", quickSettings);
+        Assert.Contains("SetOverlaySectionSeparator(_clawHudCard.Container, visible: false)", clawHud);
+        Assert.Contains("SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true)", clawHud);
+        Assert.Contains("SetOverlaySectionSeparator(_tabOrderCard.Container, visible: true)", clawHud);
+        Assert.Contains("card.BorderThickness = visible", separator);
+        Assert.Contains("QamSectionSeparatorThickness", separator);
+        Assert.Contains("new Thickness(0, 1, 0, 0)", separator);
+        Assert.Contains("var steamCard = CreateOverlaySectionCard(steamSection)", controller);
+        Assert.Contains("SetOverlaySectionSeparator(steamCard, visible: false)", controller);
+        Assert.Contains("CreateOverlaySectionCard(mappingSection)", controller);
+        Assert.Contains("CreateOverlaySectionCard(ledSection)", controller);
+        Assert.Contains("CreateOverlaySectionCard(vibrationSection)", controller);
     }
 
     [Fact]

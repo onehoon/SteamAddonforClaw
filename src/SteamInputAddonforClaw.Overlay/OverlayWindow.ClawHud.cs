@@ -60,7 +60,7 @@ public sealed partial class OverlayWindow
         SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true);
         SetOverlaySectionSeparator(_tabOrderCard.Container, visible: true);
 
-        var root = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
+        var root = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
         root.Children.Add(_clawHudCard.Container);
         root.Children.Add(_quickSettingsCard.Container);
         root.Children.Add(_tabOrderCard.Container);
