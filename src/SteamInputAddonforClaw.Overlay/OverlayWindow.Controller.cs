@@ -59,7 +59,7 @@ public sealed partial class OverlayWindow
 
     private FrameworkElement BuildControllerPage(List<OverlayRow> rows)
     {
-        var page = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
+        var page = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
         var steamSection = CreateControllerSection("Controller for Steam");
         var steamDetails = CreateOverlayDetailStack();
         var mappingSection = CreateControllerSection("M1 / M2");

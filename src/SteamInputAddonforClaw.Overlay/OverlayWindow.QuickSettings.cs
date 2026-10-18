@@ -156,7 +156,7 @@ public sealed partial class OverlayWindow
     // The surface is populated or updated after ConfigureQuickSettings/ApplyQuickSettingsPage runs.
     private FrameworkElement BuildQuickSettingsPage(AddonQuickSettingsTabId tabId, QuickSettingsPageId pageId)
     {
-        var content = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
+        var content = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
         _quickSettingsSurfaces[pageId] = new QuickSettingsSurface
         {
             PageId = pageId,
@@ -482,7 +482,7 @@ public sealed partial class OverlayWindow
         {
             Child = child,
             Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
-            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 0, 16, 0)),
+            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 12, 16, 12)),
             BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush"),
             BorderThickness = new Thickness(0),
             CornerRadius = OverlayQamResources.Get("QamSectionCornerRadius", new CornerRadius(0)),
