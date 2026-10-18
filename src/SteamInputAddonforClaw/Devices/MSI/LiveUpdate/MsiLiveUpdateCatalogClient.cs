@@ -11,7 +11,17 @@ internal enum MsiLiveUpdateCatalogState { Completed, PartialFailure, Unavailable
 internal enum MsiLiveUpdateCatalogCategory { Bios, Firmware, Driver, Utility }
 internal enum MsiLiveUpdateCatalogCategoryState { Success, Empty, Failed }
 
-internal sealed record MsiLiveUpdateCatalogEntry(string Name, string? Version, string? ReleaseDate, string? Description);
+internal sealed record MsiLiveUpdateCatalogEntry(
+    string Name,
+    string? Version,
+    string? ReleaseDate,
+    string? Description,
+    string? DeviceId = null,
+    string? Guid = null,
+    string? UpgradeGuid = null,
+    string? PackageVersion = null,
+    string? DriverVersion = null,
+    string? InfName = null);
 internal sealed record MsiLiveUpdateCatalogCategoryResult(
     MsiLiveUpdateCatalogCategory Category,
     MsiLiveUpdateCatalogCategoryState State,
@@ -399,7 +409,15 @@ internal static class MsiLiveUpdateCatalogResultParser
                 TryGetAnyString(element, ["displayVersion", "version"], 128, out var version);
                 TryGetAnyString(element, ["releaseDate", "release_date"], 128, out var releaseDate);
                 TryGetAnyString(element, ["description"], 2048, out var description);
-                entries.Add(new(name!, version, releaseDate, description));
+                TryGetAnyString(element, ["deviceID"], 512, out var deviceId);
+                TryGetAnyString(element, ["GUID"], 64, out var guid);
+                TryGetAnyString(element, ["upgradeGuid"], 64, out var upgradeGuid);
+                TryGetAnyString(element, ["packageVersion"], 128, out var packageVersion);
+                TryGetAnyString(element, ["driverVersion"], 128, out var driverVersion);
+                TryGetAnyString(element, ["infName"], 128, out var infName);
+                entries.Add(new(name!, version, releaseDate, description,
+                    ValidateDeviceId(deviceId), ValidateGuid(guid), ValidateGuid(upgradeGuid),
+                    packageVersion, driverVersion, ValidateInfName(infName)));
             }
             return entries.Count == 0
                 ? new(category, MsiLiveUpdateCatalogCategoryState.Empty, entries)
@@ -410,6 +428,22 @@ internal static class MsiLiveUpdateCatalogResultParser
             return FailedCategory(category, "MalformedCatalogResponse");
         }
     }
+
+    private static string? ValidateDeviceId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 512 || !value.Contains('\\')) return null;
+        return value.All(static character => char.IsLetterOrDigit(character)
+            || character is '\\' or '&' or '_' or '*' or '-' or '.' or ':') ? value : null;
+    }
+
+    private static string? ValidateGuid(string? value) =>
+        Guid.TryParse(value, out var parsed) ? parsed.ToString("D") : null;
+
+    private static string? ValidateInfName(string? value) =>
+        value is not null && value.Length <= 128
+            && value.All(static character => char.IsLetterOrDigit(character) || character is '_' or '-' or '.')
+            ? value
+            : null;
 
     private static string SafeResolverDiagnostics(string value)
     {
@@ -515,7 +549,15 @@ internal static class MsiLiveUpdateCatalogContractMapper
                 _ => FrontendMsiLiveUpdateCatalogCategoryState.Failed
             },
             category.Entries.Select(entry => new FrontendMsiLiveUpdateCatalogEntry(
-                entry.Name, entry.Version, entry.ReleaseDate, entry.Description)).ToArray(),
+                entry.Name, entry.DriverVersion ?? entry.PackageVersion
+                    ?? (string.Equals(entry.Version, "UWP", StringComparison.OrdinalIgnoreCase) ? null : entry.Version),
+                entry.ReleaseDate, entry.Description,
+                LatestVersionSource: FrontendMsiLiveUpdateVersionSource.Msi,
+                LatestVersionKind: !string.IsNullOrWhiteSpace(entry.DriverVersion)
+                    ? FrontendMsiLiveUpdateVersionKind.Driver
+                    : !string.IsNullOrWhiteSpace(entry.PackageVersion)
+                        ? FrontendMsiLiveUpdateVersionKind.Package
+                        : FrontendMsiLiveUpdateVersionKind.Catalog)).ToArray(),
             category.ErrorKind)).ToArray(),
         result.CheckedAtUtc,
         result.ErrorKind);

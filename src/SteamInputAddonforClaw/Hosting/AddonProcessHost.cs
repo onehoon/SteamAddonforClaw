@@ -743,7 +743,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             windowsTweaksRuntime: new WindowsTweaksRuntime(
                 new WindowsTweaksOperatingSystem(),
                 startupResult.HardwareDeviceModel is { } tweaksModel
-                    && (tweaksModel.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8")));
+                    && (tweaksModel.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8")),
+            captureControllerFirmwareVersionForMsiUpdate: CaptureOwnedControllerFirmwareVersionForMsiUpdateAsync);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -1951,6 +1952,52 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Warn("ControllerLed", "Static LED apply failed; Full1902 controller ownership remains active.", exception,
                 ("Event", "ControllerLedApplyFailed"));
         }
+    }
+
+    private async Task<string?> CaptureOwnedControllerFirmwareVersionForMsiUpdateAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+            || _physicalOwnership is not { LiveInputSource.IsRunning: true } physical
+            || physical.OwnedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong,
+                VendorId: MsiClawHardware.VendorId, ProductId: MsiClawHardware.DirectInputProductId } identity)
+            return null;
+
+        var control = new MsiClawControlHidResolver().Resolve(
+            GetMsiControllerDevices().EnumeratePresentDevices(), MsiClawNativeMode.DirectInput, identity);
+        if (control is null || control.UsagePage != MsiClawHardware.DirectInputControlUsagePage
+            || control.Usage != MsiClawHardware.DirectInputControlUsage
+            || !control.VerifiedIdentity.StronglyMatches(identity))
+            return null;
+
+        var selector = Windows.Devices.HumanInterfaceDevice.HidDevice.GetDeviceSelector(
+            control.UsagePage, control.Usage, MsiClawHardware.VendorId, MsiClawHardware.DirectInputProductId);
+        var candidates = await new WindowsMsiClawHidDeviceInformationLookup()
+            .FindAsync(selector, cancellationToken).ConfigureAwait(false);
+
+        if (!ReferenceEquals(_physicalOwnership, physical)
+            || _centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+            || physical.LiveInputSource is not { IsRunning: true }
+            || physical.OwnedPhysicalIdentity is not { } currentIdentity
+            || !currentIdentity.StronglyMatches(identity))
+            return null;
+
+        var info = WindowsMsiClawModeWriter.SelectDeviceInformation(control, candidates);
+        if (info is null) return null;
+        var transport = new WindowsMsiClawRawHidTransport();
+        if (!transport.TryGetDeviceAttributes(info.Id, out var attributes)
+            || attributes.VendorId != MsiClawHardware.VendorId
+            || attributes.ProductId != MsiClawHardware.DirectInputProductId
+            || _centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+            || physical.LiveInputSource is not { IsRunning: true }
+            || physical.OwnedPhysicalIdentity is not { } finalIdentity
+            || !finalIdentity.StronglyMatches(identity))
+            return null;
+
+        var hexadecimal = attributes.VersionNumber.ToString("X4", System.Globalization.CultureInfo.InvariantCulture);
+        if (hexadecimal.Any(character => character is >= 'A' and <= 'F')) return null;
+        var major = hexadecimal[..2].TrimStart('0');
+        return major.Length == 0 ? null : $"{major}.{hexadecimal[2..]}";
     }
 
     private async Task<bool> ApplyOwnedControllerVibrationSettingsAsync(

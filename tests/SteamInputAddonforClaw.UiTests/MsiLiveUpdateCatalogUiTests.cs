@@ -158,7 +158,10 @@ public sealed class MsiLiveUpdateCatalogUiTests
             "MsiUpdates_PartialFailure", "MsiUpdates_Unavailable", "MsiUpdates_Failed",
             "MsiUpdates_CategoryFailed", "MsiUpdates_NoEntries",
             "MsiUpdates_NotCheckedCategory", "MsiUpdates_UnavailableCategory", "MsiUpdates_NoData",
-            "MsiUpdates_LatestVersion", "MsiUpdates_ReleaseDate"
+            "MsiUpdates_LatestVersion", "MsiUpdates_LatestIntelPackage", "MsiUpdates_LatestUnavailable",
+            "MsiUpdates_InstalledVersion", "MsiUpdates_InstalledEstimated", "MsiUpdates_InstalledUnavailable",
+            "MsiUpdates_SourceMsi", "MsiUpdates_SourceIntelDsa", "MsiUpdates_MsiSourcePartial",
+            "MsiUpdates_IntelSourcePartial", "MsiUpdates_InventoryPartial", "MsiUpdates_ReleaseDate"
         };
 
         Assert.Equal(english.OrderBy(key => key, StringComparer.Ordinal), korean.OrderBy(key => key, StringComparer.Ordinal));
@@ -199,6 +202,23 @@ public sealed class MsiLiveUpdateCatalogUiTests
         Assert.DoesNotContain("FormatMsiCatalogDescription", code, StringComparison.Ordinal);
         Assert.DoesNotContain("entry.Description", code, StringComparison.Ordinal);
         Assert.DoesNotContain("MsiUpdatesLastCheckedText", xaml + code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Catalog_projection_shows_installed_version_source_and_NPU_package_without_a_verdict()
+    {
+        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml.cs");
+        var resources = ReadResourceMap("en-US");
+
+        Assert.Contains("entry.InstalledVersion", code, StringComparison.Ordinal);
+        Assert.Contains("entry.LatestVersionSource", code, StringComparison.Ordinal);
+        Assert.Contains("FrontendMsiLiveUpdateVersionKind.Package", code, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_LatestIntelPackage", code, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_InstalledEstimated", code, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_IntelSourcePartial", code, StringComparison.Ordinal);
+        Assert.Contains("no update-availability verdict", resources["MsiUpdates_CatalogOnly.Text"], StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UpdateAvailable", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("UpToDate", code, StringComparison.Ordinal);
     }
 
     private static XDocument ReadMsiPageXaml() =>
