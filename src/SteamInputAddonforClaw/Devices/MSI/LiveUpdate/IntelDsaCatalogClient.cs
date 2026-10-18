@@ -28,7 +28,7 @@ internal sealed class IntelDsaCatalogClient
     private const int MaximumZipEntries = 256;
     private const int MaximumPackages = 512;
     private const int MaximumComponents = 2048;
-    private const int MaximumDetectionValuesPerComponent = 128;
+    private const int MaximumDetectionValuesPerComponent = 1_024;
     private static readonly HttpClient SharedHttpClient = new(new SocketsHttpHandler
     {
         AutomaticDecompression = DecompressionMethods.None,

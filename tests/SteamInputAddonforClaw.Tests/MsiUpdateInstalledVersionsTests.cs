@@ -45,6 +45,29 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal("32.0.100.5540", result.Packages[3].Version);
     }
 
+    [Fact]
+    public void Intel_archive_parser_preserves_large_detection_value_arrays_for_matching()
+    {
+        var detectionValues = Enumerable.Range(0, 645)
+            .Select(index => $"VEN_8086&DEV_{index:X4}")
+            .Append("VEN_8086&DEV_64A0")
+            .ToArray();
+        var archive = CreateArchive(
+        [
+            Package("930514", "Intel Arc Graphics", "32.0.101.9150", false,
+                Component("Graphics", "32.0.101.9150", detectionValues, []))
+        ]);
+
+        var package = Assert.Single(IntelDsaCatalogClient.ParseArchive(archive).Packages);
+        var deviceId = @"PCI\VEN_8086&DEV_64A0&SUBSYS_146C1462&REV_04";
+        var device = Device(deviceId, [deviceId], "DISPLAY", "Intel Arc Graphics", "32.0.100.1", 0x8086, 0x64A0);
+        var match = Assert.Single(IntelDsaHardwareMatcher.Resolve(new(true, [package]), Inventory(device), "win11"));
+
+        Assert.Equal(646, package.Components[0].DetectionValues.Count);
+        Assert.Equal("930514", match.PackageId);
+        Assert.Equal(IntelDsaComponentFamily.Graphics, match.Family);
+    }
+
     [Theory]
     [InlineData("not a zip", "InvalidArchive")]
     [InlineData("", "EmptyArchive")]
@@ -323,6 +346,48 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Empty(driver.Entries);
         Assert.Equal(FrontendMsiLiveUpdateSourceState.PartialFailure, combined.MsiSource!.State);
         Assert.Equal(FrontendMsiLiveUpdateCatalogState.PartialFailure, combined.State);
+    }
+
+    [Fact]
+    public void Matched_Intel_driver_remains_visible_when_MSI_query_is_unavailable()
+    {
+        var deviceId = @"PCI\VEN_8086&DEV_64A0&SUBSYS_146C1462&REV_04";
+        var device = Device(deviceId, [deviceId], "DISPLAY", "Intel Arc Graphics", "32.0.100.1", 0x8086, 0x64A0);
+        var msi = new MsiLiveUpdateCatalogQueryResult(MsiLiveUpdateCatalogState.Unavailable,
+            null, null, "win11", [], DateTimeOffset.UtcNow, "HelperUnavailable");
+        var intel = new IntelDsaCatalogResult(true,
+        [IntelPackage("930514", "Intel Arc Graphics", false,
+            IntelComponent("Graphics", "32.0.101.9150", "VEN_8086&DEV_64A0"))]);
+
+        var combined = MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(device));
+        var driver = Assert.Single(combined.Categories,
+            category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
+
+        Assert.Equal(FrontendMsiLiveUpdateCatalogCategoryState.Success, driver.State);
+        Assert.Equal("MsiCategoryMissing", driver.ErrorKind);
+        Assert.Equal("32.0.101.9150", Assert.Single(driver.Entries).Version);
+        Assert.Equal(FrontendMsiLiveUpdateVersionSource.IntelDsa, driver.Entries[0].LatestVersionSource);
+        Assert.Equal(FrontendMsiLiveUpdateSourceState.Unavailable, combined.MsiSource!.State);
+        Assert.Equal(FrontendMsiLiveUpdateCatalogState.PartialFailure, combined.State);
+    }
+
+    [Fact]
+    public void Intel_DSA_row_replaces_MSI_base_HardwareId_duplicate()
+    {
+        var deviceId = @"PCI\VEN_8086&DEV_64A0&SUBSYS_146C1462&REV_04";
+        var device = Device(deviceId, [deviceId], "DISPLAY", "Intel Arc Graphics", "32.0.100.1", 0x8086, 0x64A0);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+            [new("Intel Arc Graphics Driver", "32.0.101.8000", null, null, DeviceId: @"PCI\VEN_8086&DEV_64A0")]));
+        var intel = new IntelDsaCatalogResult(true,
+        [IntelPackage("930514", "Intel Arc Graphics", false,
+            IntelComponent("Graphics", "32.0.101.9150", "VEN_8086&DEV_64A0"))]);
+
+        var driver = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(device)).Categories,
+            category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
+
+        var entry = Assert.Single(driver.Entries);
+        Assert.Equal(FrontendMsiLiveUpdateVersionSource.IntelDsa, entry.LatestVersionSource);
+        Assert.Equal("32.0.101.9150", entry.Version);
     }
 
     [Fact]

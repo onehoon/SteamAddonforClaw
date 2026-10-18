@@ -597,6 +597,14 @@ internal static class MsiUpdateCatalogComposer
             var source = msi.Categories.FirstOrDefault(item => item.Category == sourceCategory);
             if (source is null)
             {
+                if (sourceCategory == MsiLiveUpdateCatalogCategory.Driver && intelRows.Count > 0)
+                {
+                    categoryResults.Add(new(frontendCategory,
+                        FrontendMsiLiveUpdateCatalogCategoryState.Success,
+                        intelRows.Select(MapIntelEntry).ToArray(), "MsiCategoryMissing"));
+                    continue;
+                }
+
                 categoryResults.Add(new(frontendCategory, FrontendMsiLiveUpdateCatalogCategoryState.Failed, [], "CategoryMissing"));
                 continue;
             }
@@ -789,10 +797,12 @@ internal static class MsiUpdateCatalogComposer
 
     private static bool IsExactMsiDuplicate(MsiLiveUpdateCatalogEntry entry, IntelDsaResolvedDriver intelEntry)
     {
-        var exactDevice = entry.DeviceId is not null &&
-            (string.Equals(entry.DeviceId, intelEntry.Device.DeviceId, StringComparison.OrdinalIgnoreCase)
-             || intelEntry.Device.HardwareIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase));
-        if (!exactDevice) return false;
+        if (entry.DeviceId is null) return false;
+        var sameDevice = string.Equals(entry.DeviceId, intelEntry.Device.DeviceId, StringComparison.OrdinalIgnoreCase)
+            || intelEntry.Device.HardwareIds.Contains(entry.DeviceId, StringComparer.OrdinalIgnoreCase)
+            || IntelDsaHardwareMatcher.TryMatchDetectionValue(entry.DeviceId,
+                intelEntry.Device.HardwareIds.Concat(intelEntry.Device.CompatibleIds), out _);
+        if (!sameDevice) return false;
         return intelEntry.Family switch
         {
             IntelDsaComponentFamily.Graphics => ContainsAny(entry.Name, "graphics", "display", "arc"),
