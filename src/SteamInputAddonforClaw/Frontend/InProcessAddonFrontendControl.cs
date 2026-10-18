@@ -48,6 +48,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private FanProbeSession? _fanProbe;
     private readonly MsiClawBatteryChargeLimitHardware? _batteryChargeLimitHardware;
     private readonly MsiLiveUpdateCatalogClient _msiLiveUpdateCatalogClient = new();
+    private readonly IntelDsaCatalogClient _intelDsaCatalogClient;
+    private readonly Func<CancellationToken, Task<string?>>? _captureControllerFirmwareVersionForMsiUpdate;
     private readonly MsiClawBatteryChargeLimitRuntime? _batteryChargeLimitRuntime;
     private readonly MsiClawVibrationStrengthClient? _controllerVibrationStrengthClient;
     private readonly Func<bool>? _controllerVibrationTestAvailable;
@@ -167,7 +169,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<AddonPresentationKind?>? activePresentationSource = null,
         Func<string, Task>? reconcileMotionReaders = null,
         WindowsTweaksRuntime? windowsTweaksRuntime = null,
-        MaximumProcessorStateRuntime? maximumProcessorStateRuntime = null)
+        MaximumProcessorStateRuntime? maximumProcessorStateRuntime = null,
+        Func<CancellationToken, Task<string?>>? captureControllerFirmwareVersionForMsiUpdate = null,
+        IntelDsaCatalogClient? intelDsaCatalogClient = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -177,6 +181,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _updateCoordinator = updateCoordinator;
         _cpuBoostRuntime = cpuBoostRuntime;
         _maximumProcessorStateRuntime = maximumProcessorStateRuntime;
+        _captureControllerFirmwareVersionForMsiUpdate = captureControllerFirmwareVersionForMsiUpdate;
+        _intelDsaCatalogClient = intelDsaCatalogClient ?? new IntelDsaCatalogClient();
         _powerModeRuntime = powerModeRuntime;
         _intelFpsRuntime = intelFpsRuntime;
         _intelGpuMinimumClockRuntime = intelGpuMinimumClockRuntime;
@@ -2192,16 +2198,22 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             return FrontendMsiLiveUpdateCatalogSnapshot.Unavailable("UnsupportedDevice");
         }
 
-        MsiLiveUpdateCatalogQueryResult result;
-        try { result = await _msiLiveUpdateCatalogClient.QueryAsync(cancellationToken).ConfigureAwait(false); }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception exception)
+        var msiTask = QueryMsiCatalogSafelyAsync(cancellationToken);
+        var intelTask = _intelDsaCatalogClient.QueryAsync(cancellationToken);
+        var inventoryTask = CaptureMsiUpdateInventorySafelyAsync(cancellationToken);
+        await Task.WhenAll(msiTask, intelTask, inventoryTask).ConfigureAwait(false);
+        var result = await msiTask.ConfigureAwait(false);
+        var intel = await intelTask.ConfigureAwait(false);
+        var inventory = await inventoryTask.ConfigureAwait(false);
+        var snapshot = MsiUpdateCatalogComposer.Compose(result, intel, inventory, match =>
         {
-            result = new(MsiLiveUpdateCatalogState.Failed, null, null, null, [], DateTimeOffset.UtcNow,
-                new string(exception.GetType().Name.Where(char.IsLetterOrDigit).Take(64).ToArray()));
-        }
-
-        var snapshot = MsiLiveUpdateCatalogContractMapper.Map(result);
+            var hardwareId = match.Device.VendorId is { } vendorId && match.Device.ProductId is { } productId
+                ? $"{vendorId:X4}:{productId:X4}"
+                : "Unknown";
+            AppLog.Debug("MsiUpdates", "Intel DSA candidate matched a present device by exact hardware identity.",
+                ("Source", "IntelDsa"), ("PackageId", match.PackageId), ("Component", match.Family),
+                ("VersionKind", match.VersionKind), ("HardwareId", hardwareId), ("MatchReason", match.MatchReason));
+        });
         object? CatalogCount(FrontendMsiLiveUpdateCatalogCategory category)
         {
             var item = snapshot.Categories.FirstOrDefault(candidate => candidate.Category == category);
@@ -2216,11 +2228,42 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             ("FirmwareCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Firmware)),
             ("DriverCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Driver)),
             ("UtilityCount", CatalogCount(FrontendMsiLiveUpdateCatalogCategory.Utility)),
+            ("MsiSourceState", snapshot.MsiSource?.State.ToString() ?? "Unknown"),
+            ("IntelDsaSourceState", snapshot.IntelDsaSource?.State.ToString() ?? "Unknown"),
+            ("IntelDsaDriverCount", snapshot.Categories.FirstOrDefault(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver)?.Entries.Count(entry => entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa) ?? 0),
+            ("LocalInventoryWarningCount", snapshot.LocalInventoryWarnings?.Count ?? 0),
             ("HelperTokenElevation", result.HelperTokenElevation ?? "NotReported"),
             ("ResolverDiagnostics", result.ResolverDiagnostics ?? "NotReported"),
             ("Failure", snapshot.ErrorKind ?? string.Join(',', snapshot.Categories.Where(category => category.ErrorKind is not null)
                 .Select(category => $"{category.Category}:{category.ErrorKind}"))));
         return snapshot;
+    }
+
+    private async Task<MsiLiveUpdateCatalogQueryResult> QueryMsiCatalogSafelyAsync(CancellationToken cancellationToken)
+    {
+        try { return await _msiLiveUpdateCatalogClient.QueryAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
+        {
+            return new(MsiLiveUpdateCatalogState.Failed, null, null, null, [], DateTimeOffset.UtcNow,
+                new string(exception.GetType().Name.Where(char.IsLetterOrDigit).Take(64).ToArray()));
+        }
+    }
+
+    private async Task<MsiUpdateInstalledInventory> CaptureMsiUpdateInventorySafelyAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await MsiUpdateInstalledInventory.CaptureAsync(
+                _captureControllerFirmwareVersionForMsiUpdate, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
+        {
+            AppLog.Warn("MsiUpdates", "Installed version inventory capture failed; catalog results remain available.", exception,
+                ("Event", "MsiInstalledInventoryCaptureFailed"), ("Reason", exception.GetType().Name));
+            return new([], [], [], [], null, ["InstalledInventoryCaptureFailed"]);
+        }
     }
 
     /// <summary>Captures Device settings or the Runtime-selected active Steam/XBOX profile. The

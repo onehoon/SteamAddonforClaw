@@ -191,7 +191,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 85: distinguish unknown favorite state in Steam and XBOX catalog entries.
 // Version 86 adds the typed mandatory-startup-task status and user-initiated repair RPC.
 // Version 87 adds the user-initiated, read-only MSI Live Update catalog query RPC.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 87; }
+// Version 88 extends the read-only MSI Update snapshot with installed-version, Intel DSA source and provenance fields.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 88; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

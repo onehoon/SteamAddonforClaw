@@ -42,10 +42,16 @@
             </Grid>
 
             <TextBlock x:Uid="MsiUpdates_CatalogOnly"
-                       Text="MSI catalog only · no installed-version or device-applicability check."
+                       Text="Read-only version information · no update-availability verdict, downloads, or installs."
                        TextWrapping="Wrap"
                        FontSize="12"
                        Opacity="0.7" />
+
+            <TextBlock x:Name="MsiUpdatesSourceStatusText"
+                       TextWrapping="Wrap"
+                       FontSize="12"
+                       Opacity="0.8"
+                       Visibility="Collapsed" />
 
             <Grid ColumnSpacing="8" VerticalAlignment="Center">
                 <Grid.ColumnDefinitions>

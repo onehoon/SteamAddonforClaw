@@ -116,12 +116,30 @@ public sealed partial class MsiUpdatesPage : UserControl
                 FrontendMsiLiveUpdateCatalogState.Unavailable => MainUiStrings.Get("MsiUpdates_Unavailable", "The MSI catalog is unavailable for this device or MSI installation."),
                 _ => MainUiStrings.Get("MsiUpdates_Failed", "The catalog query failed. You can try again.")
             };
+        RenderSourceStatus();
 
         RenderCategoryTabHeaders();
         RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Bios, MsiUpdatesBiosEntriesPanel);
         RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Firmware, MsiUpdatesFirmwareEntriesPanel);
         RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Driver, MsiUpdatesDriverEntriesPanel);
         RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Utility, MsiUpdatesUtilityEntriesPanel);
+    }
+
+    private void RenderSourceStatus()
+    {
+        var messages = new List<string>(capacity: 3);
+        AddSourceMessage(_msiUpdatesSnapshot.MsiSource, "MsiUpdates_MsiSourcePartial", "MSI source is partially unavailable.");
+        AddSourceMessage(_msiUpdatesSnapshot.IntelDsaSource, "MsiUpdates_IntelSourcePartial", "Intel DSA source is unavailable.");
+        if (_msiUpdatesSnapshot.LocalInventoryWarnings is { Count: > 0 })
+            messages.Add(MainUiStrings.Get("MsiUpdates_InventoryPartial", "Some installed versions could not be read."));
+        MsiUpdatesSourceStatusText.Text = string.Join(" · ", messages);
+        MsiUpdatesSourceStatusText.Visibility = messages.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+
+        void AddSourceMessage(FrontendMsiLiveUpdateSourceSnapshot? source, string resourceKey, string fallback)
+        {
+            if (source is null || source.State == FrontendMsiLiveUpdateSourceState.Completed) return;
+            messages.Add(MainUiStrings.Get(resourceKey, fallback));
+        }
     }
 
     private void RenderCategoryTabHeaders()
@@ -201,11 +219,31 @@ public sealed partial class MsiUpdatesPage : UserControl
                 TextWrapping = TextWrapping.Wrap
             });
 
-            var metadata = new List<string>(capacity: 2);
+            var metadata = new List<string>(capacity: 4);
+            if (!string.IsNullOrWhiteSpace(entry.InstalledVersion))
+            {
+                var installedKey = entry.InstalledVersionConfidence == FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic
+                    ? "MsiUpdates_InstalledEstimated"
+                    : "MsiUpdates_InstalledVersion";
+                var installedFallback = entry.InstalledVersionConfidence == FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic
+                    ? "Installed (estimated) {0}"
+                    : "Installed {0}";
+                metadata.Add(MainUiStrings.Format(installedKey, installedFallback, entry.InstalledVersion.Trim()));
+            }
+            else metadata.Add(MainUiStrings.Get("MsiUpdates_InstalledUnavailable", "Installed version unavailable"));
+
             if (!string.IsNullOrWhiteSpace(entry.Version))
             {
-                metadata.Add(MainUiStrings.Format("MsiUpdates_LatestVersion", "Latest {0}", entry.Version.Trim()));
+                var latestLabel = GetLatestVersionLabel(entry);
+                metadata.Add(MainUiStrings.Format(latestLabel.ResourceKey, latestLabel.EnglishFallback, entry.Version.Trim()));
             }
+            else metadata.Add(MainUiStrings.Get("MsiUpdates_LatestUnavailable", "Latest version unavailable"));
+
+            metadata.Add(MainUiStrings.Get(
+                entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa
+                    ? "MsiUpdates_SourceIntelDsa"
+                    : "MsiUpdates_SourceMsi",
+                entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa ? "Source: Intel DSA" : "Source: MSI"));
             if (!string.IsNullOrWhiteSpace(entry.ReleaseDate))
             {
                 metadata.Add(MainUiStrings.Format("MsiUpdates_ReleaseDate", "Released {0}", FormatCatalogReleaseDate(entry.ReleaseDate)));
@@ -246,6 +284,16 @@ public sealed partial class MsiUpdatesPage : UserControl
         }
 
         return value;
+    }
+
+    internal static (string ResourceKey, string EnglishFallback) GetLatestVersionLabel(
+        FrontendMsiLiveUpdateCatalogEntry entry)
+    {
+        var isIntelPackage = entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa
+            && entry.LatestVersionKind == FrontendMsiLiveUpdateVersionKind.Package;
+        return isIntelPackage
+            ? ("MsiUpdates_LatestIntelPackage", "Latest Intel package {0}")
+            : ("MsiUpdates_LatestVersion", "Latest {0}");
     }
 
     private static string ReadHeader(TabViewItem tab, string fallback) =>

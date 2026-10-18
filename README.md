@@ -124,7 +124,7 @@ For **TDP Control**, **CPU Boost**, **Maximum Processor State**, and **Windows P
 
 ### MSI Update
 
-The **MSI Update** page can manually query MSI's published catalog for BIOS, firmware, drivers, and utilities on supported MSI Claw models. These are catalog records only: the app does not compare installed versions or verify that an entry applies to this device, and it does not download or install packages. The query uses the original MSI Live Update component when available; it does not start MSI Center M or its services.
+The **MSI Update** page can manually query MSI's published catalog for BIOS, firmware, drivers, and utilities and Intel DSA's driver catalog for hardware-ID-matched Intel graphics, Wi-Fi, Bluetooth, and NPU entries. It also reads locally available BIOS, PnP driver, software, package, and controller-revision information and labels the source and confidence for each displayed version. If an identity or installed version cannot be established, the page says so rather than guessing. This first version does not compare versions to declare an update available or current, and it does not download or install anything. The MSI query uses the original MSI Live Update component when available; it does not start MSI Center M or its services. Intel DSA is queried only when the user presses **Check for updates**; source failures are reported independently.
 
 ### Controller
 

@@ -158,7 +158,10 @@ public sealed class MsiLiveUpdateCatalogUiTests
             "MsiUpdates_PartialFailure", "MsiUpdates_Unavailable", "MsiUpdates_Failed",
             "MsiUpdates_CategoryFailed", "MsiUpdates_NoEntries",
             "MsiUpdates_NotCheckedCategory", "MsiUpdates_UnavailableCategory", "MsiUpdates_NoData",
-            "MsiUpdates_LatestVersion", "MsiUpdates_ReleaseDate"
+            "MsiUpdates_LatestVersion", "MsiUpdates_LatestIntelPackage", "MsiUpdates_LatestUnavailable",
+            "MsiUpdates_InstalledVersion", "MsiUpdates_InstalledEstimated", "MsiUpdates_InstalledUnavailable",
+            "MsiUpdates_SourceMsi", "MsiUpdates_SourceIntelDsa", "MsiUpdates_MsiSourcePartial",
+            "MsiUpdates_IntelSourcePartial", "MsiUpdates_InventoryPartial", "MsiUpdates_ReleaseDate"
         };
 
         Assert.Equal(english.OrderBy(key => key, StringComparer.Ordinal), korean.OrderBy(key => key, StringComparer.Ordinal));
@@ -199,6 +202,47 @@ public sealed class MsiLiveUpdateCatalogUiTests
         Assert.DoesNotContain("FormatMsiCatalogDescription", code, StringComparison.Ordinal);
         Assert.DoesNotContain("entry.Description", code, StringComparison.Ordinal);
         Assert.DoesNotContain("MsiUpdatesLastCheckedText", xaml + code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Catalog_projection_shows_installed_version_source_and_NPU_package_without_a_verdict()
+    {
+        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml.cs");
+        var resources = ReadResourceMap("en-US");
+
+        Assert.Contains("entry.InstalledVersion", code, StringComparison.Ordinal);
+        Assert.Contains("entry.LatestVersionSource", code, StringComparison.Ordinal);
+        Assert.Contains("FrontendMsiLiveUpdateVersionKind.Package", code, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_LatestIntelPackage", code, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_InstalledEstimated", code, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_IntelSourcePartial", code, StringComparison.Ordinal);
+        Assert.Contains("no update-availability verdict", resources["MsiUpdates_CatalogOnly.Text"], StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UpdateAvailable", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("UpToDate", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Catalog_labels_only_Intel_DSA_package_versions_as_Intel_packages()
+    {
+        var msiPackage = new FrontendMsiLiveUpdateCatalogEntry("MSI Utility", "3.0.2608.3101", null, null,
+            LatestVersionSource: FrontendMsiLiveUpdateVersionSource.Msi,
+            LatestVersionKind: FrontendMsiLiveUpdateVersionKind.Package);
+        var intelNpuPackage = new FrontendMsiLiveUpdateCatalogEntry("Intel NPU", "32.0.100.5540", null, null,
+            LatestVersionSource: FrontendMsiLiveUpdateVersionSource.IntelDsa,
+            LatestVersionKind: FrontendMsiLiveUpdateVersionKind.Package);
+        var msiLabel = MsiUpdatesPage.GetLatestVersionLabel(msiPackage);
+        var intelLabel = MsiUpdatesPage.GetLatestVersionLabel(intelNpuPackage);
+        var english = ReadResourceMap("en-US");
+        var korean = ReadResourceMap("ko-KR");
+
+        Assert.Equal("MsiUpdates_LatestVersion", msiLabel.ResourceKey);
+        Assert.Equal("Latest {0}", msiLabel.EnglishFallback);
+        Assert.Equal("MsiUpdates_LatestIntelPackage", intelLabel.ResourceKey);
+        Assert.Equal("Latest Intel package {0}", intelLabel.EnglishFallback);
+        Assert.Equal("Latest {0}", english[msiLabel.ResourceKey]);
+        Assert.Equal("최신 {0}", korean[msiLabel.ResourceKey]);
+        Assert.Equal("Latest Intel package {0}", english[intelLabel.ResourceKey]);
+        Assert.Equal("최신 Intel 패키지 {0}", korean[intelLabel.ResourceKey]);
     }
 
     private static XDocument ReadMsiPageXaml() =>
