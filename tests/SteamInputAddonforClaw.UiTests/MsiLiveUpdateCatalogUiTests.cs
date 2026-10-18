@@ -127,11 +127,16 @@ public sealed class MsiLiveUpdateCatalogUiTests
             FrontendMsiLiveUpdateCatalogCategory.Driver,
             FrontendMsiLiveUpdateCatalogCategoryState.Failed,
             []);
+        var filteredEmptySuccess = new FrontendMsiLiveUpdateCatalogCategorySnapshot(
+            FrontendMsiLiveUpdateCatalogCategory.Utility,
+            FrontendMsiLiveUpdateCatalogCategoryState.Success,
+            []);
 
         Assert.Equal("드라이버 (2)", MsiUpdatesPage.FormatCategoryHeader("드라이버", success));
         Assert.Equal("드라이버 (0)", MsiUpdatesPage.FormatCategoryHeader("드라이버", empty));
         Assert.Equal("드라이버", MsiUpdatesPage.FormatCategoryHeader("드라이버", failed));
         Assert.Equal("드라이버", MsiUpdatesPage.FormatCategoryHeader("드라이버", null));
+        Assert.Equal("유틸리티 (0)", MsiUpdatesPage.FormatCategoryHeader("유틸리티", filteredEmptySuccess));
     }
 
     [Fact]

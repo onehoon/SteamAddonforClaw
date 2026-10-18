@@ -719,6 +719,90 @@ public sealed class MsiUpdateInstalledVersionsTests
     }
 
     [Fact]
+    public void Utility_exclusions_are_exact_case_insensitive_and_precede_installed_version_matching()
+    {
+        const string excludedGuid1 = "00112233-4455-6677-8899-aabbccddeeff";
+        const string excludedGuid2 = "10112233-4455-6677-8899-aabbccddeeff";
+        const string excludedGuid3 = "20112233-4455-6677-8899-aabbccddeeff";
+        const string msiCenterGuid = "30112233-4455-6677-8899-aabbccddeeff";
+        var utilities = new MsiLiveUpdateCatalogCategoryResult(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [
+                new(" MSI App Player Installer CN ", "1.0", null, null, Guid: excludedGuid1),
+                new("intel graphics software", "1.0", null, null, Guid: excludedGuid2),
+                new("MSI App Player Installer", "1.0", null, null, Guid: excludedGuid3),
+                new("MSI Center M", "3.0.2608.3101", null, null, Guid: msiCenterGuid),
+                new("Intel Graphics Command Center", "UWP", null, null)
+            ]);
+        var msi = new MsiLiveUpdateCatalogQueryResult(MsiLiveUpdateCatalogState.Completed,
+            "Claw 8 AI+ A2VM", "kr", "win11",
+            [
+                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Success,
+                    [new("BIOS", "E1T52IMS.113", null, null)]),
+                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Success,
+                    [new("Controller Firmware", "2.0.0.0", null, null)]),
+                new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+                    [new("Intel IPF Driver", "1.2.3.4", null, null)]),
+                utilities
+            ], DateTimeOffset.UtcNow);
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [
+                new("{00112233-4455-6677-8899-aabbccddeeff}", excludedGuid1, null, "MSI App Player Installer CN", "1.0", "MSI"),
+                new("{10112233-4455-6677-8899-aabbccddeeff}", excludedGuid2, null, "Intel Graphics Software", "1.0", "Intel"),
+                new("{20112233-4455-6677-8899-aabbccddeeff}", excludedGuid3, null, "MSI App Player Installer", "1.0", "MSI"),
+                new("{30112233-4455-6677-8899-aabbccddeeff}", msiCenterGuid, null, "MSI Center M", "3.0.2501.0", "MSI")
+            ],
+            [new("Intel Graphics Command Center", "IntelGraphicsExperience_8wekyb3d8bbwe", "9.9.9.9")], null, []);
+        var diagnostics = new List<MsiUpdateCatalogMatchDiagnostic>();
+
+        var snapshot = MsiUpdateCatalogComposer.Compose(msi, new(true, []), inventory,
+            onDiagnostic: diagnostics.Add);
+        var utility = Assert.Single(snapshot.Categories,
+            category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility);
+
+        Assert.Equal(FrontendMsiLiveUpdateCatalogCategoryState.Success, utility.State);
+        Assert.Equal(new[] { "MSI Center M", "Intel Graphics Command Center" }, utility.Entries.Select(entry => entry.Name));
+        Assert.Equal("3.0.2501.0", utility.Entries[0].InstalledVersion);
+        Assert.Equal("9.9.9.9", utility.Entries[1].InstalledVersion);
+        Assert.Single(snapshot.Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Bios).Entries);
+        Assert.Single(snapshot.Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Firmware).Entries);
+        Assert.Contains(snapshot.Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries,
+            entry => entry.Name == "Intel IPF Driver");
+        Assert.Contains(diagnostics, item => item.Category == MsiLiveUpdateCatalogCategory.Utility
+            && item.Outcome == "ExcludedByPolicy" && item.FilteredCount == 3 && item.Name is null);
+        Assert.Equal(2, diagnostics.Count(item => item.Category == MsiLiveUpdateCatalogCategory.Utility
+            && item.VersionSource == "MSI" && item.Outcome is "MatchedRegistry" or "MatchedAppx"));
+        Assert.DoesNotContain(diagnostics, item => item.Name is "MSI App Player Installer CN"
+            or "intel graphics software" or "MSI App Player Installer");
+    }
+
+    [Fact]
+    public void All_excluded_utility_rows_remain_a_successful_empty_category()
+    {
+        var msi = new MsiLiveUpdateCatalogQueryResult(MsiLiveUpdateCatalogState.Completed,
+            "Claw 8 AI+ A2VM", "kr", "win11",
+            [
+                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Success,
+                    [
+                        new("MSI App Player Installer CN", "1.0", null, null),
+                        new("Intel Graphics Software", "1.0", null, null),
+                        new("MSI App Player Installer", "1.0", null, null)
+                    ])
+            ], DateTimeOffset.UtcNow);
+
+        var snapshot = MsiUpdateCatalogComposer.Compose(msi, new(true, []), new([], [], [], [], null, []));
+        var utility = Assert.Single(snapshot.Categories,
+            category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility);
+
+        Assert.Equal(FrontendMsiLiveUpdateCatalogState.Completed, snapshot.State);
+        Assert.Equal(FrontendMsiLiveUpdateCatalogCategoryState.Success, utility.State);
+        Assert.Empty(utility.Entries);
+    }
+
+    [Fact]
     public void Shared_INF_version_is_labeled_heuristic_instead_of_exact()
     {
         var first = Device(@"PCI\VEN_8086&DEV_1234", [@"PCI\VEN_8086&DEV_1234"], "NET", "Intel Network A", "1.2.3.4", 0x8086, 0x1234);

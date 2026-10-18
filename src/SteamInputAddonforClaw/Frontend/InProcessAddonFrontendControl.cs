@@ -2219,7 +2219,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 ("Category", diagnostic.Category), ("Name", SafeMsiCatalogDiagnosticName(diagnostic.Name)),
                 ("VersionSource", diagnostic.VersionSource), ("Outcome", diagnostic.Outcome),
                 ("Confidence", diagnostic.Confidence?.ToString() ?? "Unknown"),
-                ("CandidateCount", diagnostic.CandidateCount), ("VersionCount", diagnostic.VersionCount));
+                ("CandidateCount", diagnostic.CandidateCount), ("VersionCount", diagnostic.VersionCount),
+                ("FilteredCount", diagnostic.FilteredCount));
         });
         object? CatalogCount(FrontendMsiLiveUpdateCatalogCategory category)
         {

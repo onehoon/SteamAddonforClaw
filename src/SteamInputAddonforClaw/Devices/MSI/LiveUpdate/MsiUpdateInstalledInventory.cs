@@ -314,7 +314,8 @@ internal sealed record MsiUpdateCatalogMatchDiagnostic(
     string Outcome,
     FrontendMsiLiveUpdateInstalledVersionConfidence? Confidence = null,
     int CandidateCount = 0,
-    int VersionCount = 0);
+    int VersionCount = 0,
+    int FilteredCount = 0);
 
 internal static class IntelDsaHardwareMatcher
 {
@@ -596,6 +597,13 @@ internal static class MsiUpdateCatalogComposer
         ("Intel NPU Driver", IntelDsaComponentFamily.Npu)
     ];
 
+    private static readonly string[] ExcludedUtilityNames =
+    [
+        "MSI App Player Installer CN",
+        "Intel Graphics Software",
+        "MSI App Player Installer"
+    ];
+
     private sealed record MsiInstalledVersionResolution(
         string? Version,
         FrontendMsiLiveUpdateInstalledVersionConfidence? Confidence,
@@ -652,6 +660,15 @@ internal static class MsiUpdateCatalogComposer
             }
 
             var sourceEntries = source.Entries.ToList();
+            if (sourceCategory == MsiLiveUpdateCatalogCategory.Utility)
+            {
+                var retained = sourceEntries.Where(entry => !IsExcludedUtility(entry)).ToList();
+                var excludedCount = sourceEntries.Count - retained.Count;
+                if (excludedCount > 0)
+                    onDiagnostic?.Invoke(new(sourceCategory, null, "MSI", "ExcludedByPolicy", FilteredCount: excludedCount));
+                sourceEntries = retained;
+            }
+
             var entries = new List<FrontendMsiLiveUpdateCatalogEntry>(sourceEntries.Count
                 + (sourceCategory == MsiLiveUpdateCatalogCategory.Driver ? intelRows.Count : 0));
             foreach (var entry in sourceEntries)
@@ -992,6 +1009,9 @@ internal static class MsiUpdateCatalogComposer
         || device.CompatibleIds.Contains(deviceId, StringComparer.OrdinalIgnoreCase)
         || IntelDsaHardwareMatcher.TryMatchDetectionValue(deviceId,
             device.HardwareIds.Concat(device.CompatibleIds), out _);
+
+    private static bool IsExcludedUtility(MsiLiveUpdateCatalogEntry entry) =>
+        ExcludedUtilityNames.Contains(entry.Name.Trim(), StringComparer.OrdinalIgnoreCase);
 
     private sealed record MsiIntelDuplicateEvaluation(bool Suppress, string Outcome, int CandidateCount, int VersionCount = 0);
 
