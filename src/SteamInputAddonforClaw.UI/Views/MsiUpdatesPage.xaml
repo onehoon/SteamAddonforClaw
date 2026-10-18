@@ -1,0 +1,50 @@
+<UserControl
+    x:Class="SteamInputAddonforClaw.Views.MsiUpdatesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
+    <UserControl.Resources>
+        <Style x:Key="MsiCatalogEntryCardStyle" TargetType="Border">
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+    </UserControl.Resources>
+    <ScrollViewer Padding="32">
+        <StackPanel Spacing="16">
+            <TextBlock x:Uid="MsiUpdates_PageTitle" FontSize="24" FontWeight="SemiBold" Text="MSI Update" />
+            <ctcontrols:SettingsCard ContentAlignment="Vertical">
+                <StackPanel Spacing="12">
+                    <TextBlock x:Uid="MsiUpdates_CatalogOnly" Text="Catalog records only. Installed versions and device applicability are not checked." TextWrapping="Wrap" Opacity="0.8" />
+                    <Grid ColumnSpacing="10" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="MsiUpdatesCheckButton" x:Uid="MsiUpdates_CheckButton" Content="Check for updates" Click="MsiUpdatesCheckButton_Click" />
+                        <ProgressRing x:Name="MsiUpdatesProgressRing" Grid.Column="1" Width="20" Height="20" IsActive="False" Visibility="Collapsed" />
+                        <TextBlock x:Name="MsiUpdatesStatusText" Grid.Column="2" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    </Grid>
+                    <TextBlock x:Name="MsiUpdatesLastCheckedText" TextWrapping="Wrap" Opacity="0.7" Visibility="Collapsed" />
+                    <TabView x:Name="MsiUpdatesTabView" IsAddTabButtonVisible="False" CanReorderTabs="False" CanDragTabs="False" MaxHeight="620">
+                        <TabViewItem x:Uid="MsiUpdates_BiosTab" Header="BIOS" IsClosable="False">
+                            <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesBiosEntriesPanel" Spacing="8" /></ScrollViewer>
+                        </TabViewItem>
+                        <TabViewItem x:Uid="MsiUpdates_FirmwareTab" Header="Firmware" IsClosable="False">
+                            <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesFirmwareEntriesPanel" Spacing="8" /></ScrollViewer>
+                        </TabViewItem>
+                        <TabViewItem x:Uid="MsiUpdates_DriversTab" Header="Drivers" IsClosable="False">
+                            <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesDriverEntriesPanel" Spacing="8" /></ScrollViewer>
+                        </TabViewItem>
+                        <TabViewItem x:Uid="MsiUpdates_UtilitiesTab" Header="Utilities" IsClosable="False">
+                            <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="MsiUpdatesUtilityEntriesPanel" Spacing="8" /></ScrollViewer>
+                        </TabViewItem>
+                    </TabView>
+                </StackPanel>
+            </ctcontrols:SettingsCard>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

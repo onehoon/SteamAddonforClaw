@@ -17,6 +17,7 @@ public sealed class MainNavigationIconContractTests
         var expectedNavigationIcons = new[]
         {
             (Tag: "Device", Content: "Device", Icon: "FontIcon:E772"),
+            (Tag: "MsiUpdates", Content: "MSI Update", Icon: "FontIcon:E895"),
             (Tag: "Controller", Content: "Controller", Icon: "FontIcon:E7FC"),
             (Tag: "Profile", Content: "Steam", Icon: "FontIcon:E8F1"),
             (Tag: "Xbox", Content: "XBOX", Icon: "FontIcon:E990"),

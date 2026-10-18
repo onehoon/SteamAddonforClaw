@@ -25,6 +25,11 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE772;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem x:Uid="MainNav_MsiUpdates" Content="MSI Update" Tag="MsiUpdates">
+                <NavigationViewItem.Icon>
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE895;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem x:Uid="MainNav_Controller" Content="Controller" Tag="Controller">
                 <NavigationViewItem.Icon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
@@ -65,6 +70,7 @@
         <Grid>
             <views:DevicePage x:Name="DeviceContent" />
 
+            <ContentControl x:Name="MsiUpdatesPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="ControllerPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="ProfilePageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="XboxPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />

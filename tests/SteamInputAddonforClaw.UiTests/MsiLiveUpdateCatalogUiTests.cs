@@ -6,35 +6,34 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class MsiLiveUpdateCatalogUiTests
 {
     [Fact]
-    public void Catalog_expander_is_inserted_between_summary_and_existing_center_m_card()
+    public void Catalog_has_a_dedicated_main_navigation_page()
     {
-        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml");
+        var mainWindow = ReadSource("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml");
+        var devicePage = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml");
+        var msiPage = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml");
+        var mainWindowCode = ReadSource("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs");
+        var navigationState = ReadSource("src", "SteamInputAddonforClaw.UI", "MainNavigationState.cs");
 
-        var summary = xaml.IndexOf("x:Name=\"DeviceSummaryCard\"", StringComparison.Ordinal);
-        var expander = xaml.IndexOf("x:Name=\"MsiUpdatesExpander\"", StringComparison.Ordinal);
-        var centerM = xaml.IndexOf("x:Name=\"CenterMStartupInfoBar\"", StringComparison.Ordinal);
-
-        Assert.True(summary >= 0 && summary < expander && expander < centerM);
-        Assert.Contains("x:Uid=\"Device_MsiUpdatesExpander\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"MSI Updates\" IsExpanded=\"False\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Uid=\"MainNav_MsiUpdates\" Content=\"MSI Update\" Tag=\"MsiUpdates\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"MsiUpdatesPageHost\"", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("MsiUpdatesExpander", devicePage, StringComparison.Ordinal);
+        Assert.Contains("x:Uid=\"MsiUpdates_PageTitle\"", msiPage, StringComparison.Ordinal);
+        Assert.Contains("MainNavigationPage.MsiUpdates", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("\"MsiUpdates\" => MainNavigationPage.MsiUpdates", navigationState, StringComparison.Ordinal);
     }
 
     [Fact]
     public void Catalog_query_is_manual_and_tabs_are_fixed()
     {
-        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml");
-        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml.cs");
-        var activate = ExtractMethod(code, "internal void Activate()");
-        var invalidated = ExtractMethod(code, "private void OnStateInvalidated(");
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml");
+        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml.cs");
         var click = ExtractMethod(code, "private async void MsiUpdatesCheckButton_Click(");
 
         Assert.Contains("Click=\"MsiUpdatesCheckButton_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsAddTabButtonVisible=\"False\" CanReorderTabs=\"False\" CanDragTabs=\"False\"", xaml, StringComparison.Ordinal);
         Assert.Equal(4, xaml.Split("<TabViewItem ", StringSplitOptions.None).Length - 1);
         Assert.All(new[] { "Bios", "Firmware", "Drivers", "Utilities" }, name =>
-            Assert.Contains($"Device_MsiUpdates{name}Tab", xaml, StringComparison.Ordinal));
-        Assert.DoesNotContain("RequestMsiLiveUpdateCatalogAsync", activate, StringComparison.Ordinal);
-        Assert.DoesNotContain("RequestMsiLiveUpdateCatalogAsync", invalidated, StringComparison.Ordinal);
+            Assert.Contains($"MsiUpdates_{name}Tab", xaml, StringComparison.Ordinal));
         Assert.Contains("RequestMsiLiveUpdateCatalogAsync", click, StringComparison.Ordinal);
         Assert.DoesNotContain("Content=\"Install\"", xaml, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("MsiUpdatesInstall", xaml, StringComparison.Ordinal);
@@ -47,15 +46,15 @@ public sealed class MsiLiveUpdateCatalogUiTests
         var korean = ReadResources("ko-KR");
         var required = new[]
         {
-            "Device_MsiUpdatesExpander.Header", "Device_MsiUpdatesExpander.Description",
-            "Device_MsiUpdatesCatalogOnly.Text", "Device_MsiUpdatesCheckButton.Content",
-            "Device_MsiUpdatesBiosTab.Header", "Device_MsiUpdatesFirmwareTab.Header",
-            "Device_MsiUpdatesDriversTab.Header", "Device_MsiUpdatesUtilitiesTab.Header",
-            "Device_MsiUpdates_Checking", "Device_MsiUpdates_NotChecked", "Device_MsiUpdates_Completed",
-            "Device_MsiUpdates_PartialFailure", "Device_MsiUpdates_Unavailable", "Device_MsiUpdates_Failed",
-            "Device_MsiUpdates_LastChecked", "Device_MsiUpdates_CategoryFailed", "Device_MsiUpdates_NoEntries",
-            "Device_MsiUpdates_NotCheckedCategory", "Device_MsiUpdates_UnavailableCategory", "Device_MsiUpdates_NoData",
-            "Device_MsiUpdates_LatestVersion", "Device_MsiUpdates_ReleaseDate", "Device_MsiUpdates_VersionNotProvided"
+            "MainNav_MsiUpdates.Content", "MsiUpdates_PageTitle.Text",
+            "MsiUpdates_CatalogOnly.Text", "MsiUpdates_CheckButton.Content",
+            "MsiUpdates_BiosTab.Header", "MsiUpdates_FirmwareTab.Header",
+            "MsiUpdates_DriversTab.Header", "MsiUpdates_UtilitiesTab.Header",
+            "MsiUpdates_Checking", "MsiUpdates_NotChecked", "MsiUpdates_Completed",
+            "MsiUpdates_PartialFailure", "MsiUpdates_Unavailable", "MsiUpdates_Failed",
+            "MsiUpdates_LastChecked", "MsiUpdates_CategoryFailed", "MsiUpdates_NoEntries",
+            "MsiUpdates_NotCheckedCategory", "MsiUpdates_UnavailableCategory", "MsiUpdates_NoData",
+            "MsiUpdates_LatestVersion", "MsiUpdates_ReleaseDate", "MsiUpdates_VersionNotProvided"
         };
 
         Assert.All(required, key =>
@@ -68,7 +67,7 @@ public sealed class MsiLiveUpdateCatalogUiTests
     [Fact]
     public void Catalog_description_decodes_entities_strips_markup_and_preserves_breaks()
     {
-        var formatted = SteamInputAddonforClaw.Views.DevicePage.FormatMsiCatalogDescription(
+        var formatted = SteamInputAddonforClaw.Views.MsiUpdatesPage.FormatMsiCatalogDescription(
             "Steps: &lt;b&gt;Install&lt;/b&gt; ISH_SW&gt;OS Components.<br> 1. Run SetupISS.exe.<br/> 2. Restart.");
 
         Assert.Equal(
@@ -82,8 +81,8 @@ public sealed class MsiLiveUpdateCatalogUiTests
     [Fact]
     public void Catalog_entries_use_the_app_theme_card_style()
     {
-        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml");
-        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml.cs");
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml");
+        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml.cs");
 
         Assert.Contains("x:Key=\"MsiCatalogEntryCardStyle\"", xaml, StringComparison.Ordinal);
         Assert.Contains("{ThemeResource CardBackgroundFillColorDefaultBrush}", xaml, StringComparison.Ordinal);

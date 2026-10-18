@@ -68,6 +68,7 @@ public sealed partial class MainWindow : Window
     private DeveloperPage? _developerMenuContent;
     private ClawSensorProbePage? _clawSensorProbeContent;
     private FanHardwareProbePage? _fanHardwareProbeContent;
+    private MsiUpdatesPage? _msiUpdatesContent;
     private ControllerPage? _controllerContent;
     private ProfilePage? _profileContent;
     private XboxPage? _xboxContent;
@@ -225,6 +226,16 @@ public sealed partial class MainWindow : Window
             page.RenderRequiredComponents(status);
         SettingsPageHost.Content = page;
         return _settingsContent = page;
+    }
+
+    private MsiUpdatesPage GetOrCreateMsiUpdatesPage()
+    {
+        if (_msiUpdatesContent is not null) return _msiUpdatesContent;
+
+        var page = new MsiUpdatesPage();
+        page.Initialize(_frontend);
+        MsiUpdatesPageHost.Content = page;
+        return _msiUpdatesContent = page;
     }
 
     private ControllerPage GetOrCreateControllerPage()
@@ -524,6 +535,7 @@ public sealed partial class MainWindow : Window
         MainNavigationPage.Tweaks => _tweaksContent is not null,
         MainNavigationPage.Profile => _profileContent is not null,
         MainNavigationPage.Xbox => _xboxContent is not null,
+        MainNavigationPage.MsiUpdates => _msiUpdatesContent is not null,
         _ => true,
     };
 
@@ -534,6 +546,7 @@ public sealed partial class MainWindow : Window
             switch (page)
             {
                 case MainNavigationPage.Controller: _ = GetOrCreateControllerPage(); break;
+                case MainNavigationPage.MsiUpdates: _ = GetOrCreateMsiUpdatesPage(); break;
                 case MainNavigationPage.Settings: _ = GetOrCreateSettingsPage(); break;
                 case MainNavigationPage.Overlay: _ = GetOrCreateOverlayPage(); break;
                 case MainNavigationPage.Shortcut: _ = GetOrCreateShortcutPage(); break;
@@ -688,6 +701,7 @@ public sealed partial class MainWindow : Window
         };
         DeveloperContentHost.Visibility = DeveloperContentHost.Content is null ? Visibility.Collapsed : Visibility.Visible;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
+        MsiUpdatesPageHost.Visibility = page == MainNavigationPage.MsiUpdates ? Visibility.Visible : Visibility.Collapsed;
         ProfilePageHost.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         XboxPageHost.Visibility = page == MainNavigationPage.Xbox ? Visibility.Visible : Visibility.Collapsed;
         ControllerPageHost.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
@@ -745,6 +759,7 @@ public sealed partial class MainWindow : Window
     private static string? NavigationTagFor(MainNavigationPage page) => page switch
     {
         MainNavigationPage.Device => "Device",
+        MainNavigationPage.MsiUpdates => "MsiUpdates",
         MainNavigationPage.Controller => "Controller",
         MainNavigationPage.Profile => "Profile",
         MainNavigationPage.Xbox => "Xbox",

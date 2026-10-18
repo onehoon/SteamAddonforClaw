@@ -143,7 +143,7 @@ public sealed class UiArchitectureTests
         Assert.Equal(new[] { "DevicePage" }, eagerPages);
 
         var hosts = pageHostGrid.Elements().Where(element => element.Name.LocalName == "ContentControl").ToArray();
-        Assert.Equal(9, hosts.Length);
+        Assert.Equal(10, hosts.Length);
         Assert.All(hosts, host =>
         {
             Assert.Equal("Collapsed", (string?)host.Attribute("Visibility"));

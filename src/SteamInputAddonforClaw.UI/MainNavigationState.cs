@@ -3,6 +3,7 @@ namespace SteamInputAddonforClaw.Windowing;
 internal enum MainNavigationPage
 {
     Device,
+    MsiUpdates,
     Profile,
     Xbox,
     Controller,
@@ -30,6 +31,7 @@ internal sealed class MainNavigationState
             : selectedTag switch
             {
                 "Device" => MainNavigationPage.Device,
+                "MsiUpdates" => MainNavigationPage.MsiUpdates,
                 "Profile" => MainNavigationPage.Profile,
                 "Xbox" => MainNavigationPage.Xbox,
                 "Controller" => MainNavigationPage.Controller,

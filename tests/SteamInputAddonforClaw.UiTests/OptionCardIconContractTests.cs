@@ -7,7 +7,6 @@ public sealed class OptionCardIconContractTests
 {
     private static readonly (string Page, string Header, string Icon)[] ExpectedIcons =
     [
-        ("DevicePage.xaml", "MSI Updates", "FontIcon:E895"),
         ("DevicePage.xaml", "MSI Center M", "FontIcon:E71D"),
         ("DevicePage.xaml", "TDP Control", "FontIcon:E945"),
         ("DevicePage.xaml", "CPU Boost", "FontIcon:EEA1"),
@@ -58,7 +57,7 @@ public sealed class OptionCardIconContractTests
     [Fact]
     public void Main_app_option_card_icons_match_the_approved_cross_page_map()
     {
-        Assert.Equal(41, ExpectedIcons.Length);
+        Assert.Equal(40, ExpectedIcons.Length);
         var controllerIcons = ExpectedIcons
             .Where(expected => expected.Page == "ControllerPage.xaml")
             .Select(expected => expected.Icon)
