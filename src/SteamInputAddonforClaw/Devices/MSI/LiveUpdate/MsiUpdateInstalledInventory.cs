@@ -28,7 +28,8 @@ internal sealed record MsiUpdateInstalledSoftware(
     string? UpgradeCode,
     string? DisplayName,
     string? DisplayVersion,
-    string? Publisher);
+    string? Publisher,
+    string? RegistrySourceKind = null);
 
 internal sealed record MsiUpdateInstalledPackage(string Name, string FamilyName, string Version);
 
@@ -215,9 +216,11 @@ internal sealed record MsiUpdateInstalledInventory(
                 using var key = uninstall.OpenSubKey(keyName, writable: false);
                 if (key is null) continue;
                 var productCode = ParseGuid(keyName) ?? ParseGuid(SafeValue(key.GetValue("ProductCode")?.ToString()));
+                var sourceKind = hive == RegistryHive.CurrentUser ? "HKCU"
+                    : view == RegistryView.Registry32 ? "HKLM32" : "HKLM64";
                 entries.Add(new(keyName, productCode, ParseGuid(SafeValue(key.GetValue("UpgradeCode")?.ToString())),
                     SafeValue(key.GetValue("DisplayName")?.ToString()), SafeValue(key.GetValue("DisplayVersion")?.ToString()),
-                    SafeValue(key.GetValue("Publisher")?.ToString())));
+                    SafeValue(key.GetValue("Publisher")?.ToString()), sourceKind));
                 if (entries.Count >= MaximumInventoryEntries) break;
             }
         }
@@ -316,6 +319,20 @@ internal sealed record MsiUpdateCatalogMatchDiagnostic(
     int CandidateCount = 0,
     int VersionCount = 0,
     int FilteredCount = 0);
+
+internal sealed record MsiUpdateCatalogRowDiagnostic(
+    MsiLiveUpdateCatalogCategory Category,
+    int SourceIndex,
+    string UiDisposition,
+    string? DispositionReason,
+    FrontendMsiLiveUpdateCatalogEntry? MappedEntry,
+    string? MatchOutcome,
+    FrontendMsiLiveUpdateInstalledVersionConfidence? MatchConfidence,
+    int CandidateCount,
+    int VersionCount,
+    string? DuplicateOutcome,
+    int DuplicateCandidateCount,
+    int DuplicateVersionCount);
 
 internal static class IntelDsaHardwareMatcher
 {
@@ -625,7 +642,9 @@ internal static class MsiUpdateCatalogComposer
         IntelDsaCatalogResult intel,
         MsiUpdateInstalledInventory inventory,
         Action<IntelDsaResolvedDriver>? onIntelMatch = null,
-        Action<MsiUpdateCatalogMatchDiagnostic>? onDiagnostic = null)
+        Action<MsiUpdateCatalogMatchDiagnostic>? onDiagnostic = null,
+        Action<MsiUpdateCatalogRowDiagnostic>? onRowDiagnostic = null,
+        Action<IReadOnlyList<IntelDsaResolvedDriver>>? onResolvedIntelMatches = null)
     {
         var msiSource = MapMsiSource(msi);
         var intelSource = new FrontendMsiLiveUpdateSourceSnapshot(
@@ -633,6 +652,7 @@ internal static class MsiUpdateCatalogComposer
             intel.ErrorKind);
         var intelRows = IntelDsaHardwareMatcher.Resolve(intel,
             inventory, msi.OperatingSystem ?? CurrentWindowsVersion());
+        onResolvedIntelMatches?.Invoke(intelRows);
         foreach (var match in intelRows.Take(16)) onIntelMatch?.Invoke(match);
         var categoryResults = new List<FrontendMsiLiveUpdateCatalogCategorySnapshot>(4);
 
@@ -659,10 +679,14 @@ internal static class MsiUpdateCatalogComposer
                 continue;
             }
 
-            var sourceEntries = source.Entries.ToList();
+            var sourceEntries = source.Entries.Select((entry, sourceIndex) => (Entry: entry, SourceIndex: sourceIndex)).ToList();
             if (sourceCategory == MsiLiveUpdateCatalogCategory.Utility)
             {
-                var retained = sourceEntries.Where(entry => !IsExcludedUtility(entry)).ToList();
+                var excluded = sourceEntries.Where(row => IsExcludedUtility(row.Entry)).ToArray();
+                var retained = sourceEntries.Where(row => !IsExcludedUtility(row.Entry)).ToList();
+                foreach (var row in excluded)
+                    onRowDiagnostic?.Invoke(new(sourceCategory, row.SourceIndex, "ExcludedByPolicy", "ExcludedUtility",
+                        null, null, null, 0, 0, null, 0, 0));
                 var excludedCount = sourceEntries.Count - retained.Count;
                 if (excludedCount > 0)
                     onDiagnostic?.Invoke(new(sourceCategory, null, "MSI", "ExcludedByPolicy", FilteredCount: excludedCount));
@@ -671,19 +695,32 @@ internal static class MsiUpdateCatalogComposer
 
             var entries = new List<FrontendMsiLiveUpdateCatalogEntry>(sourceEntries.Count
                 + (sourceCategory == MsiLiveUpdateCatalogCategory.Driver ? intelRows.Count : 0));
-            foreach (var entry in sourceEntries)
+            foreach (var sourceRow in sourceEntries)
             {
+                var entry = sourceRow.Entry;
+                var duplicate = new MsiIntelDuplicateEvaluation(false, "NotApplicable", 0);
                 if (sourceCategory == MsiLiveUpdateCatalogCategory.Driver)
                 {
-                    var duplicate = EvaluateIntelDuplicate(entry, intelRows, intel.Succeeded);
+                    duplicate = EvaluateIntelDuplicate(entry, intelRows, intel.Succeeded);
                     if (duplicate.Outcome != "NotApplicable")
                         onDiagnostic?.Invoke(new(sourceCategory, entry.Name, "MSI/IntelDsa", duplicate.Outcome,
                             CandidateCount: duplicate.CandidateCount, VersionCount: duplicate.VersionCount));
-                    if (duplicate.Suppress) continue;
+                    if (duplicate.Suppress)
+                    {
+                        onRowDiagnostic?.Invoke(new(sourceCategory, sourceRow.SourceIndex, "SuppressedByIntelDsa",
+                            duplicate.Outcome, null, null, null, 0, 0, duplicate.Outcome,
+                            duplicate.CandidateCount, duplicate.VersionCount));
+                        continue;
+                    }
                 }
 
                 var mapped = MapMsiEntry(sourceCategory, entry, inventory, out var match);
                 entries.Add(mapped);
+                onRowDiagnostic?.Invoke(new(sourceCategory, sourceRow.SourceIndex, "Retained",
+                    duplicate.Outcome == "NotApplicable" ? null : duplicate.Outcome,
+                    mapped, match.Outcome, match.Confidence, match.CandidateCount, match.VersionCount,
+                    duplicate.Outcome == "NotApplicable" ? null : duplicate.Outcome,
+                    duplicate.CandidateCount, duplicate.VersionCount));
                 if (sourceCategory is MsiLiveUpdateCatalogCategory.Driver or MsiLiveUpdateCatalogCategory.Utility)
                     onDiagnostic?.Invoke(new(sourceCategory, entry.Name, "MSI", match.Outcome, match.Confidence,
                         match.CandidateCount, match.VersionCount));

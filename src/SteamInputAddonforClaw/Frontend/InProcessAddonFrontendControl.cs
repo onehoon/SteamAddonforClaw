@@ -2205,6 +2205,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var result = await msiTask.ConfigureAwait(false);
         var intel = await intelTask.ConfigureAwait(false);
         var inventory = await inventoryTask.ConfigureAwait(false);
+        var rowDiagnostics = new List<MsiUpdateCatalogRowDiagnostic>();
+        IReadOnlyList<IntelDsaResolvedDriver> resolvedIntelRows = [];
         var snapshot = MsiUpdateCatalogComposer.Compose(result, intel, inventory, match =>
         {
             var hardwareId = match.Device.VendorId is { } vendorId && match.Device.ProductId is { } productId
@@ -2221,7 +2223,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 ("Confidence", diagnostic.Confidence?.ToString() ?? "Unknown"),
                 ("CandidateCount", diagnostic.CandidateCount), ("VersionCount", diagnostic.VersionCount),
                 ("FilteredCount", diagnostic.FilteredCount));
-        });
+        }, rowDiagnostics.Add, matches => resolvedIntelRows = matches);
         object? CatalogCount(FrontendMsiLiveUpdateCatalogCategory category)
         {
             var item = snapshot.Categories.FirstOrDefault(candidate => candidate.Category == category);
@@ -2244,8 +2246,43 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             ("ResolverDiagnostics", result.ResolverDiagnostics ?? "NotReported"),
             ("Failure", snapshot.ErrorKind ?? string.Join(',', snapshot.Categories.Where(category => category.ErrorKind is not null)
                 .Select(category => $"{category.Category}:{category.ErrorKind}"))));
+
+        try
+        {
+            var diagnosticInput = new MsiUpdateDiagnosticSnapshotInput(hardware.Model, result, intel, inventory,
+                snapshot, rowDiagnostics, resolvedIntelRows, DateTimeOffset.UtcNow,
+                typeof(InProcessAddonFrontendControl).Assembly.GetName().Version?.ToString());
+            var diagnosticWrite = await new MsiUpdateDiagnosticSnapshotStore(AddonDataPaths.MsiUpdateDiagnosticsDirectory)
+                .WriteAsync(diagnosticInput, cancellationToken).ConfigureAwait(false);
+            if (diagnosticWrite.Succeeded)
+            {
+                AppLog.Info("MsiUpdates", "Manual update-check diagnostic snapshot saved.",
+                    ("FileName", diagnosticWrite.FileName), ("MsiRowCount", diagnosticWrite.MsiRowCount),
+                    ("LocalPnpRowCount", diagnosticWrite.LocalPnpRowCount),
+                    ("IntelMatchCount", diagnosticWrite.IntelMatchCount),
+                    ("RetentionErrorKind", diagnosticWrite.RetentionErrorKind));
+            }
+            else
+            {
+                AppLog.Warn("MsiUpdates", "Manual update-check diagnostic snapshot could not be saved.", null,
+                    ("ErrorKind", diagnosticWrite.ErrorKind ?? "Unknown"));
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("MsiUpdates", "Manual update-check diagnostic snapshot could not be saved.", null,
+                ("ErrorKind", SafeDiagnosticExceptionKind(exception)));
+        }
         return snapshot;
     }
+
+    private static string SafeDiagnosticExceptionKind(Exception exception) =>
+        new string(exception.GetType().Name.Where(character => char.IsLetterOrDigit(character) || character is '_' or '-')
+            .Take(64).ToArray());
 
     private static string? SafeMsiCatalogDiagnosticName(string? value)
     {
