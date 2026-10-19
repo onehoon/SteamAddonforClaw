@@ -87,7 +87,7 @@
   <data name="Device_MaximumProcessorStateDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Device_MaximumProcessorStateExpander.Description" xml:space="preserve"><value>Set the Windows maximum processor performance state to 99% or 100%. This is not a CPU utilization limit. Turning this off stops applying the setting but does not restore the previous value.</value></data>
   <data name="Device_MaximumProcessorStateExpander.Header" xml:space="preserve"><value>Maximum Processor State</value></data>
-  <data name="MsiUpdates_CatalogOnly.Text" xml:space="preserve"><value>Read-only version information · no update-availability verdict, downloads, or installs.</value></data>
+  <data name="MsiUpdates_CatalogOnly.Text" xml:space="preserve"><value>Read-only version check · update availability is shown; downloads and installation are not supported yet.</value></data>
   <data name="MsiUpdates_CheckButton.Content" xml:space="preserve"><value>Check for updates</value></data>
   <data name="MsiUpdates_BiosTab.Header" xml:space="preserve"><value>BIOS</value></data>
   <data name="MsiUpdates_FirmwareTab.Header" xml:space="preserve"><value>Firmware</value></data>
@@ -95,7 +95,7 @@
   <data name="MsiUpdates_UtilitiesTab.Header" xml:space="preserve"><value>Utilities</value></data>
   <data name="MsiUpdates_Checking" xml:space="preserve"><value>Checking catalogs and installed versions…</value></data>
   <data name="MsiUpdates_NotChecked" xml:space="preserve"><value>Select Check for updates to inspect available catalog and installed-version data.</value></data>
-  <data name="MsiUpdates_Completed" xml:space="preserve"><value>Version information loaded. No update-availability verdict is made.</value></data>
+  <data name="MsiUpdates_Completed" xml:space="preserve"><value>Version information loaded.</value></data>
   <data name="MsiUpdates_PartialFailure" xml:space="preserve"><value>Some sources or installed versions could not be read. Available information is shown.</value></data>
   <data name="MsiUpdates_Unavailable" xml:space="preserve"><value>MSI Update data is unavailable for this device.</value></data>
   <data name="MsiUpdates_Failed" xml:space="preserve"><value>The update-data check failed. You can try again.</value></data>
@@ -112,10 +112,17 @@
   <data name="MsiUpdates_InstalledUnavailable" xml:space="preserve"><value>Installed version unavailable</value></data>
   <data name="MsiUpdates_SourceMsi" xml:space="preserve"><value>Source: MSI</value></data>
   <data name="MsiUpdates_SourceIntelDsa" xml:space="preserve"><value>Source: Intel DSA</value></data>
+  <data name="MsiUpdates_CompactSourceMsi" xml:space="preserve"><value>MSI</value></data>
+  <data name="MsiUpdates_CompactSourceIntelDsa" xml:space="preserve"><value>Intel DSA</value></data>
   <data name="MsiUpdates_MsiSourcePartial" xml:space="preserve"><value>Some MSI catalog data could not be read.</value></data>
   <data name="MsiUpdates_IntelSourcePartial" xml:space="preserve"><value>Intel DSA data is unavailable.</value></data>
   <data name="MsiUpdates_InventoryPartial" xml:space="preserve"><value>Some installed versions could not be read.</value></data>
   <data name="MsiUpdates_ReleaseDate" xml:space="preserve"><value>Released {0}</value></data>
+  <data name="MsiUpdates_StatusUpdateAvailable" xml:space="preserve"><value>Update available</value></data>
+  <data name="MsiUpdates_StatusUpToDate" xml:space="preserve"><value>Up to date</value></data>
+  <data name="MsiUpdates_StatusUnknown" xml:space="preserve"><value>Unknown</value></data>
+  <data name="MsiUpdates_StatusUnknownAccessible" xml:space="preserve"><value>Unable to determine update status</value></data>
+  <data name="MsiUpdates_UpdateButton" xml:space="preserve"><value>Update</value></data>
   <data name="Device_PageTitle.Text" xml:space="preserve"><value>Device</value></data>
   <data name="Device_PowerMode_InitializationFailed" xml:space="preserve"><value>Windows Power Mode could not be initialized.</value></data>
   <data name="Device_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>

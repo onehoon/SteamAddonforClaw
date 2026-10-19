@@ -165,7 +165,10 @@ public sealed class MsiLiveUpdateCatalogUiTests
             "MsiUpdates_NotCheckedCategory", "MsiUpdates_UnavailableCategory", "MsiUpdates_NoData",
             "MsiUpdates_LatestVersion", "MsiUpdates_LatestIntelPackage", "MsiUpdates_LatestUnavailable",
             "MsiUpdates_InstalledVersion", "MsiUpdates_InstalledEstimated", "MsiUpdates_InstalledUnavailable",
-            "MsiUpdates_SourceMsi", "MsiUpdates_SourceIntelDsa", "MsiUpdates_MsiSourcePartial",
+            "MsiUpdates_SourceMsi", "MsiUpdates_SourceIntelDsa",
+            "MsiUpdates_CompactSourceMsi", "MsiUpdates_CompactSourceIntelDsa",
+            "MsiUpdates_StatusUpdateAvailable", "MsiUpdates_StatusUpToDate", "MsiUpdates_StatusUnknown",
+            "MsiUpdates_StatusUnknownAccessible", "MsiUpdates_UpdateButton", "MsiUpdates_MsiSourcePartial",
             "MsiUpdates_IntelSourcePartial", "MsiUpdates_InventoryPartial", "MsiUpdates_ReleaseDate"
         };
 
@@ -186,6 +189,14 @@ public sealed class MsiLiveUpdateCatalogUiTests
         var koreanValues = ReadResourceMap("ko-KR");
         Assert.All(englishValues, item => Assert.False(string.IsNullOrWhiteSpace(item.Value), item.Key));
         Assert.All(koreanValues, item => Assert.False(string.IsNullOrWhiteSpace(item.Value), item.Key));
+        Assert.Equal("Source: MSI", englishValues["MsiUpdates_SourceMsi"]);
+        Assert.Equal("출처: MSI", koreanValues["MsiUpdates_SourceMsi"]);
+        Assert.Equal("MSI", englishValues["MsiUpdates_CompactSourceMsi"]);
+        Assert.Equal("MSI", koreanValues["MsiUpdates_CompactSourceMsi"]);
+        Assert.Contains("downloads and installation are not supported", englishValues["MsiUpdates_CatalogOnly.Text"], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("다운로드와 설치는 아직 지원하지 않습니다", koreanValues["MsiUpdates_CatalogOnly.Text"], StringComparison.Ordinal);
+        Assert.DoesNotContain("no update-availability verdict", englishValues["MsiUpdates_Completed"], StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("판정하지 않습니다", koreanValues["MsiUpdates_Completed"], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -210,9 +221,10 @@ public sealed class MsiLiveUpdateCatalogUiTests
     }
 
     [Fact]
-    public void Catalog_projection_shows_installed_version_source_and_NPU_package_without_a_verdict()
+    public void Catalog_projection_shows_installed_version_source_and_comparison_status()
     {
         var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml.cs");
+        var render = ExtractMethod(code, "private void RenderMsiLiveUpdateCategory(");
         var resources = ReadResourceMap("en-US");
 
         Assert.Contains("entry.InstalledVersion", code, StringComparison.Ordinal);
@@ -221,9 +233,33 @@ public sealed class MsiLiveUpdateCatalogUiTests
         Assert.Contains("MsiUpdates_LatestIntelPackage", code, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_InstalledEstimated", code, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_IntelSourcePartial", code, StringComparison.Ordinal);
-        Assert.Contains("no update-availability verdict", resources["MsiUpdates_CatalogOnly.Text"], StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("UpdateAvailable", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("UpToDate", code, StringComparison.Ordinal);
+        Assert.Contains("update availability is shown", resources["MsiUpdates_CatalogOnly.Text"], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("entry.ComparisonStatus switch", render, StringComparison.Ordinal);
+        Assert.Contains("FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable", render, StringComparison.Ordinal);
+        Assert.Contains("FrontendMsiLiveUpdateComparisonStatus.UpToDate", render, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_StatusUnknown", render, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_StatusUnknownAccessible", render, StringComparison.Ordinal);
+        Assert.Contains("Orientation = Orientation.Horizontal", render, StringComparison.Ordinal);
+        Assert.Contains("VerticalAlignment = VerticalAlignment.Center", render, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetColumn(actions, 1)", render, StringComparison.Ordinal);
+        Assert.Contains("if (entry.ComparisonStatus == FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)", render, StringComparison.Ordinal);
+        Assert.Contains("new Button", render, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled = false", render, StringComparison.Ordinal);
+        Assert.DoesNotContain("Click =", render, StringComparison.Ordinal);
+        Assert.DoesNotContain("Command =", render, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.SetName(statusText, accessibleStatus)", render, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_CompactSourceMsi", render, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_CompactSourceIntelDsa", render, StringComparison.Ordinal);
+        Assert.True(render.IndexOf("MsiUpdates_InstalledVersion", StringComparison.Ordinal)
+            < render.IndexOf("GetLatestVersionLabel(entry)", StringComparison.Ordinal));
+        Assert.True(render.IndexOf("GetLatestVersionLabel(entry)", StringComparison.Ordinal)
+            < render.IndexOf("MsiUpdates_CompactSourceIntelDsa", StringComparison.Ordinal));
+        Assert.True(render.IndexOf("MsiUpdates_CompactSourceIntelDsa", StringComparison.Ordinal)
+            < render.IndexOf("MsiUpdates_ReleaseDate", StringComparison.Ordinal));
+        Assert.Contains("RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Bios", code, StringComparison.Ordinal);
+        Assert.Contains("RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Firmware", code, StringComparison.Ordinal);
+        Assert.Contains("RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Driver", code, StringComparison.Ordinal);
+        Assert.Contains("RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Utility", code, StringComparison.Ordinal);
     }
 
     [Fact]
