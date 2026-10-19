@@ -2223,7 +2223,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 ("Confidence", diagnostic.Confidence?.ToString() ?? "Unknown"),
                 ("CandidateCount", diagnostic.CandidateCount), ("VersionCount", diagnostic.VersionCount),
                 ("FilteredCount", diagnostic.FilteredCount));
-        }, rowDiagnostics.Add, matches => resolvedIntelRows = matches);
+        }, rowDiagnostics.Add, matches => resolvedIntelRows = matches,
+            hardwareModelId: hardware.Model);
         object? CatalogCount(FrontendMsiLiveUpdateCatalogCategory category)
         {
             var item = snapshot.Categories.FirstOrDefault(candidate => candidate.Category == category);
