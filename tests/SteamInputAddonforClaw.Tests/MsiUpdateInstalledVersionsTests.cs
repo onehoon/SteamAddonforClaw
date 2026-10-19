@@ -777,6 +777,194 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable, utility.ComparisonStatus);
     }
 
+    [Theory]
+    [InlineData("4.19", "4.19", FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("4.18", "4.19", FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, FrontendMsiLiveUpdateComparisonStatus.Unknown)]
+    [InlineData("0x0419", "0x0419", FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, FrontendMsiLiveUpdateComparisonStatus.Unknown)]
+    [InlineData("4.x", "4.x", FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, FrontendMsiLiveUpdateComparisonStatus.Unknown)]
+    [InlineData("4.19", "4.19", FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, FrontendMsiLiveUpdateComparisonStatus.Unknown)]
+    public void Controller_firmware_verdict_requires_exact_owned_capture_and_equal_dotted_version(
+        string installed, string offered,
+        FrontendMsiLiveUpdateInstalledVersionConfidence confidence,
+        FrontendMsiLiveUpdateComparisonStatus expected)
+    {
+        var catalogEntry = new MsiLiveUpdateCatalogEntry("Controller Firmware", offered, null, null,
+            DeviceId: @"USB\VID_0DB0&PID_1901");
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Firmware,
+            MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
+        var inventory = new MsiUpdateInstalledInventory([], [], [], [],
+            new(installed, confidence), []);
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+                IntelDsaCatalogResult.Failed("Http403"), inventory)
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Firmware).Entries);
+
+        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Catalog, entry.LatestVersionKind);
+        Assert.Equal(expected, entry.ComparisonStatus);
+    }
+
+    [Fact]
+    public void Controller_firmware_verdict_stays_unknown_without_a_capture_or_controller_identity()
+    {
+        var firmware = new MsiLiveUpdateCatalogEntry("Controller Firmware", "4.19", null, null,
+            DeviceId: @"USB\VID_0DB0&PID_1902");
+        var unrelated = new MsiLiveUpdateCatalogEntry("Wireless Firmware", "4.19", null, null);
+        var msi = new MsiLiveUpdateCatalogQueryResult(MsiLiveUpdateCatalogState.Completed,
+            "Claw 8 AI+ CG3EM", "kr", "win11",
+            [
+                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Success, [firmware, unrelated]),
+                new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Empty, [])
+            ], DateTimeOffset.UtcNow);
+        var inventory = new MsiUpdateInstalledInventory([], [], [], [], null, []);
+
+        var entries = MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), inventory)
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Firmware).Entries;
+
+        Assert.All(entries, entry => Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus));
+
+        var capturedInventory = inventory with
+        {
+            ControllerFirmware = new("4.19", FrontendMsiLiveUpdateInstalledVersionConfidence.Exact)
+        };
+        var wrongIdentity = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Firmware,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [new("Wireless Firmware", "4.19", null, null, DeviceId: @"USB\VID_1234&PID_5678"),
+                new("Controller Firmware", "4.19", null, null, DeviceId: @"USB\VID_0DB0&PID_1903")]));
+        var wrongIdentityEntries = MsiUpdateCatalogComposer.Compose(
+                wrongIdentity, IntelDsaCatalogResult.Failed("Http403"), capturedInventory)
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Firmware).Entries;
+        Assert.All(wrongIdentityEntries, entry => Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus));
+    }
+
+    [Theory]
+    [InlineData("Goodix FingerPrinter Driver", "USB\\VID_27C6&PID_6090", "3.12144.0.160", "3.12144.0.100", "3.12144.0.100", FrontendMsiLiveUpdateVersionKind.Package, FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("Goodix FingerPrinter Driver", "USB\\VID_27C6&PID_6090", "3.12144.0.100", "3.12144.0.100", "3.12144.0.100", FrontendMsiLiveUpdateVersionKind.Package, FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("Intel Game Assist Driver", "PCI\\VEN_8086&DEV_E45D", "2.0.1801.30", "1.9.602.30", null, FrontendMsiLiveUpdateVersionKind.Catalog, FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("Intel Game Assist Driver", "PCI\\VEN_8086&DEV_E45D", "1.9.602.30", "1.9.602.30", null, FrontendMsiLiveUpdateVersionKind.Catalog, FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("Intel Game Assist Driver", "PCI\\VEN_8086&DEV_E45D", "1.8.602.30", "1.9.602.30", null, FrontendMsiLiveUpdateVersionKind.Catalog, FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)]
+    [InlineData("Intel Dynamic Tuning Driver", "ACPI\\INTC10D5", "9.1.10009.1745", "9.1.10009.1745", null, FrontendMsiLiveUpdateVersionKind.Catalog, FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("Intel Trusted Execution Technology Driver", "ACPI\\VEN_INTC&DEV_1025", "1.21.18.0", "1.21.18.0", "1.21.18.0", FrontendMsiLiveUpdateVersionKind.Package, FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("Intel PPM Provision Driver", "ACPI\\INTC1025", "1.0.0.255", "1.0.0.255", null, FrontendMsiLiveUpdateVersionKind.Catalog, FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("Goodix FingerPrinter Driver", "USB\\VID_27C6&PID_6090", "3.12144.0.100", "3.12144.0.160", "3.12144.0.160", FrontendMsiLiveUpdateVersionKind.Package, FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)]
+    public void Observed_single_device_MSI_driver_families_compare_only_exact_precise_matches(
+        string name, string hardwareId, string installed, string offered, string? packageVersion,
+        FrontendMsiLiveUpdateVersionKind expectedKind,
+        FrontendMsiLiveUpdateComparisonStatus expectedStatus)
+    {
+        var device = DriverDevice(hardwareId + @"\INSTANCE_1", hardwareId,
+            name.StartsWith("Goodix", StringComparison.Ordinal) ? "Biometric" : "SoftwareComponent",
+            name.StartsWith("Goodix", StringComparison.Ordinal) ? "Goodix" : "Intel",
+            installed);
+        var catalogEntry = new MsiLiveUpdateCatalogEntry(name, offered, null, null,
+            DeviceId: hardwareId, PackageVersion: packageVersion);
+
+        var entry = ComposeDriverEntry(catalogEntry, device);
+
+        Assert.Equal(installed, entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, entry.InstalledVersionConfidence);
+        Assert.Equal(expectedKind, entry.LatestVersionKind);
+        Assert.Equal(expectedStatus, entry.ComparisonStatus);
+    }
+
+    [Fact]
+    public void Observed_single_device_MSI_driver_families_reject_conflicting_catalog_fields_and_vague_ids()
+    {
+        var preciseId = @"USB\VID_27C6&PID_6090";
+        var device = DriverDevice(preciseId + @"\INSTANCE_1", preciseId, "Biometric", "Goodix", "3.12144.0.160");
+        var conflict = ComposeDriverEntry(new MsiLiveUpdateCatalogEntry(
+            "Goodix FingerPrinter Driver", "3.12144.0.100", null, null,
+            DeviceId: preciseId, PackageVersion: "3.12144.0.101"), device);
+        var vagueId = @"USB\VID_27C6";
+        var vagueDevice = DriverDevice(vagueId + @"\INSTANCE_1", vagueId, "Biometric", "Goodix", "3.12144.0.160");
+        var vague = ComposeDriverEntry(new MsiLiveUpdateCatalogEntry(
+            "Goodix FingerPrinter Driver", "3.12144.0.100", null, null,
+            DeviceId: vagueId, PackageVersion: "3.12144.0.100"), vagueDevice);
+        var unsupported = ComposeDriverEntry(new MsiLiveUpdateCatalogEntry(
+            "Unrelated OEM Driver", "3.12144.0.100", null, null,
+            DeviceId: preciseId, PackageVersion: "3.12144.0.100"), device);
+        var wrongHardwareId = ComposeDriverEntry(new MsiLiveUpdateCatalogEntry(
+            "Goodix FingerPrinter Driver", "3.12144.0.100", null, null,
+            DeviceId: @"USB\VID_27C6&PID_6091", PackageVersion: "3.12144.0.100"), device);
+        var dynamicConflict = ComposeDriverEntry(new MsiLiveUpdateCatalogEntry(
+            "Intel Dynamic Tuning Driver", "9.1.10009.1745", null, null,
+            DeviceId: @"ACPI\INTC10D5", PackageVersion: "9.1.10009.1746"),
+            DriverDevice(@"ACPI\INTC10D5\INSTANCE_1", @"ACPI\INTC10D5", "System", "Intel", "9.1.10009.1745"));
+        var ppmMalformed = ComposeDriverEntry(new MsiLiveUpdateCatalogEntry(
+            "Intel PPM Provision Driver", "1.0.0.x", null, null,
+            DeviceId: @"ACPI\INTC1025"),
+            DriverDevice(@"ACPI\INTC1025\INSTANCE_1", @"ACPI\INTC1025", "SoftwareComponent", "Intel", "1.0.0.x"));
+
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, conflict.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, vague.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, unsupported.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, wrongHardwareId.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, dynamicConflict.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, ppmMalformed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void Observed_single_device_MSI_driver_families_reject_ambiguous_present_devices()
+    {
+        var hardwareId = @"USB\VID_27C6&PID_6090";
+        var catalogEntry = new MsiLiveUpdateCatalogEntry(
+            "Goodix FingerPrinter Driver", "3.12144.0.100", null, null,
+            DeviceId: hardwareId, PackageVersion: "3.12144.0.100");
+        var first = DriverDevice(hardwareId + @"\INSTANCE_1", hardwareId, "Biometric", "Goodix", "3.12144.0.160");
+        var second = DriverDevice(hardwareId + @"\INSTANCE_2", hardwareId, "Biometric", "Goodix", "3.12144.0.160");
+
+        var entry = ComposeDriverEntry(catalogEntry, first, second);
+
+        Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, entry.InstalledVersionConfidence);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+    }
+
+    [Theory]
+    [InlineData("DTS Driver", "DTS", "SoftwareComponent", "SWC\\VEN_DTSI&DEV_0001", "1.16.4.0", 2)]
+    [InlineData("IntelliGo APO Driver", "intelliGo", "AudioProcessingObject", "SWC\\VEN_IGO&DEV_0002", "100.1.4.2709", 4)]
+    public void Observed_audio_driver_families_allow_only_same_version_family_equality(
+        string name, string provider, string deviceClass, string hardwareId, string version, int candidateCount)
+    {
+        var devices = Enumerable.Range(1, candidateCount)
+            .Select(index => DriverDevice($"{hardwareId}\\COMPONENT_{index}", hardwareId,
+                index % 2 == 0 ? "SoftwareComponent" : deviceClass, provider, version))
+            .ToArray();
+        var catalogEntry = new MsiLiveUpdateCatalogEntry(name, version, null, null,
+            DeviceId: hardwareId, PackageVersion: name == "IntelliGo APO Driver" ? version : null);
+
+        var entry = ComposeDriverEntry(catalogEntry, devices);
+
+        Assert.Equal(version, entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, entry.InstalledVersionConfidence);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, entry.ComparisonStatus);
+    }
+
+    [Fact]
+    public void Observed_audio_driver_families_keep_mixed_unrelated_broad_and_unequal_matches_unknown()
+    {
+        const string dtsId = @"SWC\VEN_DTSI&DEV_0001";
+        var dtsOne = DriverDevice(dtsId + @"\COMPONENT_1", dtsId, "SoftwareComponent", "DTS", "1.16.4.0");
+        var dtsTwo = DriverDevice(dtsId + @"\COMPONENT_2", dtsId, "AudioProcessingObject", "DTS", "1.16.4.1");
+        var mixed = ComposeDriverEntry(new("DTS Driver", "1.16.4.0", null, null, DeviceId: dtsId), dtsOne, dtsTwo);
+
+        var unrelated = DriverDevice(dtsId + @"\COMPONENT_2", dtsId, "AudioProcessingObject", "Other Audio", "1.16.4.0");
+        var wrongFamily = ComposeDriverEntry(new("DTS Driver", "1.16.4.0", null, null, DeviceId: dtsId), dtsOne, unrelated);
+
+        const string broadId = @"SWC\VEN_DTSI";
+        var broadOne = DriverDevice(broadId + @"\COMPONENT_1", broadId, "SoftwareComponent", "DTS", "1.16.4.0");
+        var broadTwo = DriverDevice(broadId + @"\COMPONENT_2", broadId, "AudioProcessingObject", "DTS", "1.16.4.0");
+        var broad = ComposeDriverEntry(new("DTS Driver", "1.16.4.0", null, null, DeviceId: broadId), broadOne, broadTwo);
+
+        var unequal = ComposeDriverEntry(new("DTS Driver", "1.16.4.1", null, null, DeviceId: dtsId),
+            dtsOne, dtsOne with { DeviceId = dtsId + @"\COMPONENT_2" });
+
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, mixed.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, wrongFamily.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, broad.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, unequal.ComparisonStatus);
+    }
+
     [Fact]
     public void UWP_sentinel_is_not_displayed_as_a_version_and_AppX_requires_exact_package_identity()
     {
@@ -804,6 +992,150 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, matching.ComparisonStatus);
         Assert.Null(unmatched.InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, unmatched.ComparisonStatus);
+    }
+
+    [Fact]
+    public void AppX_package_version_fields_are_formatted_as_invariant_numeric_components()
+    {
+        Assert.Equal("1.2.3.4", MsiUpdateInstalledInventory.FormatAppxVersion(1, 2, 3, 4));
+        Assert.Equal("65535.0.9.1", MsiUpdateInstalledInventory.FormatAppxVersion(ushort.MaxValue, 0, 9, 1));
+    }
+
+    [Fact]
+    public void Known_UWP_utilities_resolve_only_the_exact_AppX_name_and_publisher_family()
+    {
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [
+                new("Realtek Audio Control", "UWP", null, null),
+                new("DTS Audio Processing", "UWP", null, null)
+            ]));
+        var inventory = new MsiUpdateInstalledInventory([], [], [],
+            [
+                new("RealtekSemiconductorCorp.RealtekAudioControl",
+                    "RealtekSemiconductorCorp.RealtekAudioControl_dt26b99r8h8gj", "1.2.3.4"),
+                new("DTSInc.DTSAudioProcessing",
+                    "DTSInc.DTSAudioProcessing_t5j2fzbtdg37r", "5.6.7.8")
+            ], null, []);
+
+        var entries = MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), inventory)
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries;
+
+        Assert.Equal("1.2.3.4", entries[0].InstalledVersion);
+        Assert.Equal("5.6.7.8", entries[1].InstalledVersion);
+        Assert.All(entries, entry =>
+        {
+            Assert.Null(entry.Version);
+            Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+        });
+
+        var lookalikeInventory = new MsiUpdateInstalledInventory([], [], [],
+            [
+                new("RealtekSemiconductorCorp.RealtekAudioControl",
+                    "RealtekSemiconductorCorp.RealtekAudioControl_wrong", "1.2.3.4"),
+                new("DTSInc.DTSAudioProcessing",
+                    "DTSInc.DTSAudioProcessing_wrong", "5.6.7.8")
+            ], null, []);
+        var lookalikes = MsiUpdateCatalogComposer.Compose(
+                msi, IntelDsaCatalogResult.Failed("Http403"), lookalikeInventory)
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries;
+        Assert.All(lookalikes, entry => Assert.Null(entry.InstalledVersion));
+    }
+
+    [Fact]
+    public void Synthetic_CG3EM_capture_applies_only_the_evidenced_version_verdicts()
+    {
+        const string goodixId = @"USB\VID_27C6&PID_6090";
+        const string gameAssistId = @"PCI\VEN_8086&DEV_E45D";
+        const string dynamicTuningId = @"ACPI\INTC10D5";
+        const string trustedExecutionId = @"ACPI\VEN_INTC&DEV_1025";
+        const string ppmId = @"ACPI\INTC1025";
+        const string dtsId = @"SWC\VEN_DTSI";
+        const string intelliGoId = @"SWC\VEN_IGO";
+        const string npuId = @"PCI\VEN_8086&DEV_B03E";
+
+        var firmware = new MsiLiveUpdateCatalogEntry("Controller Firmware", "4.19", null, null,
+            DeviceId: @"USB\VID_0DB0&PID_1901");
+        var drivers = new MsiLiveUpdateCatalogCategoryResult(MsiLiveUpdateCatalogCategory.Driver,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [
+                new("Goodix FingerPrinter Driver", "3.12144.0.100", null, null,
+                    DeviceId: goodixId, PackageVersion: "3.12144.0.100"),
+                new("Intel Game Assist Driver", "1.9.602.30", null, null, DeviceId: gameAssistId),
+                new("Intel Dynamic Tuning Driver", "9.1.10009.1745", null, null, DeviceId: dynamicTuningId),
+                new("Intel Trusted Execution Technology Driver", "1.21.18.0", null, null,
+                    DeviceId: trustedExecutionId, PackageVersion: "1.21.18.0"),
+                new("Intel PPM Provision Driver", "1.0.0.255", null, null, DeviceId: ppmId),
+                new("DTS Driver", "1.16.4.0", null, null, DeviceId: dtsId),
+                new("IntelliGo APO Driver", "100.1.4.2709", null, null,
+                    DeviceId: intelliGoId, PackageVersion: "100.1.4.2709"),
+                new("Unmatched Chipset Driver", "10.1.56.28", null, null)
+            ]);
+        var utilities = new MsiLiveUpdateCatalogCategoryResult(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [new("Realtek Audio Control", "UWP", null, null), new("DTS Audio Processing", "UWP", null, null)]);
+        var msi = new MsiLiveUpdateCatalogQueryResult(MsiLiveUpdateCatalogState.Completed,
+            "Claw 8 AI+ CG3EM", "kr", "win11",
+            [
+                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Success, [firmware]),
+                drivers,
+                utilities
+            ], DateTimeOffset.UtcNow);
+        var pnpDevices = new List<MsiUpdateInstalledPnpDevice>
+        {
+            DriverDevice(goodixId + @"\INSTANCE_1", goodixId, "Biometric", "Goodix", "3.12144.0.160"),
+            DriverDevice(gameAssistId + @"\INSTANCE_1", gameAssistId, "System", "Intel", "2.0.1801.30"),
+            DriverDevice(dynamicTuningId + @"\INSTANCE_1", dynamicTuningId, "System", "Intel", "9.1.10009.1745"),
+            DriverDevice(trustedExecutionId + @"\INSTANCE_1", trustedExecutionId, "System", "Intel", "1.21.18.0"),
+            DriverDevice(ppmId + @"\INSTANCE_1", ppmId, "SoftwareComponent", "Intel", "1.0.0.255"),
+            DriverDevice(dtsId + @"\COMPONENT_1", dtsId, "SoftwareComponent", "DTS", "1.16.4.0"),
+            DriverDevice(dtsId + @"\COMPONENT_2", dtsId, "AudioProcessingObject", "DTS", "1.16.4.0"),
+            DriverDevice(intelliGoId + @"\COMPONENT_1", intelliGoId, "SoftwareComponent", "IntelliGo", "100.1.4.2709"),
+            DriverDevice(intelliGoId + @"\COMPONENT_2", intelliGoId, "SoftwareComponent", "IntelliGo", "100.1.4.2709"),
+            DriverDevice(intelliGoId + @"\COMPONENT_3", intelliGoId, "AudioProcessingObject", "IntelliGo", "100.1.4.2709"),
+            DriverDevice(intelliGoId + @"\COMPONENT_4", intelliGoId, "AudioProcessingObject", "IntelliGo", "100.1.4.2709"),
+            Device(npuId, [npuId], "ComputeAccelerator", "Intel AI Boost NPU", "32.0.100.5540", 0x8086, 0xB03E)
+        };
+        var inventory = new MsiUpdateInstalledInventory([], pnpDevices, [],
+            [
+                new("RealtekSemiconductorCorp.RealtekAudioControl",
+                    "RealtekSemiconductorCorp.RealtekAudioControl_dt26b99r8h8gj", "1.0.0.0"),
+                new("DTSInc.DTSAudioProcessing", "DTSInc.DTSAudioProcessing_t5j2fzbtdg37r", "1.0.0.0")
+            ], new("4.19", FrontendMsiLiveUpdateInstalledVersionConfidence.Exact), []);
+        var npuPackage = IntelPackage("npu", "Intel NPU Driver", false,
+            IntelComponent("OtherDrivers", null, "VEN_8086&DEV_B03E"), version: "32.0.100.5540");
+
+        var snapshot = MsiUpdateCatalogComposer.Compose(msi,
+            new(true, [npuPackage]), inventory);
+        var msiEntries = snapshot.Categories.SelectMany(category => category.Entries)
+            .Where(entry => entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.Msi)
+            .ToDictionary(entry => entry.Name, StringComparer.Ordinal);
+        var dsaNpu = Assert.Single(snapshot.Categories.Single(category =>
+            category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries,
+            entry => entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa);
+
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate,
+            msiEntries["Controller Firmware"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate,
+            msiEntries["Goodix FingerPrinter Driver"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate,
+            msiEntries["Intel Game Assist Driver"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate,
+            msiEntries["Intel Dynamic Tuning Driver"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate,
+            msiEntries["Intel Trusted Execution Technology Driver"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate,
+            msiEntries["Intel PPM Provision Driver"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["DTS Driver"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["IntelliGo APO Driver"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["Unmatched Chipset Driver"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["Realtek Audio Control"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["DTS Audio Processing"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, dsaNpu.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, dsaNpu.LatestVersionKind);
+        Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic,
+            msiEntries["DTS Driver"].InstalledVersionConfidence);
     }
 
     [Fact]
@@ -953,6 +1285,60 @@ public sealed class MsiUpdateInstalledVersionsTests
 
         Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, entry.LatestVersionKind);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+    }
+
+    [Theory]
+    [InlineData("32.0.100.5540", FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("32.0.100.5539", FrontendMsiLiveUpdateComparisonStatus.Unknown)]
+    [InlineData("32.0.100.5541", FrontendMsiLiveUpdateComparisonStatus.Unknown)]
+    public void Intel_NPU_package_verdict_allows_exact_identity_equality_only(
+        string installed, FrontendMsiLiveUpdateComparisonStatus expected)
+    {
+        var deviceId = @"PCI\VEN_8086&DEV_643E";
+        var device = Device(deviceId, [deviceId], "System", "Intel AI Boost NPU", installed, 0x8086, 0x643E);
+        var package = IntelPackage("npu", "Intel NPU Driver", false,
+            IntelComponent("OtherDrivers", null, "VEN_8086&DEV_643E"), version: "32.0.100.5540");
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(
+                MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, [])),
+                new(true, [package]), Inventory(device))
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+
+        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, entry.LatestVersionKind);
+        Assert.Equal(expected, entry.ComparisonStatus);
+    }
+
+    [Fact]
+    public void Intel_NPU_package_verdict_rejects_malformed_equal_versions()
+    {
+        var deviceId = @"PCI\VEN_8086&DEV_643E";
+        var device = Device(deviceId, [deviceId], "System", "Intel AI Boost NPU", "not-a-version", 0x8086, 0x643E);
+        var package = IntelPackage("npu", "Intel NPU Driver", false,
+            IntelComponent("OtherDrivers", null, "VEN_8086&DEV_643E"), version: "not-a-version");
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(
+                MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, [])),
+                new(true, [package]), Inventory(device))
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+    }
+
+    [Fact]
+    public void Intel_NPU_package_verdict_does_not_transfer_equal_versions_to_another_hardware_id()
+    {
+        var installedId = @"PCI\VEN_8086&DEV_B03E";
+        var unrelatedPackage = IntelPackage("npu", "Intel NPU Driver", false,
+            IntelComponent("OtherDrivers", null, "VEN_8086&DEV_B03F"), version: "32.0.100.5540");
+        var installedDevice = Device(installedId, [installedId], "ComputeAccelerator",
+            "Intel AI Boost NPU", "32.0.100.5540", 0x8086, 0xB03E);
+
+        var snapshot = MsiUpdateCatalogComposer.Compose(
+            MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, [])),
+            new(true, [unrelatedPackage]), Inventory(installedDevice));
+
+        Assert.DoesNotContain(snapshot.Categories.SelectMany(category => category.Entries),
+            entry => entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa);
     }
 
     [Theory]
@@ -1243,6 +1629,11 @@ public sealed class MsiUpdateInstalledVersionsTests
 
     private static MsiUpdateInstalledInventory Inventory(params MsiUpdateInstalledPnpDevice[] devices) =>
         new([], devices, [], [], null, []);
+
+    private static MsiUpdateInstalledPnpDevice DriverDevice(
+        string instanceId, string hardwareId, string deviceClass, string provider, string driverVersion) =>
+        new(instanceId, [hardwareId], [], deviceClass, $"{provider} {deviceClass}", deviceClass,
+            $"{provider} {deviceClass}", provider, driverVersion, "oem1.inf", null, null);
 
     private static MsiUpdateInstalledPnpDevice Device(string instanceId, string[] hardwareIds, string deviceClass,
         string name, string driverVersion, ushort vendorId, ushort productId) =>
