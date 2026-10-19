@@ -122,6 +122,38 @@ The *current MSI catalog API* continues to supply Latest dynamically; **do not h
 
 Continue using `MsiUpdateInstalledInventory`'s existing `PnpDevices` (provider, class, DeviceId, HardwareIds, CompatibleIds, friendly/name, DriverVersion, InfName). Do not introduce runtime downloads, static JSON loaded from disk, new SetupAPI/DriverStore scans, persistent DB or new frontend IPC. Existing manual request, diagnostic JSON, Korean/English labels, left metadata, centered right status and disabled Update button remain unchanged.
 
+### 4.4 Required deletion / consolidation of obsolete comparison code
+
+**This cleanup is part of the SAME PR and a required completion condition, not an optional later refactor.** PRs #839/#840 added one-off comparison admission layers before the EX package identity had been defined. Once the CG3EM fixed mapping is the authoritative source for installed-driver selection, do not merely add it alongside all the old per-driver vetoes.
+
+In `MsiUpdateCatalogComposer`, review these exact existing symbols against actual remaining call sites and remove or fold them into the CG3EM mapping path **when their sole purpose is superseded**:
+
+| Existing symbol/condition | Required cleanup |
+|---|---|
+| `ObservedSingleDeviceDriverNames` | Remove the five-name comparison allowlist. A driver is comparable because its CG3EM mapping resolves the correct package/version domain, not because its name was separately whitelisted. |
+| `CompareObservedSingleDeviceMsiDriver()` | Merge the ordinary numeric comparison into the common mapped-driver verdict path; eliminate the stand-alone single-device route for CG3EM. |
+| `CompareObservedMultiComponentMsiDriver()` | Replace the special second resolver/re-enumeration of DTS/IntelliGo candidates with the same **already resolved mapped representative/group** used for Installed display. Remove the stand-alone multi-component verdict path for CG3EM. |
+| `IsObservedMultiComponentDriverName()` | Move any genuine DTS/IntelliGo recognition into the static mapping entry; otherwise delete. |
+| `HasObservedAudioCatalogHardwareIdentity()` | Delete obsolete `SWC\\VEN_...&DEV_XXXX` requirement, which contradicts extracted EX INF identifiers. |
+| `HasExactCatalogAudioHardwareId()` | Prefer a **single existing HWID/compatible-ID matching helper** used by the fixed mapping; remove this duplicate if no longer used. |
+| `IsObservedAudioDriverComponent()` | Fold actual provider/class checks into the static DTS/IntelliGo mapping predicate; avoid a second, inconsistent validation pass. |
+| `HasPreciseObservedMsiDriverIdentity()` and `IsExactIntelAcpiIdentity()` | Remove redundant comparison-only gates if the stable model-specific hardware identity is already checked by the selected mapping rule. Keep a small reusable predicate only if a surviving path truly requires it. |
+| `match.Outcome == ExactHardwareId/ExactInf`, `Confidence == Exact`, `CandidateCount == 1` as **generic** Driver verdict gates | Replace with: correct product mapping + one coherent installed representative version + comparable offered version. One device is **not** a prerequisite for Chipset, Serial IO, DTS or IntelliGo. |
+| `ResolveRealtekAudioDriverInstalledVersion()`, `IsObservedRealtekAudioCodec()`, `IsObservedRealtekAudioCodecHardwareId()` | Review carefully: current codec-based special fallback is **not** the same identity as the EX `RtkSdcaXuMSI.inf` extension. Replace it for CG3EM with the exact EX mapping; remove dead special-case code if no other supported model/path uses it. Do not use the codec's version as the extension version. |
+
+**Target structure:** `ResolveMsiDriverInstalledVersion()` selects the CG3EM mapping and its installed representative once; `MapMsiEntry()` passes that resolution to **one ordinary mapped-Driver comparison path**, reusing the existing `CompareNumericVersions()`. The same selected package/device group must drive both the `InstalledVersion` shown in UI and the verdict. No separate DTS/IntelliGo second lookup to "prove" the result again.
+
+**Preserve genuine shared code and contracts:**
+- Keep `CompareNumericVersions()` and parsing; `CompareBiosVersions()`, `CompareControllerFirmwareVersions()` and their ownership/identity safeguards.
+- Keep `IntelDsaHardwareMatcher`, `EvaluateIntelDuplicate()`, `KnownMsiIntelDriverNames` where they implement Intel DSA source precedence or MSI fallback, and general `IsMsiDeviceIdMatch()` where used for that behavior.
+- Keep Utility Registry/AppX matching and comparison, catalog/Frontend DTOs, diagnostics, source attribution and current A2VM 7/8 behavior.
+- If a candidate helper still has a legitimate non-CG3EM caller, **do not delete it blindly**. Retain the smallest legacy-only branch needed for current supported behavior, and ensure the new CG3EM path **never runs through the obsolete veto again**. Do not create a fresh generic manager/strategy/interface solely to preserve old helpers.
+- Delete genuinely unreferenced private helpers, arrays, dead branches and obsolete test fixtures; verify compiler references after the rewrite. Avoid deleting production regression coverage just because its original test expected too many `Unknown` results.
+
+**Concrete acceptance:** A code review must be able to follow one unambiguous EX flow:
+`catalog row → fixed CG3EM mapping → local version/group → selected MSI latest version → numeric verdict`.
+No redundant `ObservedSingleDevice` / `ObservedMultiComponent` gate may veto an already mapped CG3EM result. The delivered PR must enumerate which old symbols were deleted, which were merged, and any **specific** shared behavior that required one to remain. The goal is **one owner and one comparison path**, not a mandated LOC reduction.
+
 ## 5. Acceptance and regression tests (synthetic, no hardware)
 
 Tests **must drive the real production composer** and exercise supported `msi.claw.cg3em` with EX INF-derived static identity rules:
@@ -134,9 +166,10 @@ Tests **must drive the real production composer** and exercise supported `msi.cl
 6. Explicitly reject broad Intel/Realtek/DTS-only vendor identity, unrelated Device/Class, duplicate version coincidences and multi-package conflicting versions. ISS `5.8.58.0` vs `5.8.61.0` package must not be miscompared. Realtek Audio Control AppX cannot stand in for Realtek Audio Driver.
 7. **A2VM 7/8 isolation:** CG3EM-only rule must not run on other hardware; their BIOS/Firmware/Intel DSA and existing MSI matching behavior must not change.
 8. Source selection, suppression, BIOS hexadecimal, owned PID1902 firmware, UWP sentinel, diagnostics privacy/retention, existing UI and disabled Update button are unchanged.
-9. Run solution build and Runtime/UI tests. Actual device tests belong to the owner **after merge**, never a PR blocker.
+9. **Cleanup regression check:** ensure the CG3EM mapped Driver path no longer invokes the old single-/multi-device exception comparators or independent exact/confidence/count verdict gate; confirm installed-display and verdict use the same selected mapped group. Remove dead helper references and obsolete fixtures, update intentional `Unknown` expectations and retain all genuine negative regression tests.
+10. Run solution build and Runtime/UI tests. Actual device tests belong to the owner **after merge**, never a PR blocker.
 
-**Expected PR organization:** One PR, optional internally separated commits (a) CG3EM package mapping table, (b) comparison simplification and DTS separation, (c) regression tests. Source should be **simpler** than the current layer of successive one-off gates; one static mapping, one installed-version owner, one verdict policy. No runtime ZIP handling and **no installation support**.
+**Expected PR organization:** One PR, optional internally separated commits (a) CG3EM package mapping table, (b) **required deletion/consolidation of superseded comparison gates** and DTS representative separation, (c) regression tests. Source should be **simpler** than the current layer of successive one-off gates; one static mapping, one installed-version owner, one verdict policy. No runtime ZIP handling and **no installation support**.
 
 ## 6. Additional background, explicitly not this PR
 
