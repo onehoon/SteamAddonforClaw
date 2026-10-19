@@ -56,17 +56,17 @@ The EX extracted root has **19** MSI Driver folders. Each maps to a correspondin
 | Intel Serial IO Driver | `Intel Serial IO Driver` | Extract LPSS/Serial IO model IDs; multiple matching PnP devices are legitimate |
 | Intel Dynamic Tuning Driver | `Intel Dynamic Tuning Driver` | Map extracted DTT component(s), preserve working exact Installed comparison |
 | Intel IPF Driver | `Intel IPF Driver` | Extract IPF IDs and distinguish real `2.3.20303.5058` family from unrelated local `2.3.20306.4` components |
-| Intel Management Engine Driver | `Intel Management Engine Driver` | Extract ME/CSME/MEI IDs and identify correct Intel System driver, not generic `PCI\\VEN_8086` |
-| Intel Trusted Execution Technology Driver | `Intel Trusted Execution Technology Driver` | Preserve working `ACPI\\INTC1025` family match |
+| Intel Management Engine Driver | `Intel Management Engine Driver` | Extract ME/CSME/MEI IDs and identify correct Intel System driver, not generic `PCI\VEN_8086` |
+| Intel Trusted Execution Technology Driver | `Intel Trusted Execution Technology Driver` | Preserve working `ACPI\INTC1025` family match |
 | Intel PPM Provision Driver | `Intel PPM Provision Driver` | `ipfppm_sw.inf` and its specific software component identity |
 | Intel Game Assist Driver | `Intel Game Assist Driver` | Preserve current version lookup, do not downgrade installed newer build |
-| IntelliGo APO Driver | `IntelliGo APO Driver` | Extract intelliGo APO `SWC\\VEN_IGO` child component IDs and compare relevant group |
+| IntelliGo APO Driver | `IntelliGo APO Driver` | Extract intelliGo APO `SWC\VEN_IGO` child component IDs and compare relevant group |
 | Intel Smart Sound Technology driver | `Intel Smart Sound Technology driver` | Extract Intel SST/Audio/INTELAUDIO INF components; select a documented *representative version domain*, not arbitrary max |
 | Realtek OED Driver | `Realtek OED Driver` | `IntcOED_OemLibPath.inf` has `DriverVer=20.43.274.009` and exact INTELAUDIO DSP IDs, including `SUBSYS_15101462`; do not conflate with main SST driver |
 | Realtek Audio Driver | `Realtek Audio Driver` | `RtkSdcaXuMSI.inf` `DriverVer=10.0.378.1`, Class=Extension; compare matching Realtek SDCA XU extension/driver, **not** Realtek Audio Control AppX version or another codec driver's version |
 | DTS Driver | `DTS Driver` | **EXACT RULE IN SECTION 3; official MSI page latest `1.16.4.0`** |
 | Goodix FingerPrinter Driver | `Goodix FingerPrinter Driver` | `GoodixMocUsb.inf`: `Class=Biometric`, `DriverVer=3.12144.0.100`, USB `VID_27C6&PID_6090`; preserve installed newer `3.12144.0.160` |
-| Realtek Card Reader Driver | `Realtek Card Reader Driver` | Map Realtek RTS card reader model (observed local `PCI\\VEN_10EC&DEV_5264` / MTD), installed `10.0.26200.21389` vs MSI `10.0.26100.21378` -> UpToDate |
+| Realtek Card Reader Driver | `Realtek Card Reader Driver` | Map Realtek RTS card reader model (observed local `PCI\VEN_10EC&DEV_5264` / MTD), installed `10.0.26200.21389` vs MSI `10.0.26100.21378` -> UpToDate |
 
 **Do not pretend IDs not yet extracted are known:** Local Codex must read each unpacked INF/model section and commit a short **static CG3EM mapping table**. A mapping that cannot be supported by source INF + observed Windows inventory must remain `Unknown` and be explained in the PR summary; do not create a placebo match to pass the matrix.
 
@@ -84,16 +84,16 @@ The *current MSI catalog API* continues to supply Latest dynamically; **do not h
 
 | INF / subpackage | INF DriverVer | Device/component ID | Role in DTS Driver mapping |
 |---|---|---|---|
-| `DTS_UWP_APO4x_Core_MSFT_1_16_4_0_25H2/dtsapo4x64.inf` | `1.16.4.0` | `SWC\\VEN_DTSI&AID_DTSI2` | **Preferred representative DTS APO core** |
-| `DTS_UWP_APO4x_Controller_MSFT_1_16_4_0_25H2/dtscontrollerx64.inf` | `1.16.4.0` | `SWC\\VEN_DTSI&HID_DTSIAPO4xCONTROLLER` | Related DTS versioned component |
-| `DTS_UWP_APO4x_RPCService_MSFT_1_16_4_0_25H2/dtsapo4xservice.inf` | `1.16.4.0` | `SWC\\VEN_DTSI&HID_DTSIAPO4xSERVICE` | Related DTS versioned component |
-| `DAP_UWP_APO4x_HSA_MSFT_1_10_7_0_25H2/dtsaudioprocessinghsa.inf` | `1.10.7.0` | `SWC\\VEN_DTSI&HID_DTSIDAP` | **Exclude from representative DTS Driver version**: separate HSA/DAP companion |
+| `DTS_UWP_APO4x_Core_MSFT_1_16_4_0_25H2/dtsapo4x64.inf` | `1.16.4.0` | `SWC\VEN_DTSI&AID_DTSI2` | **Preferred representative DTS APO core** |
+| `DTS_UWP_APO4x_Controller_MSFT_1_16_4_0_25H2/dtscontrollerx64.inf` | `1.16.4.0` | `SWC\VEN_DTSI&HID_DTSIAPO4xCONTROLLER` | Related DTS versioned component |
+| `DTS_UWP_APO4x_RPCService_MSFT_1_16_4_0_25H2/dtsapo4xservice.inf` | `1.16.4.0` | `SWC\VEN_DTSI&HID_DTSIAPO4xSERVICE` | Related DTS versioned component |
+| `DAP_UWP_APO4x_HSA_MSFT_1_10_7_0_25H2/dtsaudioprocessinghsa.inf` | `1.10.7.0` | `SWC\VEN_DTSI&HID_DTSIDAP` | **Exclude from representative DTS Driver version**: separate HSA/DAP companion |
 | MSI extension files in this same package | May differ | Audio OEM extension-specific | Not the DTS APO core `Latest` used by this row; do not pick merely because numerically newer |
 
 **Implementation:**
-- Match the **known DTS APO core identity**, using stable `SWC\\VEN_DTSI&AID_DTSI2` (actual installed PnP DeviceId, HardwareIds and CompatibleIds), appropriate DTS provider and SoftwareComponent/AudioProcessingObject class; allow equivalent, verified core subgroup if Windows enumerates it differently.
+- Match the **known DTS APO core identity**, using stable `SWC\VEN_DTSI&AID_DTSI2` (actual installed PnP DeviceId, HardwareIds and CompatibleIds), appropriate DTS provider and SoftwareComponent/AudioProcessingObject class; allow equivalent, verified core subgroup if Windows enumerates it differently.
 - If the core entry is absent but an unambiguous supported corresponding controller/service group is present, fall back to its **same version domain**; when core vs related components have conflicting versions that cannot be resolved, `Unknown`, not arbitrary pick.
-- A versioned group may contain multiple PnP instances: don't require exactly one or a non-existent `&DEV_XXXX` suffix. Existing `HasObservedAudioCatalogHardwareIdentity()` regex that only admits `SWC\\VEN_DTSI&DEV_...` is **not the right package identity**.
+- A versioned group may contain multiple PnP instances: don't require exactly one or a non-existent `&DEV_XXXX` suffix. Existing `HasObservedAudioCatalogHardwareIdentity()` regex that only admits `SWC\VEN_DTSI&DEV_...` is **not the right package identity**.
 - A separate `DTS Audio Processing` UWP package version or `1.10.7.0` HSA component must **never overwrite** the MSI DTS Driver Installed version.
 - Expected on supplied CG3EM capture: **Installed `1.16.4.0` / Latest `1.16.4.0` => UpToDate**. Do **not** select local candidates solely by equality with Latest. Identify DTS core family first, then compare its installed version with MSI's published version.
 
@@ -104,7 +104,7 @@ The *current MSI catalog API* continues to supply Latest dynamically; **do not h
 - The Frontend request already determines `hardware.Model` before Compose. Pass the resolved supported model to the composer via the **smallest internal signature change** (optional trailing argument or equivalent), rather than guessing CG3EM from a human-readable catalog title.
 - Keep `MsiUpdateCatalogComposer` as the sole owner. Add a **compact CG3EM driver mapping table or bounded switch** keyed by exact normalized **MSI Driver catalog name**. Each row declares its stable Windows ID/class/provider or representative-component predicate(s). The source code must be explicit and reviewable; **no generic scoring model, fuzzy title engine, additional resolver interface, registry database, ML classifier or auto-discovery**.
 - For `msi.claw.a2vm.7` / `msi.claw.a2vm.8`, do not apply CG3EM rules or assert they are the same board. Their current code path remains unchanged pending their own evidence.
-- Preserve existing strongly matched `DeviceId` / `InfName` results; for CG3EM rows whose MSI API fields are incomplete or vendor-only, use the **static EX mapping** instead of immediately returning `NoUsableIdentity`. Avoid applying a broad `PCI\\VEN_8086` or `SWC\\VEN_DTSI` to every device of that vendor.
+- Preserve existing strongly matched `DeviceId` / `InfName` results; for CG3EM rows whose MSI API fields are incomplete or vendor-only, use the **static EX mapping** instead of immediately returning `NoUsableIdentity`. Avoid applying a broad `PCI\VEN_8086` or `SWC\VEN_DTSI` to every device of that vendor.
 - INF filenames in the unpacked MSI reference are for **design-time identification**. Windows `Win32_PnPSignedDriver.InfName` commonly becomes `oem###.inf`. Match installed **stable IDs + provider/class** already captured by Windows, **never** expect `PantherLakeSystem.inf == oem598.inf` by bare string equality.
 - A defined static mapping is a **key**, not a hardcoded version; each manual check reads the currently installed `DriverVersion`.
 
