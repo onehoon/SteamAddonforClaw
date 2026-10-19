@@ -42,7 +42,7 @@
             </Grid>
 
             <TextBlock x:Uid="MsiUpdates_CatalogOnly"
-                       Text="Read-only version information · no update-availability verdict, downloads, or installs."
+                       Text="Read-only version check · update availability is shown; downloads and installation are not supported yet."
                        TextWrapping="Wrap"
                        FontSize="12"
                        Opacity="0.7" />

@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.UI;
@@ -241,9 +242,9 @@ public sealed partial class MsiUpdatesPage : UserControl
 
             metadata.Add(MainUiStrings.Get(
                 entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa
-                    ? "MsiUpdates_SourceIntelDsa"
-                    : "MsiUpdates_SourceMsi",
-                entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa ? "Source: Intel DSA" : "Source: MSI"));
+                    ? "MsiUpdates_CompactSourceIntelDsa"
+                    : "MsiUpdates_CompactSourceMsi",
+                entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa ? "Intel DSA" : "MSI"));
             if (!string.IsNullOrWhiteSpace(entry.ReleaseDate))
             {
                 metadata.Add(MainUiStrings.Format("MsiUpdates_ReleaseDate", "Released {0}", FormatCatalogReleaseDate(entry.ReleaseDate)));
@@ -263,6 +264,54 @@ public sealed partial class MsiUpdatesPage : UserControl
             cardContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             cardContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             cardContent.Children.Add(content);
+
+            var (statusKey, statusFallback, accessibleStatusKey, accessibleStatusFallback, statusSymbol) = entry.ComparisonStatus switch
+            {
+                FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable => (
+                    "MsiUpdates_StatusUpdateAvailable", "Update available",
+                    "MsiUpdates_StatusUpdateAvailable", "Update available", Symbol.Important),
+                FrontendMsiLiveUpdateComparisonStatus.UpToDate => (
+                    "MsiUpdates_StatusUpToDate", "Up to date",
+                    "MsiUpdates_StatusUpToDate", "Up to date", Symbol.Accept),
+                _ => (
+                    "MsiUpdates_StatusUnknown", "Unknown",
+                    "MsiUpdates_StatusUnknownAccessible", "Unable to determine update status", Symbol.Help)
+            };
+            var accessibleStatus = MainUiStrings.Get(accessibleStatusKey, accessibleStatusFallback);
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Spacing = 8
+            };
+            Grid.SetColumn(actions, 1);
+            actions.Children.Add(new SymbolIcon
+            {
+                Symbol = statusSymbol,
+                Width = 16,
+                Height = 16,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            var statusText = new TextBlock
+            {
+                Text = MainUiStrings.Get(statusKey, statusFallback),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.NoWrap
+            };
+            AutomationProperties.SetName(statusText, accessibleStatus);
+            actions.Children.Add(statusText);
+            if (entry.ComparisonStatus == FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)
+            {
+                actions.Children.Add(new Button
+                {
+                    Content = MainUiStrings.Get("MsiUpdates_UpdateButton", "Update"),
+                    IsEnabled = false,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+            cardContent.Children.Add(actions);
+
             panel.Children.Add(new Border
             {
                 Style = (Style)Resources["MsiCatalogEntryCardStyle"],
