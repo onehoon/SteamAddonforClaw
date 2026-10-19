@@ -223,6 +223,12 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
         "INTEL", "REALTEK", "GOODIX", "DTS", "MSI", "NVIDIA", "AMD", "QUALCOMM", "SYNAPTICS",
         "MEDIATEK", "CIRRUS", "MICROSOFT", "ELAN", "ASUS", "BROADCOM"
     };
+    private static readonly Dictionary<string, string> ApprovedAppxPackageNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["MSI_Center_M"] = "MSI_Center_M",
+        ["RealtekSemiconductorCorp.RealtekAudioControl"] = "RealtekSemiconductorCorp.RealtekAudioControl",
+        ["DTSInc.DTSAudioProcessing"] = "DTSInc.DTSAudioProcessing"
+    };
 
     internal static MsiUpdateDiagnosticSnapshotDocument Build(MsiUpdateDiagnosticSnapshotInput input)
     {
@@ -490,7 +496,6 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
     {
         var catalogNames = input.Msi.Categories.SelectMany(category => category.Entries)
             .Select(entry => SafeCatalogName(entry.Name)).Where(value => value is not null).Cast<string>().ToArray();
-        var catalogWords = catalogNames.SelectMany(Words).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var selected = new List<MsiUpdateDiagnosticAppxRow>();
         foreach (var package in input.Inventory.Packages)
         {
@@ -498,14 +503,14 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
             var rawFamilyName = SafePackageName(package.FamilyName);
             if (rawName is null && rawFamilyName is null) continue;
             var packageText = string.Join(' ', new[] { rawName, rawFamilyName }.Where(value => value is not null));
-            var matchedNames = catalogNames.Where(catalogName => HasProductFamilyOverlap(catalogName, packageText)).Take(4).ToList();
+            var matchedNames = catalogNames.Where(catalogName =>
+                    HasProductFamilyOverlap(catalogName, packageText)
+                    || IsCatalogPackageCandidate(catalogName, packageText))
+                .Take(4).ToList();
             if (matchedNames.Count == 0) continue;
 
-            var allowedPackageWords = new HashSet<string>(catalogWords, StringComparer.OrdinalIgnoreCase);
-            allowedPackageWords.UnionWith(GenericWords);
-            allowedPackageWords.UnionWith(KnownProviderTokens);
-            var safeName = IsSafePackageIdentity(rawName, allowedPackageWords) ? rawName : null;
-            var safeFamilyName = IsSafePackageFamilyName(rawFamilyName, rawName, safeName, allowedPackageWords);
+            var safeName = GetApprovedAppxPackageName(rawName);
+            var safeFamilyName = SafeValidatedFamilyName(rawFamilyName, safeName);
             selected.Add(new(safeName, safeFamilyName, SafeVersion(package.Version), matchedNames,
                 safeName is not null ? "Included" : rawName is null ? "MissingOrInvalid" : "RedactedUnrecognizedToken",
                 safeFamilyName is not null ? "Included" : rawFamilyName is null ? "MissingOrInvalid" : "RedactedUnrecognizedToken"));
@@ -514,22 +519,27 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
         return selected.Take(MaximumAppxRows).ToList();
     }
 
-    private static bool IsSafePackageIdentity(string? value, IReadOnlySet<string> allowedWords)
-    {
-        if (value is null) return false;
-        var words = Words(value);
-        return words.Count > 0 && words.All(allowedWords.Contains);
-    }
+    private static string? GetApprovedAppxPackageName(string? packageName) =>
+        packageName is not null && ApprovedAppxPackageNames.TryGetValue(packageName, out var approvedName)
+            ? approvedName
+            : null;
 
-    private static string? IsSafePackageFamilyName(string? familyName, string? packageName, string? safePackageName,
-        IReadOnlySet<string> allowedWords)
+    private static string? SafeValidatedFamilyName(string? familyName, string? approvedPackageName)
     {
-        if (familyName is null || !IsSafePackageIdentity(familyName, allowedWords)) return null;
-        if (packageName is null || safePackageName is null) return familyName;
-        var prefix = packageName + "_";
-        if (!familyName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return familyName;
+        if (familyName is null || approvedPackageName is null) return null;
+        var prefix = approvedPackageName + "_";
+        if (!familyName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
         var publisherId = familyName[prefix.Length..];
         return Regex.IsMatch(publisherId, @"^[A-Za-z0-9]{8,20}$", RegexOptions.CultureInvariant) ? familyName : null;
+    }
+
+    private static bool IsCatalogPackageCandidate(string catalogName, string packageName)
+    {
+        var catalogTokens = Words(catalogName).Where(word => !GenericWords.Contains(word)).ToArray();
+        if (catalogTokens.Length < 2) return false;
+        var compactCatalogName = string.Concat(catalogTokens);
+        var compactPackageName = string.Concat(Words(packageName));
+        return compactPackageName.Contains(compactCatalogName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static List<MsiUpdateDiagnosticIntelMatch> ProjectIntelMatches(MsiUpdateDiagnosticSnapshotInput input,

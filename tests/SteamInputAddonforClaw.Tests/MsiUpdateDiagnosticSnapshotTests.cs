@@ -26,6 +26,8 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
                 deviceID = deviceId, GUID = "UWP", Upgrade_Guid = $"{{{ProductCode}}}", Crc = "UWP",
                 Type = "Utility", Other = privateUrl, File = privateUrl, Siparam = privateCommand
             },
+            new { name = "Realtek Audio Control", version = "UWP", Type = "Utility" },
+            new { name = "DTS Audio Processing", version = "UWP", Type = "Utility" },
             new { name = "Malformed Optional", version = "1.2.3", Type = new[] { "ignored" }, Other = new { secret = "private" } },
             new { name = "Missing OEM Identity", version = "1.0", deviceID = "NOT_FOUND", GUID = "NOT_FOUND", upgradeGuid = "UWP", Crc = "NOT_FOUND" },
             new { name = "Partial OEM Identity", version = "1.0", deviceID = "VEN_8086&DEV_1234" },
@@ -37,7 +39,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
 
         Assert.Equal(MsiLiveUpdateCatalogState.Completed, msi.State);
         var rows = msi.Categories.Single(category => category.Category == MsiLiveUpdateCatalogCategory.Utility).Entries;
-        Assert.Equal(5, rows.Count);
+        Assert.Equal(7, rows.Count);
         var first = rows[0];
         var fields = first.DiagnosticFields!;
         Assert.Null(first.UpgradeGuid); // Existing matcher input remains unchanged for the raw Upgrade_Guid alias.
@@ -51,17 +53,17 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         Assert.Equal("Url", fields.FileKind);
         Assert.Equal(".exe", fields.FileExtension);
         Assert.Equal("RedactedCommand", fields.SiparamKind);
-        var fields1 = rows[1].DiagnosticFields!;
+        var fields1 = rows[3].DiagnosticFields!;
         Assert.Equal("Array", fields1.TypeKind);
         Assert.Equal("Object", fields1.OtherKind);
         Assert.Null(fields1.Type);
-        var fields2 = rows[2].DiagnosticFields!;
+        var fields2 = rows[4].DiagnosticFields!;
         Assert.Equal("NotFoundSentinel", fields2.DeviceIdKind);
         Assert.Equal("NotFoundSentinel", fields2.GuidKind);
         Assert.Equal("UwpSentinel", fields2.UpgradeGuidKind);
         Assert.Equal("NotFoundSentinel", fields2.CrcKind);
-        Assert.Equal("Partial", rows[3].DiagnosticFields!.DeviceIdKind);
-        var fields4 = rows[4].DiagnosticFields!;
+        Assert.Equal("Partial", rows[5].DiagnosticFields!.DeviceIdKind);
+        var fields4 = rows[6].DiagnosticFields!;
         Assert.Equal("RedactedValue", fields4.OtherKind);
         Assert.Null(fields4.Other);
         Assert.Equal("RedactedValue", fields4.CrcKind);
@@ -71,18 +73,40 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
             [new(@"C:\Users\onehoon\AppData\Local\PrivateRegistryKey", ProductCode, null,
                 "MSI Center M", "3.0.1", "MSI Corporation")],
             [new("MSI_Center_M", "MSI_Center_M_8wekyb3d8bbwe", "3.0.1"),
-                new("onehoon.MSI_Center_M", "onehoon.MSI_Center_M_8wekyb3d8bbwe", "3.0.2")], null, []));
+                new("onehoon.MSI_Center_M", "onehoon.MSI_Center_M_8wekyb3d8bbwe", "3.0.2"),
+                new("RealtekSemiconductorCorp.RealtekAudioControl",
+                    "RealtekSemiconductorCorp.RealtekAudioControl_1234567890abc", "1.2.3"),
+                new("DTSInc.DTSAudioProcessing", "DTSInc.DTSAudioProcessing_abc1234567890", "4.5.6"),
+                new("onehoon.RealtekSemiconductorCorp.RealtekAudioControl",
+                    "onehoon.RealtekSemiconductorCorp.RealtekAudioControl_1234567890abc", "7.8.9")], null, []));
         var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
         var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
+        var approvedMsiPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "3.0.1");
         var userNamedPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "3.0.2");
+        var realtekPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "1.2.3");
+        var dtsPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "4.5.6");
+        var userPrefixedRealtekPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "7.8.9");
 
         Assert.Contains("UwpSentinel", json, StringComparison.Ordinal);
         Assert.Contains("RedactedCommand", json, StringComparison.Ordinal);
         Assert.Contains("MSI Center M", json, StringComparison.Ordinal);
+        Assert.Equal("MSI_Center_M", approvedMsiPackage.Name);
+        Assert.Equal("MSI_Center_M_8wekyb3d8bbwe", approvedMsiPackage.FamilyName);
+        Assert.Contains("MSI Center M", approvedMsiPackage.MatchedCatalogNames);
         Assert.Null(userNamedPackage.Name);
         Assert.Equal("RedactedUnrecognizedToken", userNamedPackage.NameDisposition);
         Assert.Null(userNamedPackage.FamilyName);
         Assert.Equal("RedactedUnrecognizedToken", userNamedPackage.FamilyNameDisposition);
+        Assert.Equal("RealtekSemiconductorCorp.RealtekAudioControl", realtekPackage.Name);
+        Assert.Equal("RealtekSemiconductorCorp.RealtekAudioControl_1234567890abc", realtekPackage.FamilyName);
+        Assert.Contains("Realtek Audio Control", realtekPackage.MatchedCatalogNames);
+        Assert.Equal("DTSInc.DTSAudioProcessing", dtsPackage.Name);
+        Assert.Equal("DTSInc.DTSAudioProcessing_abc1234567890", dtsPackage.FamilyName);
+        Assert.Contains("DTS Audio Processing", dtsPackage.MatchedCatalogNames);
+        Assert.Null(userPrefixedRealtekPackage.Name);
+        Assert.Equal("RedactedUnrecognizedToken", userPrefixedRealtekPackage.NameDisposition);
+        Assert.Null(userPrefixedRealtekPackage.FamilyName);
+        Assert.Equal("RedactedUnrecognizedToken", userPrefixedRealtekPackage.FamilyNameDisposition);
         Assert.DoesNotContain("private-query-token", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private-command-token", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("onehoon", json, StringComparison.OrdinalIgnoreCase);
