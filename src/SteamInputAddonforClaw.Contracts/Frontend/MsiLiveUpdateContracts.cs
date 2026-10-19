@@ -7,6 +7,7 @@ public enum FrontendMsiLiveUpdateSourceState { Completed, PartialFailure, Unavai
 public enum FrontendMsiLiveUpdateVersionSource { Msi, IntelDsa }
 public enum FrontendMsiLiveUpdateVersionKind { Catalog, Driver, Package }
 public enum FrontendMsiLiveUpdateInstalledVersionConfidence { Exact, Heuristic }
+public enum FrontendMsiLiveUpdateComparisonStatus { Unknown, UpdateAvailable, UpToDate }
 
 public sealed record FrontendMsiLiveUpdateCatalogEntry(
     string Name,
@@ -16,7 +17,8 @@ public sealed record FrontendMsiLiveUpdateCatalogEntry(
     string? InstalledVersion = null,
     FrontendMsiLiveUpdateVersionSource LatestVersionSource = FrontendMsiLiveUpdateVersionSource.Msi,
     FrontendMsiLiveUpdateVersionKind LatestVersionKind = FrontendMsiLiveUpdateVersionKind.Catalog,
-    FrontendMsiLiveUpdateInstalledVersionConfidence? InstalledVersionConfidence = null);
+    FrontendMsiLiveUpdateInstalledVersionConfidence? InstalledVersionConfidence = null,
+    FrontendMsiLiveUpdateComparisonStatus ComparisonStatus = FrontendMsiLiveUpdateComparisonStatus.Unknown);
 public sealed record FrontendMsiLiveUpdateCatalogCategorySnapshot(
     FrontendMsiLiveUpdateCatalogCategory Category,
     FrontendMsiLiveUpdateCatalogCategoryState State,

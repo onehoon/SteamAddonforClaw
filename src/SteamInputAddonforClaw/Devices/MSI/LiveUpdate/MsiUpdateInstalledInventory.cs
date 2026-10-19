@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Management;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
@@ -789,8 +790,213 @@ internal static class MsiUpdateCatalogComposer
                 ? FrontendMsiLiveUpdateVersionKind.Package
                 : FrontendMsiLiveUpdateVersionKind.Catalog;
         match = ResolveMsiInstalledVersion(category, entry, inventory);
+        var comparisonStatus = ResolveMsiComparisonStatus(category, entry, inventory, match, latestVersion, versionKind);
         return new(entry.Name, latestVersion, entry.ReleaseDate, entry.Description,
-            match.Version, FrontendMsiLiveUpdateVersionSource.Msi, versionKind, match.Confidence);
+            match.Version, FrontendMsiLiveUpdateVersionSource.Msi, versionKind, match.Confidence, comparisonStatus);
+    }
+
+    private static FrontendMsiLiveUpdateComparisonStatus ResolveMsiComparisonStatus(
+        MsiLiveUpdateCatalogCategory category,
+        MsiLiveUpdateCatalogEntry entry,
+        MsiUpdateInstalledInventory inventory,
+        MsiInstalledVersionResolution match,
+        string? latestVersion,
+        FrontendMsiLiveUpdateVersionKind versionKind)
+    {
+        if (category == MsiLiveUpdateCatalogCategory.Bios)
+            return CompareBiosVersions(entry, inventory, match, latestVersion);
+
+        if (category == MsiLiveUpdateCatalogCategory.Driver)
+        {
+            if (KnownMsiIntelDriverNames.Any(candidate =>
+                    string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase))
+                || versionKind != FrontendMsiLiveUpdateVersionKind.Driver
+                || !string.Equals(latestVersion, entry.DriverVersion, StringComparison.Ordinal)
+                || match.Outcome is not ("ExactHardwareId" or "ExactInf")
+                || match.Confidence != FrontendMsiLiveUpdateInstalledVersionConfidence.Exact
+                || match.CandidateCount != 1
+                || match.VersionCount != 1)
+                return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+            return CompareNumericVersions(match.Version, entry.DriverVersion);
+        }
+
+        if (category == MsiLiveUpdateCatalogCategory.Utility)
+        {
+            var registryStatus = CompareExactRegistryDisplayVersion(entry, inventory, match, latestVersion, versionKind);
+            return registryStatus != FrontendMsiLiveUpdateComparisonStatus.Unknown
+                ? registryStatus
+                : CompareExactAppxPackageVersion(entry, inventory, match, latestVersion, versionKind);
+        }
+
+        return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+    }
+
+    private static FrontendMsiLiveUpdateComparisonStatus CompareBiosVersions(
+        MsiLiveUpdateCatalogEntry entry,
+        MsiUpdateInstalledInventory inventory,
+        MsiInstalledVersionResolution match,
+        string? latestVersion)
+    {
+        if (!IsBiosImage(entry)
+            || string.IsNullOrWhiteSpace(entry.Version)
+            || !string.Equals(latestVersion, entry.Version, StringComparison.Ordinal)
+            || match.Outcome != "ExactBiosIdentity"
+            || match.Confidence != FrontendMsiLiveUpdateInstalledVersionConfidence.Exact
+            || match.CandidateCount != 1
+            || !TryParseBiosVersion(entry.Version, out var offeredBoard, out var offeredRevision, out var offeredIsTest)
+            || offeredIsTest)
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        var boardPattern = new Regex(
+            $@"(?<![A-Z0-9])(?<version>{Regex.Escape(offeredBoard)}\.[0-9A-F]{{1,8}}T?)(?![A-Z0-9])",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var installedVersions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var biosValue in inventory.BiosVersions)
+        {
+            foreach (Match biosMatch in boardPattern.Matches(biosValue))
+                installedVersions.Add(biosMatch.Groups["version"].Value);
+        }
+
+        if (installedVersions.Count != 1)
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        var installedVersion = installedVersions.Single();
+        if (!string.Equals(installedVersion, match.Version, StringComparison.OrdinalIgnoreCase)
+            || !TryParseBiosVersion(installedVersion, out var installedBoard, out var installedRevision, out var installedIsTest)
+            || installedIsTest
+            || !string.Equals(installedBoard, offeredBoard, StringComparison.OrdinalIgnoreCase))
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        return installedRevision < offeredRevision
+            ? FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable
+            : FrontendMsiLiveUpdateComparisonStatus.UpToDate;
+    }
+
+    private static bool TryParseBiosVersion(string? value, out string board, out uint revision, out bool isTest)
+    {
+        board = string.Empty;
+        revision = 0;
+        isTest = false;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        var match = Regex.Match(value,
+            @"^(?<board>[A-Z0-9]+IMS)\.(?<revision>[0-9A-F]{1,8})(?<test>T?)$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success) return false;
+
+        board = match.Groups["board"].Value;
+        isTest = match.Groups["test"].Length > 0;
+        return uint.TryParse(match.Groups["revision"].Value, NumberStyles.AllowHexSpecifier,
+            CultureInfo.InvariantCulture, out revision);
+    }
+
+    private static FrontendMsiLiveUpdateComparisonStatus CompareExactAppxPackageVersion(
+        MsiLiveUpdateCatalogEntry entry,
+        MsiUpdateInstalledInventory inventory,
+        MsiInstalledVersionResolution match,
+        string? latestVersion,
+        FrontendMsiLiveUpdateVersionKind versionKind)
+    {
+        if (versionKind != FrontendMsiLiveUpdateVersionKind.Package
+            || string.IsNullOrWhiteSpace(entry.PackageVersion)
+            || !string.Equals(latestVersion, entry.PackageVersion, StringComparison.Ordinal)
+            || IsUwpCatalogEntry(entry)
+            || match.Outcome != "MatchedAppx"
+            || match.Confidence != FrontendMsiLiveUpdateInstalledVersionConfidence.Exact
+            || match.CandidateCount != 1
+            || match.VersionCount != 1)
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        var packageMatches = inventory.Packages.Where(package =>
+                string.Equals(entry.Name, package.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entry.Name, package.FamilyName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (packageMatches.Length != 1
+            || !string.Equals(packageMatches[0].Version, match.Version, StringComparison.Ordinal))
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        return CompareNumericVersions(packageMatches[0].Version, entry.PackageVersion);
+    }
+
+    private static FrontendMsiLiveUpdateComparisonStatus CompareExactRegistryDisplayVersion(
+        MsiLiveUpdateCatalogEntry entry,
+        MsiUpdateInstalledInventory inventory,
+        MsiInstalledVersionResolution match,
+        string? latestVersion,
+        FrontendMsiLiveUpdateVersionKind versionKind)
+    {
+        if (versionKind != FrontendMsiLiveUpdateVersionKind.Catalog
+            || string.IsNullOrWhiteSpace(entry.Version)
+            || !string.Equals(latestVersion, entry.Version, StringComparison.Ordinal)
+            || !string.IsNullOrWhiteSpace(entry.DriverVersion)
+            || !string.IsNullOrWhiteSpace(entry.PackageVersion)
+            || IsUwpCatalogEntry(entry)
+            || match.Outcome != "MatchedRegistry"
+            || match.Confidence != FrontendMsiLiveUpdateInstalledVersionConfidence.Exact
+            || match.CandidateCount != 1
+            || match.VersionCount != 1)
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        var registryMatches = inventory.Software.Where(installed =>
+                entry.Guid is not null && string.Equals(installed.ProductCode, entry.Guid, StringComparison.OrdinalIgnoreCase)
+                || entry.UpgradeGuid is not null && string.Equals(installed.UpgradeCode, entry.UpgradeGuid, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (registryMatches.Length != 1
+            || !string.Equals(registryMatches[0].DisplayVersion, match.Version, StringComparison.Ordinal))
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        return CompareNumericVersions(registryMatches[0].DisplayVersion, entry.Version);
+    }
+
+    private static bool IsUwpCatalogEntry(MsiLiveUpdateCatalogEntry entry) =>
+        string.Equals(entry.Version, "UWP", StringComparison.OrdinalIgnoreCase)
+        || entry.DiagnosticFields is { } fields && (
+            fields.GuidKind == "UwpSentinel"
+            || fields.UpgradeGuidKind == "UwpSentinel"
+            || fields.CrcKind == "UwpSentinel"
+            || fields.TypeKind == "UwpSentinel"
+            || fields.OtherKind == "UwpSentinel"
+            || fields.FileKind == "UwpSentinel"
+            || fields.SiparamKind == "UwpSentinel");
+
+    private static FrontendMsiLiveUpdateComparisonStatus CompareNumericVersions(string? installed, string? offered)
+    {
+        if (string.IsNullOrWhiteSpace(installed) || string.IsNullOrWhiteSpace(offered))
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        var installedSegments = installed.Split('.');
+        var offeredSegments = offered.Split('.');
+        if (installedSegments.Length is < 2 or > 6 || installedSegments.Length != offeredSegments.Length)
+            return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+        var installedParts = new uint[installedSegments.Length];
+        var offeredParts = new uint[offeredSegments.Length];
+        for (var index = 0; index < installedSegments.Length; index++)
+        {
+            if (!TryParseVersionComponent(installedSegments[index], out installedParts[index])
+                || !TryParseVersionComponent(offeredSegments[index], out offeredParts[index]))
+                return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+        }
+
+        for (var index = 0; index < installedParts.Length; index++)
+        {
+            var comparison = installedParts[index].CompareTo(offeredParts[index]);
+            if (comparison != 0)
+                return comparison < 0
+                    ? FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable
+                    : FrontendMsiLiveUpdateComparisonStatus.UpToDate;
+        }
+
+        return FrontendMsiLiveUpdateComparisonStatus.UpToDate;
+    }
+
+    private static bool TryParseVersionComponent(string value, out uint component)
+    {
+        component = 0;
+        return value.Length is >= 1 and <= 10
+            && value.All(static character => character is >= '0' and <= '9')
+            && uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out component);
     }
 
     private static MsiInstalledVersionResolution ResolveMsiInstalledVersion(
@@ -1028,11 +1234,18 @@ internal static class MsiUpdateCatalogComposer
         var displayName = string.IsNullOrWhiteSpace(deviceName)
             ? entry.PackageName
             : $"{entry.PackageName} — {deviceName}";
+        var comparisonStatus = (entry.Family is IntelDsaComponentFamily.Graphics
+                or IntelDsaComponentFamily.Wireless or IntelDsaComponentFamily.Bluetooth)
+            && entry.MatchReason.EndsWith(":HardwareId", StringComparison.Ordinal)
+            && entry.VersionKind == FrontendMsiLiveUpdateVersionKind.Driver
+            ? CompareNumericVersions(installedVersion, entry.LatestVersion)
+            : FrontendMsiLiveUpdateComparisonStatus.Unknown;
         return new(displayName, entry.LatestVersion, entry.ReleaseDate, null,
             installedVersion,
             FrontendMsiLiveUpdateVersionSource.IntelDsa,
             entry.VersionKind,
-            installedVersion is null ? null : FrontendMsiLiveUpdateInstalledVersionConfidence.Exact);
+            installedVersion is null ? null : FrontendMsiLiveUpdateInstalledVersionConfidence.Exact,
+            comparisonStatus);
     }
 
     private static string? SafeDeviceName(string? value)
