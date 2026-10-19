@@ -626,7 +626,7 @@ internal static class MsiUpdateCatalogComposer
         "MSI App Player Installer"
     ];
 
-    private static readonly string[] LegacySingleDeviceDriverNames =
+    private static readonly string[] A2vmLegacySingleDeviceDriverNames =
     [
         "Goodix FingerPrinter Driver",
         "Intel Game Assist Driver",
@@ -877,7 +877,8 @@ internal static class MsiUpdateCatalogComposer
                 ? FrontendMsiLiveUpdateVersionKind.Package
                 : FrontendMsiLiveUpdateVersionKind.Catalog;
         match = ResolveMsiInstalledVersion(category, entry, inventory, hardwareModelId);
-        var comparisonStatus = ResolveMsiComparisonStatus(category, entry, inventory, match, latestVersion, versionKind);
+        var comparisonStatus = ResolveMsiComparisonStatus(
+            category, entry, inventory, match, latestVersion, versionKind, hardwareModelId);
         return new(entry.Name, latestVersion, entry.ReleaseDate, entry.Description,
             match.Version, FrontendMsiLiveUpdateVersionSource.Msi, versionKind, match.Confidence, comparisonStatus);
     }
@@ -888,7 +889,8 @@ internal static class MsiUpdateCatalogComposer
         MsiUpdateInstalledInventory inventory,
         MsiInstalledVersionResolution match,
         string? latestVersion,
-        FrontendMsiLiveUpdateVersionKind versionKind)
+        FrontendMsiLiveUpdateVersionKind versionKind,
+        string? hardwareModelId)
     {
         if (category == MsiLiveUpdateCatalogCategory.Bios)
             return CompareBiosVersions(entry, inventory, match, latestVersion);
@@ -907,7 +909,12 @@ internal static class MsiUpdateCatalogComposer
                     ? FrontendMsiLiveUpdateComparisonStatus.Unknown
                     : CompareNumericVersions(match.Version, match.ComparisonVersion);
 
-            var multiComponentStatus = CompareLegacyMultiComponentMsiDriver(
+            // Preserve the previous comparison policy only for supported A2VM models.
+            // Unmapped CG3EM rows must not fall through to these pre-mapping heuristics.
+            if (hardwareModelId is not ("msi.claw.a2vm.7" or "msi.claw.a2vm.8"))
+                return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+            var multiComponentStatus = CompareA2vmLegacyMultiComponentMsiDriver(
                 entry, inventory, match, latestVersion, versionKind);
             if (multiComponentStatus != FrontendMsiLiveUpdateComparisonStatus.Unknown)
                 return multiComponentStatus;
@@ -924,7 +931,7 @@ internal static class MsiUpdateCatalogComposer
                     ? CompareNumericVersions(match.Version, entry.DriverVersion)
                     : FrontendMsiLiveUpdateComparisonStatus.Unknown;
 
-            return CompareLegacySingleDeviceMsiDriver(entry, match, latestVersion, versionKind);
+            return CompareA2vmLegacySingleDeviceMsiDriver(entry, match, latestVersion, versionKind);
         }
 
         if (category == MsiLiveUpdateCatalogCategory.Utility)
@@ -962,14 +969,14 @@ internal static class MsiUpdateCatalogComposer
         return FrontendMsiLiveUpdateComparisonStatus.UpToDate;
     }
 
-    private static FrontendMsiLiveUpdateComparisonStatus CompareLegacySingleDeviceMsiDriver(
+    private static FrontendMsiLiveUpdateComparisonStatus CompareA2vmLegacySingleDeviceMsiDriver(
         MsiLiveUpdateCatalogEntry entry,
         MsiInstalledVersionResolution match,
         string? latestVersion,
         FrontendMsiLiveUpdateVersionKind versionKind)
     {
-        if (!LegacySingleDeviceDriverNames.Contains(entry.Name.Trim(), StringComparer.OrdinalIgnoreCase)
-            || !HasLegacyPreciseMsiDriverIdentity(entry)
+        if (!A2vmLegacySingleDeviceDriverNames.Contains(entry.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            || !HasA2vmLegacyPreciseMsiDriverIdentity(entry)
             || IsUwpCatalogEntry(entry))
             return FrontendMsiLiveUpdateComparisonStatus.Unknown;
 
@@ -990,16 +997,16 @@ internal static class MsiUpdateCatalogComposer
         return CompareNumericVersions(match.Version, offeredVersion);
     }
 
-    private static FrontendMsiLiveUpdateComparisonStatus CompareLegacyMultiComponentMsiDriver(
+    private static FrontendMsiLiveUpdateComparisonStatus CompareA2vmLegacyMultiComponentMsiDriver(
         MsiLiveUpdateCatalogEntry entry,
         MsiUpdateInstalledInventory inventory,
         MsiInstalledVersionResolution match,
         string? latestVersion,
         FrontendMsiLiveUpdateVersionKind versionKind)
     {
-        if (!IsLegacyAudioDriverName(entry.Name)
+        if (!IsA2vmLegacyAudioDriverName(entry.Name)
             || string.IsNullOrWhiteSpace(entry.DeviceId)
-            || !HasLegacySpecificAudioCatalogHardwareIdentity(entry.Name, entry.DeviceId)
+            || !HasA2vmLegacySpecificAudioCatalogHardwareIdentity(entry.Name, entry.DeviceId)
             || !string.IsNullOrWhiteSpace(entry.DriverVersion)
             || IsUwpCatalogEntry(entry)
             || match.Outcome != "ExactHardwareId"
@@ -1031,8 +1038,8 @@ internal static class MsiUpdateCatalogComposer
         if (candidates.Length != match.CandidateCount
             || candidates.Length < 2
             || candidates.Any(device =>
-                !HasLegacyExactCatalogHardwareId(entry.DeviceId, device)
-                || !HasLegacyAudioProviderAndClass(entry.Name, device)))
+                !HasA2vmLegacyExactCatalogHardwareId(entry.DeviceId, device)
+                || !HasA2vmLegacyAudioProviderAndClass(entry.Name, device)))
             return FrontendMsiLiveUpdateComparisonStatus.Unknown;
 
         var installedVersions = candidates.Select(device => device.DriverVersion).ToArray();
@@ -1045,11 +1052,11 @@ internal static class MsiUpdateCatalogComposer
         return FrontendMsiLiveUpdateComparisonStatus.UpToDate;
     }
 
-    private static bool IsLegacyAudioDriverName(string name) =>
+    private static bool IsA2vmLegacyAudioDriverName(string name) =>
         string.Equals(name.Trim(), "DTS Driver", StringComparison.OrdinalIgnoreCase)
         || string.Equals(name.Trim(), "IntelliGo APO Driver", StringComparison.OrdinalIgnoreCase);
 
-    private static bool HasLegacySpecificAudioCatalogHardwareIdentity(string catalogName, string deviceId)
+    private static bool HasA2vmLegacySpecificAudioCatalogHardwareIdentity(string catalogName, string deviceId)
     {
         var pattern = string.Equals(catalogName.Trim(), "DTS Driver", StringComparison.OrdinalIgnoreCase)
             ? @"^SWC\\VEN_DTSI&DEV_[A-Z0-9]{4,}$"
@@ -1057,11 +1064,11 @@ internal static class MsiUpdateCatalogComposer
         return Regex.IsMatch(deviceId, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
-    private static bool HasLegacyExactCatalogHardwareId(string deviceId, MsiUpdateInstalledPnpDevice device) =>
+    private static bool HasA2vmLegacyExactCatalogHardwareId(string deviceId, MsiUpdateInstalledPnpDevice device) =>
         device.HardwareIds.Contains(deviceId, StringComparer.OrdinalIgnoreCase)
         || device.CompatibleIds.Contains(deviceId, StringComparer.OrdinalIgnoreCase);
 
-    private static bool HasLegacyAudioProviderAndClass(string catalogName, MsiUpdateInstalledPnpDevice device)
+    private static bool HasA2vmLegacyAudioProviderAndClass(string catalogName, MsiUpdateInstalledPnpDevice device)
     {
         var expectedProvider = string.Equals(catalogName.Trim(), "DTS Driver", StringComparison.OrdinalIgnoreCase)
             ? "DTS"
@@ -1072,12 +1079,12 @@ internal static class MsiUpdateCatalogComposer
                 || string.Equals(deviceClass, "AUDIOPROCESSINGOBJECT", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool HasLegacyPreciseMsiDriverIdentity(MsiLiveUpdateCatalogEntry entry) =>
+    private static bool HasA2vmLegacyPreciseMsiDriverIdentity(MsiLiveUpdateCatalogEntry entry) =>
         !string.IsNullOrWhiteSpace(entry.InfName)
         || IntelDsaHardwareMatcher.HasComparableHardwareIdentity(entry.DeviceId)
-        || IsLegacyIntelAcpiIdentity(entry.DeviceId);
+        || IsA2vmLegacyIntelAcpiIdentity(entry.DeviceId);
 
-    private static bool IsLegacyIntelAcpiIdentity(string? deviceId) =>
+    private static bool IsA2vmLegacyIntelAcpiIdentity(string? deviceId) =>
         deviceId is not null
         && (Regex.IsMatch(deviceId, @"^ACPI\\VEN_INTC&DEV_[A-Z0-9]{4}$",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
@@ -1338,9 +1345,17 @@ internal static class MsiUpdateCatalogComposer
         MsiUpdateInstalledInventory inventory,
         string? hardwareModelId)
     {
-        if (string.Equals(hardwareModelId, "msi.claw.cg3em", StringComparison.Ordinal)
-            && FindCg3emDriverMapping(entry.Name) is { } cg3emMapping)
-            return ResolveCg3emMappedDriver(entry, inventory, cg3emMapping);
+        if (string.Equals(hardwareModelId, "msi.claw.cg3em", StringComparison.Ordinal))
+        {
+            var cg3emMapping = FindCg3emDriverMapping(entry.Name);
+            if (cg3emMapping is not null)
+                return ResolveCg3emMappedDriver(entry, inventory, cg3emMapping);
+
+            var isIntelDsaFallback = KnownMsiIntelDriverNames.Any(candidate =>
+                string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (!isIntelDsaFallback)
+                return MsiInstalledVersionResolution.Unknown("NoCg3emPackageMapping");
+        }
 
         if (!string.IsNullOrWhiteSpace(entry.DeviceId))
         {
@@ -1360,7 +1375,11 @@ internal static class MsiUpdateCatalogComposer
         }
 
         if (string.Equals(entry.Name.Trim(), "Realtek Audio Driver", StringComparison.OrdinalIgnoreCase))
-            return ResolveLegacyRealtekAudioDriverInstalledVersion(inventory);
+        {
+            return hardwareModelId is "msi.claw.a2vm.7" or "msi.claw.a2vm.8"
+                ? ResolveA2vmLegacyRealtekAudioDriverInstalledVersion(inventory)
+                : MsiInstalledVersionResolution.Unknown("NoSupportedModelSpecificMapping");
+        }
 
         var family = KnownMsiIntelDriverNames
             .FirstOrDefault(candidate => string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase));
@@ -1499,10 +1518,10 @@ internal static class MsiUpdateCatalogComposer
         return offeredVersion;
     }
 
-    private static MsiInstalledVersionResolution ResolveLegacyRealtekAudioDriverInstalledVersion(
+    private static MsiInstalledVersionResolution ResolveA2vmLegacyRealtekAudioDriverInstalledVersion(
         MsiUpdateInstalledInventory inventory)
     {
-        var candidates = inventory.PnpDevices.Where(IsLegacyRealtekAudioCodec)
+        var candidates = inventory.PnpDevices.Where(IsA2vmLegacyRealtekAudioCodec)
             .GroupBy(device => device.DeviceId, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToArray();
@@ -1524,7 +1543,7 @@ internal static class MsiUpdateCatalogComposer
             FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, "HeuristicFamily", 1, 1);
     }
 
-    private static bool IsLegacyRealtekAudioCodec(MsiUpdateInstalledPnpDevice device)
+    private static bool IsA2vmLegacyRealtekAudioCodec(MsiUpdateInstalledPnpDevice device)
     {
         if (string.IsNullOrWhiteSpace(device.DriverProvider)
             || !device.DriverProvider.StartsWith("Realtek", StringComparison.OrdinalIgnoreCase)) return false;
@@ -1535,10 +1554,10 @@ internal static class MsiUpdateCatalogComposer
         var deviceName = FirstNonEmpty(device.WmiDeviceName, device.FriendlyName);
         if (!string.Equals(deviceName, "Realtek(R) Audio", StringComparison.OrdinalIgnoreCase)) return false;
 
-        return device.HardwareIds.Any(IsLegacyRealtekAudioCodecHardwareId);
+        return device.HardwareIds.Any(IsA2vmLegacyRealtekAudioCodecHardwareId);
     }
 
-    private static bool IsLegacyRealtekAudioCodecHardwareId(string hardwareId) =>
+    private static bool IsA2vmLegacyRealtekAudioCodecHardwareId(string hardwareId) =>
         Regex.IsMatch(hardwareId,
             @"^INTELAUDIO\\FUNC_01&VEN_10EC&DEV_0256(?:&|$)",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);

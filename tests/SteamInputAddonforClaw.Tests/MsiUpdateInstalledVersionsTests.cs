@@ -633,7 +633,8 @@ public sealed class MsiUpdateInstalledVersionsTests
                 IntelComponent("Graphics", "32.0.101.9150", "VEN_8086&DEV_1234"))]);
         var diagnostics = new List<MsiUpdateCatalogMatchDiagnostic>();
 
-        var entries = MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(codec, intelDevice), onDiagnostic: diagnostics.Add)
+        var entries = MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(codec, intelDevice),
+                onDiagnostic: diagnostics.Add, hardwareModelId: "msi.claw.a2vm.8")
             .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries;
         var entry = Assert.Single(entries, item => item.Name == "Realtek Audio Driver");
 
@@ -671,7 +672,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         foreach (var collision in collisions)
         {
             var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"),
-                    Inventory(collision))
+                    Inventory(collision), hardwareModelId: "msi.claw.a2vm.8")
                 .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
             Assert.Null(entry.InstalledVersion);
             Assert.Null(entry.InstalledVersionConfidence);
@@ -680,7 +681,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         var secondCodecId = @"INTELAUDIO\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1462146C&REV_1000\SECOND";
         var secondCodec = realtekCodec with { DeviceId = secondCodecId };
         var ambiguous = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"),
-                Inventory(realtekCodec, secondCodec))
+                Inventory(realtekCodec, secondCodec), hardwareModelId: "msi.claw.a2vm.8")
             .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
         Assert.Null(ambiguous.InstalledVersion);
         Assert.Null(ambiguous.InstalledVersionConfidence);
@@ -1043,7 +1044,7 @@ public sealed class MsiUpdateInstalledVersionsTests
     }
 
     [Fact]
-    public void Synthetic_CG3EM_capture_applies_only_the_evidenced_version_verdicts()
+    public void Synthetic_A2VM_capture_preserves_legacy_evidenced_version_verdicts()
     {
         const string goodixId = @"USB\VID_27C6&PID_6090";
         const string gameAssistId = @"PCI\VEN_8086&DEV_E45D";
@@ -1075,7 +1076,7 @@ public sealed class MsiUpdateInstalledVersionsTests
             MsiLiveUpdateCatalogCategoryState.Success,
             [new("Realtek Audio Control", "UWP", null, null), new("DTS Audio Processing", "UWP", null, null)]);
         var msi = new MsiLiveUpdateCatalogQueryResult(MsiLiveUpdateCatalogState.Completed,
-            "Claw 8 AI+ CG3EM", "kr", "win11",
+            "Claw 8 AI+ A2VM", "kr", "win11",
             [
                 new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Success, [firmware]),
@@ -1107,7 +1108,7 @@ public sealed class MsiUpdateInstalledVersionsTests
             IntelComponent("OtherDrivers", null, "VEN_8086&DEV_B03E"), version: "32.0.100.5540");
 
         var snapshot = MsiUpdateCatalogComposer.Compose(msi,
-            new(true, [npuPackage]), inventory);
+            new(true, [npuPackage]), inventory, hardwareModelId: "msi.claw.a2vm.8");
         var msiEntries = snapshot.Categories.SelectMany(category => category.Entries)
             .Where(entry => entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.Msi)
             .ToDictionary(entry => entry.Name, StringComparer.Ordinal);
@@ -1177,6 +1178,19 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(catalogNames.Length, diagnostics.Count);
         Assert.All(diagnostics, diagnostic =>
             Assert.Equal("Cg3emMappedNoMatchingPresentDevice", diagnostic.Outcome));
+    }
+
+    [Fact]
+    public void CG3EM_unmapped_catalog_driver_does_not_fall_through_to_legacy_identity_matching()
+    {
+        const string hardwareId = @"PCI\VEN_8086&DEV_E402";
+        var device = DriverDevice(hardwareId + @"\INSTANCE", hardwareId, "System", "Intel", "10.1.56.28");
+        var entry = ComposeCg3emDriverEntry(
+            new("Unmapped MSI Driver", "10.1.56.28", null, null, DeviceId: hardwareId, DriverVersion: "10.1.56.28"),
+            device);
+
+        Assert.Null(entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
     }
 
     [Fact]
@@ -1878,7 +1892,8 @@ public sealed class MsiUpdateInstalledVersionsTests
         var intel = new IntelDsaCatalogResult(true,
             [IntelPackage("gpu", "Intel Arc", false, IntelComponent("Graphics", "2.0.0.0", "VEN_8086&DEV_1234"))]);
 
-        var snapshot = MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(gpu, msiDevice));
+        var snapshot = MsiUpdateCatalogComposer.Compose(msi, intel, Inventory(gpu, msiDevice),
+            hardwareModelId: "msi.claw.a2vm.8");
         var entries = snapshot.Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries;
 
         Assert.Equal(FrontendMsiLiveUpdateCatalogState.PartialFailure, snapshot.State);
