@@ -28,6 +28,14 @@ public sealed class AddonDataPathsTests
     }
 
     [Fact]
+    public void ResolveMsiUpdateDiagnosticsDirectory_UsesCanonicalDataRoot()
+    {
+        Assert.Equal(
+            @"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\Diagnostics\MsiUpdates",
+            AddonDataPaths.ResolveMsiUpdateDiagnosticsDirectory(InstallRoot));
+    }
+
+    [Fact]
     public void ResolveClawHudRuntimePaths_UseCanonicalDataRootOutsideInstallRoot()
     {
         var runtimeRoot = AddonDataPaths.ResolveClawHudRuntimeRoot(InstallRoot);

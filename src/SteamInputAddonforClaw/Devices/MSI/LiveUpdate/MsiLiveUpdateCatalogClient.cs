@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Management;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Devices.MSI.LiveUpdate;
@@ -10,6 +11,23 @@ namespace SteamInputAddonforClaw.Devices.MSI.LiveUpdate;
 internal enum MsiLiveUpdateCatalogState { Completed, PartialFailure, Unavailable, Failed }
 internal enum MsiLiveUpdateCatalogCategory { Bios, Firmware, Driver, Utility }
 internal enum MsiLiveUpdateCatalogCategoryState { Success, Empty, Failed }
+
+internal sealed record MsiLiveUpdateCatalogRawDiagnosticFields(
+    string DeviceIdKind,
+    List<string> HardwareTypes,
+    string GuidKind,
+    string? SafeGuid,
+    string UpgradeGuidKind,
+    string? SafeUpgradeGuid,
+    string CrcKind,
+    string TypeKind,
+    string? Type,
+    string OtherKind,
+    string? Other,
+    string FileKind,
+    string? FileExtension,
+    string SiparamKind,
+    string? Crc);
 
 internal sealed record MsiLiveUpdateCatalogEntry(
     string Name,
@@ -21,7 +39,8 @@ internal sealed record MsiLiveUpdateCatalogEntry(
     string? UpgradeGuid = null,
     string? PackageVersion = null,
     string? DriverVersion = null,
-    string? InfName = null);
+    string? InfName = null,
+    MsiLiveUpdateCatalogRawDiagnosticFields? DiagnosticFields = null);
 internal sealed record MsiLiveUpdateCatalogCategoryResult(
     MsiLiveUpdateCatalogCategory Category,
     MsiLiveUpdateCatalogCategoryState State,
@@ -311,6 +330,12 @@ internal static class MsiLiveUpdateCatalogResultParser
         (MsiLiveUpdateCatalogCategory.Driver, "driver"),
         (MsiLiveUpdateCatalogCategory.Utility, "utility")
     ];
+    private static readonly HashSet<string> DiagnosticHardwareBuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "PCI", "USB", "USBSTOR", "ACPI", "HDAUDIO", "INTELAUDIO", "BTHENUM", "ROOT", "SWD",
+        "SCSI", "SD", "I2C", "GPIO", "DISPLAY", "HID", "HIDCLASS", "SYSTEM", "PROCESSOR",
+        "MEDIA", "NET", "SWC", "UCM", "USB4", "NVME", "VMBUS", "VPCI"
+    };
 
     internal static MsiLiveUpdateCatalogQueryResult ParseHelperOutput(
         string output, MsiLiveUpdateCatalogRequest request, DateTimeOffset checkedAtUtc)
@@ -417,7 +442,7 @@ internal static class MsiLiveUpdateCatalogResultParser
                 TryGetAnyString(element, ["infName"], 128, out var infName);
                 entries.Add(new(name!, version, releaseDate, description,
                     ValidateDeviceId(deviceId), ValidateGuid(guid), ValidateGuid(upgradeGuid),
-                    packageVersion, driverVersion, ValidateInfName(infName)));
+                    packageVersion, driverVersion, ValidateInfName(infName), ReadDiagnosticFields(element, deviceId)));
             }
             return entries.Count == 0
                 ? new(category, MsiLiveUpdateCatalogCategoryState.Empty, entries)
@@ -444,6 +469,218 @@ internal static class MsiLiveUpdateCatalogResultParser
             && value.All(static character => char.IsLetterOrDigit(character) || character is '_' or '-' or '.')
             ? value
             : null;
+
+    private static MsiLiveUpdateCatalogRawDiagnosticFields ReadDiagnosticFields(JsonElement element, string? deviceId)
+    {
+        var type = ReadSafeScalar(element, ["Type"], 64, allowSpace: false);
+        var other = ReadAllowlistedOther(element);
+        var file = ClassifyFile(element);
+        var crc = ReadSafeCrc(element);
+        return new(
+            ClassifyIdentityField(element, ["deviceID"], value => ValidateDeviceId(value) is not null),
+            ReadHardwareTypes(deviceId),
+            ClassifyIdentityField(element, ["GUID"], static value => Guid.TryParse(value, out _)),
+            ReadGuid(element, ["GUID"]),
+            ClassifyIdentityField(element, ["upgradeGuid", "Upgrade_Guid"], static value => Guid.TryParse(value, out _)),
+            ReadGuid(element, ["upgradeGuid", "Upgrade_Guid"]),
+            ClassifyValueField(element, ["Crc"], crc),
+            ClassifyValueField(element, ["Type"], type),
+            type,
+            ClassifyOpaqueScalarField(element, ["Other"], other),
+            other,
+            file.Kind,
+            file.Extension,
+            ClassifyCommandField(element, ["Siparam"]),
+            crc);
+    }
+
+    private static string ClassifyIdentityField(JsonElement element, string[] names, Func<string, bool> isValid)
+    {
+        if (!TryGetRawField(element, names, out var raw)) return "Missing";
+        if (raw.ValueKind == JsonValueKind.Null) return "Null";
+        if (raw.ValueKind != JsonValueKind.String) return JsonKindName(raw.ValueKind);
+        var value = raw.GetString()?.Trim();
+        if (string.IsNullOrEmpty(value)) return "Empty";
+        if (string.Equals(value, "UWP", StringComparison.OrdinalIgnoreCase)) return "UwpSentinel";
+        if (string.Equals(value, "NOT_FOUND", StringComparison.OrdinalIgnoreCase)) return "NotFoundSentinel";
+        if (isValid(value)) return "Valid";
+        if (names[0].Equals("deviceID", StringComparison.OrdinalIgnoreCase)
+            && value.IndexOfAny(['/', ':', '?', '#']) < 0
+            && value.Split('&', StringSplitOptions.RemoveEmptyEntries).Any(token => token.StartsWith("VEN_", StringComparison.OrdinalIgnoreCase)
+                || token.StartsWith("VID_", StringComparison.OrdinalIgnoreCase)
+                || token.StartsWith("DEV_", StringComparison.OrdinalIgnoreCase)
+                || token.StartsWith("PID_", StringComparison.OrdinalIgnoreCase))) return "Partial";
+        return "Rejected";
+    }
+
+    private static string? ReadGuid(JsonElement element, string[] names)
+    {
+        if (!TryGetRawField(element, names, out var raw) || raw.ValueKind != JsonValueKind.String) return null;
+        return Guid.TryParse(raw.GetString(), out var guid) ? guid.ToString("D") : null;
+    }
+
+    private static List<string> ReadHardwareTypes(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 512) return [];
+        var parts = value.Trim().Split('\\', 3);
+        var bus = parts.Length > 1 && DiagnosticHardwareBuses.Contains(parts[0]) ? parts[0].ToUpperInvariant() : null;
+        var identity = parts.Length > 1 ? parts[1] : value.Trim();
+        var tokens = identity.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => token.ToUpperInvariant())
+            .Where(token => Regex.IsMatch(token,
+                @"^(?:VEN_[0-9A-F]{4}|VID_[0-9A-F]{4}|DEV_[0-9A-F]{4}|PID_[0-9A-F]{4}|SUBSYS_[0-9A-F]{8}|REV_[0-9A-F]{2,4}|MI_[0-9A-F]{2}|FUNC_[0-9A-F]{2}|CC_[0-9A-F]{6}|PNP[0-9A-F]{4}|INTC[0-9A-F]{4,8}|CID_[A-Z0-9]{4,12}|ACPI_[A-Z0-9]{3,8})$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
+        if (tokens.Length == 0) return [];
+        var normalized = string.Join('&', tokens);
+        return [bus is null ? normalized : $"{bus}\\{normalized}"];
+    }
+
+    private static string ClassifyValueField(JsonElement element, string[] names, string? safeValue)
+    {
+        if (!TryGetRawField(element, names, out var raw)) return "Missing";
+        if (raw.ValueKind == JsonValueKind.Null) return "Null";
+        if (raw.ValueKind != JsonValueKind.String && raw.ValueKind != JsonValueKind.Number)
+            return JsonKindName(raw.ValueKind);
+        var value = raw.ValueKind == JsonValueKind.String ? raw.GetString()?.Trim() : raw.GetRawText();
+        if (string.IsNullOrEmpty(value)) return "Empty";
+        if (string.Equals(value, "UWP", StringComparison.OrdinalIgnoreCase)) return "UwpSentinel";
+        if (string.Equals(value, "NOT_FOUND", StringComparison.OrdinalIgnoreCase)) return "NotFoundSentinel";
+        return safeValue is null ? "RedactedValue" : "SafeScalar";
+    }
+
+    private static string ClassifyOpaqueScalarField(JsonElement element, string[] names, string? safeValue)
+    {
+        if (!TryGetRawField(element, names, out var raw)) return "Missing";
+        if (raw.ValueKind == JsonValueKind.Null) return "Null";
+        if (raw.ValueKind != JsonValueKind.String && raw.ValueKind != JsonValueKind.Number)
+            return JsonKindName(raw.ValueKind);
+        var value = raw.ValueKind == JsonValueKind.String ? raw.GetString()?.Trim() : raw.GetRawText();
+        if (string.IsNullOrEmpty(value)) return "Empty";
+        if (string.Equals(value, "UWP", StringComparison.OrdinalIgnoreCase)) return "UwpSentinel";
+        if (string.Equals(value, "NOT_FOUND", StringComparison.OrdinalIgnoreCase)) return "NotFoundSentinel";
+        return safeValue is null ? "RedactedValue" : "SafeScalar";
+    }
+
+    private static (string Kind, string? Extension) ClassifyFile(JsonElement element)
+    {
+        if (!TryGetRawField(element, ["File"], out var raw)) return ("Missing", null);
+        if (raw.ValueKind == JsonValueKind.Null) return ("Null", null);
+        if (raw.ValueKind != JsonValueKind.String) return (JsonKindName(raw.ValueKind), null);
+        var value = raw.GetString()?.Trim();
+        if (string.IsNullOrEmpty(value)) return ("Empty", null);
+        if (string.Equals(value, "UWP", StringComparison.OrdinalIgnoreCase)) return ("UwpSentinel", null);
+        if (string.Equals(value, "NOT_FOUND", StringComparison.OrdinalIgnoreCase)) return ("NotFoundSentinel", null);
+
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            var extension = SafeFileExtension(uri.IsFile ? uri.LocalPath : uri.AbsolutePath);
+            return (uri.Scheme.Equals("ms-windows-store", StringComparison.OrdinalIgnoreCase) ? "StoreLink" : "Url", extension);
+        }
+
+        var hasPath = value.Contains('\\') || value.Contains('/') || value.Contains(':');
+        var fileExtension = SafeFileExtension(value);
+        if (fileExtension is not null) return (ClassifyFileExtension(fileExtension), fileExtension);
+        return (hasPath ? "RedactedPath" : "RedactedString", null);
+    }
+
+    private static string ClassifyCommandField(JsonElement element, string[] names)
+    {
+        if (!TryGetRawField(element, names, out var raw)) return "Missing";
+        if (raw.ValueKind == JsonValueKind.Null) return "Null";
+        if (raw.ValueKind != JsonValueKind.String) return JsonKindName(raw.ValueKind);
+        var value = raw.GetString()?.Trim();
+        if (string.IsNullOrEmpty(value)) return "Empty";
+        if (string.Equals(value, "UWP", StringComparison.OrdinalIgnoreCase)) return "UwpSentinel";
+        if (string.Equals(value, "NOT_FOUND", StringComparison.OrdinalIgnoreCase)) return "NotFoundSentinel";
+        if (value.Any(char.IsWhiteSpace) || value.IndexOfAny(['\\', '/', ':', '"', '\'']) >= 0
+            || value.Contains(".exe", StringComparison.OrdinalIgnoreCase)
+            || value.Contains(".msi", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+            return "RedactedCommand";
+        return IsSafeScalar(value, 64, allowSpace: false) ? "SafeToken" : "RedactedString";
+    }
+
+    private static string? ReadSafeScalar(JsonElement element, string[] names, int maximumLength, bool allowSpace)
+    {
+        if (!TryGetRawField(element, names, out var raw)) return null;
+        string? value = raw.ValueKind switch
+        {
+            JsonValueKind.String => raw.GetString(),
+            JsonValueKind.Number => raw.GetRawText(),
+            _ => null
+        };
+        value = value?.Trim();
+        return value is not null && IsSafeScalar(value, maximumLength, allowSpace) ? value : null;
+    }
+
+    private static string? ReadAllowlistedOther(JsonElement element)
+    {
+        if (!TryGetRawField(element, ["Other"], out var raw)
+            || raw.ValueKind is not (JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False))
+            return null;
+        var value = raw.ValueKind == JsonValueKind.String ? raw.GetString()?.Trim() : raw.GetRawText();
+        if (string.IsNullOrEmpty(value)) return null;
+        return value.ToUpperInvariant() is "UWP" or "NOT_FOUND" or "BIOS" or "PPKG" or "DISM" or "TRUE" or "FALSE" or "0" or "1"
+            ? value.ToUpperInvariant()
+            : null;
+    }
+
+    private static string? ReadSafeCrc(JsonElement element)
+    {
+        if (!TryGetRawField(element, ["Crc"], out var raw)
+            || raw.ValueKind is not (JsonValueKind.String or JsonValueKind.Number)) return null;
+        var value = raw.ValueKind == JsonValueKind.String ? raw.GetString()?.Trim() : raw.GetRawText();
+        if (string.IsNullOrEmpty(value)) return null;
+        if (value.Equals("UWP", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("NOT_FOUND", StringComparison.OrdinalIgnoreCase)) return value.ToUpperInvariant();
+        return Regex.IsMatch(value, @"^(?:[0-9A-F]{1,16}|[0-9]{1,10}(?:\.[0-9]{1,10}){1,4})$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ? value : null;
+    }
+
+    private static bool IsSafeScalar(string value, int maximumLength, bool allowSpace) =>
+        value.Length is > 0 && value.Length <= maximumLength
+        && value.All(character => char.IsLetterOrDigit(character)
+            || character is '.' or '_' or '+' or '-'
+            || allowSpace && character == ' ');
+
+    private static string? SafeFileExtension(string value)
+    {
+        var query = value.IndexOfAny(['?', '#']);
+        if (query >= 0) value = value[..query];
+        var dot = value.LastIndexOf('.');
+        if (dot < 0) return null;
+        var extension = value[dot..].ToLowerInvariant();
+        return extension is ".zip" or ".cab" or ".msi" or ".exe" or ".appx" or ".msix" or ".7z" or ".rar" or ".inf" or ".sys" or ".bin"
+            ? extension
+            : null;
+    }
+
+    private static string ClassifyFileExtension(string extension) => extension switch
+    {
+        ".zip" or ".cab" or ".7z" or ".rar" => "Archive",
+        ".msi" or ".appx" or ".msix" => "Installer",
+        ".exe" => "Executable",
+        ".inf" or ".sys" or ".bin" => "DriverPayload",
+        _ => "OtherFile"
+    };
+
+    private static bool TryGetRawField(JsonElement element, string[] names, out JsonElement value)
+    {
+        foreach (var name in names)
+            if (TryGetProperty(element, name, out value)) return true;
+        value = default;
+        return false;
+    }
+
+    private static string JsonKindName(JsonValueKind kind) => kind switch
+    {
+        JsonValueKind.Number => "Number",
+        JsonValueKind.True or JsonValueKind.False => "Boolean",
+        JsonValueKind.Array => "Array",
+        JsonValueKind.Object => "Object",
+        _ => "WrongType"
+    };
 
     private static string SafeResolverDiagnostics(string value)
     {
