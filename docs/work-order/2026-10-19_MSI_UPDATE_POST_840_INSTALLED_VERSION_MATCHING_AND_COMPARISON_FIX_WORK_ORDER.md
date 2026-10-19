@@ -1,211 +1,143 @@
-# Work Order — Post-PR #840: Fix MSI Update Installed-Version Matching and Comparison (Read-Only)
+# Work Order — Post-PR #840: EX/CG3EM Fixed MSI Driver Mapping and Version Verdict Correction
 
 **Date:** 2026-10-19  
-**Target:** One focused PR on current `main` (PR #840 already squash-merged)  
-**Owner:** Local Codex (implementation + automated code tests); physical-device verification is the **product owner's post-merge role**  
-**Product:** Standalone SteamAddonforClaw, Full PID1902; **no CTW integration**
+**Target:** One PR on current `main` (PR #840 already merged). Code by local Codex, hardware verification by product owner after merge.  
+**Product:** Standalone Full PID1902 SteamAddonforClaw; no CTW integration.
 
-## 0. Locked scope and changed decision
+## 0. Locked direction — replace generic heuristic discovery with device-specific static matching
 
-Fix the **existing** MSI Update **manual lookup → installed-version identification → version comparison → per-item UI display** behavior. Nothing else.
+**This order replaces/supersedes the earlier, overly generic matching proposal previously saved at this same path.** The product is **NOT** a universal PC driver updater. Its supported Claw models are fixed: `msi.claw.cg3em`, `msi.claw.a2vm.7`, `msi.claw.a2vm.8`.
 
-The product owner explicitly rejects the progressively restrictive version-verdict policies in PR #839/#840. MSI supplies the official **supported-model catalog** and MSI package releases. The Addon is a read-only update-information display at this stage, **not** a second OEM hardware-compatibility certification engine.
+The current evidence and this PR concern **EX = CG3EM**. Define a **small static mapping** from **MSI EX catalog driver name → known Windows hardware/component identifiers (from MSI's extracted EX driver package)**, then read the **currently installed version dynamically** from the existing Windows inventory. Do not rediscover the catalog-to-device relationship on every check via a generic vendor/name/score/heuristic engine.
 
-**Supersession:** For this PR, the relaxed lookup/comparison policy in this order supersedes the overly strict single-device/Exact-only, typed-`DriverVersion`-only, MSI-family allowlist, and DTS/IntelliGo per-device-DEV restrictions in:
-- `docs/work-order/2026-10-19_MSI_UPDATE_PR2_VERSION_COMPARISON_CENTERED_ACTION_UI_WORK_ORDER.md`;
-- `docs/work-order/2026-10-19_MSI_UPDATE_POST_839_VERSION_VERDICT_CORRECTIONS_WORK_ORDER.md`.
+- **Fixed:** supported model + MSI catalog name + package's meaningful hardware ID(s) / software component IDs / provider/class/representative INF-family evidence.
+- **Dynamic on each manual check:** MSI catalog's published Latest version, Windows present device/installed driver version, actual match/no match, resulting `UpdateAvailable` / `UpToDate` / `Unknown`.
+- **Never hardcode installed versions, MSI latest values, OS-assigned `oem###.inf` names, or specific installed DriverStore paths** as static lookup keys. These change after updates/reinstall.
+- **Model isolation:** a CG3EM mapping must not accidentally apply to A2VM 7/8. Their mapping tables require their own package evidence later; leave their existing behavior unchanged in this PR. Keep current Intel DSA precedence unchanged.
 
-Their unrelated model-specific catalog selection, source attribution, UI, lifecycle and safety contracts remain in force.
+### Explicit scope exclusions
 
-**DO NOT implement installation yet.** No MSI/Intel package download, installer, launch command, UAC, flash, shell/store action, installability checker, IPC method, new workflow, or changes to the future **Update** button. The button remains a real WinUI 3 Button **unconditionally disabled** for `UpdateAvailable` cards, with **no Click/Command**, as on current `main`.
+**MSI Drivers for EX/CG3EM ONLY.** Do not implement, redesign or test functionality for:
+- Intel DSA entries or Intel DSA duplicate/suppression logic (leave current code as-is).
+- BIOS entries or controller Firmware entries (leave currently working logic as-is).
+- UWP / Microsoft Store / AppX rows (leave as-is).
+- Utilities including MSI Center M; their installers and registry mappings are not part of the supplied EX **Driver** source set.
+- All downloads/installers/driver execution or BIOS/firmware flash. The Update button remains present but **disabled, without Click/Command**.
 
-This PR must actually improve the many `Installed version unavailable` results rather than merely adding another narrow list of status exceptions.
+No additional Windows data collection, new IPC, background update checking, package cache, CTW integration or controller lifecycle changes.
 
-## 1. Read these authorities and evidence
+## 1. Mandatory sources
 
-1. `docs/Full 1902 Implementation/README.md` and its authority chain, including:
-   - `FULL_1902_IMPLEMENTATION_ARCHITECTURE.md`
-   - `REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md`
-   - `HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md`
-   - `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md`.
-   No changes to routing, PID1901↔PID1902, sleep/resume, HidHide, VIIPER, physical ownership, Center M enable/disable, Runtime privilege or teardown.
-2. `docs/work-order/2026-10-19_MSI_UPDATE_MANUAL_CHECK_DIAGNOSTIC_SNAPSHOT_WORK_ORDER.md` (PR #838), the PR #839 and #840 work orders above, and their current merged source/tests.
-3. MSI OEM REA: `C:\GoogleDrive\Addon\MSI\MSI_CENTER_M_DRIVER_FIRMWARE_UPDATE_REA_REPORT.md`, especially **Section 11**. The OEM mutable `DataSet` update matcher is **not** an independent safe API. Keep the Addon's one inventory/composer authority; do not invoke Center M or add its matcher.
-4. **Latest physical evidence, PR #840 build `0.1.405.0`:**
-   `C:\GoogleDrive\Addon\Log\1019-MSIUPDATE\msi-update-20261019-125953.549-e06e67b6.json` and
-   `msi-update-20261019-130041.900-39b44896.json`.
-   Both have MSI Completed, Intel DSA succeeded, `inventoryWarnings=[]`, 81 diagnostic-selected PnP entries and the **same** source/matching data. All diagnostic `msiRows[*].installed` outcomes are pre-comparison matching evidence; the JSON **does not serialize** `ComparisonStatus`.
+Read together before implementation:
+- `docs/Full 1902 Implementation/README.md` and authority documents in that folder (`FULL_1902_IMPLEMENTATION_ARCHITECTURE.md`, `REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md`, `HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md`, `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md`).
+- Prior PR2/#839 and post-839/#840 work orders; this current order takes precedence over strict one-device/DEV/DriverVersion-only gates and earlier proposed universal family discovery.
+- Current `main` code:
+  - `src/SteamInputAddonforClaw/Devices/MSI/LiveUpdate/MsiUpdateInstalledInventory.cs`, `MsiUpdateCatalogComposer` (`Compose`, `ResolveMsiDriverInstalledVersion`, `ResolveDriverCandidates`, `ResolveMsiComparisonStatus`, `MapMsiEntry`).
+  - `src/SteamInputAddonforClaw/Devices/MSI/LiveUpdate/MsiLiveUpdateCatalogClient.cs` (source data, no parser change unless actual bug).
+  - `src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs` (already knows `hardware.Model`; one manual request).
+  - `tests/SteamInputAddonforClaw.Tests/MsiUpdateInstalledVersionsTests.cs`.
+- **Official MSI EX driver package extracts, already unpacked by user:** `GoogleDrive\Addon\MSI Update\Driver\EX` — [Google Drive EX folder](https://drive.google.com/drive/folders/16cehj5hLXcamcf49f_P2pgVHLUpfPhjv).
+- **CG3EM installed evidence after PR #840 / app v0.1.405.0:** `GoogleDrive\Addon\Log\1019-MSIUPDATE\msi-update-20261019-125953.549-e06e67b6.json`, `msi-update-20261019-130041.900-39b44896.json`. Source query succeeds, 81 PnP rows collected, many existing MSI Driver rows still have `NoUsableIdentity`.
+- MSI OEM REA `GoogleDrive\Addon\MSI\MSI_CENTER_M_DRIVER_FIRMWARE_UPDATE_REA_REPORT.md` (Section 11). Do not call mutable MSI `DataSet` scanner.
 
-### Observed real symptoms
+**Very explicit:** The `EX` folder contains **both extracted directories and ZIP files**. **Read ONLY ALREADY-EXTRACTED directories, INF, BAT/TXT/readme where useful. Do not open, list ZIP internals, unzip or analyze archives.** No installer execution. EX package folders are **design-time references only**; the production app must not depend on Google Drive or local extracts.
 
-Out of 19 retained MSI Driver rows, **11 report `NoUsableIdentity` and one Realtek Audio row reports `NoMatchingPresentDevice`**, although Windows signed-driver data contains plausible vendor/component evidence for many. This is a **matching** bug/coverage gap, not a WMI enumeration failure. PR #840 only changed verdict admission for already matched rows.
+## 2. EX MSI catalog → package mapping coverage
 
-Relevant CG3EM PnP candidates versus MSI catalog:
-| MSI row | MSI published Latest | Windows signed-driver candidate(s) | Existing problem |
+The EX extracted root has **19** MSI Driver folders. Each maps to a corresponding MSI catalog Driver title. For each, inspect extracted source INF files (`[Version]`, `DriverVer`, `[Manufacturer]`, Models sections, PnP HWID/CHID/SWC IDs) and record the **stable identifiers** required for runtime lookup.
+
+| MSI EX catalog driver row | Unpacked EX folder name | Mapping intent |
+|---|---|---|
+| Windows Studio Effects | `Windows Studio Effects` | Inspect AudioComponent / CameraComponent / Extension INF; choose representative versioned driver component, not a random Intel Camera device |
+| Intel HID Event Filter | `Intel HID Event Filter` | Match documented Intel HID ACPI device / HIDClass driver family |
+| Integrated Sensor Solution | `Integrated Sensor Solution` | Distinguish ISS driver `5.8.58.0` from catalog `PackageVersion=5.8.61.0`; do not blindly compare different version domains |
+| Intel Chipset Driver | `Intel Chipset Driver` | `PantherLakeSystem.inf`, `PantherLakeSystemNorthpeak.inf` (both `DriverVer=10.1.56.28`); match their *explicit Intel Panther Lake IDs*; multiple devices are legitimate |
+| Intel Platform Monitoring Technology Driver | `Intel Platform Monitoring Technology Driver` | Extract PMT INF HWID(s), distinguish Intel System from other System-family drivers |
+| Intel Serial IO Driver | `Intel Serial IO Driver` | Extract LPSS/Serial IO model IDs; multiple matching PnP devices are legitimate |
+| Intel Dynamic Tuning Driver | `Intel Dynamic Tuning Driver` | Map extracted DTT component(s), preserve working exact Installed comparison |
+| Intel IPF Driver | `Intel IPF Driver` | Extract IPF IDs and distinguish real `2.3.20303.5058` family from unrelated local `2.3.20306.4` components |
+| Intel Management Engine Driver | `Intel Management Engine Driver` | Extract ME/CSME/MEI IDs and identify correct Intel System driver, not generic `PCI\\VEN_8086` |
+| Intel Trusted Execution Technology Driver | `Intel Trusted Execution Technology Driver` | Preserve working `ACPI\\INTC1025` family match |
+| Intel PPM Provision Driver | `Intel PPM Provision Driver` | `ipfppm_sw.inf` and its specific software component identity |
+| Intel Game Assist Driver | `Intel Game Assist Driver` | Preserve current version lookup, do not downgrade installed newer build |
+| IntelliGo APO Driver | `IntelliGo APO Driver` | Extract intelliGo APO `SWC\\VEN_IGO` child component IDs and compare relevant group |
+| Intel Smart Sound Technology driver | `Intel Smart Sound Technology driver` | Extract Intel SST/Audio/INTELAUDIO INF components; select a documented *representative version domain*, not arbitrary max |
+| Realtek OED Driver | `Realtek OED Driver` | `IntcOED_OemLibPath.inf` has `DriverVer=20.43.274.009` and exact INTELAUDIO DSP IDs, including `SUBSYS_15101462`; do not conflate with main SST driver |
+| Realtek Audio Driver | `Realtek Audio Driver` | `RtkSdcaXuMSI.inf` `DriverVer=10.0.378.1`, Class=Extension; compare matching Realtek SDCA XU extension/driver, **not** Realtek Audio Control AppX version or another codec driver's version |
+| DTS Driver | `DTS Driver` | **EXACT RULE IN SECTION 3; official MSI page latest `1.16.4.0`** |
+| Goodix FingerPrinter Driver | `Goodix FingerPrinter Driver` | `GoodixMocUsb.inf`: `Class=Biometric`, `DriverVer=3.12144.0.100`, USB `VID_27C6&PID_6090`; preserve installed newer `3.12144.0.160` |
+| Realtek Card Reader Driver | `Realtek Card Reader Driver` | Map Realtek RTS card reader model (observed local `PCI\\VEN_10EC&DEV_5264` / MTD), installed `10.0.26200.21389` vs MSI `10.0.26100.21378` -> UpToDate |
+
+**Do not pretend IDs not yet extracted are known:** Local Codex must read each unpacked INF/model section and commit a short **static CG3EM mapping table**. A mapping that cannot be supported by source INF + observed Windows inventory must remain `Unknown` and be explained in the PR summary; do not create a placebo match to pass the matrix.
+
+## 3. Definitive DTS Driver handling — MSI page version is authoritative
+
+**Confirmed by user from MSI product support page:**
+- Row `DTS Driver`
+- **Published/latest version: `1.16.4.0`**
+- Date: **2026-06-04**
+- Package size: **6.23 MB**
+
+The *current MSI catalog API* continues to supply Latest dynamically; **do not hardcode 1.16.4.0 into runtime code**. Treat those user values as verified evidence for expected mapping/tests.
+
+**Direct inspection of the already extracted EX package (not ZIP):**
+
+| INF / subpackage | INF DriverVer | Device/component ID | Role in DTS Driver mapping |
 |---|---|---|---|
-| Intel HID Event Filter | `2.2.2.17` | Intel HIDClass `2.2.2.17`, `oem605.inf`, ACPI INTC10CC | `NoUsableIdentity` |
-| Intel Chipset Driver | `10.1.56.28` | Several Intel System devices, shared `oem598.inf`, `10.1.56.28` | `NoUsableIdentity`; do not require 1 PnP device |
-| Intel Platform Monitoring Technology | `7.3.11.3` | Intel System device `7.3.11.3`, `oem618.inf` | `NoUsableIdentity` |
-| Realtek Card Reader | `10.0.26100.21378` | Realtek MTD `10.0.26200.21389`, PCI VEN_10EC/DEV_5264 | `NoUsableIdentity`; installed is *newer* if same family |
-| Intel Serial IO | `30.100.2534.18` | Intel System device group at `30.100.2534.18`, including `oem636.inf` | `NoUsableIdentity` |
-| Intel IPF | `2.3.20303.5058` | Intel System entries `2.3.20303.5058` (`oem615.inf`) **and other `2.3.20306.4` entries** | `NoUsableIdentity`; avoid arbitrary maximum/version-equality selection |
-| Intel Management Engine | `2603.9.4.0` | Intel System `2603.9.4.0`, `oem633.inf` | `NoUsableIdentity` |
-| Intel Smart Sound | `20.43.12741.0` | Intel MEDIA/System INTELAUDIO-related component group, multiple INFs, consistent `20.43.12741.0` | `NoUsableIdentity` |
-| Integrated Sensor Solution | `5.8.61.0` **Package**; `5.8.58.0` Catalog `Version` | Intel `5.8.61.0` and `5.8.58.0` present in different components | `NoUsableIdentity`; keep version-domain distinction |
-| DTS Driver | `1.16.4.0` | Matched 2 DTS components `1.16.4.0`; other DTS components at `1.10.7.0` also exist | Installed `1.16.4.0` already found; post-840 comparison incorrectly `Unknown` |
-| IntelliGo APO | `100.1.4.2709` | Matched 4 IntelliGo components at `100.1.4.2709` | Installed version found; post-840 comparison incorrectly `Unknown` |
-| MSI Center M Utility | `3.0.2608.3101` | HKLM32 uninstall record MSI-published `3.0.2608.3101` | `Unmatched` due GUID-only lookup |
+| `DTS_UWP_APO4x_Core_MSFT_1_16_4_0_25H2/dtsapo4x64.inf` | `1.16.4.0` | `SWC\\VEN_DTSI&AID_DTSI2` | **Preferred representative DTS APO core** |
+| `DTS_UWP_APO4x_Controller_MSFT_1_16_4_0_25H2/dtscontrollerx64.inf` | `1.16.4.0` | `SWC\\VEN_DTSI&HID_DTSIAPO4xCONTROLLER` | Related DTS versioned component |
+| `DTS_UWP_APO4x_RPCService_MSFT_1_16_4_0_25H2/dtsapo4xservice.inf` | `1.16.4.0` | `SWC\\VEN_DTSI&HID_DTSIAPO4xSERVICE` | Related DTS versioned component |
+| `DAP_UWP_APO4x_HSA_MSFT_1_10_7_0_25H2/dtsaudioprocessinghsa.inf` | `1.10.7.0` | `SWC\\VEN_DTSI&HID_DTSIDAP` | **Exclude from representative DTS Driver version**: separate HSA/DAP companion |
+| MSI extension files in this same package | May differ | Audio OEM extension-specific | Not the DTS APO core `Latest` used by this row; do not pick merely because numerically newer |
 
-Other noted retained rows: Windows Studio Effects (`3.0.8.0` package), Realtek OED (`20.43.274.9`), Realtek Audio (`10.0.378.1`) need **correct package/component identification**, not arbitrary Realtek or camera names. Do not fabricate local versions if genuinely absent/undistinguishable.
+**Implementation:**
+- Match the **known DTS APO core identity**, using stable `SWC\\VEN_DTSI&AID_DTSI2` (actual installed PnP DeviceId, HardwareIds and CompatibleIds), appropriate DTS provider and SoftwareComponent/AudioProcessingObject class; allow equivalent, verified core subgroup if Windows enumerates it differently.
+- If the core entry is absent but an unambiguous supported corresponding controller/service group is present, fall back to its **same version domain**; when core vs related components have conflicting versions that cannot be resolved, `Unknown`, not arbitrary pick.
+- A versioned group may contain multiple PnP instances: don't require exactly one or a non-existent `&DEV_XXXX` suffix. Existing `HasObservedAudioCatalogHardwareIdentity()` regex that only admits `SWC\\VEN_DTSI&DEV_...` is **not the right package identity**.
+- A separate `DTS Audio Processing` UWP package version or `1.10.7.0` HSA component must **never overwrite** the MSI DTS Driver Installed version.
+- Expected on supplied CG3EM capture: **Installed `1.16.4.0` / Latest `1.16.4.0` => UpToDate**. Do **not** select local candidates solely by equality with Latest. Identify DTS core family first, then compare its installed version with MSI's published version.
 
-Already-working rows must stay working: BIOS `E1T91IMS.10D`, exact-owned Controller Firmware `4.19`, Goodix installed `3.12144.0.160` > MSI `3.12144.0.100`, Intel Game Assist installed `2.0.1801.30` > MSI `1.9.602.30`, Dynamic Tuning / Trusted Execution / PPM equal versions, exact Intel DSA Graphics/Wi-Fi/Bluetooth and equality-only NPU. AppX Realtek Audio Control `2.53.394.0` and DTS Audio Processing `1.11.3.0` already read correctly; MSI `UWP` sentinel has **no numeric latest** and remains Unknown.
+## 4. Minimal runtime implementation policy
 
-## 2. Verified code defects and fix boundaries
+### 4.1 Explicit model key and static rule selection
 
-### 2.1 Driver lookup never reaches usable Windows family evidence
+- The Frontend request already determines `hardware.Model` before Compose. Pass the resolved supported model to the composer via the **smallest internal signature change** (optional trailing argument or equivalent), rather than guessing CG3EM from a human-readable catalog title.
+- Keep `MsiUpdateCatalogComposer` as the sole owner. Add a **compact CG3EM driver mapping table or bounded switch** keyed by exact normalized **MSI Driver catalog name**. Each row declares its stable Windows ID/class/provider or representative-component predicate(s). The source code must be explicit and reviewable; **no generic scoring model, fuzzy title engine, additional resolver interface, registry database, ML classifier or auto-discovery**.
+- For `msi.claw.a2vm.7` / `msi.claw.a2vm.8`, do not apply CG3EM rules or assert they are the same board. Their current code path remains unchanged pending their own evidence.
+- Preserve existing strongly matched `DeviceId` / `InfName` results; for CG3EM rows whose MSI API fields are incomplete or vendor-only, use the **static EX mapping** instead of immediately returning `NoUsableIdentity`. Avoid applying a broad `PCI\\VEN_8086` or `SWC\\VEN_DTSI` to every device of that vendor.
+- INF filenames in the unpacked MSI reference are for **design-time identification**. Windows `Win32_PnPSignedDriver.InfName` commonly becomes `oem###.inf`. Match installed **stable IDs + provider/class** already captured by Windows, **never** expect `PantherLakeSystem.inf == oem598.inf` by bare string equality.
+- A defined static mapping is a **key**, not a hardcoded version; each manual check reads the currently installed `DriverVersion`.
 
-`src/SteamInputAddonforClaw/Devices/MSI/LiveUpdate/MsiUpdateInstalledInventory.cs`
+### 4.2 Grouped driver-package version and ordinary comparison
 
-Existing `ResolveMsiDriverInstalledVersion`:
-1. Attempts `entry.DeviceId` via `IsMsiDeviceIdMatch`;
-2. attempts `entry.InfName`;
-3. special-cases Realtek codec;
-4. uses `KnownMsiIntelDriverNames` only for Graphics/Wireless/Bluetooth/NPU;
-5. otherwise `Unknown("NoUsableIdentity")`.
+- **One product may install several related PnP devices.** After selecting only the mapped representative driver family/package, treat repeated device instances with the same version as one installed driver version; don't reject merely due to `CandidateCount>1` or `Confidence=Heuristic`.
+- Exclude accessory components known to use separate version domains (e.g. DTS HSA, ISS driver vs package, Realtek extension vs codec).
+- If multiple **relevant** installed component versions disagree and the mapping has no dependable representative, report `Unknown`, not first/maximum/local version coincidentally equal to Latest. `Installed (estimated)` is allowed when a coherent identified component/version exists but source-domain equivalence remains uncertain.
+- For comparable **same-product** dotted numeric driver versions, compare the installed version with MSI catalog `DriverVersion` or its published `Version`/`PackageVersion` (as applicable to this defined row): installed < MSI → `UpdateAvailable`; installed == or > MSI → `UpToDate`. Installed-newer must never be called an update.
+- When `Version` and `PackageVersion` are **different**, verify which corresponds to the representative INF before comparing; keep `Unknown` if it cannot be mapped without guessing. Do not use a local version equal to the MSI value as evidence for identity.
+- This is display-only, not permission to launch the official MSI installer. Keep all Update buttons disabled.
+- Simplify the redundant `ObservedSingleDeviceDriverNames` / `Exact` / one-device / DTS `&DEV_` / typed-`DriverVersion` veto paths that prevent **already mapped CG3EM drivers** from being compared. Do not alter other models' existing matching semantics.
 
-Many MSI catalog `DeviceId` fields are just `PCI\VEN_8086`, `PCI\VEN_10EC`, `NOT_FOUND` or empty; `InfName` is null. This **must not terminate lookup** while Windows has usable `DriverProvider`, `DeviceClass`, `DeviceName`/`FriendlyName`, HardwareIds and `InfName` in the already captured `MsiUpdateInstalledInventory.PnpDevices`.
+### 4.3 No new collection or UI redesign
 
-**Required implementation**:
-- Keep exact DeviceId/INF match precedence where it genuinely identifies the product.
-- When missing/partial/not-found or no usable exact match, attempt **bounded family matching** for **the current MSI catalog driver families** using *combinations* of already-captured Windows metadata:
-  - known product/component name tokens and semantic family (`HID Event Filter`, `Chipset`, `Serial IO`, `IPF`, `Management Engine`, `Smart Sound`, `Card Reader`, `ISS`, `Platform Monitoring`, `DTS`, `IntelliGo` etc.);
-  - appropriate vendor/provider;
-  - relevant Windows PnP class;
-  - corroborating precise HWID, device-name, INF/driver-package evidence **when available**.
-- `Type=Chipset` plus Intel provider, or `PCI\VEN_8086` by itself, is **NOT** a chipset/ME/IPF/Serial IO identity. Differentiating family matters more than making the candidate count exactly one.
-- Do not use **numerical equality with MSI Latest** as the sole way to pick a local driver; that circular selection hides outdated components and can produce false UpToDate. Do not pick max/current/latest-like version merely because it makes the row look correct.
-- Reuse existing captured inventory and current composer methods; implement small readable helper(s) or one small focused family rule table **within the same file**, with no new registry/service/manager/state framework. Avoid a growing collection of product-specific comparator exceptions.
+Continue using `MsiUpdateInstalledInventory`'s existing `PnpDevices` (provider, class, DeviceId, HardwareIds, CompatibleIds, friendly/name, DriverVersion, InfName). Do not introduce runtime downloads, static JSON loaded from disk, new SetupAPI/DriverStore scans, persistent DB or new frontend IPC. Existing manual request, diagnostic JSON, Korean/English labels, left metadata, centered right status and disabled Update button remain unchanged.
 
-**Multi-device package rule:**
-- Many legitimate Intel driver packages bind to multiple PnP devices. Group by **demonstrated component family / known installed driver package (e.g. same INF/driver family)**, not by each PnP instance. If all selected **relevant components** have the same valid installed version, report that version (with `Heuristic` confidence when deduced from a family).
-- If more than one legitimate version occurs, first distinguish unrelated subcomponents / separate driver packages using **product identity evidence**, not numeric preference. If one valid family/package remains, display it; if multiple different relevant package versions genuinely remain and cannot be distinguished, retain Unknown. Never silently choose a maximum, the first device, or the value matching MSI.
-- A multi-device count or `Confidence.Heuristic` alone must **not** suppress an otherwise well-supported installed version or same-domain comparison.
-- If there is a good family candidate but comparison-domain proof is insufficient, **display Installed (estimated)** and keep status `Unknown`; do not discard useful installed version solely due to a conservative comparison gate.
-- Retain controlled unknown for no reliable package-family evidence, conflicting installed versions in one inseparable family, unsupported/absent item, or corrupt/unreadable Windows data. **Unknown is a result of actual ambiguity, not an automatic response to missing OEM HWID.**
+## 5. Acceptance and regression tests (synthetic, no hardware)
 
-### 2.2 Version comparison overconstrains the resolved family
+Tests **must drive the real production composer** and exercise supported `msi.claw.cg3em` with EX INF-derived static identity rules:
 
-Existing `ResolveMsiComparisonStatus` demands `match.Outcome ExactHardwareId/ExactInf`, `Confidence.Exact`, `CandidateCount==1`, and for MSI versions often a hardcoded `ObservedSingleDeviceDriverNames` admission. `CompareObservedMultiComponentMsiDriver` requires DTS/IntelliGo `SWC\VEN_XXX&DEV_...` even though this CG3EM diagnostic carries `SWC\VEN_DTSI` / `SWC\VEN_IGO` family identity.
+1. For all **19 EX catalog names**, prove explicit mapping exists or explicitly document truly unresolved package evidence; do **not** let `NoUsableIdentity` remain merely because MSI catalog has an empty/partial ID while the supported EX mapping exists.
+2. Intel Chipset (multiple Panther Lake IDs and same version `10.1.56.28`), HID Event Filter (`2.2.2.17`), Serial IO (`30.100.2534.18`), Platform Monitoring (`7.3.11.3`), ME (`2603.9.4.0`), Smart Sound (`20.43.12741.0`), Realtek Card Reader (installed `10.0.26200.21389` > MSI `10.0.26100.21378`) resolve sensible installed versions and status using **device/package keys**, not coincidental version equality.
+3. DTS: core installed `1.16.4.0` and MSI page/API `1.16.4.0` => UpToDate, even alongside DAP `1.10.7.0`. If core becomes `1.16.3.0` with same identity and MSI Latest remains `1.16.4.0`, => UpdateAvailable. If core identity not found, no fake UpToDate based on DAP. Test different candidate counts and IDs without `DEV_`.
+4. IntelliGo: multiple recognized APO software components at `100.1.4.2709` => UpToDate; unrelated SWC/provider must not alter it.
+5. Existing Goodix `3.12144.0.160` > MSI `3.12144.0.100` => UpToDate; Game Assist `2.0.1801.30` > MSI `1.9.602.30` => UpToDate; DTT/Trusted/PPM equals => UpToDate.
+6. Explicitly reject broad Intel/Realtek/DTS-only vendor identity, unrelated Device/Class, duplicate version coincidences and multi-package conflicting versions. ISS `5.8.58.0` vs `5.8.61.0` package must not be miscompared. Realtek Audio Control AppX cannot stand in for Realtek Audio Driver.
+7. **A2VM 7/8 isolation:** CG3EM-only rule must not run on other hardware; their BIOS/Firmware/Intel DSA and existing MSI matching behavior must not change.
+8. Source selection, suppression, BIOS hexadecimal, owned PID1902 firmware, UWP sentinel, diagnostics privacy/retention, existing UI and disabled Update button are unchanged.
+9. Run solution build and Runtime/UI tests. Actual device tests belong to the owner **after merge**, never a PR blocker.
 
-**Required policy:**
-1. A successfully resolved, sufficiently unambiguous product/driver-family version may be compared; **not just `Exact`/one PnP item**. Keep confidence in the frontend for honest `Installed (estimated)` display, but do not use it as the only verdict gate.
-2. MSI provides the official **model-targeted** catalog. For a correctly identified same product/version domain, compare the numeric MSI offered version (`DriverVersion`, or applicable `Version`/`PackageVersion`) against local installed numeric `DriverVersion`. It is unreasonable to require MSI `DriverVersion` when every observed OEM Driver row lacks it. Existing `VersionKind` still tells UI which field was used.
-3. Use ordinary numeric dotted-component ordering: installed < offered → `UpdateAvailable`; installed == or > offered → `UpToDate`. **Installed newer is not an UpdateAvailable downgrade**.
-4. **Do not blindly compare unlike version domains** when the catalog explicitly distinguishes them. For example, the ISS catalog lists `Version=5.8.58.0` and `PackageVersion=5.8.61.0`; the published Latest is the **package** version. The implementation must not silently compare an unrelated component's PnP driver version against that package value. If no reliable cross-domain correspondence, show the best supported installed version and Unknown comparison.
-5. Apply the **same** admission policy to matched exact and credible family/INF matches. Eliminate or simplify redundant per-family `ObservedSingleDeviceDriverNames`, `HasPreciseObservedMsiDriverIdentity`, one-component / special `DEV_` checks **only insofar as they prevent legitimate identified comparisons**. Do not introduce a replacement overdesigned verdict registry.
-6. Keep BIOS hexadecimal same-board behavior, owned controller Firmware semantics, Intel DSA source precedence/duplicate suppression, NPU existing equality-only cross-kind behavior, UWP sentinel handling and the future-disabled Update button exactly as already implemented.
-7. Avoid changing existing public/frontend enum, entry positional record or IPC protocol.
+**Expected PR organization:** One PR, optional internally separated commits (a) CG3EM package mapping table, (b) comparison simplification and DTS separation, (c) regression tests. Source should be **simpler** than the current layer of successive one-off gates; one static mapping, one installed-version owner, one verdict policy. No runtime ZIP handling and **no installation support**.
 
-### 2.3 DTS / IntelliGo: remove unusable exact DEV test
+## 6. Additional background, explicitly not this PR
 
-Real CG3EM:
-- `DTS Driver`: `ExactHardwareId`, 2 matching installed components at `1.16.4.0`, provider DTS; **other DTS `1.10.7.0` components coexist**.
-- `IntelliGo APO Driver`: `ExactHardwareId`, 4 matching components at `100.1.4.2709`, provider IntelliGo.
-- PnP diagnostic exposes `SWC\VEN_DTSI` and `SWC\VEN_IGO`, **without** the arbitrary `DEV_XXXX` structure required by `HasObservedAudioCatalogHardwareIdentity`.
-
-Fix their existing matching/verdict path to use observed software-component family evidence plus provider/class/installed INF or concrete component identity. **Do not include every DTS package indiscriminately**: `1.10.7.0` is a demonstrably different installed component family; select the existing matched `1.16.4.0` family by independent package/INF/component evidence, never by matching the offered number.
-
-When matched group is coherent and comparable, `Installed (estimated) 1.16.4.0` / `Latest 1.16.4.0` → `UpToDate`; similarly IntelliGo `100.1.4.2709` → `UpToDate`. If independent family distinction is impossible for DTS 1.10.7 vs 1.16.4, preserve Unknown rather than showing an invented verdict; tests must exercise the real mixed-family topology.
-
-### 2.4 MSI Center M: use installed program identity, not GUID only
-
-`ResolveMsiInstalledVersion` Utility path currently relies on matching MSI catalog GUID/UpgradeGuid against Registry ProductCode, missing the installed **MSI Center M** HKLM32 record even though Windows reports `3.0.2608.3101`.
-
-For **MSI Center M**:
-- Permit an **exact normalized DisplayName + MSI Publisher** installed-product match as a fallback when GUIDs are missing/mismatched, with a single unambiguous matching installed product and numeric DisplayVersion. It is an update-check display, not permission to restart Center M.
-- Keep Registry GUID/UpgradeGuid and approved exact AppX identities as preferred strong matches. If the registry entry has an incompatible product title, non-MSI publisher, conflicting versions or multiple distinct matching products, do not infer a version from publisher alone.
-- Compare MSI's `3.0.2608.3101` against the matching Registry `DisplayVersion` when the same product's comparable numeric domain is established. Equal → `UpToDate`.
-- **Center M being Disabled must not be interpreted as NotInstalled**. Never start/enable/query MSI Center M processes/services or edit startup tasks.
-
-Existing Realtek Audio Control and DTS Audio Processing AppX mapping/version display must not regress. MSI `UWP` sentinel remains missing latest numeric version, hence `Unknown` comparison.
-
-## 3. Negative boundaries — relax correctly, not blindly
-
-These are **real** incorrect-result risks, not hypothetical race defenses:
-
-- **Multiple Intel System drivers:** Intel provider + System/Chipset class or catalog `PCI\VEN_8086` is not enough to map the same version to HID, chipset, IPF, DTT, Serial IO and ME. Require a meaningful product-family discriminator beyond generic vendor/category.
-- **DTS 1.10.7.0 vs 1.16.4.0:** never choose `1.16.4.0` just because it equals MSI; different installed groups may coexist.
-- **ISS 5.8.58.0 vs 5.8.61.0:** different local components and separate `Version`/`PackageVersion` semantics; don't fabricate UpToDate/UpdateAvailable.
-- **Realtek audio / OED:** don't treat AppX Realtek Audio Control `2.53.394.0` or its separate Uninstall entry `6.0.9738.1` as Realtek Audio Driver `10.0.378.1` without a matching driver identity.
-- **Realtek Card Reader:** genuine card reader PnP `10.0.26200.21389` is newer than MSI `10.0.26100.21378`; where their version domain is established, this is **UpToDate**, never an UpdateAvailable downgrade.
-- **Unrelated software titles:** do not classify all MSI-published software/Windows Store AppX packages merely by shared `MSI` / `Intel` / `Realtek` / `DTS` tokens.
-- **Absent installed product:** unknown is permitted; do not assert NotInstalled unless actually proven (no new status needed).
-- **Intel DSA fail/unavailable:** keep MSI family fallback and do not claim it represents the globally latest Intel driver; retain existing source-precedence policy.
-- **No new PnP/SetupAPI scan** merely to perform a second matcher pass. Existing WMI/registry/AppX inventory already captures the required evidence. Prefer local family predicates over a new data service.
-
-## 4. Expected implementation footprint (current `main`)
-
-Primary:
-- `src/SteamInputAddonforClaw/Devices/MSI/LiveUpdate/MsiUpdateInstalledInventory.cs`
-  - `ResolveMsiDriverInstalledVersion`
-  - `ResolveDriverCandidates` / group selection
-  - `ResolveMsiInstalledVersion` Utility branch
-  - `ResolveMsiComparisonStatus` + overrestrictive audio/known-family helpers
-  - `MsiUpdateCatalogComposer.MapMsiEntry` remains the **one** provenance+verdict calculation point.
-- `tests/SteamInputAddonforClaw.Tests/MsiUpdateInstalledVersionsTests.cs` (focused reproduction/negative tests).
-
-Touch `MsiLiveUpdateCatalogClient.cs` only if an **actual parser bug** is proven, not to change published versions or endpoints. No reason to modify WinUI 3 page layout, resources, frontend contract, diagnostic file schema or Intel DSA client.
-
-**Small illustrative direction only (not copy/paste without checking existing types):**
-
-~~~csharp
-// For an already captured MSI Driver catalog entry:
-// 1) exact device/INF matches (when meaningful) take precedence;
-// 2) otherwise match a product family using provider + component/class/name/INF;
-// 3) group the relevant signed-driver components by proven package/family;
-// 4) one coherent installed version => show it (Exact or Heuristic);
-// 5) compare only if that displayed version and selected MSI-offered
-//    version refer to the same product version domain.
-// Do not require candidates.Count == 1 when multiple devices share one
-// identified driver package.
-// Do not select a candidate based on its version being == offeredVersion.
-~~~
-
-The actual work should prioritize **reducing code and duplicated one-off vetoes**, not adding a bigger selector framework. Keep one owner/one resolution path and preserve existing fail-safe comparisons where genuinely ambiguous.
-
-## 5. Automated acceptance matrix (all hardware-free)
-
-Use synthetic but **realistic CG3EM PnP fixture structure** informed by the 21:59 / 22:00 JSON, with correct provider/class, coherent or distinct INF, ID/name/version combinations. Tests must test **the actual production composer method**, not a parallel ad hoc matcher.
-
-### Required positive cases
-1. Intel HID Event Filter: named Intel HIDClass / recognized component, installed `2.2.2.17`, offered `2.2.2.17` → Installed populated and UpToDate.
-2. Intel Chipset: 3 Intel System components sharing one relevant signed driver package/`oem598.inf`, `10.1.56.28` → Installed populated and UpToDate **despite 3 devices**.
-3. Intel Serial IO: several relevant Intel components at `30.100.2534.18`, clear family/INF grouping → Installed populated and UpToDate.
-4. Intel Platform Monitoring `7.3.11.3`, Management Engine `2603.9.4.0` and Smart Sound `20.43.12741.0`: matching provider plus meaningful family evidence → Installed populated and comparable UpToDate.
-5. Realtek Card Reader: MTD/Realtek/PCI VEN_10EC-DEV_5264, installed `10.0.26200.21389` > offered `10.0.26100.21378` → UpToDate (not UpdateAvailable).
-6. DTS `1.16.4.0` and IntelliGo `100.1.4.2709`: coherent **matched software-component package groups** with multiple PnP devices → Installed estimated and UpToDate. Also include DTS `1.10.7.0` from an **unrelated group** and verify it is not selected or used for wrong verdict.
-7. MSI Center M with exact normalized name and MSI publisher in Registry, version `3.0.2608.3101`, catalog latest same, mismatched/no OEM GUID → Installed populated and UpToDate.
-8. For credible same-family `installed < offered`, return UpdateAvailable and retain the existing **disabled** Update placeholder. For `installed > offered`, return UpToDate; check exact source/version-kind display remains unchanged.
-
-### Required negative/regression cases
-- Intel provider/category-only identity and no named/INF/family discriminator → Unknown, not a fabricated match.
-- Multiple **relevant** different versions without defensible sub-family separation → Unknown; neither max nor first nor latest-equal chosen.
-- ISS dual component `5.8.58`/`5.8.61` with MSI Catalog vs Package version distinction; no unsupported cross-domain ordering.
-- DTS mixed installed package groups not attributable from evidence; no Version==Latest candidate selection.
-- Missing Windows driver, name/provider mismatch, wrong class, unrelated HWID/INF, spoofed partial vendor ID, registry false-positive Center M title/publisher, two contradictory Center M installations.
-- Realtek Audio, Realtek OED and Windows Studio Effects remain honest if component evidence is insufficient; never equate AppX/registry versions with PnP driver versions.
-- No regressions: BIOS hexadecimal comparison, owned exact Controller Firmware `4.19`, Goodix, Game Assist, DTT, Trusted Execution, PPM, Intel DSA GPU/Wi-Fi/Bluetooth/NPU matching and suppression, Realtek/DTS AppX numeric versions, UWP sentinel, category counts, full one-line metadata, vertically centered action, Korean/English statuses and disabled Update button.
-- Check default Unknown if insufficient version domain; existing serialization and PR #838 privacy-safe bounded JSON snapshot still work.
-
-**Testing:** build solution, run existing Runtime/UI tests and CI. Hardware tests do **not** belong in required Local Codex validation or merge-blocker lists. User performs real A2VM/CG3EM checks after merge.
-
-## 6. PR delivery and stop conditions
-
-- **One PR**, optionally split into internal reviewable commits: (1) installed driver-family matching + grouping, (2) comparison gate cleanup + DTS/IntelliGo, (3) MSI Center M + regression tests.
-- No new public contract, new manager, extra background scanning, matching plugin framework, retry/state machine/lock/epoch for theoretical races, or architectural change.
-- Do **not** add more one-off numeric-identity whitelist entries just to make this CG3EM log green. Prefer small deterministic and understandable family predicates that work on all supported MSI Claw models; if a family truly needs model-specific HWID differentiation, make that a narrowly documented predicate in the existing matcher.
-- No real MSI downloads/installations. No changes to Center M enable/disable behavior, controller routing, HidHide, VIIPER or shutdown/recovery.
-- If existing Windows evidence cannot identify a specific package or distinguish version domains, leave that item Unknown **with honest Installed (estimated) where supported**; do not block the whole PR for unresolved rows.
-- The PR is complete when the verified matching defects are fixed and automated positive/negative evidence passes. Physical hardware review is **after merge**, by the user.
-
-**Success criterion:** A normal CG3EM manual check no longer returns `NoUsableIdentity` for well-identified installed driver families merely because MSI omitted a precise device ID or INF, and no longer returns `Unknown` solely due to `CandidateCount>1`, `Heuristic`, or DTS/IntelliGo's missing `DEV_XXXX`, while keeping genuinely ambiguous items honest.
+The same technique may later be applied to A2VM 7/8 using their **own extracted MSI model packages**. Do not infer their hardware IDs from CG3EM Panther Lake files. Non-Driver MSI Center M utility identity/Registry mapping may be handled separately; do not add it while focusing on the user's supplied EX Driver package evidence.
