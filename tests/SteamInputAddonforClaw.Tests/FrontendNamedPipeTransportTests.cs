@@ -517,12 +517,18 @@ public sealed class FrontendNamedPipeTransportTests
                 new(FrontendMsiLiveUpdateCatalogCategory.Bios, FrontendMsiLiveUpdateCatalogCategoryState.Success,
                     [new("BIOS", "E1T52IMS.114", "2026-08-07", null, "E1T52IMS.113",
                         FrontendMsiLiveUpdateVersionSource.Msi, FrontendMsiLiveUpdateVersionKind.Catalog,
-                        FrontendMsiLiveUpdateInstalledVersionConfidence.Exact)]),
+                        FrontendMsiLiveUpdateInstalledVersionConfidence.Exact,
+                        FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)]),
                 new(FrontendMsiLiveUpdateCatalogCategory.Firmware, FrontendMsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(FrontendMsiLiveUpdateCatalogCategory.Driver, FrontendMsiLiveUpdateCatalogCategoryState.Success,
                     [new("Intel NPU Driver", "32.0.100.5540", "2026-10-16", null, "32.0.90.1",
                         FrontendMsiLiveUpdateVersionSource.IntelDsa, FrontendMsiLiveUpdateVersionKind.Package,
-                        FrontendMsiLiveUpdateInstalledVersionConfidence.Exact)]),
+                        FrontendMsiLiveUpdateInstalledVersionConfidence.Exact,
+                        FrontendMsiLiveUpdateComparisonStatus.Unknown),
+                    new("Intel Arc Graphics", "32.0.101.9000", "2026-10-10", null, "32.0.101.8000",
+                        FrontendMsiLiveUpdateVersionSource.IntelDsa, FrontendMsiLiveUpdateVersionKind.Driver,
+                        FrontendMsiLiveUpdateInstalledVersionConfidence.Exact,
+                        FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)]),
                 new(FrontendMsiLiveUpdateCatalogCategory.Utility, FrontendMsiLiveUpdateCatalogCategoryState.Empty, [])
             ],
             new DateTimeOffset(2026, 10, 18, 12, 30, 0, TimeSpan.Zero),
@@ -539,13 +545,29 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(88, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal("E1T52IMS.113", received.Categories[0].Entries[0].InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable,
+            received.Categories[0].Entries[0].ComparisonStatus);
         var npu = received.Categories[2].Entries[0];
         Assert.Equal(FrontendMsiLiveUpdateVersionSource.IntelDsa, npu.LatestVersionSource);
         Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, npu.LatestVersionKind);
         Assert.Equal("32.0.90.1", npu.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, npu.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable,
+            received.Categories[2].Entries[1].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateSourceState.PartialFailure, received.MsiSource!.State);
         Assert.Equal("AppxReadFailed", Assert.Single(received.LocalInventoryWarnings!));
         Assert.Equal(1, fake.MsiLiveUpdateCatalogRequestCount);
+    }
+
+    [Fact]
+    public void Legacy_MSI_catalog_entry_without_comparison_status_defaults_to_unknown()
+    {
+        const string legacyJson = """{"Name":"BIOS","Version":"E1T52IMS.114","ReleaseDate":"2026-08-07","Description":null}""";
+
+        var entry = JsonSerializer.Deserialize<FrontendMsiLiveUpdateCatalogEntry>(legacyJson, FrontendWireCodec.Json);
+
+        Assert.NotNull(entry);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
     }
 
     [Fact]
