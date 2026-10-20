@@ -1279,10 +1279,10 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(catalogNames.Length, composed.Count);
         Assert.Equal(catalogNames.Length, diagnostics.Count);
         Assert.All(diagnostics.Where(diagnostic => diagnostic.Name is not
-                ("Windows Studio Effects" or "Realtek OED Driver" or "Realtek Audio Driver")),
+                ("Windows Studio Effects" or "Integrated Sensor Solution" or "Realtek OED Driver" or "Realtek Audio Driver")),
             diagnostic => Assert.Equal("Cg3emMappedNoMatchingPresentDevice", diagnostic.Outcome));
         Assert.All(diagnostics.Where(diagnostic => diagnostic.Name is
-                ("Windows Studio Effects" or "Realtek OED Driver" or "Realtek Audio Driver")),
+                ("Windows Studio Effects" or "Integrated Sensor Solution" or "Realtek OED Driver" or "Realtek Audio Driver")),
             diagnostic => Assert.Equal("Cg3emInvalidOemPackageIdentity", diagnostic.Outcome));
     }
 
@@ -1340,7 +1340,8 @@ public sealed class MsiUpdateInstalledVersionsTests
             new("Windows Studio Effects", "3.0.8.0", null, null, PackageVersion: "3.0.8.0",
                 OemPackageIdentity: "dism_mep,audio,component.inf_AudioProcessingObject_Microsoft"),
             new("Intel HID Event Filter", "2.2.2.17", null, null),
-            new("Integrated Sensor Solution", "5.8.58.0", null, null, PackageVersion: "5.8.61.0"),
+            new("Integrated Sensor Solution", "5.8.58.0", null, null, PackageVersion: "5.8.61.0",
+                OemPackageIdentity: "dism_ishheci.inf_System_Intel"),
             new("Intel Chipset Driver", "10.1.56.28", null, null),
             new("Intel Platform Monitoring Technology Driver", "7.3.11.3", null, null),
             new("Intel Serial IO Driver", "30.100.2534.18", null, null),
@@ -1405,6 +1406,7 @@ public sealed class MsiUpdateInstalledVersionsTests
             DriverStore = new("Completed",
             [
                 new("oem901.inf", "mep_audio_component.inf", "Microsoft Corporation", "AudioProcessingObject", "3.0.8.0"),
+                new("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0"),
                 new("oem902.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009"),
                 new("oem903.inf", "RtkSdcaXuMSI.inf", "Realtek", "Extension", "10.0.378.1")
             ])
@@ -1437,9 +1439,10 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["DTS Driver"].ComparisonStatus);
         Assert.Equal("100.1.4.2709", composed["IntelliGo APO Driver"].InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["IntelliGo APO Driver"].ComparisonStatus);
-        Assert.Equal("5.8.58.0", composed["Integrated Sensor Solution"].InstalledVersion);
+        Assert.Equal("5.8.61.0", composed["Integrated Sensor Solution"].InstalledVersion);
         Assert.Equal("5.8.61.0", composed["Integrated Sensor Solution"].Version);
-        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed["Integrated Sensor Solution"].ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, composed["Integrated Sensor Solution"].LatestVersionKind);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["Integrated Sensor Solution"].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["Windows Studio Effects"].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["Intel HID Event Filter"].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["Intel Dynamic Tuning Driver"].ComparisonStatus);
@@ -1595,6 +1598,94 @@ public sealed class MsiUpdateInstalledVersionsTests
 
         Assert.Null(result.InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, result.ComparisonStatus);
+    }
+
+    [Theory]
+    [InlineData("5.8.60.0", "UpdateAvailable")]
+    [InlineData("5.8.61.0", "UpToDate")]
+    [InlineData("5.8.62.0", "UpToDate")]
+    public void CG3EM_ISS_compares_only_the_exact_HECI_INF_package_domain(
+        string installedHeciVersion, string expectedStatus)
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var catalog = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var issDevice = DriverDevice(@"PCI\VEN_8086&DEV_E445\ISS", @"PCI\VEN_8086&DEV_E445",
+            "System", "Intel", "5.8.58.0");
+        var heciPackage = new MsiUpdateInstalledDriverPackage("oem677.inf", row.OriginalInfName,
+            row.Provider, row.DeviceClass, installedHeciVersion);
+
+        var composed = ComposeCg3emDriverStoreEntry(catalog, new("Completed", [heciPackage]), issDevice);
+
+        Assert.Equal(installedHeciVersion, composed.InstalledVersion);
+        Assert.Equal("5.8.61.0", composed.Version);
+        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, composed.LatestVersionKind);
+        Assert.Equal(Enum.Parse<FrontendMsiLiveUpdateComparisonStatus>(expectedStatus), composed.ComparisonStatus);
+        Assert.Equal("Cg3emInstalledInfPackageMatch",
+            ComposeCg3emDriverStoreOutcome(catalog, new("Completed", [heciPackage])));
+    }
+
+    [Fact]
+    public void CG3EM_ISS_main_device_version_alone_never_becomes_HECI_package_version()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var catalog = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var issDevice = DriverDevice(@"PCI\VEN_8086&DEV_E445\ISS", @"PCI\VEN_8086&DEV_E445",
+            "System", "Intel", "5.8.58.0");
+        var activeOnly = ComposeCg3emDriverStoreEntry(catalog, MsiUpdateDriverStoreCapture.NotRequested, issDevice);
+
+        Assert.Null(activeOnly.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, activeOnly.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_ISS_rejects_wrong_HECI_identity_and_conflicting_package_candidates()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var catalog = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var package = new MsiUpdateInstalledDriverPackage("oem677.inf", row.OriginalInfName,
+            row.Provider, row.DeviceClass, "5.8.61.0");
+        var wrongOriginalInf = ComposeCg3emDriverStoreEntry(catalog,
+            new("Completed", [package with { OriginalInfName = "oem677.inf" }]));
+        var wrongProvider = ComposeCg3emDriverStoreEntry(catalog,
+            new("Completed", [package with { Provider = "Intel Corporation" }]));
+        var wrongClass = ComposeCg3emDriverStoreEntry(catalog,
+            new("Completed", [package with { Class = "SoftwareComponent" }]));
+        var conflicting = ComposeCg3emDriverStoreEntry(catalog, new("Completed",
+        [
+            package,
+            package with { PublishedInfName = "oem678.inf", Version = "5.8.62.0" }
+        ]));
+
+        foreach (var result in new[] { wrongOriginalInf, wrongProvider, wrongClass, conflicting })
+        {
+            Assert.Null(result.InstalledVersion);
+            Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, result.ComparisonStatus);
+        }
+    }
+
+    [Fact]
+    public void A2VM_ISS_does_not_consume_CG3EM_DriverStore_package_evidence()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var catalog = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var inventory = new MsiUpdateInstalledInventory([], [], [], null, [])
+        {
+            DriverStore = new("Completed",
+                [new("oem677.inf", row.OriginalInfName, row.Provider, row.DeviceClass, "5.8.61.0")])
+        };
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver,
+            MsiLiveUpdateCatalogCategoryState.Success, [catalog]));
+
+        var composed = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+                IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.a2vm.8")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+
+        Assert.Null(composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
     }
 
     [Fact]
@@ -2416,6 +2507,8 @@ public sealed class MsiUpdateInstalledVersionsTests
         "Realtek Audio Driver" => new(catalogName,
             "dism_rtksdcaxumsi.inf_Extension_Realtek", "RtkSdcaXuMSI.inf",
             "Realtek", "Extension", "10.0.378.1"),
+        "Integrated Sensor Solution" => new(catalogName,
+            "dism_ishheci.inf_System_Intel", "ishheci.inf", "Intel", "System", "5.8.61.0"),
         _ => throw new ArgumentOutOfRangeException(nameof(catalogName), catalogName, null)
     };
 

@@ -922,7 +922,9 @@ internal static class MsiUpdateCatalogComposer
                 "mep_audio_component.inf", "Microsoft Corporation", "AudioProcessingObject")),
         Mapping("Intel HID Event Filter", ["ACPI\\INTC10CC"], "Intel", ["HIDClass"]),
         Mapping("Integrated Sensor Solution", ["PCI\\VEN_8086&DEV_E345", "PCI\\VEN_8086&DEV_E445"],
-            "Intel", ["System"], comparable: false),
+            "Intel", ["System"], comparable: false,
+            driverStoreIdentity: new("dism_ishheci.inf_System_Intel",
+                "ishheci.inf", "Intel", "System")),
         Mapping("Intel Chipset Driver", ["PCI\\VEN_8086&DEV_E402", "PCI\\VEN_8086&DEV_E422", "PCI\\VEN_8086&DEV_E423"],
             "Intel", ["System"]),
         Mapping("Intel Platform Monitoring Technology Driver", ["PCI\\VEN_8086&DEV_B07D"], "Intel", ["System"]),
@@ -1204,6 +1206,17 @@ internal static class MsiUpdateCatalogComposer
             if (KnownMsiIntelDriverNames.Any(candidate =>
                     string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase)))
                 return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+            if (match.IsCg3emMappedDriver && match.Outcome == "Cg3emInstalledInfPackageMatch")
+            {
+                if (versionKind != FrontendMsiLiveUpdateVersionKind.Package
+                    || string.IsNullOrWhiteSpace(entry.PackageVersion)
+                    || !string.Equals(match.ComparisonVersion, entry.PackageVersion, StringComparison.Ordinal)
+                    || !AreEqualNumericVersions(match.ComparisonVersion, entry.PackageVersion))
+                    return FrontendMsiLiveUpdateComparisonStatus.Unknown;
+
+                return CompareNumericVersions(match.Version, entry.PackageVersion);
+            }
 
             if (match.IsCg3emMappedDriver)
                 return string.IsNullOrWhiteSpace(match.Version) || string.IsNullOrWhiteSpace(match.ComparisonVersion)
