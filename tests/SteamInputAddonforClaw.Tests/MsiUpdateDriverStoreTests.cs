@@ -11,6 +11,8 @@ public sealed class MsiUpdateDriverStoreTests
     {
         var script = MsiUpdateInstalledInventory.DriverStorePowerShellScript;
 
+        Assert.Contains("Get-WindowsDriver -Online -ErrorAction Stop", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("-All", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("$_.Driver", script, StringComparison.Ordinal);
         Assert.Contains("$_.OriginalFileName", script, StringComparison.Ordinal);
         Assert.Contains("$_.ProviderName", script, StringComparison.Ordinal);

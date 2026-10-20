@@ -77,7 +77,7 @@ internal sealed record MsiUpdateInstalledInventory(
     internal const string DriverStorePowerShellScript = """
 $ErrorActionPreference = 'Stop'
 $allowed = @('mep_audio_component.inf', 'IntcOED_OemLibPath.inf', 'RtkSdcaXuMSI.inf', 'ishheci.inf')
-$matches = @(Get-WindowsDriver -Online -All -ErrorAction Stop | Where-Object {
+$matches = @(Get-WindowsDriver -Online -ErrorAction Stop | Where-Object {
     $name = [IO.Path]::GetFileName([string]$_.OriginalFileName)
     $allowed -contains $name
 } | ForEach-Object {
