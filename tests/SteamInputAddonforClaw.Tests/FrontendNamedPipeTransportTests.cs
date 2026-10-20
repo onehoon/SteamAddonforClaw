@@ -534,7 +534,7 @@ public sealed class FrontendNamedPipeTransportTests
             new DateTimeOffset(2026, 10, 18, 12, 30, 0, TimeSpan.Zero),
             MsiSource: new(FrontendMsiLiveUpdateSourceState.PartialFailure, "UtilityUnavailable"),
             IntelDsaSource: new(FrontendMsiLiveUpdateSourceState.Completed),
-            LocalInventoryWarnings: ["AppxReadFailed"]);
+            LocalInventoryWarnings: ["WmiDriverReadFailed"]);
         var fake = new RecordingFrontendControl { MsiLiveUpdateCatalogSnapshot = snapshot };
         var (server, pipeName) = await StartServerAsync(fake);
         await using var serverLifetime = server;
@@ -555,7 +555,7 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable,
             received.Categories[2].Entries[1].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateSourceState.PartialFailure, received.MsiSource!.State);
-        Assert.Equal("AppxReadFailed", Assert.Single(received.LocalInventoryWarnings!));
+        Assert.Equal("WmiDriverReadFailed", Assert.Single(received.LocalInventoryWarnings!));
         Assert.Equal(1, fake.MsiLiveUpdateCatalogRequestCount);
     }
 

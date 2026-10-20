@@ -27,7 +27,9 @@ internal sealed record MsiLiveUpdateCatalogRawDiagnosticFields(
     string FileKind,
     string? FileExtension,
     string SiparamKind,
-    string? Crc);
+    string? Crc,
+    string OemPackageIdentityKind = "Missing",
+    string? OemPackageIdentity = null);
 
 internal sealed record MsiLiveUpdateCatalogEntry(
     string Name,
@@ -40,7 +42,9 @@ internal sealed record MsiLiveUpdateCatalogEntry(
     string? PackageVersion = null,
     string? DriverVersion = null,
     string? InfName = null,
-    MsiLiveUpdateCatalogRawDiagnosticFields? DiagnosticFields = null);
+    MsiLiveUpdateCatalogRawDiagnosticFields? DiagnosticFields = null,
+    IReadOnlyList<string>? CatalogHardwareIds = null,
+    string? OemPackageIdentity = null);
 internal sealed record MsiLiveUpdateCatalogCategoryResult(
     MsiLiveUpdateCatalogCategory Category,
     MsiLiveUpdateCatalogCategoryState State,
@@ -323,6 +327,9 @@ internal static class MsiLiveUpdateCatalogResultParser
 {
     private const int MaximumCategoryEntries = 500;
     private const int MaximumResponseCharacters = 1024 * 1024;
+    private const int MaximumDeviceIdFieldLength = 4096;
+    private const int MaximumCatalogHardwareIds = 128;
+    private const int MaximumSingleHardwareIdLength = 512;
     private static readonly (MsiLiveUpdateCatalogCategory Category, string WireName)[] Categories =
     [
         (MsiLiveUpdateCatalogCategory.Bios, "bios"),
@@ -334,7 +341,7 @@ internal static class MsiLiveUpdateCatalogResultParser
     {
         "PCI", "USB", "USBSTOR", "ACPI", "HDAUDIO", "INTELAUDIO", "BTHENUM", "ROOT", "SWD",
         "SCSI", "SD", "I2C", "GPIO", "DISPLAY", "HID", "HIDCLASS", "SYSTEM", "PROCESSOR",
-        "MEDIA", "NET", "SWC", "UCM", "USB4", "NVME", "VMBUS", "VPCI"
+        "MEDIA", "NET", "SWC", "SOUNDWIRE", "UCM", "USB4", "NVME", "VMBUS", "VPCI"
     };
 
     internal static MsiLiveUpdateCatalogQueryResult ParseHelperOutput(
@@ -434,15 +441,18 @@ internal static class MsiLiveUpdateCatalogResultParser
                 TryGetAnyString(element, ["displayVersion", "version"], 128, out var version);
                 TryGetAnyString(element, ["releaseDate", "release_date"], 128, out var releaseDate);
                 TryGetAnyString(element, ["description"], 2048, out var description);
-                TryGetAnyString(element, ["deviceID"], 512, out var deviceId);
+                var hardwareIdentity = ReadCatalogHardwareIds(element);
                 TryGetAnyString(element, ["GUID"], 64, out var guid);
                 TryGetAnyString(element, ["upgradeGuid"], 64, out var upgradeGuid);
                 TryGetAnyString(element, ["packageVersion"], 128, out var packageVersion);
                 TryGetAnyString(element, ["driverVersion"], 128, out var driverVersion);
                 TryGetAnyString(element, ["infName"], 128, out var infName);
+                var rawDiagnosticFields = ReadDiagnosticFields(element, hardwareIdentity);
                 entries.Add(new(name!, version, releaseDate, description,
-                    ValidateDeviceId(deviceId), ValidateGuid(guid), ValidateGuid(upgradeGuid),
-                    packageVersion, driverVersion, ValidateInfName(infName), ReadDiagnosticFields(element, deviceId)));
+                    hardwareIdentity.Ids.FirstOrDefault(), ValidateGuid(guid), ValidateGuid(upgradeGuid),
+                    packageVersion, driverVersion, ValidateInfName(infName),
+                    rawDiagnosticFields, hardwareIdentity.Ids,
+                    rawDiagnosticFields.OemPackageIdentity));
             }
             return entries.Count == 0
                 ? new(category, MsiLiveUpdateCatalogCategoryState.Empty, entries)
@@ -454,11 +464,44 @@ internal static class MsiLiveUpdateCatalogResultParser
         }
     }
 
-    private static string? ValidateDeviceId(string? value)
+    internal static bool IsValidSingleHardwareId(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value) || value.Length > 512 || !value.Contains('\\')) return null;
-        return value.All(static character => char.IsLetterOrDigit(character)
-            || character is '\\' or '&' or '_' or '*' or '-' or '.' or ':') ? value : null;
+        if (string.IsNullOrWhiteSpace(value) || value.Length > MaximumSingleHardwareIdLength) return false;
+        var separator = value.IndexOf('\\');
+        if (separator is < 1 or > 32 || separator == value.Length - 1 || value.IndexOf('\\', separator + 1) >= 0)
+            return false;
+        if (!DiagnosticHardwareBuses.Contains(value[..separator])) return false;
+
+        var components = value[(separator + 1)..].Split('&', StringSplitOptions.None);
+        return components.Length is > 0 and <= 16
+            && components.All(component => component.Length is > 0 and <= 96
+                && component.All(static character => char.IsAsciiLetterOrDigit(character)
+                    || character is '_' or '*' or '-' or '.'));
+    }
+
+    private static (string Kind, IReadOnlyList<string> Ids) ReadCatalogHardwareIds(JsonElement element)
+    {
+        if (!TryGetRawField(element, ["deviceID"], out var raw)) return ("Missing", []);
+        if (raw.ValueKind == JsonValueKind.Null) return ("Null", []);
+        if (raw.ValueKind != JsonValueKind.String) return (JsonKindName(raw.ValueKind), []);
+
+        var value = raw.GetString()?.Trim();
+        if (string.IsNullOrEmpty(value)) return ("Empty", []);
+        if (string.Equals(value, "UWP", StringComparison.OrdinalIgnoreCase)) return ("UwpSentinel", []);
+        if (string.Equals(value, "NOT_FOUND", StringComparison.OrdinalIgnoreCase)) return ("NotFoundSentinel", []);
+        if (value.Length > MaximumDeviceIdFieldLength) return ("Oversized", []);
+
+        var components = value.Split(';', StringSplitOptions.TrimEntries);
+        var nonEmpty = components.Where(component => component.Length > 0).ToArray();
+        var exceededCount = nonEmpty.Length > MaximumCatalogHardwareIds;
+        var validated = nonEmpty.Take(MaximumCatalogHardwareIds)
+            .Where(IsValidSingleHardwareId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (validated.Length == 0) return ("Partial", []);
+
+        var invalidCount = nonEmpty.Take(MaximumCatalogHardwareIds).Count(component => !IsValidSingleHardwareId(component));
+        return invalidCount > 0 || exceededCount ? ("Partial", validated) : ("Valid", validated);
     }
 
     private static string? ValidateGuid(string? value) =>
@@ -470,16 +513,20 @@ internal static class MsiLiveUpdateCatalogResultParser
             ? value
             : null;
 
-    private static MsiLiveUpdateCatalogRawDiagnosticFields ReadDiagnosticFields(JsonElement element, string? deviceId)
+    private static MsiLiveUpdateCatalogRawDiagnosticFields ReadDiagnosticFields(
+        JsonElement element,
+        (string Kind, IReadOnlyList<string> Ids) hardwareIdentity)
     {
         var type = ReadSafeScalar(element, ["Type"], 64, allowSpace: false);
         var other = ReadAllowlistedOther(element);
         var file = ClassifyFile(element);
         var crc = ReadSafeCrc(element);
+        var guidKind = ClassifyGuidField(element);
+        var oemPackageIdentity = ReadOemDismPackageIdentityFromElement(element);
         return new(
-            ClassifyIdentityField(element, ["deviceID"], value => ValidateDeviceId(value) is not null),
-            ReadHardwareTypes(deviceId),
-            ClassifyIdentityField(element, ["GUID"], static value => Guid.TryParse(value, out _)),
+            hardwareIdentity.Kind,
+            ReadHardwareTypes(hardwareIdentity.Ids),
+            guidKind,
             ReadGuid(element, ["GUID"]),
             ClassifyIdentityField(element, ["upgradeGuid", "Upgrade_Guid"], static value => Guid.TryParse(value, out _)),
             ReadGuid(element, ["upgradeGuid", "Upgrade_Guid"]),
@@ -491,7 +538,49 @@ internal static class MsiLiveUpdateCatalogResultParser
             file.Kind,
             file.Extension,
             ClassifyCommandField(element, ["Siparam"]),
-            crc);
+            crc,
+            oemPackageIdentity.Kind,
+            oemPackageIdentity.Value);
+    }
+
+    private static string ClassifyGuidField(JsonElement element)
+    {
+        if (!TryGetRawField(element, ["GUID"], out var raw)) return "Missing";
+        if (raw.ValueKind == JsonValueKind.Null) return "Null";
+        if (raw.ValueKind != JsonValueKind.String) return JsonKindName(raw.ValueKind);
+        var value = raw.GetString()?.Trim();
+        if (string.IsNullOrEmpty(value)) return "Empty";
+        if (string.Equals(value, "UWP", StringComparison.OrdinalIgnoreCase)) return "UwpSentinel";
+        if (string.Equals(value, "NOT_FOUND", StringComparison.OrdinalIgnoreCase)) return "NotFoundSentinel";
+        if (Guid.TryParse(value, out _)) return "Valid";
+        return value.StartsWith("dism_", StringComparison.OrdinalIgnoreCase)
+            ? TryParseOemDismPackageIdentity(value, out _) ? "DismPackageIdentity" : "RejectedDismIdentity"
+            : "Rejected";
+    }
+
+    private static (string Kind, string? Value) ReadOemDismPackageIdentityFromElement(JsonElement element)
+    {
+        if (!TryGetRawField(element, ["GUID"], out var raw)) return ("Missing", null);
+        if (raw.ValueKind == JsonValueKind.Null) return ("Null", null);
+        if (raw.ValueKind != JsonValueKind.String) return (JsonKindName(raw.ValueKind), null);
+        var value = raw.GetString()?.Trim();
+        if (string.IsNullOrEmpty(value)) return ("Empty", null);
+        if (!value.StartsWith("dism_", StringComparison.OrdinalIgnoreCase)) return ("NotApplicable", null);
+        return TryParseOemDismPackageIdentity(value, out var identity)
+            ? ("ValidDismPackageIdentity", identity)
+            : ("RejectedDismPackageIdentity", null);
+    }
+
+    private static bool TryParseOemDismPackageIdentity(string? value, out string? identity)
+    {
+        identity = null;
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 256) return false;
+        var match = Regex.Match(value.Trim(),
+            @"^dism_(?<package>[A-Za-z0-9][A-Za-z0-9.,_-]{0,191})_(?<class>[A-Za-z0-9-]{1,32})_(?<provider>[A-Za-z0-9-]{1,32})$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success) return false;
+        identity = value.Trim();
+        return true;
     }
 
     private static string ClassifyIdentityField(JsonElement element, string[] names, Func<string, bool> isValid)
@@ -519,21 +608,24 @@ internal static class MsiLiveUpdateCatalogResultParser
         return Guid.TryParse(raw.GetString(), out var guid) ? guid.ToString("D") : null;
     }
 
-    private static List<string> ReadHardwareTypes(string? value)
+    private static List<string> ReadHardwareTypes(IReadOnlyList<string> values)
     {
-        if (string.IsNullOrWhiteSpace(value) || value.Length > 512) return [];
-        var parts = value.Trim().Split('\\', 3);
-        var bus = parts.Length > 1 && DiagnosticHardwareBuses.Contains(parts[0]) ? parts[0].ToUpperInvariant() : null;
-        var identity = parts.Length > 1 ? parts[1] : value.Trim();
-        var tokens = identity.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(token => token.ToUpperInvariant())
-            .Where(token => Regex.IsMatch(token,
-                @"^(?:VEN_[0-9A-F]{4}|VID_[0-9A-F]{4}|DEV_[0-9A-F]{4}|PID_[0-9A-F]{4}|SUBSYS_[0-9A-F]{8}|REV_[0-9A-F]{2,4}|MI_[0-9A-F]{2}|FUNC_[0-9A-F]{2}|CC_[0-9A-F]{6}|PNP[0-9A-F]{4}|INTC[0-9A-F]{4,8}|CID_[A-Z0-9]{4,12}|ACPI_[A-Z0-9]{3,8})$",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-            .Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
-        if (tokens.Length == 0) return [];
-        var normalized = string.Join('&', tokens);
-        return [bus is null ? normalized : $"{bus}\\{normalized}"];
+        var result = new List<string>();
+        foreach (var value in values.Take(MaximumCatalogHardwareIds))
+        {
+            var parts = value.Split('\\', 2);
+            if (parts.Length != 2) continue;
+            var tokens = parts[1].Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(token => token.ToUpperInvariant())
+                .Where(token => Regex.IsMatch(token,
+                    @"^(?:VEN_[A-Z0-9]{3,8}|VID_[0-9A-F]{4}|DEV_[A-Z0-9]{2,8}|PID_[0-9A-F]{4}|SUBSYS_[0-9A-F]{8}|REV_[0-9A-F]{2,4}|MI_[0-9A-F]{2}|FUNC_[0-9A-F]{2}|CC_[0-9A-F]{6}|PNP[0-9A-F]{4}|INTC[0-9A-F]{4,8}|CID_[A-Z0-9]{4,12}|ACPI_[A-Z0-9]{3,8}|AID_[A-Z0-9]{1,32}|HID_[A-Z0-9]{1,32}|SDCA_[A-Z0-9]{1,16}|MAN_[A-Z0-9]{1,16}|TYPE_[A-Z0-9]{1,16}|VER_[A-Z0-9]{1,16}|ADR_[A-Z0-9]{1,16}|LID_[A-Z0-9]{1,16}|UID_[A-Z0-9]{1,16}|VID[0-9A-F]{4}_[A-Z0-9_.-]{1,80})$",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
+            if (tokens.Length == 0) continue;
+            var normalized = $"{parts[0].ToUpperInvariant()}\\{string.Join('&', tokens)}";
+            if (!result.Contains(normalized, StringComparer.OrdinalIgnoreCase)) result.Add(normalized);
+        }
+        return result;
     }
 
     private static string ClassifyValueField(JsonElement element, string[] names, string? safeValue)
@@ -575,7 +667,8 @@ internal static class MsiLiveUpdateCatalogResultParser
         if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
         {
             var extension = SafeFileExtension(uri.IsFile ? uri.LocalPath : uri.AbsolutePath);
-            return (uri.Scheme.Equals("ms-windows-store", StringComparison.OrdinalIgnoreCase) ? "StoreLink" : "Url", extension);
+            return (uri.Scheme.Equals("ms-windows-store", StringComparison.OrdinalIgnoreCase)
+                || uri.Host.Equals("apps.microsoft.com", StringComparison.OrdinalIgnoreCase) ? "StoreLink" : "Url", extension);
         }
 
         var hasPath = value.Contains('\\') || value.Contains('/') || value.Contains(':');

@@ -102,7 +102,10 @@ internal sealed record MsiUpdateDiagnosticOemFields(
     string? Other,
     string FileKind,
     string? FileExtension,
-    string SiparamKind);
+    string SiparamKind,
+    List<string> CatalogHardwareIds,
+    string OemPackageIdentityKind,
+    string? OemPackageIdentity);
 
 internal sealed record MsiUpdateDiagnosticLatestVersion(
     string? Value,
@@ -140,6 +143,7 @@ internal sealed record MsiUpdateDiagnosticInventory(
     int SoftwareTotalCount,
     int SoftwareCapturedCount,
     List<MsiUpdateDiagnosticSoftwareRow> Software,
+    // Retained as empty schema-v1 fields; MSI Update no longer queries AppX packages.
     int AppxTotalCount,
     int AppxCapturedCount,
     List<MsiUpdateDiagnosticAppxRow> AppxPackages,
@@ -153,6 +157,8 @@ internal sealed record MsiUpdateDiagnosticPnpRow(
     string? DriverProvider,
     string? DriverVersion,
     string? InfName,
+    string? FriendlyName,
+    string? WmiDeviceName,
     List<string> HardwareTypes,
     string SelectionReason,
     string? DeviceDescriptorOmittedReason);
@@ -192,7 +198,6 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
     private const int MaximumIntelMatches = 256;
     private const int MaximumLocalPnpRows = 512;
     private const int MaximumSoftwareRows = 256;
-    private const int MaximumAppxRows = 256;
     private const int MaximumSnapshotBytes = 2 * 1024 * 1024;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -202,14 +207,14 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
     };
 
     private static readonly Regex HardwareTokenPattern = new(
-        @"^(?:VEN_[A-Z0-9]{3,8}|VID_[0-9A-F]{4}|DEV_[A-Z0-9]{2,8}|PID_[0-9A-F]{4}|SUBSYS_[0-9A-F]{8}|REV_[0-9A-F]{2,4}|MI_[0-9A-F]{2}|FUNC_[0-9A-F]{2}|CC_[0-9A-F]{6}|PNP[0-9A-F]{4}|INTC[0-9A-F]{4,8}|CID_[A-Z0-9]{4,12}|ACPI_[A-Z0-9]{3,8})$",
+        @"^(?:VEN_[A-Z0-9]{3,8}|VID_[0-9A-F]{4}|DEV_[A-Z0-9]{2,8}|PID_[0-9A-F]{4}|SUBSYS_[0-9A-F]{8}|REV_[0-9A-F]{2,4}|MI_[0-9A-F]{2}|FUNC_[0-9A-F]{2}|CC_[0-9A-F]{6}|PNP[0-9A-F]{4}|INTC[0-9A-F]{4,8}|CID_[A-Z0-9]{4,12}|ACPI_[A-Z0-9]{3,8}|AID_[A-Z0-9]{1,32}|HID_[A-Z0-9]{1,32}|SDCA_[A-Z0-9]{1,16}|MAN_[A-Z0-9]{1,16}|TYPE_[A-Z0-9]{1,16}|VER_[A-Z0-9]{1,16}|ADR_[A-Z0-9]{1,16}|LID_[A-Z0-9]{1,16}|UID_[A-Z0-9]{1,16})$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly HashSet<string> HardwareBuses = new(StringComparer.OrdinalIgnoreCase)
     {
         "PCI", "USB", "USBSTOR", "ACPI", "HDAUDIO", "INTELAUDIO", "BTHENUM", "ROOT", "SWD",
         "SCSI", "SD", "I2C", "GPIO", "DISPLAY", "HID", "HIDCLASS", "SYSTEM", "PROCESSOR",
-        "MEDIA", "NET", "SWC", "UCM", "USB4", "NVME", "VMBUS", "VPCI"
+        "MEDIA", "NET", "SWC", "SOUNDWIRE", "UCM", "USB4", "NVME", "VMBUS", "VPCI"
     };
 
     private static readonly HashSet<string> GenericWords = new(StringComparer.OrdinalIgnoreCase)
@@ -223,13 +228,6 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
         "INTEL", "REALTEK", "GOODIX", "DTS", "MSI", "NVIDIA", "AMD", "QUALCOMM", "SYNAPTICS",
         "MEDIATEK", "CIRRUS", "MICROSOFT", "ELAN", "ASUS", "BROADCOM"
     };
-    private static readonly Dictionary<string, string> ApprovedAppxPackageNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["MSI_Center_M"] = "MSI_Center_M",
-        ["RealtekSemiconductorCorp.RealtekAudioControl"] = "RealtekSemiconductorCorp.RealtekAudioControl",
-        ["DTSInc.DTSAudioProcessing"] = "DTSInc.DTSAudioProcessing"
-    };
-
     internal static MsiUpdateDiagnosticSnapshotDocument Build(MsiUpdateDiagnosticSnapshotInput input)
     {
         var rowDiagnostics = input.MsiRows.ToDictionary(item => (item.Category, item.SourceIndex));
@@ -243,7 +241,6 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
 
         var pnp = ProjectPnp(input, out var pnpRowIds, out var pnpTotalCount);
         var software = ProjectSoftware(input, out var softwareTotalCount);
-        var appx = ProjectAppx(input, out var appxTotalCount);
         var intelMatches = ProjectIntelMatches(input, pnpRowIds);
         var rowCap = Math.Min(projectedMsiRows.Count, MaximumMsiRows);
         var intelCap = Math.Min(intelMatches.Count, MaximumIntelMatches);
@@ -278,7 +275,7 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
                     .Count(entry => entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa)),
             Inventory = new(pnpTotalCount, Math.Min(pnp.Count, MaximumLocalPnpRows), pnp.Take(MaximumLocalPnpRows).ToList(),
                 softwareTotalCount, Math.Min(software.Count, MaximumSoftwareRows), software.Take(MaximumSoftwareRows).ToList(),
-                appxTotalCount, Math.Min(appx.Count, MaximumAppxRows), appx.Take(MaximumAppxRows).ToList(),
+                0, 0, [],
                 biosVersions, input.Inventory.ControllerFirmware is { } firmware
                     ? new(SafeVersion(firmware.Version), firmware.Confidence.ToString()) : null),
             MsiRows = capturedMsiRows,
@@ -289,7 +286,6 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
                 IntelMatchesOmitted = intelMatches.Count - intelCap,
                 LocalPnpRowsOmitted = pnpTotalCount - Math.Min(pnp.Count, MaximumLocalPnpRows),
                 SoftwareRowsOmitted = softwareTotalCount - Math.Min(software.Count, MaximumSoftwareRows),
-                AppxRowsOmitted = appxTotalCount - Math.Min(appx.Count, MaximumAppxRows),
                 BiosVersionsOmitted = Math.Max(0, input.Inventory.BiosVersions.Count - biosVersions.Count)
             }
         };
@@ -316,13 +312,6 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
         {
             var software = Trim(document.Inventory.Software, omitted => document.Truncation.SoftwareRowsOmitted += omitted);
             document.Inventory = document.Inventory with { Software = software, SoftwareCapturedCount = software.Count };
-            bytes = JsonSerializer.SerializeToUtf8Bytes(document, JsonOptions);
-        }
-
-        if (bytes.Length > MaximumSnapshotBytes)
-        {
-            var appx = Trim(document.Inventory.AppxPackages, omitted => document.Truncation.AppxRowsOmitted += omitted);
-            document.Inventory = document.Inventory with { AppxPackages = appx, AppxCapturedCount = appx.Count };
             bytes = JsonSerializer.SerializeToUtf8Bytes(document, JsonOptions);
         }
 
@@ -393,7 +382,10 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
                 raw?.TypeKind ?? "Missing", SafeOemScalar(raw?.Type),
                 raw?.OtherKind ?? "Missing", SafeOemScalar(raw?.Other),
                 raw?.FileKind ?? "Missing", raw?.FileExtension is { } extension ? SafeFileExtension(extension) : null,
-                raw?.SiparamKind ?? "Missing"),
+                raw?.SiparamKind ?? "Missing",
+                entry.CatalogHardwareIds?.Take(128).Select(SafeCatalogHardwareId).Where(value => value is not null)
+                    .Cast<string>().ToList() ?? [],
+                raw?.OemPackageIdentityKind ?? "Missing", SafeOemPackageIdentity(raw?.OemPackageIdentity)),
             new(latestValue, mapped?.LatestVersionSource.ToString(), mapped?.LatestVersionKind.ToString(), latestUnavailableReason),
             new(installed, mapped?.InstalledVersionConfidence?.ToString(), diagnostic?.MatchOutcome,
                 diagnostic?.CandidateCount, diagnostic?.VersionCount, installedUnavailableReason),
@@ -417,7 +409,8 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
             .Where(word => !GenericWords.Contains(word)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var catalogTypes = catalogEntries.Select(entry => NormalizeClass(entry.DiagnosticFields?.Type))
             .Where(value => value is not null).Cast<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var catalogHardwareTypes = catalogEntries.SelectMany(entry => SafeHardwareTypes(entry.DeviceId))
+        var catalogHardwareTypes = catalogEntries.SelectMany(CatalogHardwareIds)
+            .SelectMany(SafeHardwareTypes)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var intelDeviceIds = input.ResolvedIntelRows.Select(row => row.Device.DeviceId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -452,13 +445,14 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
             row.RowId,
             SafeClass(row.Device.ClassName),
             SafeClass(row.Device.WmiDeviceClass),
-            row.ProviderToken.Length == 0 ? null : row.ProviderToken,
+            SafeInstalledPublisher(row.Device.DriverProvider),
             SafeVersion(row.Device.DriverVersion),
             SafeInfName(row.Device.InfName),
+            SafeInstalledName(row.Device.FriendlyName),
+            SafeInstalledName(row.Device.WmiDeviceName),
             row.HardwareTypes,
             row.SelectionReason,
-            string.IsNullOrWhiteSpace(row.Device.FriendlyName) && string.IsNullOrWhiteSpace(row.Device.WmiDeviceName)
-                ? null : "PotentiallyUserAssigned"))
+            null))
             .ToList();
     }
 
@@ -474,72 +468,18 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
         var selected = new List<MsiUpdateDiagnosticSoftwareRow>();
         foreach (var software in input.Inventory.Software)
         {
-            var observedName = SafeCatalogName(software.DisplayName);
+            var observedName = SafeInstalledName(software.DisplayName);
             if (observedName is null) continue;
             var matchedNames = utilityNames.Where(name => HasProductFamilyOverlap(name, observedName)).Take(4).ToList();
             if (matchedNames.Count == 0) continue;
 
-            var exactTitle = matchedNames.FirstOrDefault(name => string.Equals(name, observedName, StringComparison.OrdinalIgnoreCase));
-            var evidenceTokens = matchedNames.SelectMany(Words).Where(word => !GenericWords.Contains(word))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            selected.Add(new(exactTitle, ProviderEvidenceToken(software.Publisher, evidenceTokens),
+            selected.Add(new(observedName, SafeInstalledPublisher(software.Publisher),
                 SafeVersion(software.DisplayVersion), SafeGuid(software.ProductCode), SafeGuid(software.UpgradeCode),
                 software.RegistrySourceKind is "HKCU" or "HKLM32" or "HKLM64" ? software.RegistrySourceKind : null,
                 matchedNames));
         }
         totalCount = selected.Count;
         return selected.Take(MaximumSoftwareRows).ToList();
-    }
-
-    private static List<MsiUpdateDiagnosticAppxRow> ProjectAppx(MsiUpdateDiagnosticSnapshotInput input,
-        out int totalCount)
-    {
-        var catalogNames = input.Msi.Categories.SelectMany(category => category.Entries)
-            .Select(entry => SafeCatalogName(entry.Name)).Where(value => value is not null).Cast<string>().ToArray();
-        var selected = new List<MsiUpdateDiagnosticAppxRow>();
-        foreach (var package in input.Inventory.Packages)
-        {
-            var rawName = SafePackageName(package.Name);
-            var rawFamilyName = SafePackageName(package.FamilyName);
-            if (rawName is null && rawFamilyName is null) continue;
-            var packageText = string.Join(' ', new[] { rawName, rawFamilyName }.Where(value => value is not null));
-            var matchedNames = catalogNames.Where(catalogName =>
-                    HasProductFamilyOverlap(catalogName, packageText)
-                    || IsCatalogPackageCandidate(catalogName, packageText))
-                .Take(4).ToList();
-            if (matchedNames.Count == 0) continue;
-
-            var safeName = GetApprovedAppxPackageName(rawName);
-            var safeFamilyName = SafeValidatedFamilyName(rawFamilyName, safeName);
-            selected.Add(new(safeName, safeFamilyName, SafeVersion(package.Version), matchedNames,
-                safeName is not null ? "Included" : rawName is null ? "MissingOrInvalid" : "RedactedUnrecognizedToken",
-                safeFamilyName is not null ? "Included" : rawFamilyName is null ? "MissingOrInvalid" : "RedactedUnrecognizedToken"));
-        }
-        totalCount = selected.Count;
-        return selected.Take(MaximumAppxRows).ToList();
-    }
-
-    private static string? GetApprovedAppxPackageName(string? packageName) =>
-        packageName is not null && ApprovedAppxPackageNames.TryGetValue(packageName, out var approvedName)
-            ? approvedName
-            : null;
-
-    private static string? SafeValidatedFamilyName(string? familyName, string? approvedPackageName)
-    {
-        if (familyName is null || approvedPackageName is null) return null;
-        var prefix = approvedPackageName + "_";
-        if (!familyName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
-        var publisherId = familyName[prefix.Length..];
-        return Regex.IsMatch(publisherId, @"^[A-Za-z0-9]{8,20}$", RegexOptions.CultureInvariant) ? familyName : null;
-    }
-
-    private static bool IsCatalogPackageCandidate(string catalogName, string packageName)
-    {
-        var catalogTokens = Words(catalogName).Where(word => !GenericWords.Contains(word)).ToArray();
-        if (catalogTokens.Length < 2) return false;
-        var compactCatalogName = string.Concat(catalogTokens);
-        var compactPackageName = string.Concat(Words(packageName));
-        return compactPackageName.Contains(compactCatalogName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static List<MsiUpdateDiagnosticIntelMatch> ProjectIntelMatches(MsiUpdateDiagnosticSnapshotInput input,
@@ -577,6 +517,39 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
 
     private static string? SafeCatalogName(string? value) => SafeCatalogScalar(value, 128, allowSpace: true,
         allowedPunctuation: "._+-()&'");
+
+    private static string? SafeInstalledName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 256) return null;
+        var safe = value.Trim();
+        if (safe.Length == 0 || safe.Contains('\\') || safe.StartsWith('/')
+            || Regex.IsMatch(safe, @"^[A-Za-z]:")
+            || safe.Contains("://", StringComparison.Ordinal)
+            || Regex.IsMatch(safe, @"^(?:powershell|pwsh|cmd|msiexec)(?:\.exe)?(?:\s|$)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            || Regex.IsMatch(safe, @"(?:^|\s)(?:--?token|/token)(?:\s|=|$)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            || Regex.IsMatch(safe, @"\.(?:exe|msi|cmd|bat)\s+[/\\-]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            || safe.Any(char.IsControl)) return null;
+        return safe.All(character => char.IsLetterOrDigit(character)
+            || char.IsWhiteSpace(character)
+            || char.IsPunctuation(character) || char.IsSymbol(character))
+            ? safe : null;
+    }
+
+    private static string? SafeInstalledPublisher(string? value) => SafeInstalledName(value);
+
+    private static string? SafeCatalogHardwareId(string value) =>
+        MsiLiveUpdateCatalogResultParser.IsValidSingleHardwareId(value) ? value : null;
+
+    private static string? SafeOemPackageIdentity(string? value) => value is { Length: > 0 and <= 256 }
+        && value.All(character => char.IsLetterOrDigit(character) || character is '_' or '-' or '.' or ',')
+            ? value : null;
+
+    private static IEnumerable<string> CatalogHardwareIds(MsiLiveUpdateCatalogEntry entry) =>
+        entry.CatalogHardwareIds is { Count: > 0 } identities
+            ? identities
+            : string.IsNullOrWhiteSpace(entry.DeviceId) ? [] : [entry.DeviceId];
 
     private static string? SafeCatalogScalar(string? value, int maximumLength, bool allowSpace,
         string allowedPunctuation = "._+-")
@@ -661,7 +634,7 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
 
     private static bool HasOmissions(MsiUpdateDiagnosticTruncation truncation) =>
         truncation.MsiRowsOmitted + truncation.IntelMatchesOmitted + truncation.LocalPnpRowsOmitted
-        + truncation.SoftwareRowsOmitted + truncation.AppxRowsOmitted + truncation.BiosVersionsOmitted > 0;
+        + truncation.SoftwareRowsOmitted + truncation.BiosVersionsOmitted > 0;
 
     private static List<T> Trim<T>(List<T> rows, Action<int> addOmitted)
     {
