@@ -586,6 +586,7 @@ internal static class MsiUpdateCatalogComposer
     ];
 
     private const string MsiCenterMCatalogName = "MSI Center M";
+    private const string MsiCenterMSdkDisplayName = "MSI Center M SDK";
     private const string VerifiedMsiPublisher = "MSI";
     private const string VerifiedMsiCorporationPublisher = "MSI Corporation";
 
@@ -1349,6 +1350,7 @@ internal static class MsiUpdateCatalogComposer
     {
         var name = displayName?.Trim();
         return string.Equals(name, MsiCenterMCatalogName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, MsiCenterMSdkDisplayName, StringComparison.OrdinalIgnoreCase)
             || Regex.IsMatch(name ?? string.Empty, @"^MSI Center M\s+v?\d+(?:\.\d+){1,3}$",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }

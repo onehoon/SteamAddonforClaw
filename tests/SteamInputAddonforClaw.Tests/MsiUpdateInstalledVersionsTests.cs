@@ -1953,6 +1953,94 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal("MatchedCenterMKnownNamePublisher", Assert.Single(rowDiagnostics).MatchOutcome);
     }
 
+    [Theory]
+    [InlineData("3.0.2501.0", FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)]
+    [InlineData("3.0.2608.3101", FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    [InlineData("3.0.2700.0", FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
+    public void MSI_Center_M_SDK_registry_alias_matches_the_observed_unique_HKLM32_entry(
+        string installedVersion, FrontendMsiLiveUpdateComparisonStatus expected)
+    {
+        const string catalogGuid = "0da6126a-8430-4367-b282-aa285afc2f10";
+        var catalogEntry = new MsiLiveUpdateCatalogEntry("MSI Center M", "3.0.2608.3101", null, null,
+            Guid: catalogGuid, PackageVersion: "3.0.2608.3101");
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", null, null, " MSI Center M SDK ", installedVersion, "MSI", "HKLM32")], null, []);
+        var diagnostics = new List<MsiUpdateCatalogRowDiagnostic>();
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory,
+            onRowDiagnostic: diagnostics.Add, hardwareModelId: "msi.claw.cg3em")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+
+        Assert.Equal(installedVersion, entry.InstalledVersion);
+        Assert.Equal(expected, entry.ComparisonStatus);
+        Assert.Equal("MatchedCenterMKnownNamePublisher", Assert.Single(diagnostics).MatchOutcome);
+    }
+
+    [Theory]
+    [InlineData("MSI Center M SDK Updater", "MSI")]
+    [InlineData("Other MSI Center M SDK", "MSI")]
+    [InlineData("MSI Center M SDK", "Micro-Star International")]
+    public void MSI_Center_M_SDK_registry_alias_rejects_unverified_lookalikes(
+        string displayName, string publisher)
+    {
+        var catalogEntry = new MsiLiveUpdateCatalogEntry("MSI Center M", "3.0.2608.3101", null, null,
+            Guid: "0da6126a-8430-4367-b282-aa285afc2f10", PackageVersion: "3.0.2608.3101");
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", null, null, displayName, "3.0.2608.3101", publisher, "HKLM32")], null, []);
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.cg3em")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+
+        Assert.Null(entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+    }
+
+    [Fact]
+    public void MSI_Center_M_SDK_registry_alias_requires_one_non_conflicting_candidate()
+    {
+        var catalogEntry = new MsiLiveUpdateCatalogEntry("MSI Center M", "3.0.2608.3101", null, null,
+            Guid: "0da6126a-8430-4367-b282-aa285afc2f10", PackageVersion: "3.0.2608.3101");
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+        [
+            new("uninstall-1", null, null, "MSI Center M SDK", "3.0.2608.3101", "MSI", "HKLM32"),
+            new("uninstall-2", null, null, "MSI Center M SDK", "3.0.2608.3101", "MSI Corporation", "HKLM32")
+        ], null, []);
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.cg3em")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+
+        Assert.Null(entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+    }
+
+    [Fact]
+    public void MSI_Center_M_SDK_registry_alias_rejects_a_conflicting_explicit_product_code()
+    {
+        var catalogEntry = new MsiLiveUpdateCatalogEntry("MSI Center M", "3.0.2608.3101", null, null,
+            Guid: "0da6126a-8430-4367-b282-aa285afc2f10", PackageVersion: "3.0.2608.3101");
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", "20112233-4455-6677-8899-aabbccddeeff", null,
+                "MSI Center M SDK", "3.0.2608.3101", "MSI", "HKLM32")], null, []);
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.cg3em")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+
+        Assert.Null(entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+    }
+
     [Fact]
     public void MSI_Center_M_name_fallback_compares_a_single_numeric_catalog_version_field()
     {
