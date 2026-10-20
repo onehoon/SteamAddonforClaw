@@ -587,6 +587,7 @@ internal static class MsiUpdateCatalogComposer
 
     private const string MsiCenterMCatalogName = "MSI Center M";
     private const string VerifiedMsiPublisher = "MSI";
+    private const string VerifiedMsiCorporationPublisher = "MSI Corporation";
 
     private static readonly string[] A2vmLegacySingleDeviceDriverNames =
     [
@@ -1140,7 +1141,7 @@ internal static class MsiUpdateCatalogComposer
         string? latestVersion,
         FrontendMsiLiveUpdateVersionKind versionKind)
     {
-        if (match.Outcome is not ("MatchedRegistry" or "MatchedCenterMExactNamePublisher")
+        if (match.Outcome is not ("MatchedRegistry" or "MatchedCenterMKnownNamePublisher")
             || match.Confidence != FrontendMsiLiveUpdateInstalledVersionConfidence.Exact
             || match.CandidateCount != 1
             || match.VersionCount != 1
@@ -1294,11 +1295,10 @@ internal static class MsiUpdateCatalogComposer
         MsiLiveUpdateCatalogEntry entry,
         IReadOnlyList<MsiUpdateInstalledSoftware> software)
     {
-        var titleCandidates = software.Where(candidate =>
-                string.Equals(candidate.DisplayName?.Trim(), MsiCenterMCatalogName, StringComparison.OrdinalIgnoreCase))
+        var titleCandidates = software.Where(candidate => IsKnownMsiCenterMDisplayName(candidate.DisplayName))
             .ToArray();
         if (titleCandidates.Length == 0)
-            return MsiInstalledVersionResolution.Unknown("CenterMNoExactDisplayNameMatch");
+            return MsiInstalledVersionResolution.Unknown("CenterMNoKnownDisplayNameMatch");
 
         var conflictingIdentity = titleCandidates.Any(candidate =>
             candidate.ProductCode is not null
@@ -1316,7 +1316,7 @@ internal static class MsiUpdateCatalogComposer
             return MsiInstalledVersionResolution.Unknown("CenterMAmbiguousRegistryMatches", verifiedPublisherCandidates.Length,
                 CountDistinctVersions(verifiedPublisherCandidates.Select(candidate => candidate.DisplayVersion)));
 
-        return ResolveRegistryCandidate(verifiedPublisherCandidates[0], "MatchedCenterMExactNamePublisher", 1);
+        return ResolveRegistryCandidate(verifiedPublisherCandidates[0], "MatchedCenterMKnownNamePublisher", 1);
     }
 
     private static MsiInstalledVersionResolution ResolveRegistryCandidate(
@@ -1345,8 +1345,20 @@ internal static class MsiUpdateCatalogComposer
             && Guid.TryParse(candidate.RegistryKeyName, out var registryProductCode)
             && !string.Equals(registryProductCode.ToString("D"), entry.Guid, StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsVerifiedMsiCenterMPublisher(MsiUpdateInstalledSoftware candidate) =>
-        string.Equals(candidate.Publisher?.Trim(), VerifiedMsiPublisher, StringComparison.OrdinalIgnoreCase);
+    private static bool IsKnownMsiCenterMDisplayName(string? displayName)
+    {
+        var name = displayName?.Trim();
+        return string.Equals(name, MsiCenterMCatalogName, StringComparison.OrdinalIgnoreCase)
+            || Regex.IsMatch(name ?? string.Empty, @"^MSI Center M\s+v?\d+(?:\.\d+){1,3}$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool IsVerifiedMsiCenterMPublisher(MsiUpdateInstalledSoftware candidate)
+    {
+        var publisher = candidate.Publisher?.Trim();
+        return string.Equals(publisher, VerifiedMsiPublisher, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(publisher, VerifiedMsiCorporationPublisher, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsMsiCenterMEntry(MsiLiveUpdateCatalogEntry entry) =>
         string.Equals(entry.Name.Trim(), MsiCenterMCatalogName, StringComparison.OrdinalIgnoreCase);

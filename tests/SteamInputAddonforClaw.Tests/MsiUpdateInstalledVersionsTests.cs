@@ -1911,7 +1911,7 @@ public sealed class MsiUpdateInstalledVersionsTests
     [InlineData("msi.claw.cg3em")]
     [InlineData("msi.claw.a2vm.7")]
     [InlineData("msi.claw.a2vm.8")]
-    public void MSI_Center_M_uses_unique_exact_name_and_verified_publisher_fallback_on_supported_models(string model)
+    public void MSI_Center_M_uses_unique_known_name_and_verified_publisher_fallback_on_supported_models(string model)
     {
         var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
             MsiLiveUpdateCatalogCategoryState.Success,
@@ -1927,7 +1927,30 @@ public sealed class MsiUpdateInstalledVersionsTests
 
         Assert.Equal("3.0.2501.0", entry.InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable, entry.ComparisonStatus);
-        Assert.Equal("MatchedCenterMExactNamePublisher", Assert.Single(rowDiagnostics).MatchOutcome);
+        Assert.Equal("MatchedCenterMKnownNamePublisher", Assert.Single(rowDiagnostics).MatchOutcome);
+    }
+
+    [Theory]
+    [InlineData("MSI Center M 3.0.2608.3101", "MSI Corporation")]
+    [InlineData("MSI Center M v3.0.2608.3101", "MSI")]
+    public void MSI_Center_M_accepts_bounded_versioned_registry_name_and_verified_publisher(
+        string displayName, string publisher)
+    {
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [new("MSI Center M", "3.0.2608.3101", null, null, PackageVersion: "3.0.2608.3101")]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", null, null, displayName, "3.0.2501.0", publisher)], null, []);
+        var rowDiagnostics = new List<MsiUpdateCatalogRowDiagnostic>();
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory,
+            onRowDiagnostic: rowDiagnostics.Add, hardwareModelId: "msi.claw.cg3em")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+
+        Assert.Equal("3.0.2501.0", entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable, entry.ComparisonStatus);
+        Assert.Equal("MatchedCenterMKnownNamePublisher", Assert.Single(rowDiagnostics).MatchOutcome);
     }
 
     [Fact]
@@ -1954,7 +1977,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         var inventory = new MsiUpdateInstalledInventory([], [],
             [
                 new("uninstall-1", null, null, "MSI Center M", "3.0.2501.0", "MSI"),
-                new("uninstall-2", null, null, "MSI Center M", "3.0.2502.0", "MSI")
+                new("uninstall-2", null, null, "MSI Center M 3.0.2608.3101", "3.0.2502.0", "MSI Corporation")
             ], null, []);
 
         var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
@@ -1967,6 +1990,8 @@ public sealed class MsiUpdateInstalledVersionsTests
     [Theory]
     [InlineData("msi.claw.cg3em", "MSI Center M", "Other Publisher", null, null)]
     [InlineData("msi.claw.cg3em", "MSI Center M Helper", "MSI", null, null)]
+    [InlineData("msi.claw.cg3em", "MSI Center M 3.0.2608.3101 Preview", "MSI Corporation", null, null)]
+    [InlineData("msi.claw.cg3em", "MSI Center M 3.0.2608.3101", "Micro-Star International", null, null)]
     [InlineData("msi.claw.cg3em", "MSI Center M", "MSI", "20112233-4455-6677-8899-aabbccddeeff", null)]
     [InlineData("msi.claw.other", "MSI Center M", "MSI", null, null)]
     public void MSI_Center_M_name_fallback_rejects_unverified_or_conflicting_candidates(
