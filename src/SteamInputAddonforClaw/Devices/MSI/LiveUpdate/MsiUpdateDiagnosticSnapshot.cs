@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
@@ -152,7 +153,11 @@ internal sealed record MsiUpdateDiagnosticInventory(
     string DriverStoreStatus,
     int DriverStoreTotalCount,
     int DriverStoreCapturedCount,
-    List<MsiUpdateDiagnosticDriverStorePackage> DriverStorePackages);
+    List<MsiUpdateDiagnosticDriverStorePackage> DriverStorePackages)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? DriverStoreElapsedMs { get; init; }
+}
 
 internal sealed record MsiUpdateDiagnosticDriverStorePackage(
     string PublishedInfName,
@@ -301,7 +306,13 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
                         SafeCatalogScalar(package.Provider, 128, allowSpace: true) ?? string.Empty,
                         SafeCatalogScalar(package.Class, 64, allowSpace: true) ?? string.Empty,
                         SafeVersion(package.Version) ?? string.Empty))
-                    .ToList()),
+                    .ToList())
+            {
+                DriverStoreElapsedMs = string.Equals(input.Inventory.DriverStore.Status, "NotRequested",
+                    StringComparison.Ordinal)
+                    ? null
+                    : input.Inventory.DriverStore.ElapsedMs
+            },
             MsiRows = capturedMsiRows,
             IntelDsaMatches = intelMatches.Take(MaximumIntelMatches).ToList(),
             Truncation = new()

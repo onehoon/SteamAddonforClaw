@@ -50,6 +50,8 @@ internal sealed record MsiUpdateDriverStoreCapture(
     string? Warning = null)
 {
     internal static MsiUpdateDriverStoreCapture NotRequested { get; } = new("NotRequested", []);
+
+    internal long? ElapsedMs { get; init; }
 }
 
 internal sealed record MsiUpdateInstalledInventory(
@@ -65,7 +67,11 @@ internal sealed record MsiUpdateInstalledInventory(
     private const int MaximumDriverStoreRows = 128;
     private const int MaximumDriverStoreOutputCharacters = 64 * 1024;
     private const int MaximumDriverStoreErrorCharacters = 8 * 1024;
-    private static readonly TimeSpan DriverStoreTimeout = TimeSpan.FromSeconds(20);
+    internal const int DriverStoreTimeoutMilliseconds = 8_000;
+    internal const int DriverStoreProcessCleanupGraceMilliseconds = 500;
+    internal const int MaximumDriverStoreElapsedMilliseconds = 30_000;
+    private static readonly TimeSpan DriverStoreTimeout = TimeSpan.FromMilliseconds(DriverStoreTimeoutMilliseconds);
+    private static readonly TimeSpan DriverStoreProcessCleanupGrace = TimeSpan.FromMilliseconds(DriverStoreProcessCleanupGraceMilliseconds);
     private static readonly string[] DriverStoreOriginalInfAllowlist =
     [
         "mep_audio_component.inf",
@@ -143,6 +149,10 @@ $packages = @($matches | Select-Object -First 128)
 
     internal static bool ShouldCaptureCg3emDriverStore(string? hardwareModelId) =>
         string.Equals(hardwareModelId, "msi.claw.cg3em", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool ShouldLogDriverStoreCapture(string? hardwareModelId, MsiUpdateDriverStoreCapture capture) =>
+        ShouldCaptureCg3emDriverStore(hardwareModelId)
+        && !string.Equals(capture.Status, "NotRequested", StringComparison.Ordinal);
 
     internal static bool IsAllowedDriverStoreOriginalInf(string? originalInfName) =>
         DriverStoreOriginalInfAllowlist.Contains(originalInfName ?? string.Empty, StringComparer.OrdinalIgnoreCase);
@@ -262,6 +272,40 @@ $packages = @($matches | Select-Object -First 128)
     private static async Task<MsiUpdateDriverStoreCapture> CaptureDriverStoreProcessAsync(
         CancellationToken cancellationToken)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        try
+        {
+            var capture = await CaptureDriverStoreProcessCoreAsync(cancellationToken).ConfigureAwait(false);
+            return WithDriverStoreElapsed(capture, Stopwatch.GetElapsedTime(startedAt));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return WithDriverStoreElapsed(
+                new("Unavailable", [], "Cg3emDriverStoreCommandFailed"),
+                Stopwatch.GetElapsedTime(startedAt));
+        }
+    }
+
+    internal static MsiUpdateDriverStoreCapture WithDriverStoreElapsed(
+        MsiUpdateDriverStoreCapture capture,
+        TimeSpan elapsed)
+    {
+        var milliseconds = elapsed.TotalMilliseconds;
+        var boundedMilliseconds = double.IsNaN(milliseconds) || milliseconds <= 0
+            ? 0
+            : milliseconds >= MaximumDriverStoreElapsedMilliseconds
+                ? MaximumDriverStoreElapsedMilliseconds
+                : (long)milliseconds;
+        return capture with { ElapsedMs = boundedMilliseconds };
+    }
+
+    private static async Task<MsiUpdateDriverStoreCapture> CaptureDriverStoreProcessCoreAsync(
+        CancellationToken cancellationToken)
+    {
         var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var powershellPath = Path.Combine(windowsDirectory, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
         var startInfo = new ProcessStartInfo
@@ -316,9 +360,7 @@ $packages = @($matches | Select-Object -First 128)
             var first = await Task.WhenAny(exitTask, outputLimitExceeded.Task).ConfigureAwait(false);
             if (first == outputLimitExceeded.Task)
             {
-                TryKill(process);
-                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-                process.WaitForExit();
+                await TryKillAndWaitForExitAsync(process).ConfigureAwait(false);
                 return new("OutputLimitExceeded", [], "Cg3emDriverStoreOutputLimitExceeded");
             }
 
@@ -327,10 +369,7 @@ $packages = @($matches | Select-Object -First 128)
         }
         catch (OperationCanceledException)
         {
-            TryKill(process);
-            try { await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); }
-            catch (InvalidOperationException) { }
-            process.WaitForExit();
+            await TryKillAndWaitForExitAsync(process).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested) throw;
             return new("TimedOut", [], "Cg3emDriverStoreTimedOut");
         }
@@ -358,6 +397,16 @@ $packages = @($matches | Select-Object -First 128)
     private static void TryKill(Process process)
     {
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+        catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
+    }
+
+    private static async Task TryKillAndWaitForExitAsync(Process process)
+    {
+        TryKill(process);
+        using var cleanupSource = new CancellationTokenSource(DriverStoreProcessCleanupGrace);
+        try { await process.WaitForExitAsync(cleanupSource.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
         catch (InvalidOperationException) { }
         catch (System.ComponentModel.Win32Exception) { }
     }

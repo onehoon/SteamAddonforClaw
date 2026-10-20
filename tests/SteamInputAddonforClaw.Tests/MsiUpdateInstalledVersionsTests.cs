@@ -1586,6 +1586,24 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, unavailable.ComparisonStatus);
     }
 
+    [Theory]
+    [InlineData("Integrated Sensor Solution")]
+    [InlineData("Windows Studio Effects")]
+    [InlineData("Realtek OED Driver")]
+    [InlineData("Realtek Audio Driver")]
+    public void CG3EM_package_rows_remain_unknown_when_DriverStore_capture_times_out(string catalogName)
+    {
+        var row = GetCg3emDriverStoreCase(catalogName);
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, row.PackageVersion, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+
+        var composed = ComposeCg3emDriverStoreEntry(entry,
+            new("TimedOut", [], "Cg3emDriverStoreTimedOut"));
+
+        Assert.Null(composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
+    }
+
     [Fact]
     public void CG3EM_WSE_and_Realtek_package_matches_ignore_unrelated_matching_PnP_devices()
     {
