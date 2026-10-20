@@ -11,6 +11,9 @@ public sealed class MsiUpdateDriverStoreTests
     {
         var script = MsiUpdateInstalledInventory.DriverStorePowerShellScript;
 
+        Assert.Contains("Get-WindowsDriver -Online -ErrorAction Stop", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("-All", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, script.Split("Get-WindowsDriver", StringSplitOptions.None).Length - 1);
         Assert.Contains("$_.Driver", script, StringComparison.Ordinal);
         Assert.Contains("$_.OriginalFileName", script, StringComparison.Ordinal);
         Assert.Contains("$_.ProviderName", script, StringComparison.Ordinal);
@@ -19,6 +22,46 @@ public sealed class MsiUpdateDriverStoreTests
         Assert.DoesNotContain("$_.PublishedName", script, StringComparison.Ordinal);
         Assert.Contains("[IO.Path]::GetFileName", script, StringComparison.Ordinal);
         Assert.DoesNotContain("FileRepository", script, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DriverStore_timeout_and_process_cleanup_policies_are_short_and_finite()
+    {
+        Assert.Equal(8_000, MsiUpdateInstalledInventory.DriverStoreTimeoutMilliseconds);
+        Assert.InRange(MsiUpdateInstalledInventory.DriverStoreProcessCleanupGraceMilliseconds, 1, 1_000);
+    }
+
+    [Fact]
+    public void DriverStore_capture_records_bounded_elapsed_for_success_timeout_and_command_failure()
+    {
+        var results = new[]
+        {
+            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{\"Packages\":[]}", 0),
+            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{}", 0, timedOut: true),
+            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{}", 5)
+        };
+
+        Assert.Equal(new[] { "Completed", "TimedOut", "Unavailable" }, results.Select(result => result.Status));
+        Assert.All(results, result => Assert.Equal(1_234,
+            MsiUpdateInstalledInventory.WithDriverStoreElapsed(result, TimeSpan.FromMilliseconds(1_234)).ElapsedMs));
+        Assert.Equal(0, MsiUpdateInstalledInventory.WithDriverStoreElapsed(results[0], TimeSpan.FromMilliseconds(-1)).ElapsedMs);
+        Assert.Equal(MsiUpdateInstalledInventory.MaximumDriverStoreElapsedMilliseconds,
+            MsiUpdateInstalledInventory.WithDriverStoreElapsed(results[0],
+                TimeSpan.FromMilliseconds(MsiUpdateInstalledInventory.MaximumDriverStoreElapsedMilliseconds + 1)).ElapsedMs);
+        Assert.Null(MsiUpdateDriverStoreCapture.NotRequested.ElapsedMs);
+    }
+
+    [Theory]
+    [InlineData("msi.claw.cg3em", "Completed", true)]
+    [InlineData("msi.claw.cg3em", "TimedOut", true)]
+    [InlineData("msi.claw.cg3em", "Unavailable", true)]
+    [InlineData("msi.claw.a2vm.8", "Completed", false)]
+    [InlineData("msi.claw.cg3em", "NotRequested", false)]
+    public void DriverStore_capture_log_is_limited_to_requested_CG3EM_scans(
+        string model, string status, bool expected)
+    {
+        Assert.Equal(expected, MsiUpdateInstalledInventory.ShouldLogDriverStoreCapture(
+            model, new(status, [])));
     }
 
     [Theory]

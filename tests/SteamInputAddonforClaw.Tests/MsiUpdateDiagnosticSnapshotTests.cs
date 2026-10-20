@@ -319,6 +319,9 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         var write = method.IndexOf("MsiUpdateDiagnosticSnapshotStore", StringComparison.Ordinal);
         Assert.True(unsupportedCheck >= 0 && compose > unsupportedCheck && write > compose);
         Assert.Equal(1, CountOccurrences(method, "CaptureMsiUpdateInventorySafelyAsync(hardware.Model, cancellationToken)"));
+        Assert.Contains("ShouldLogDriverStoreCapture(hardware.Model, inventory.DriverStore)", method, StringComparison.Ordinal);
+        Assert.Contains("(\"Event\", \"MSI.DriverStoreCapture\")", method, StringComparison.Ordinal);
+        Assert.Contains("(\"ElapsedMs\", inventory.DriverStore.ElapsedMs)", method, StringComparison.Ordinal);
         Assert.Contains("WriteAsync(diagnosticInput, cancellationToken)", method, StringComparison.Ordinal);
         Assert.Contains("return FrontendMsiLiveUpdateCatalogSnapshot.Unavailable(\"UnsupportedDevice\")", method, StringComparison.Ordinal);
     }
@@ -332,7 +335,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
             [
                 new("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0"),
                 new("oem755.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009")
-            ])
+            ]) { ElapsedMs = 1_827 }
         };
         var input = ComposeInput(MsiResult(
                 new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
@@ -345,11 +348,60 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
 
         Assert.Equal("Completed", document.Inventory.DriverStoreStatus);
+        Assert.Equal(1_827, document.Inventory.DriverStoreElapsedMs);
         Assert.Equal(2, document.Inventory.DriverStoreTotalCount);
         Assert.Contains(document.Inventory.DriverStorePackages, row => row.OriginalInfName == "ishheci.inf"
             && row.PublishedInfName == "oem677.inf" && row.Version == "5.8.61.0");
         Assert.DoesNotContain("C:\\Windows", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("FileRepository", json, StringComparison.OrdinalIgnoreCase);
+        using var parsed = JsonDocument.Parse(json);
+        Assert.Equal(1_827, parsed.RootElement.GetProperty("inventory").GetProperty("driverStoreElapsedMs").GetInt64());
+    }
+
+    [Theory]
+    [InlineData("TimedOut")]
+    [InlineData("Unavailable")]
+    public void Diagnostic_snapshot_keeps_elapsed_time_for_failed_DriverStore_capture(string status)
+    {
+        var inventory = new MsiUpdateInstalledInventory([], [], [], null, [])
+        {
+            DriverStore = new(status, [], "Cg3emDriverStoreUnavailable") { ElapsedMs = 8_231 }
+        };
+        var input = ComposeInput(MsiResult(
+                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Empty, [])),
+            IntelDsaCatalogResult.Failed("Http403"), inventory);
+
+        var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
+        var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
+        using var parsed = JsonDocument.Parse(json);
+
+        Assert.Equal(status, document.Inventory.DriverStoreStatus);
+        Assert.Equal(8_231, parsed.RootElement.GetProperty("inventory").GetProperty("driverStoreElapsedMs").GetInt64());
+    }
+
+    [Fact]
+    public void Diagnostic_snapshot_omits_DriverStore_elapsed_time_when_capture_was_not_requested()
+    {
+        var capturedInventory = new MsiUpdateInstalledInventory([], [], [], null, [])
+        {
+            DriverStore = MsiUpdateDriverStoreCapture.NotRequested with { ElapsedMs = 55 }
+        };
+        var input = CreateInput(MsiResult(
+            new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
+            new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
+            new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
+            new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Empty, [])), inventory: capturedInventory);
+
+        var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
+        var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
+        using var parsed = JsonDocument.Parse(json);
+        var inventory = parsed.RootElement.GetProperty("inventory");
+
+        Assert.Equal("NotRequested", document.Inventory.DriverStoreStatus);
+        Assert.False(inventory.TryGetProperty("driverStoreElapsedMs", out _));
     }
 
     private static MsiUpdateDiagnosticSnapshotInput ComposeInput(MsiLiveUpdateCatalogQueryResult msi,

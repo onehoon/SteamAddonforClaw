@@ -2205,6 +2205,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var result = await msiTask.ConfigureAwait(false);
         var intel = await intelTask.ConfigureAwait(false);
         var inventory = await inventoryTask.ConfigureAwait(false);
+        if (MsiUpdateInstalledInventory.ShouldLogDriverStoreCapture(hardware.Model, inventory.DriverStore))
+        {
+            AppLog.Info("MsiUpdates", "CG3EM DriverStore package capture completed.",
+                ("Event", "MSI.DriverStoreCapture"), ("Model", hardware.Model!),
+                ("Status", inventory.DriverStore.Status), ("ElapsedMs", inventory.DriverStore.ElapsedMs),
+                ("PackageCount", inventory.DriverStore.Packages.Count));
+        }
+
         var rowDiagnostics = new List<MsiUpdateCatalogRowDiagnostic>();
         IReadOnlyList<IntelDsaResolvedDriver> resolvedIntelRows = [];
         var snapshot = MsiUpdateCatalogComposer.Compose(result, intel, inventory, match =>
