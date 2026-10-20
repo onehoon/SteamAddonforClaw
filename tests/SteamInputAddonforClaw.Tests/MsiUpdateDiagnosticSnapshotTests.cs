@@ -17,7 +17,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
     {
         var privateUrl = "https://catalog.example.test/users/onehoon/setup.exe?token=private-query-token";
         var privateCommand = @"C:\Users\onehoon\setup.exe /quiet /token=private-command-token";
-        var deviceId = @"PCI\VEN_10EC&DEV_0256\INSTANCE_SERIAL_PRIVATE-DEVICE";
+        var deviceId = @"PCI\VEN_10EC&DEV_0256;PCI\VEN_10EC&DEV_0257\INSTANCE_SERIAL_PRIVATE-DEVICE";
         var utilityJson = JsonSerializer.Serialize(new object[]
         {
             new
@@ -31,7 +31,10 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
             new { name = "Malformed Optional", version = "1.2.3", Type = new[] { "ignored" }, Other = new { secret = "private" } },
             new { name = "Missing OEM Identity", version = "1.0", deviceID = "NOT_FOUND", GUID = "NOT_FOUND", upgradeGuid = "UWP", Crc = "NOT_FOUND" },
             new { name = "Partial OEM Identity", version = "1.0", deviceID = "VEN_8086&DEV_1234" },
-            new { name = "Opaque OEM Selectors", version = "1.0", Other = "onehoon-private-selector", Crc = "private-crc-payload" }
+            new { name = "Opaque OEM Selectors", version = "1.0", Other = "onehoon-private-selector", Crc = "private-crc-payload" },
+            new { name = "MSI Center M", version = "3.0.1.0", Type = "Utility", deviceID = @"PCI\VEN_10EC&DEV_0256" },
+            new { name = "Windows PowerShell", version = "7.5.3", Type = "Utility" },
+            new { name = "Windows PowerShell 7", version = "7.5.3", Type = "Utility" }
         });
         var request = new MsiLiveUpdateCatalogRequest("Claw 8 AI+ A2VM", "kr", "win11");
         var msi = MsiLiveUpdateCatalogResultParser.ParseHelperOutput(HelperOutput(
@@ -39,11 +42,11 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
 
         Assert.Equal(MsiLiveUpdateCatalogState.Completed, msi.State);
         var rows = msi.Categories.Single(category => category.Category == MsiLiveUpdateCatalogCategory.Utility).Entries;
-        Assert.Equal(7, rows.Count);
+        Assert.Equal(10, rows.Count);
         var first = rows[0];
         var fields = first.DiagnosticFields!;
         Assert.Null(first.UpgradeGuid); // Existing matcher input remains unchanged for the raw Upgrade_Guid alias.
-        Assert.Equal("Valid", fields.DeviceIdKind);
+        Assert.Equal("Partial", fields.DeviceIdKind);
         Assert.Equal(new[] { @"PCI\VEN_10EC&DEV_0256" }, fields.HardwareTypes);
         Assert.Equal("UwpSentinel", fields.GuidKind);
         Assert.Equal("Valid", fields.UpgradeGuidKind);
@@ -70,43 +73,27 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         Assert.Null(fields4.Crc);
 
         var input = CreateInput(msi, IntelDsaCatalogResult.Failed("Http403"), new([], [],
-            [new(@"C:\Users\onehoon\AppData\Local\PrivateRegistryKey", ProductCode, null,
-                "MSI Center M", "3.0.1", "MSI Corporation")],
-            [new("MSI_Center_M", "MSI_Center_M_8wekyb3d8bbwe", "3.0.1"),
-                new("onehoon.MSI_Center_M", "onehoon.MSI_Center_M_8wekyb3d8bbwe", "3.0.2"),
-                new("RealtekSemiconductorCorp.RealtekAudioControl",
-                    "RealtekSemiconductorCorp.RealtekAudioControl_1234567890abc", "1.2.3"),
-                new("DTSInc.DTSAudioProcessing", "DTSInc.DTSAudioProcessing_abc1234567890", "4.5.6"),
-                new("onehoon.RealtekSemiconductorCorp.RealtekAudioControl",
-                    "onehoon.RealtekSemiconductorCorp.RealtekAudioControl_1234567890abc", "7.8.9")], null, []));
+            [
+                new(@"C:\Users\onehoon\AppData\Local\PrivateRegistryKey", ProductCode, null,
+                    "MSI Center M", "3.0.1", "MSI Corporation"),
+                new("PowerShell", null, null, "Windows PowerShell 7", "7.5.3", "Microsoft Corporation")
+            ],
+            null, []));
         var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
         var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
-        var approvedMsiPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "3.0.1");
-        var userNamedPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "3.0.2");
-        var realtekPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "1.2.3");
-        var dtsPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "4.5.6");
-        var userPrefixedRealtekPackage = Assert.Single(document.Inventory.AppxPackages, row => row.Version == "7.8.9");
+        var softwareRow = Assert.Single(document.Inventory.Software, row => row.DisplayName == "MSI Center M");
+        var powershellRow = Assert.Single(document.Inventory.Software, row => row.DisplayName == "Windows PowerShell 7");
 
         Assert.Contains("UwpSentinel", json, StringComparison.Ordinal);
         Assert.Contains("RedactedCommand", json, StringComparison.Ordinal);
         Assert.Contains("MSI Center M", json, StringComparison.Ordinal);
-        Assert.Equal("MSI_Center_M", approvedMsiPackage.Name);
-        Assert.Equal("MSI_Center_M_8wekyb3d8bbwe", approvedMsiPackage.FamilyName);
-        Assert.Contains("MSI Center M", approvedMsiPackage.MatchedCatalogNames);
-        Assert.Null(userNamedPackage.Name);
-        Assert.Equal("RedactedUnrecognizedToken", userNamedPackage.NameDisposition);
-        Assert.Null(userNamedPackage.FamilyName);
-        Assert.Equal("RedactedUnrecognizedToken", userNamedPackage.FamilyNameDisposition);
-        Assert.Equal("RealtekSemiconductorCorp.RealtekAudioControl", realtekPackage.Name);
-        Assert.Equal("RealtekSemiconductorCorp.RealtekAudioControl_1234567890abc", realtekPackage.FamilyName);
-        Assert.Contains("Realtek Audio Control", realtekPackage.MatchedCatalogNames);
-        Assert.Equal("DTSInc.DTSAudioProcessing", dtsPackage.Name);
-        Assert.Equal("DTSInc.DTSAudioProcessing_abc1234567890", dtsPackage.FamilyName);
-        Assert.Contains("DTS Audio Processing", dtsPackage.MatchedCatalogNames);
-        Assert.Null(userPrefixedRealtekPackage.Name);
-        Assert.Equal("RedactedUnrecognizedToken", userPrefixedRealtekPackage.NameDisposition);
-        Assert.Null(userPrefixedRealtekPackage.FamilyName);
-        Assert.Equal("RedactedUnrecognizedToken", userPrefixedRealtekPackage.FamilyNameDisposition);
+        Assert.Equal("MSI Center M", softwareRow.DisplayName);
+        Assert.Equal("MSI Corporation", softwareRow.Publisher);
+        Assert.Contains("MSI Center M", softwareRow.MatchedCatalogNames);
+        Assert.Equal("Microsoft Corporation", powershellRow.Publisher);
+        Assert.Equal(0, document.Inventory.AppxTotalCount);
+        Assert.Equal(0, document.Inventory.AppxCapturedCount);
+        Assert.Empty(document.Inventory.AppxPackages);
         Assert.DoesNotContain("private-query-token", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private-command-token", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("onehoon", json, StringComparison.OrdinalIgnoreCase);
@@ -115,20 +102,26 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         Assert.DoesNotContain("PrivateRegistryKey", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("onehoon-private-selector", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private-crc-payload", json, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("UwpSentinel", document.MsiRows.Single(row => row.Name == "MSI Center M").Latest.UnavailableReason);
+        var excludedCenterM = document.MsiRows.First(row => row.Name == "MSI Center M");
+        Assert.Equal("ExcludedByPolicy", excludedCenterM.UiDisposition);
+        Assert.Equal("UwpCatalogEntry", excludedCenterM.DispositionReason);
     }
 
     [Fact]
     public void Projection_preserves_duplicate_source_ordinals_dispositions_and_independent_match_reasons()
     {
         const string gpuId = @"PCI\VEN_8086&DEV_1234";
-        var localGpu = Pnp(gpuId + @"\LOCAL_SERIAL_PRIVATE", gpuId, "DISPLAY", "USER_ASSIGNED_PRIVATE_NAME", "32.0.100.1");
+        var localGpu = Pnp(gpuId + @"\LOCAL_SERIAL_PRIVATE", gpuId, "DISPLAY", "Intel Arc Graphics", "32.0.100.1") with
+        {
+            WmiDeviceName = "Intel Arc Graphics Adapter",
+            DriverProvider = "Intel Corporation"
+        };
         var msi = MsiResult(
             new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
             new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
             new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
             [
-                new("Intel Graphics Driver", "UWP", null, null, DeviceId: gpuId),
+                new("Intel Graphics Driver", "2.0.0.0", null, null, DeviceId: gpuId),
                 new("Intel Graphics Driver", "2.0.0.0", null, null, DeviceId: @"PCI\VEN_8086&DEV_9999"),
                 new("Intel Graphics Driver", "2.0.0.0", null, null),
                 new("Exact GPU Component", "2.0.0.0", null, null, DeviceId: gpuId),
@@ -146,7 +139,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
                 "https://download.example.test/driver.exe?token=private-dsa-token", false, [],
                 [new IntelDsaComponent("Graphics", "32.0.101.9150", ["VEN_8086&DEV_1234"], [])])],
             CatalogCreatedUtc: CapturedAt);
-        var inventory = new MsiUpdateInstalledInventory([], [localGpu], [], [], null, []);
+        var inventory = new MsiUpdateInstalledInventory([], [localGpu], [], null, []);
         var input = ComposeInput(msi, intel, inventory);
         var rows = input.MsiRows;
         var driverRows = rows.Where(row => row.Category == MsiLiveUpdateCatalogCategory.Driver).ToArray();
@@ -171,6 +164,10 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         Assert.Equal(1, document.Sources.IntelDsa.ResolvedCount);
         Assert.Equal(1, document.Counts.AppendedIntelDsaRows);
         Assert.Contains(document.Inventory.LocalPnp, row => row.HardwareTypes.Contains(gpuId));
+        var capturedGpu = Assert.Single(document.Inventory.LocalPnp);
+        Assert.Equal("Intel Arc Graphics", capturedGpu.FriendlyName);
+        Assert.Equal("Intel Arc Graphics Adapter", capturedGpu.WmiDeviceName);
+        Assert.Equal("Intel Corporation", capturedGpu.DriverProvider);
         var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
         Assert.DoesNotContain("private-dsa-token", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("download.example.test", json, StringComparison.OrdinalIgnoreCase);
@@ -339,7 +336,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
     private static MsiUpdateDiagnosticSnapshotInput CreateInput(MsiLiveUpdateCatalogQueryResult msi,
         IntelDsaCatalogResult? intel = null, MsiUpdateInstalledInventory? inventory = null) =>
         ComposeInput(msi, intel ?? IntelDsaCatalogResult.Failed("Http403"),
-            inventory ?? new([], [], [], [], null, []));
+            inventory ?? new([], [], [], null, []));
 
     private static MsiLiveUpdateCatalogQueryResult MsiResult(
         MsiLiveUpdateCatalogCategoryResult bios,

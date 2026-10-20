@@ -346,7 +346,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
             [new("Intel Display Driver", "32.0.101.9150", null, null, DeviceId: GpuDeviceId)]));
         var combined = MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"),
-            new([], [], [], [], null, ["WmiDriverReadFailed", "AppxReadFailed"]));
+            new([], [], [], null, ["WmiDriverReadFailed"]));
         var entry = combined.Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries[0];
 
         Assert.Equal(FrontendMsiLiveUpdateCatalogState.PartialFailure, combined.State);
@@ -372,6 +372,47 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal("32.0.100.1", entry.InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, entry.InstalledVersionConfidence);
         Assert.Equal(FrontendMsiLiveUpdateVersionSource.Msi, entry.LatestVersionSource);
+    }
+
+    [Fact]
+    public void A2VM_matches_a_later_valid_alternate_catalog_HardwareId()
+    {
+        const string primaryId = @"PCI\VEN_8086&DEV_1111";
+        const string alternateId = @"PCI\VEN_8086&DEV_2222";
+        var device = Device(alternateId + @"\LOCAL_INSTANCE", [alternateId], "SYSTEM",
+            "Intel Device", "10.1.2.3", 0x8086, 0x2222);
+        var catalogEntry = new MsiLiveUpdateCatalogEntry("Alternate Hardware Driver", "10.1.2.4", null, null,
+            DeviceId: primaryId, CatalogHardwareIds: [primaryId, alternateId]);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver,
+            MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), Inventory(device),
+            hardwareModelId: "msi.claw.a2vm.8")
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+
+        Assert.Equal("10.1.2.3", entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Exact, entry.InstalledVersionConfidence);
+    }
+
+    [Fact]
+    public void A2VM_does_not_expand_vendor_only_catalog_identity_to_all_vendor_devices()
+    {
+        const string vendorOnlyId = @"PCI\VEN_8086";
+        var device = Device(@"PCI\VEN_8086&DEV_2222\LOCAL_INSTANCE", [vendorOnlyId],
+            "SYSTEM", "Intel Device", "10.1.2.3", 0x8086, 0x2222);
+        var catalogEntry = new MsiLiveUpdateCatalogEntry("Unmapped Generic Driver", "10.1.2.4", null, null,
+            DeviceId: vendorOnlyId, CatalogHardwareIds: [vendorOnlyId]);
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver,
+            MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), Inventory(device),
+            hardwareModelId: "msi.claw.a2vm.7")
+            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+
+        Assert.Null(entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
     }
 
     [Fact]
@@ -755,7 +796,7 @@ public sealed class MsiUpdateInstalledVersionsTests
             ], DateTimeOffset.UtcNow);
         var inventory = new MsiUpdateInstalledInventory(
             ["E1T52IMS.113"], [device],
-            [new("uninstall-key", productCode, null, "MSI Center M", "3.0.2501.0", "MSI")], [],
+            [new("uninstall-key", productCode, null, "MSI Center M", "3.0.2501.0", "MSI")],
             new("0x0230", FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic), []);
 
         var snapshot = MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), inventory);
@@ -793,8 +834,7 @@ public sealed class MsiUpdateInstalledVersionsTests
             DeviceId: @"USB\VID_0DB0&PID_1901");
         var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Firmware,
             MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
-        var inventory = new MsiUpdateInstalledInventory([], [], [], [],
-            new(installed, confidence), []);
+        var inventory = new MsiUpdateInstalledInventory([], [], [], new(installed, confidence), []);
 
         var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
                 IntelDsaCatalogResult.Failed("Http403"), inventory)
@@ -818,7 +858,7 @@ public sealed class MsiUpdateInstalledVersionsTests
                 new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Empty, [])
             ], DateTimeOffset.UtcNow);
-        var inventory = new MsiUpdateInstalledInventory([], [], [], [], null, []);
+        var inventory = new MsiUpdateInstalledInventory([], [], [], null, []);
 
         var entries = MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), inventory)
             .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Firmware).Entries;
@@ -967,81 +1007,147 @@ public sealed class MsiUpdateInstalledVersionsTests
     }
 
     [Fact]
-    public void UWP_sentinel_is_not_displayed_as_a_version_and_AppX_requires_exact_package_identity()
+    public void UWP_and_store_catalog_rows_are_excluded_before_local_version_matching()
     {
         var msi = new MsiLiveUpdateCatalogQueryResult(MsiLiveUpdateCatalogState.Completed,
             "Claw 8 AI+ A2VM", "kr", "win11",
             [
-                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
-                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
-                new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Success,
+                    [new("Bios Store", "1.0", null, null, DiagnosticFields: StoreRowFields(".appx"))]),
+                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Success,
+                    [new("Firmware Store", "1.0", null, null, DiagnosticFields: StoreRowFields(null, "StoreLink"))]),
+                new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
+                    [new("Realtek Audio Control", "UWP", null, null)]),
                 new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Success,
-                    [new("Intel Graphics Command Center", "UWP", null, null)])
+                [
+                    new("Intel Graphics Command Center", "1.0", null, null,
+                        DiagnosticFields: StoreRowFields(null, "StoreLink")),
+                    new("Realtek Audio Control", "UWP", null, null),
+                    new("DTS Audio Processing", "1.0", null, null,
+                        DiagnosticFields: StoreRowFields(".msix")),
+                    new("Intel Graphics Software", "1.0", null, null,
+                        DiagnosticFields: StoreRowFields(null, "StoreLink")),
+                    new("MSI App Player Installer CN", "1.0", null, null),
+                    new("MSI App Player Installer", "1.0", null, null),
+                    new("MSI Center M", "3.0.2608.3101", null, null,
+                        Guid: "00112233-4455-6677-8899-aabbccddeeff")
+                ])
             ], DateTimeOffset.UtcNow);
-        var matchingInventory = new MsiUpdateInstalledInventory([], [], [],
-            [new("Intel Graphics Command Center", "IntelGraphicsExperience_8wekyb3d8bbwe", "1.2.3.4")], null, []);
-        var unmatchedInventory = new MsiUpdateInstalledInventory([], [], [],
-            [new("IntelGraphicsExperience", "IntelGraphicsExperience_8wekyb3d8bbwe", "1.2.3.4")], null, []);
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", "00112233-4455-6677-8899-aabbccddeeff", null,
+                "MSI Center M", "3.0.2501.0", "MSI")], null, []);
+        var diagnostics = new List<MsiUpdateCatalogRowDiagnostic>();
+        var snapshot = MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), inventory,
+            onRowDiagnostic: diagnostics.Add);
 
-        var matching = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), matchingInventory)
-            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
-        var unmatched = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), unmatchedInventory)
-            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
-
-        Assert.Null(matching.Version);
-        Assert.Equal("1.2.3.4", matching.InstalledVersion);
-        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, matching.ComparisonStatus);
-        Assert.Null(unmatched.InstalledVersion);
-        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, unmatched.ComparisonStatus);
+        foreach (var category in snapshot.Categories.Where(category => category.Category != FrontendMsiLiveUpdateCatalogCategory.Utility))
+            Assert.True(category.Entries.Count == 0,
+                $"{category.Category} retained: {string.Join(", ", category.Entries.Select(entry => entry.Name))}");
+        var utility = Assert.Single(snapshot.Categories,
+            category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility);
+        Assert.Equal(FrontendMsiLiveUpdateCatalogCategoryState.Success, utility.State);
+        var retained = Assert.Single(utility.Entries);
+        Assert.Equal("MSI Center M", retained.Name);
+        Assert.Equal("3.0.2501.0", retained.InstalledVersion);
+        Assert.Equal(9, diagnostics.Count(item => item.UiDisposition == "ExcludedByPolicy"));
+        Assert.Equal(7, diagnostics.Count(item => item.UiDisposition == "ExcludedByPolicy" && item.DispositionReason == "UwpCatalogEntry"));
+        Assert.Equal(2, diagnostics.Count(item => item.UiDisposition == "ExcludedByPolicy" && item.DispositionReason == "ExcludedUtility"));
     }
 
     [Fact]
-    public void AppX_package_version_fields_are_formatted_as_invariant_numeric_components()
+    public void CG3EM_frozen_catalog_counts_preserve_only_the_MSI_Center_M_utility()
     {
-        Assert.Equal("1.2.3.4", MsiUpdateInstalledInventory.FormatAppxVersion(1, 2, 3, 4));
-        Assert.Equal("65535.0.9.1", MsiUpdateInstalledInventory.FormatAppxVersion(ushort.MaxValue, 0, 9, 1));
-    }
+        const string graphicsId = @"PCI\VEN_8086&DEV_64A0";
+        const string wirelessId = @"PCI\VEN_8086&DEV_2725";
+        const string bluetoothId = @"USB\VID_8087&PID_0033";
+        const string npuId = @"PCI\VEN_8086&DEV_B03E";
+        const string centerMGuid = "30112233-4455-6677-8899-aabbccddeeff";
+        var devices = new[]
+        {
+            Device(graphicsId, [graphicsId], "DISPLAY", "Intel Arc Graphics", "32.0.100.1", 0x8086, 0x64A0),
+            Device(wirelessId, [wirelessId], "NET", "Intel Wi-Fi", "23.0.0.1", 0x8086, 0x2725),
+            Device(bluetoothId, [bluetoothId], "Bluetooth", "Intel Wireless Bluetooth", "22.0.0.1", 0x8087, 0x0033),
+            Device(npuId, [npuId], "System", "Intel AI Boost NPU", "31.0.100.1", 0x8086, 0xB03E)
+        };
+        var driverRows = new List<MsiLiveUpdateCatalogEntry>
+        {
+            new("Intel Graphics Driver", "32.0.101.9150", null, null, DeviceId: graphicsId),
+            new("Intel Wireless LAN Driver", "24.70.0.3", null, null, DeviceId: wirelessId),
+            new("Intel Bluetooth Driver", "24.70.0.4", null, null, DeviceId: bluetoothId),
+            new("Intel NPU Driver", "32.0.100.5540", null, null, DeviceId: npuId)
+        };
+        driverRows.AddRange(Enumerable.Range(1, 19)
+            .Select(index => new MsiLiveUpdateCatalogEntry($"Unmapped CG3EM Driver {index}", "1.2.3.4", null, null)));
 
-    [Fact]
-    public void Known_UWP_utilities_resolve_only_the_exact_AppX_name_and_publisher_family()
-    {
-        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+        var utilityRows = new MsiLiveUpdateCatalogCategoryResult(MsiLiveUpdateCatalogCategory.Utility,
             MsiLiveUpdateCatalogCategoryState.Success,
             [
-                new("Realtek Audio Control", "UWP", null, null),
-                new("DTS Audio Processing", "UWP", null, null)
-            ]));
-        var inventory = new MsiUpdateInstalledInventory([], [], [],
+                new("Intel Graphics Software", "1.0", null, null,
+                    DiagnosticFields: StoreRowFields(null, "StoreLink")),
+                new("Intel Graphics Command Center", "UWP", null, null),
+                new("Realtek Audio Control", "1.0", null, null,
+                    DiagnosticFields: StoreRowFields(".appx")),
+                new("MSI App Player Installer CN", "1.0", null, null),
+                new("MSI App Player Installer", "1.0", null, null),
+                new("MSI Center M", "3.0.2608.3101", null, null, Guid: centerMGuid)
+            ]);
+        var msi = new MsiLiveUpdateCatalogQueryResult(MsiLiveUpdateCatalogState.Completed,
+            "Claw 8 AI+ EX", "kr", "win11",
             [
-                new("RealtekSemiconductorCorp.RealtekAudioControl",
-                    "RealtekSemiconductorCorp.RealtekAudioControl_dt26b99r8h8gj", "1.2.3.4"),
-                new("DTSInc.DTSAudioProcessing",
-                    "DTSInc.DTSAudioProcessing_t5j2fzbtdg37r", "5.6.7.8")
-            ], null, []);
-
-        var entries = MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), inventory)
-            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries;
-
-        Assert.Equal("1.2.3.4", entries[0].InstalledVersion);
-        Assert.Equal("5.6.7.8", entries[1].InstalledVersion);
-        Assert.All(entries, entry =>
-        {
-            Assert.Null(entry.Version);
-            Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
-        });
-
-        var lookalikeInventory = new MsiUpdateInstalledInventory([], [], [],
+                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Success,
+                    [new("CG3EM BIOS", "E1T52IMS.113", null, null)]),
+                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Success,
+                    [new("Controller Firmware", "4.19", null, null)]),
+                new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success, driverRows),
+                utilityRows
+            ], DateTimeOffset.UtcNow);
+        var intel = new IntelDsaCatalogResult(true,
             [
-                new("RealtekSemiconductorCorp.RealtekAudioControl",
-                    "RealtekSemiconductorCorp.RealtekAudioControl_wrong", "1.2.3.4"),
-                new("DTSInc.DTSAudioProcessing",
-                    "DTSInc.DTSAudioProcessing_wrong", "5.6.7.8")
-            ], null, []);
-        var lookalikes = MsiUpdateCatalogComposer.Compose(
-                msi, IntelDsaCatalogResult.Failed("Http403"), lookalikeInventory)
-            .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries;
-        Assert.All(lookalikes, entry => Assert.Null(entry.InstalledVersion));
+                IntelPackage("graphics", "Intel Arc Graphics", false,
+                    IntelComponent("Graphics", "32.0.101.9150", "VEN_8086&DEV_64A0")),
+                IntelPackage("wireless", "Intel Wi-Fi", false,
+                    IntelComponent("Wireless", "24.70.0.3", "VEN_8086&DEV_2725")),
+                IntelPackage("bluetooth", "Intel Bluetooth", false,
+                    IntelComponent("Bluetooth", "24.70.0.4", "VID_8087&PID_0033")),
+                IntelPackage("npu", "Intel NPU Driver", false,
+                    IntelComponent("OtherDrivers", null, "VEN_8086&DEV_B03E"), version: "32.0.100.5540")
+            ]);
+        var inventory = new MsiUpdateInstalledInventory([], devices,
+            [new($"{{{centerMGuid}}}", centerMGuid, null, "MSI Center M", "3.0.2501.0", "MSI")], null, []);
+        var rowDiagnostics = new List<MsiUpdateCatalogRowDiagnostic>();
+
+        var snapshot = MsiUpdateCatalogComposer.Compose(msi, intel, inventory,
+            onRowDiagnostic: rowDiagnostics.Add, hardwareModelId: "msi.claw.cg3em");
+
+        Assert.Equal(FrontendMsiLiveUpdateCatalogState.Completed, snapshot.State);
+        Assert.Equal(FrontendMsiLiveUpdateSourceState.Completed, snapshot.MsiSource!.State);
+        Assert.Equal(31, rowDiagnostics.Count);
+        Assert.Equal(1, rowDiagnostics.Count(row => row.Category == MsiLiveUpdateCatalogCategory.Bios));
+        Assert.Equal(1, rowDiagnostics.Count(row => row.Category == MsiLiveUpdateCatalogCategory.Firmware));
+        Assert.Equal(23, rowDiagnostics.Count(row => row.Category == MsiLiveUpdateCatalogCategory.Driver));
+        Assert.Equal(6, rowDiagnostics.Count(row => row.Category == MsiLiveUpdateCatalogCategory.Utility));
+        Assert.Equal(5, rowDiagnostics.Count(row => row.UiDisposition == "ExcludedByPolicy"));
+        Assert.Equal(3, rowDiagnostics.Count(row => row.DispositionReason == "UwpCatalogEntry"));
+        Assert.Equal(2, rowDiagnostics.Count(row => row.DispositionReason == "ExcludedUtility"));
+        Assert.Equal(Enumerable.Range(0, 6), rowDiagnostics
+            .Where(row => row.Category == MsiLiveUpdateCatalogCategory.Utility)
+            .Select(row => row.SourceIndex).OrderBy(index => index));
+
+        var categories = snapshot.Categories.ToDictionary(category => category.Category);
+        Assert.Single(categories[FrontendMsiLiveUpdateCatalogCategory.Bios].Entries);
+        Assert.Single(categories[FrontendMsiLiveUpdateCatalogCategory.Firmware].Entries);
+        Assert.Equal(23, categories[FrontendMsiLiveUpdateCatalogCategory.Driver].Entries.Count);
+        Assert.Single(categories[FrontendMsiLiveUpdateCatalogCategory.Utility].Entries);
+        Assert.Equal("MSI Center M", Assert.Single(categories[FrontendMsiLiveUpdateCatalogCategory.Utility].Entries).Name);
+        Assert.Equal(4, categories[FrontendMsiLiveUpdateCatalogCategory.Driver].Entries.Count(entry =>
+            entry.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa));
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable,
+            Assert.Single(categories[FrontendMsiLiveUpdateCatalogCategory.Utility].Entries).ComparisonStatus);
     }
+
+    private static MsiLiveUpdateCatalogRawDiagnosticFields StoreRowFields(string? extension = null, string fileKind = "Missing") =>
+        new("Missing", [], "Missing", null, "Missing", null, "Missing", "Missing", null,
+            "Missing", null, fileKind, extension, "Missing", null, "Missing", null);
 
     [Fact]
     public void Synthetic_A2VM_capture_preserves_legacy_evidenced_version_verdicts()
@@ -1051,8 +1157,8 @@ public sealed class MsiUpdateInstalledVersionsTests
         const string dynamicTuningId = @"ACPI\INTC10D5";
         const string trustedExecutionId = @"ACPI\VEN_INTC&DEV_1025";
         const string ppmId = @"ACPI\INTC1025";
-        const string dtsId = @"SWC\VEN_DTSI";
-        const string intelliGoId = @"SWC\VEN_IGO";
+        const string dtsId = @"SWC\VEN_DTSI&AID_DTSI2";
+        const string intelliGoId = @"SWC\VEN_IGO&CID_APO";
         const string npuId = @"PCI\VEN_8086&DEV_B03E";
 
         var firmware = new MsiLiveUpdateCatalogEntry("Controller Firmware", "4.19", null, null,
@@ -1099,11 +1205,7 @@ public sealed class MsiUpdateInstalledVersionsTests
             Device(npuId, [npuId], "ComputeAccelerator", "Intel AI Boost NPU", "32.0.100.5540", 0x8086, 0xB03E)
         };
         var inventory = new MsiUpdateInstalledInventory([], pnpDevices, [],
-            [
-                new("RealtekSemiconductorCorp.RealtekAudioControl",
-                    "RealtekSemiconductorCorp.RealtekAudioControl_dt26b99r8h8gj", "1.0.0.0"),
-                new("DTSInc.DTSAudioProcessing", "DTSInc.DTSAudioProcessing_t5j2fzbtdg37r", "1.0.0.0")
-            ], new("4.19", FrontendMsiLiveUpdateInstalledVersionConfidence.Exact), []);
+            new("4.19", FrontendMsiLiveUpdateInstalledVersionConfidence.Exact), []);
         var npuPackage = IntelPackage("npu", "Intel NPU Driver", false,
             IntelComponent("OtherDrivers", null, "VEN_8086&DEV_B03E"), version: "32.0.100.5540");
 
@@ -1131,8 +1233,8 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["DTS Driver"].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["IntelliGo APO Driver"].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["Unmatched Chipset Driver"].ComparisonStatus);
-        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["Realtek Audio Control"].ComparisonStatus);
-        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, msiEntries["DTS Audio Processing"].ComparisonStatus);
+        Assert.DoesNotContain("Realtek Audio Control", msiEntries.Keys);
+        Assert.DoesNotContain("DTS Audio Processing", msiEntries.Keys);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, dsaNpu.ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, dsaNpu.LatestVersionKind);
         Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic,
@@ -1441,13 +1543,11 @@ public sealed class MsiUpdateInstalledVersionsTests
         var conflictingCatalogVersions = ComposeCg3emDriverEntry(new("Goodix FingerPrinter Driver", "3.12144.0.100", null, null,
                 PackageVersion: "3.12144.0.101"),
             DriverDevice(goodix + @"\INSTANCE", goodix, "Biometric", "Goodix", "3.12144.0.160"));
-        var realtekAppxOnly = MsiUpdateCatalogComposer.Compose(
+        var realtekWithoutExactDevice = MsiUpdateCatalogComposer.Compose(
                 MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
                     [new("Realtek Audio Driver", "10.0.378.1", null, null, PackageVersion: "10.0.378.1")])),
                 IntelDsaCatalogResult.Failed("Http403"),
-                new MsiUpdateInstalledInventory([], [], [],
-                    [new("RealtekSemiconductorCorp.RealtekAudioControl",
-                        "RealtekSemiconductorCorp.RealtekAudioControl_dt26b99r8h8gj", "10.0.378.1")], null, []),
+                new MsiUpdateInstalledInventory([], [], [], null, []),
                 hardwareModelId: "msi.claw.cg3em")
             .Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries.Single();
         var broadIntel = ComposeCg3emDriverEntry(new("Intel Chipset Driver", "10.1.56.28", null, null),
@@ -1461,8 +1561,8 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, wrongGoodixProvider.ComparisonStatus);
         Assert.Equal("3.12144.0.160", conflictingCatalogVersions.InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, conflictingCatalogVersions.ComparisonStatus);
-        Assert.Null(realtekAppxOnly.InstalledVersion);
-        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, realtekAppxOnly.ComparisonStatus);
+        Assert.Null(realtekWithoutExactDevice.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, realtekWithoutExactDevice.ComparisonStatus);
         Assert.Null(broadIntel.InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, broadIntel.ComparisonStatus);
         Assert.Null(wrongSoundwireClass.InstalledVersion);
@@ -1503,7 +1603,7 @@ public sealed class MsiUpdateInstalledVersionsTests
                 new("{20112233-4455-6677-8899-aabbccddeeff}", excludedGuid3, null, "MSI App Player Installer", "1.0", "MSI"),
                 new("{30112233-4455-6677-8899-aabbccddeeff}", msiCenterGuid, null, "MSI Center M", "3.0.2501.0", "MSI")
             ],
-            [new("Intel Graphics Command Center", "IntelGraphicsExperience_8wekyb3d8bbwe", "9.9.9.9")], null, []);
+            null, []);
         var diagnostics = new List<MsiUpdateCatalogMatchDiagnostic>();
 
         var snapshot = MsiUpdateCatalogComposer.Compose(msi, new(true, []), inventory,
@@ -1512,17 +1612,16 @@ public sealed class MsiUpdateInstalledVersionsTests
             category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility);
 
         Assert.Equal(FrontendMsiLiveUpdateCatalogCategoryState.Success, utility.State);
-        Assert.Equal(new[] { "MSI Center M", "Intel Graphics Command Center" }, utility.Entries.Select(entry => entry.Name));
+        Assert.Equal(new[] { "MSI Center M" }, utility.Entries.Select(entry => entry.Name));
         Assert.Equal("3.0.2501.0", utility.Entries[0].InstalledVersion);
-        Assert.Equal("9.9.9.9", utility.Entries[1].InstalledVersion);
         Assert.Single(snapshot.Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Bios).Entries);
         Assert.Single(snapshot.Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Firmware).Entries);
         Assert.Contains(snapshot.Categories.Single(category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries,
             entry => entry.Name == "Intel IPF Driver");
         Assert.Contains(diagnostics, item => item.Category == MsiLiveUpdateCatalogCategory.Utility
-            && item.Outcome == "ExcludedByPolicy" && item.FilteredCount == 3 && item.Name is null);
-        Assert.Equal(2, diagnostics.Count(item => item.Category == MsiLiveUpdateCatalogCategory.Utility
-            && item.VersionSource == "MSI" && item.Outcome is "MatchedRegistry" or "MatchedAppx"));
+            && item.Outcome == "ExcludedByPolicy" && item.FilteredCount == 4 && item.Name is null);
+        Assert.Equal(1, diagnostics.Count(item => item.Category == MsiLiveUpdateCatalogCategory.Utility
+            && item.VersionSource == "MSI" && item.Outcome == "MatchedRegistry"));
         Assert.DoesNotContain(diagnostics, item => item.Name is "MSI App Player Installer CN"
             or "intel graphics software" or "MSI App Player Installer");
     }
@@ -1544,7 +1643,7 @@ public sealed class MsiUpdateInstalledVersionsTests
                     ])
             ], DateTimeOffset.UtcNow);
 
-        var snapshot = MsiUpdateCatalogComposer.Compose(msi, new(true, []), new([], [], [], [], null, []));
+        var snapshot = MsiUpdateCatalogComposer.Compose(msi, new(true, []), new([], [], [], null, []));
         var utility = Assert.Single(snapshot.Categories,
             category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Utility);
 
@@ -1768,51 +1867,122 @@ public sealed class MsiUpdateInstalledVersionsTests
     [InlineData("1.2.3.4", "1.2.3.5", FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)]
     [InlineData("1.2.3.5", "1.2.3.5", FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
     [InlineData("1.2.3.6", "1.2.3.5", FrontendMsiLiveUpdateComparisonStatus.UpToDate)]
-    public void Utility_compares_only_an_exact_AppX_package_and_typed_package_version(
+    public void MSI_Center_M_compares_exact_registry_DisplayVersion_with_equal_catalog_versions(
         string installed, string offered, FrontendMsiLiveUpdateComparisonStatus expected)
     {
-        var packageName = "ContosoUtility_8wekyb3d8bbwe";
-        var utility = new MsiLiveUpdateCatalogEntry(packageName, offered, null, null,
+        const string productCode = "00112233-4455-6677-8899-aabbccddeeff";
+        var utility = new MsiLiveUpdateCatalogEntry("MSI Center M", offered, null, null,
+            Guid: productCode,
             PackageVersion: offered);
         var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
             MsiLiveUpdateCatalogCategoryState.Success, [utility]));
-        var inventory = new MsiUpdateInstalledInventory([], [], [],
-            [new(packageName, packageName, installed)], null, []);
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", productCode, null, "MSI Center M", installed, "MSI")], null, []);
 
         var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
-            IntelDsaCatalogResult.Failed("Http403"), inventory)
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.cg3em")
             .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
 
         Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, entry.LatestVersionKind);
         Assert.Equal(expected, entry.ComparisonStatus);
     }
 
-    [Fact]
-    public void Utility_registry_DisplayVersion_and_UWP_sentinel_remain_unknown_without_a_proven_version_domain()
+    [Theory]
+    [InlineData("3.0.2608.3101", "3.0.2608.3102")]
+    [InlineData("not-a-version", "not-a-version")]
+    public void MSI_Center_M_comparison_fails_closed_when_catalog_versions_disagree_or_are_malformed(
+        string version, string packageVersion)
     {
         const string productCode = "00112233-4455-6677-8899-aabbccddeeff";
-        var registryEntry = new MsiLiveUpdateCatalogEntry("MSI Center M", "3.0.2608.3101", null, null,
-            Guid: productCode, PackageVersion: "3.0.2608.3101");
-        var registryMsi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+        var registryEntry = new MsiLiveUpdateCatalogEntry("MSI Center M", version, null, null,
+            Guid: productCode, PackageVersion: packageVersion);
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
             MsiLiveUpdateCatalogCategoryState.Success, [registryEntry]));
-        var registryInventory = new MsiUpdateInstalledInventory([], [],
-            [new("uninstall-key", productCode, null, "MSI Center M", "3.0.2501.0", "MSI")], [], null, []);
-        var registry = Assert.Single(MsiUpdateCatalogComposer.Compose(registryMsi,
-            IntelDsaCatalogResult.Failed("Http403"), registryInventory)
-            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
-        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, registry.ComparisonStatus);
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", productCode, null, "MSI Center M", "3.0.2501.0", "MSI")], null, []);
 
-        var packageName = "ContosoUtility_8wekyb3d8bbwe";
-        var uwpEntry = new MsiLiveUpdateCatalogEntry(packageName, "UWP", null, null,
-            PackageVersion: "9.9.9.9");
-        var uwpMsi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
-            MsiLiveUpdateCatalogCategoryState.Success, [uwpEntry]));
-        var uwpInventory = new MsiUpdateInstalledInventory([], [], [],
-            [new(packageName, packageName, "1.0.0.0")], null, []);
-        var uwp = Assert.Single(MsiUpdateCatalogComposer.Compose(uwpMsi,
-            IntelDsaCatalogResult.Failed("Http403"), uwpInventory)
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.cg3em")
             .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
-        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, uwp.ComparisonStatus);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+    }
+
+    [Theory]
+    [InlineData("msi.claw.cg3em")]
+    [InlineData("msi.claw.a2vm.7")]
+    [InlineData("msi.claw.a2vm.8")]
+    public void MSI_Center_M_uses_unique_exact_name_and_verified_publisher_fallback_on_supported_models(string model)
+    {
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [new("MSI Center M", "3.0.2608.3101", null, null, PackageVersion: "3.0.2608.3101")]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", null, null, " MSI Center M ", "3.0.2501.0", " MSI ")], null, []);
+        var rowDiagnostics = new List<MsiUpdateCatalogRowDiagnostic>();
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory,
+            onRowDiagnostic: rowDiagnostics.Add, hardwareModelId: model)
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+
+        Assert.Equal("3.0.2501.0", entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable, entry.ComparisonStatus);
+        Assert.Equal("MatchedCenterMExactNamePublisher", Assert.Single(rowDiagnostics).MatchOutcome);
+    }
+
+    [Fact]
+    public void MSI_Center_M_name_fallback_compares_a_single_numeric_catalog_version_field()
+    {
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [new("MSI Center M", "3.0.2608.3101", null, null)]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", null, null, "MSI Center M", "3.0.2501.0", "MSI")], null, []);
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.a2vm.8")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable, entry.ComparisonStatus);
+    }
+
+    [Fact]
+    public void MSI_Center_M_name_fallback_requires_one_registry_candidate()
+    {
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [new("MSI Center M", "3.0.2608.3101", null, null)]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [
+                new("uninstall-1", null, null, "MSI Center M", "3.0.2501.0", "MSI"),
+                new("uninstall-2", null, null, "MSI Center M", "3.0.2502.0", "MSI")
+            ], null, []);
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.a2vm.7")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+        Assert.Null(entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
+    }
+
+    [Theory]
+    [InlineData("msi.claw.cg3em", "MSI Center M", "Other Publisher", null, null)]
+    [InlineData("msi.claw.cg3em", "MSI Center M Helper", "MSI", null, null)]
+    [InlineData("msi.claw.cg3em", "MSI Center M", "MSI", "20112233-4455-6677-8899-aabbccddeeff", null)]
+    [InlineData("msi.claw.other", "MSI Center M", "MSI", null, null)]
+    public void MSI_Center_M_name_fallback_rejects_unverified_or_conflicting_candidates(
+        string model, string displayName, string publisher, string? productCode, string? upgradeCode)
+    {
+        var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
+            MsiLiveUpdateCatalogCategoryState.Success,
+            [new("MSI Center M", "3.0.2608.3101", null, null)]));
+        var inventory = new MsiUpdateInstalledInventory([], [],
+            [new("uninstall-key", productCode, upgradeCode, displayName, "3.0.2501.0", publisher)], null, []);
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: model)
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
+        Assert.Null(entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
     }
 
     [Theory]
@@ -1823,17 +1993,18 @@ public sealed class MsiUpdateInstalledVersionsTests
         string installed, string offered, FrontendMsiLiveUpdateComparisonStatus expected)
     {
         const string productCode = "00112233-4455-6677-8899-aabbccddeeff";
-        var catalogEntry = new MsiLiveUpdateCatalogEntry("MSI Center M", offered, null, null, Guid: productCode);
+        var catalogEntry = new MsiLiveUpdateCatalogEntry("MSI Center M", offered, null, null,
+            Guid: productCode, PackageVersion: offered);
         var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Utility,
             MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
         var inventory = new MsiUpdateInstalledInventory([], [],
-            [new("uninstall-key", productCode, null, "MSI Center M", installed, "MSI")], [], null, []);
+            [new("uninstall-key", productCode, null, "MSI Center M", installed, "MSI")], null, []);
 
         var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
-            IntelDsaCatalogResult.Failed("Http403"), inventory)
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.cg3em")
             .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
 
-        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Catalog, entry.LatestVersionKind);
+        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, entry.LatestVersionKind);
         Assert.Equal(expected, entry.ComparisonStatus);
     }
 
@@ -1854,7 +2025,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         };
 
         var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
-            IntelDsaCatalogResult.Failed("Http403"), new([], [], [matching, secondMatching], [], null, []))
+            IntelDsaCatalogResult.Failed("Http403"), new([], [], [matching, secondMatching], null, []))
             .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Utility).Entries);
 
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, entry.ComparisonStatus);
@@ -1870,7 +2041,7 @@ public sealed class MsiUpdateInstalledVersionsTests
             MsiLiveUpdateCatalogCategoryState.Success, [catalogEntry]));
         var inventory = new MsiUpdateInstalledInventory([], [],
             [new("uninstall-key", "00112233-4455-6677-8899-aabbccddeeff", upgradeCode,
-                "MSI Center M", "3.0.2501.0", "MSI")], [], null, []);
+                "MSI Center M", "3.0.2501.0", "MSI")], null, []);
 
         var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
             IntelDsaCatalogResult.Failed("Http403"), inventory)
@@ -1937,7 +2108,7 @@ public sealed class MsiUpdateInstalledVersionsTests
     {
         var msi = MsiResultWithCategory(new(MsiLiveUpdateCatalogCategory.Bios,
             MsiLiveUpdateCatalogCategoryState.Success, [new("BIOS", offered, null, null)]));
-        var inventory = new MsiUpdateInstalledInventory(installed, [], [], [], null, []);
+        var inventory = new MsiUpdateInstalledInventory(installed, [], [], null, []);
         return Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
             IntelDsaCatalogResult.Failed("Http403"), inventory)
             .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Bios).Entries).ComparisonStatus;
@@ -1970,7 +2141,7 @@ public sealed class MsiUpdateInstalledVersionsTests
     }
 
     private static MsiUpdateInstalledInventory Inventory(params MsiUpdateInstalledPnpDevice[] devices) =>
-        new([], devices, [], [], null, []);
+        new([], devices, [], null, []);
 
     private static MsiUpdateInstalledPnpDevice DriverDevice(
         string instanceId, string hardwareId, string deviceClass, string provider, string driverVersion) =>

@@ -123,6 +123,63 @@ public sealed class MsiLiveUpdateCatalogTests
         Assert.Equal(new[] { "Same name", "Same name" }, result.Categories[2].Entries.Select(entry => entry.Name));
     }
 
+    [Fact]
+    public void Parser_preserves_bounded_valid_alternate_catalog_HardwareIds_and_skips_invalid_components()
+    {
+        var ids = Enumerable.Range(1, 65)
+            .Select(index => $@"PCI\VEN_8086&DEV_{index:X4}")
+            .ToArray();
+        var rawIds = ";" + string.Join(';', ids) + ";" + ids[0].ToLowerInvariant()
+            + @";PCI\VEN_8086&DEV_1234\INSTANCE_SUFFIX;invalid-id";
+        var driver = JsonSerializer.Serialize(new[] { new { name = "Intel Device Driver", version = "1.0.0.0", deviceID = rawIds } });
+
+        var result = Parse(HelperOutput(("bios", "[]"), ("firmware", "[]"), ("driver", driver), ("utility", "[]")));
+        var entry = Assert.Single(result.Categories.Single(category => category.Category == MsiLiveUpdateCatalogCategory.Driver).Entries);
+
+        Assert.Equal(ids[0], entry.DeviceId);
+        Assert.Equal(ids, entry.CatalogHardwareIds);
+        Assert.Equal("Partial", entry.DiagnosticFields!.DeviceIdKind);
+        Assert.Contains(@"PCI\VEN_8086&DEV_0041", entry.DiagnosticFields.HardwareTypes);
+
+        var cappedIds = Enumerable.Range(1, 130)
+            .Select(index => $@"PCI\VEN_8086&DEV_{index:X4}")
+            .ToArray();
+        var capped = Parse(HelperOutput(("bios", "[]"), ("firmware", "[]"),
+            ("driver", JsonSerializer.Serialize(new[] { new { name = "Capped", deviceID = string.Join(';', cappedIds) } })),
+            ("utility", "[]")));
+        var cappedEntry = Assert.Single(capped.Categories.Single(category => category.Category == MsiLiveUpdateCatalogCategory.Driver).Entries);
+        Assert.Equal(128, cappedEntry.CatalogHardwareIds!.Count);
+        Assert.Equal("Partial", cappedEntry.DiagnosticFields!.DeviceIdKind);
+
+        var oversized = Parse(HelperOutput(("bios", "[]"), ("firmware", "[]"),
+            ("driver", JsonSerializer.Serialize(new[] { new { name = "Oversized", deviceID = new string('x', 4097) } })),
+            ("utility", "[]")));
+        Assert.Equal("Oversized", Assert.Single(oversized.Categories.Single(category => category.Category == MsiLiveUpdateCatalogCategory.Driver)
+            .Entries).DiagnosticFields!.DeviceIdKind);
+    }
+
+    [Fact]
+    public void Parser_keeps_DISM_package_marker_separate_from_GUID_and_classifies_Store_files()
+    {
+        var driver = JsonSerializer.Serialize(new object[]
+        {
+            new { name = "MSI Center M", version = "3.0.1.0", GUID = "dism_MSI_Center_M_Utility_MSI" },
+            new { name = "Intel Graphics Software", version = "UWP", File = "https://apps.microsoft.com/detail/123" },
+            new { name = "Store App", version = "UWP", File = "driver.appx" }
+        });
+        var result = Parse(HelperOutput(("bios", "[]"), ("firmware", "[]"), ("driver", driver), ("utility", "[]")));
+        var rows = result.Categories.Single(category => category.Category == MsiLiveUpdateCatalogCategory.Driver).Entries;
+
+        Assert.Null(rows[0].Guid);
+        Assert.Null(rows[0].UpgradeGuid);
+        Assert.Equal("DismPackageIdentity", rows[0].DiagnosticFields!.GuidKind);
+        Assert.Equal("dism_MSI_Center_M_Utility_MSI", rows[0].OemPackageIdentity);
+        Assert.Equal("ValidDismPackageIdentity", rows[0].DiagnosticFields!.OemPackageIdentityKind);
+        Assert.Equal("StoreLink", rows[1].DiagnosticFields!.FileKind);
+        Assert.Equal("Installer", rows[2].DiagnosticFields!.FileKind);
+        Assert.Equal(".appx", rows[2].DiagnosticFields!.FileExtension);
+    }
+
     [Theory]
     [InlineData("false", "FalseSentinel")]
     [InlineData("{", "MalformedCatalogResponse")]

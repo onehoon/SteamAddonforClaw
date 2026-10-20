@@ -2316,7 +2316,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         {
             AppLog.Warn("MsiUpdates", "Installed version inventory capture failed; catalog results remain available.", exception,
                 ("Event", "MsiInstalledInventoryCaptureFailed"), ("Reason", exception.GetType().Name));
-            return new([], [], [], [], null, ["InstalledInventoryCaptureFailed"]);
+            return new([], [], [], null, ["InstalledInventoryCaptureFailed"]);
         }
     }
 
