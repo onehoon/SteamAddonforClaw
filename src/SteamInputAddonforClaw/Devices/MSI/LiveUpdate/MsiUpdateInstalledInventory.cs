@@ -1,4 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using System.Management;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
@@ -34,6 +37,21 @@ internal sealed record MsiUpdateInstalledSoftware(
 internal sealed record MsiUpdateControllerFirmware(string Version,
     FrontendMsiLiveUpdateInstalledVersionConfidence Confidence);
 
+internal sealed record MsiUpdateInstalledDriverPackage(
+    string PublishedInfName,
+    string OriginalInfName,
+    string Provider,
+    string Class,
+    string Version);
+
+internal sealed record MsiUpdateDriverStoreCapture(
+    string Status,
+    IReadOnlyList<MsiUpdateInstalledDriverPackage> Packages,
+    string? Warning = null)
+{
+    internal static MsiUpdateDriverStoreCapture NotRequested { get; } = new("NotRequested", []);
+}
+
 internal sealed record MsiUpdateInstalledInventory(
     IReadOnlyList<string> BiosVersions,
     IReadOnlyList<MsiUpdateInstalledPnpDevice> PnpDevices,
@@ -44,15 +62,51 @@ internal sealed record MsiUpdateInstalledInventory(
     private const int MaximumInventoryEntries = 4096;
     private const int MaximumValueLength = 512;
     private const int MaximumWmiDurationSeconds = 15;
+    private const int MaximumDriverStoreRows = 128;
+    private const int MaximumDriverStoreOutputCharacters = 64 * 1024;
+    private const int MaximumDriverStoreErrorCharacters = 8 * 1024;
+    private static readonly TimeSpan DriverStoreTimeout = TimeSpan.FromSeconds(20);
+    private static readonly string[] DriverStoreOriginalInfAllowlist =
+    [
+        "mep_audio_component.inf",
+        "IntcOED_OemLibPath.inf",
+        "RtkSdcaXuMSI.inf",
+        "ishheci.inf"
+    ];
+
+    internal const string DriverStorePowerShellScript = """
+$ErrorActionPreference = 'Stop'
+$allowed = @('mep_audio_component.inf', 'IntcOED_OemLibPath.inf', 'RtkSdcaXuMSI.inf', 'ishheci.inf')
+$matches = @(Get-WindowsDriver -Online -All -ErrorAction Stop | Where-Object {
+    $name = [IO.Path]::GetFileName([string]$_.OriginalFileName)
+    $allowed -contains $name
+} | ForEach-Object {
+    $name = [IO.Path]::GetFileName([string]$_.OriginalFileName)
+    [pscustomobject]@{
+        PublishedInfName = [string]$_.Driver
+        OriginalInfName = $name
+        Provider = [string]$_.ProviderName
+        Class = [string]$_.ClassName
+        Version = [string]$_.Version
+    }
+})
+$overflow = $matches.Count -gt 128
+$packages = @($matches | Select-Object -First 128)
+[pscustomobject]@{ Overflow = $overflow; Packages = $packages } | ConvertTo-Json -Depth 4 -Compress
+""";
+
+    internal MsiUpdateDriverStoreCapture DriverStore { get; init; } = MsiUpdateDriverStoreCapture.NotRequested;
 
     internal static Task<MsiUpdateInstalledInventory> CaptureAsync(
         Func<CancellationToken, Task<string?>>? exactControllerFirmwareReader,
-        CancellationToken cancellationToken) =>
-        Task.Run(() => Capture(exactControllerFirmwareReader, cancellationToken), cancellationToken);
+        CancellationToken cancellationToken,
+        string? hardwareModelId = null) =>
+        Task.Run(() => Capture(exactControllerFirmwareReader, cancellationToken, hardwareModelId), cancellationToken);
 
     private static MsiUpdateInstalledInventory Capture(
         Func<CancellationToken, Task<string?>>? exactControllerFirmwareReader,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? hardwareModelId)
     {
         var warnings = new List<string>();
         var biosVersions = CaptureBiosVersions(warnings, cancellationToken);
@@ -60,6 +114,7 @@ internal sealed record MsiUpdateInstalledInventory(
         var pnpDevices = CaptureSignedDriverVersions(presentDevices, warnings, cancellationToken);
         var software = CaptureUninstallEntries(warnings, cancellationToken);
         var controllerFirmware = CaptureControllerRevision(presentDevices);
+        var driverStore = CaptureCg3emDriverStore(hardwareModelId, warnings, cancellationToken);
 
         if (exactControllerFirmwareReader is not null)
         {
@@ -80,8 +135,269 @@ internal sealed record MsiUpdateInstalledInventory(
         }
 
         return new(biosVersions, pnpDevices, software, controllerFirmware,
-            warnings.Distinct(StringComparer.Ordinal).Take(16).ToArray());
+            warnings.Distinct(StringComparer.Ordinal).Take(16).ToArray())
+        {
+            DriverStore = driverStore
+        };
     }
+
+    internal static bool ShouldCaptureCg3emDriverStore(string? hardwareModelId) =>
+        string.Equals(hardwareModelId, "msi.claw.cg3em", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsAllowedDriverStoreOriginalInf(string? originalInfName) =>
+        DriverStoreOriginalInfAllowlist.Contains(originalInfName ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+
+    internal static string GetDriverStoreCaptureDisposition(string? hardwareModelId, bool isWindows) =>
+        !ShouldCaptureCg3emDriverStore(hardwareModelId)
+            ? "NotRequested"
+            : isWindows ? "Capture" : "UnsupportedPlatform";
+
+    internal static MsiUpdateDriverStoreCapture ParseDriverStorePackagesJson(string? json)
+    {
+        if (json is null || json.Length == 0)
+            return new("EmptyOutput", [], "Cg3emDriverStoreEmptyOutput");
+        if (json.Length > MaximumDriverStoreOutputCharacters)
+            return new("OutputLimitExceeded", [], "Cg3emDriverStoreOutputLimitExceeded");
+        if (string.IsNullOrWhiteSpace(json))
+            return new("EmptyOutput", [], "Cg3emDriverStoreEmptyOutput");
+
+        try
+        {
+            using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 8 });
+            var root = document.RootElement;
+            var overflow = false;
+            JsonElement rows;
+            if (root.ValueKind == JsonValueKind.Object && TryGetProperty(root, "Packages", out var packages))
+            {
+                rows = packages;
+                if (TryGetProperty(root, "Overflow", out var overflowValue)
+                    && overflowValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    overflow = overflowValue.GetBoolean();
+            }
+            else
+            {
+                rows = root;
+            }
+
+            if (overflow)
+                return new("RowLimitExceeded", [], "Cg3emDriverStoreRowLimitExceeded");
+
+            var items = rows.ValueKind switch
+            {
+                JsonValueKind.Array => rows.EnumerateArray().ToArray(),
+                JsonValueKind.Object => [rows],
+                JsonValueKind.Null => [],
+                _ => throw new JsonException("DriverStore output has an unexpected root value.")
+            };
+            if (items.Length > MaximumDriverStoreRows)
+                return new("RowLimitExceeded", [], "Cg3emDriverStoreRowLimitExceeded");
+
+            var parsed = new List<MsiUpdateInstalledDriverPackage>(items.Length);
+            foreach (var item in items)
+            {
+                if (item.ValueKind != JsonValueKind.Object
+                    || !TryGetString(item, "OriginalInfName", out var originalInfPath))
+                    return new("InvalidOutput", [], "Cg3emDriverStoreInvalidOutput");
+
+                var originalInfName = GetInfBasename(originalInfPath);
+                if (!IsAllowedDriverStoreOriginalInf(originalInfName))
+                    continue;
+
+                if (!TryGetString(item, "PublishedInfName", out var publishedInfName)
+                    || !Regex.IsMatch(publishedInfName, @"^oem\d+\.inf$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                    || !TryGetString(item, "Provider", out var provider)
+                    || !IsSafeDriverStoreLabel(provider)
+                    || !TryGetString(item, "Class", out var deviceClass)
+                    || !IsSafeDriverStoreLabel(deviceClass)
+                    || !TryGetString(item, "Version", out var version)
+                    || !Regex.IsMatch(version, @"^\d+(?:\.\d+){1,3}$", RegexOptions.CultureInvariant))
+                    return new("InvalidOutput", [], "Cg3emDriverStoreInvalidOutput");
+
+                parsed.Add(new(publishedInfName, originalInfName, provider, deviceClass, version));
+            }
+
+            return new("Completed", parsed
+                .OrderBy(package => package.OriginalInfName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(package => package.PublishedInfName, StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+        }
+        catch (JsonException)
+        {
+            return new("InvalidOutput", [], "Cg3emDriverStoreInvalidOutput");
+        }
+    }
+
+    private static MsiUpdateDriverStoreCapture CaptureCg3emDriverStore(
+        string? hardwareModelId,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var disposition = GetDriverStoreCaptureDisposition(hardwareModelId, OperatingSystem.IsWindows());
+        if (disposition == "NotRequested")
+            return MsiUpdateDriverStoreCapture.NotRequested;
+        if (disposition == "UnsupportedPlatform")
+        {
+            warnings.Add("Cg3emDriverStoreUnsupportedPlatform");
+            return new("UnsupportedPlatform", [], "Cg3emDriverStoreUnsupportedPlatform");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var capture = CaptureDriverStoreProcessAsync(cancellationToken).GetAwaiter().GetResult();
+            if (capture.Status != "Completed") warnings.Add(capture.Warning ?? "Cg3emDriverStoreUnavailable");
+            return capture;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            warnings.Add("Cg3emDriverStoreUnavailable");
+            return new("Unavailable", [], "Cg3emDriverStoreUnavailable");
+        }
+    }
+
+    private static async Task<MsiUpdateDriverStoreCapture> CaptureDriverStoreProcessAsync(
+        CancellationToken cancellationToken)
+    {
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var powershellPath = Path.Combine(windowsDirectory, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = powershellPath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Environment.SystemDirectory
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-Command");
+        startInfo.ArgumentList.Add(DriverStorePowerShellScript);
+
+        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        var standardOutput = new StringBuilder();
+        var standardError = new StringBuilder();
+        var outputLimitExceeded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var outputGate = new object();
+        void AppendBounded(StringBuilder buffer, string? line, int maximum)
+        {
+            if (line is null) return;
+            lock (outputGate)
+            {
+                if (buffer.Length + line.Length + Environment.NewLine.Length > maximum)
+                {
+                    outputLimitExceeded.TrySetResult();
+                    return;
+                }
+                buffer.AppendLine(line);
+            }
+        }
+
+        process.OutputDataReceived += (_, eventArgs) =>
+            AppendBounded(standardOutput, eventArgs.Data, MaximumDriverStoreOutputCharacters);
+        process.ErrorDataReceived += (_, eventArgs) =>
+            AppendBounded(standardError, eventArgs.Data, MaximumDriverStoreErrorCharacters);
+        if (!process.Start()) return new("Unavailable", [], "Cg3emDriverStoreStartFailed");
+
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(DriverStoreTimeout);
+        var exitTask = process.WaitForExitAsync(timeoutSource.Token);
+        try
+        {
+            var first = await Task.WhenAny(exitTask, outputLimitExceeded.Task).ConfigureAwait(false);
+            if (first == outputLimitExceeded.Task)
+            {
+                TryKill(process);
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                process.WaitForExit();
+                return new("OutputLimitExceeded", [], "Cg3emDriverStoreOutputLimitExceeded");
+            }
+
+            await exitTask.ConfigureAwait(false);
+            process.WaitForExit();
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            try { await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch (InvalidOperationException) { }
+            process.WaitForExit();
+            if (cancellationToken.IsCancellationRequested) throw;
+            return new("TimedOut", [], "Cg3emDriverStoreTimedOut");
+        }
+
+        string json;
+        lock (outputGate) json = standardOutput.ToString();
+        return ParseDriverStoreProcessResult(json, process.ExitCode);
+    }
+
+    internal static MsiUpdateDriverStoreCapture ParseDriverStoreProcessResult(
+        string? standardOutput,
+        int exitCode,
+        bool timedOut = false,
+        bool outputLimitExceeded = false)
+    {
+        if (outputLimitExceeded)
+            return new("OutputLimitExceeded", [], "Cg3emDriverStoreOutputLimitExceeded");
+        if (timedOut)
+            return new("TimedOut", [], "Cg3emDriverStoreTimedOut");
+        if (exitCode != 0)
+            return new("Unavailable", [], "Cg3emDriverStoreCommandFailed");
+        return ParseDriverStorePackagesJson(standardOutput);
+    }
+
+    private static void TryKill(Process process)
+    {
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+        catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
+    }
+
+    private static bool TryGetString(JsonElement element, string propertyName, out string value)
+    {
+        value = string.Empty;
+        if (!TryGetProperty(element, propertyName, out var property)
+            || property.ValueKind != JsonValueKind.String)
+            return false;
+        var raw = property.GetString()?.Trim();
+        if (string.IsNullOrWhiteSpace(raw) || raw.Length > 256) return false;
+        value = raw;
+        return true;
+    }
+
+    private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+        value = default;
+        return false;
+    }
+
+    private static string GetInfBasename(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        var separator = normalized.LastIndexOf('/');
+        return (separator >= 0 ? normalized[(separator + 1)..] : normalized).Trim();
+    }
+
+    private static bool IsSafeDriverStoreLabel(string value) =>
+        value.Length <= 128 && value.All(character => char.IsLetterOrDigit(character)
+            || character is ' ' or '.' or '_' or '-' or '&' or '(' or ')');
 
     private static IReadOnlyList<string> CaptureBiosVersions(List<string> warnings, CancellationToken cancellationToken)
     {
