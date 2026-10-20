@@ -318,9 +318,38 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         var compose = method.IndexOf("MsiUpdateCatalogComposer.Compose", StringComparison.Ordinal);
         var write = method.IndexOf("MsiUpdateDiagnosticSnapshotStore", StringComparison.Ordinal);
         Assert.True(unsupportedCheck >= 0 && compose > unsupportedCheck && write > compose);
-        Assert.Equal(1, CountOccurrences(method, "CaptureMsiUpdateInventorySafelyAsync(cancellationToken)"));
+        Assert.Equal(1, CountOccurrences(method, "CaptureMsiUpdateInventorySafelyAsync(hardware.Model, cancellationToken)"));
         Assert.Contains("WriteAsync(diagnosticInput, cancellationToken)", method, StringComparison.Ordinal);
         Assert.Contains("return FrontendMsiLiveUpdateCatalogSnapshot.Unavailable(\"UnsupportedDevice\")", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Diagnostic_snapshot_records_bounded_DriverStore_evidence_without_machine_paths()
+    {
+        var inventory = new MsiUpdateInstalledInventory([], [], [], null, [])
+        {
+            DriverStore = new("Completed",
+            [
+                new("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0"),
+                new("oem755.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009")
+            ])
+        };
+        var input = ComposeInput(MsiResult(
+                new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
+                new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Empty, [])),
+            IntelDsaCatalogResult.Failed("Http403"), inventory);
+
+        var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
+        var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
+
+        Assert.Equal("Completed", document.Inventory.DriverStoreStatus);
+        Assert.Equal(2, document.Inventory.DriverStoreTotalCount);
+        Assert.Contains(document.Inventory.DriverStorePackages, row => row.OriginalInfName == "ishheci.inf"
+            && row.PublishedInfName == "oem677.inf" && row.Version == "5.8.61.0");
+        Assert.DoesNotContain("C:\\Windows", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FileRepository", json, StringComparison.OrdinalIgnoreCase);
     }
 
     private static MsiUpdateDiagnosticSnapshotInput ComposeInput(MsiLiveUpdateCatalogQueryResult msi,

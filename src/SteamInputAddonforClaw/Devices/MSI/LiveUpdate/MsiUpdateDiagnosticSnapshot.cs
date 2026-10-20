@@ -148,7 +148,18 @@ internal sealed record MsiUpdateDiagnosticInventory(
     int AppxCapturedCount,
     List<MsiUpdateDiagnosticAppxRow> AppxPackages,
     List<string> BiosVersions,
-    MsiUpdateDiagnosticControllerFirmware? ControllerFirmware);
+    MsiUpdateDiagnosticControllerFirmware? ControllerFirmware,
+    string DriverStoreStatus,
+    int DriverStoreTotalCount,
+    int DriverStoreCapturedCount,
+    List<MsiUpdateDiagnosticDriverStorePackage> DriverStorePackages);
+
+internal sealed record MsiUpdateDiagnosticDriverStorePackage(
+    string PublishedInfName,
+    string OriginalInfName,
+    string Provider,
+    string Class,
+    string Version);
 
 internal sealed record MsiUpdateDiagnosticPnpRow(
     int RowId,
@@ -190,6 +201,7 @@ internal sealed class MsiUpdateDiagnosticTruncation
     public int SoftwareRowsOmitted { get; set; }
     public int AppxRowsOmitted { get; set; }
     public int BiosVersionsOmitted { get; set; }
+    public int DriverStorePackagesOmitted { get; set; }
 }
 
 internal static class MsiUpdateDiagnosticSnapshotBuilder
@@ -198,6 +210,7 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
     private const int MaximumIntelMatches = 256;
     private const int MaximumLocalPnpRows = 512;
     private const int MaximumSoftwareRows = 256;
+    private const int MaximumDriverStorePackages = 32;
     private const int MaximumSnapshotBytes = 2 * 1024 * 1024;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -277,7 +290,18 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
                 softwareTotalCount, Math.Min(software.Count, MaximumSoftwareRows), software.Take(MaximumSoftwareRows).ToList(),
                 0, 0, [],
                 biosVersions, input.Inventory.ControllerFirmware is { } firmware
-                    ? new(SafeVersion(firmware.Version), firmware.Confidence.ToString()) : null),
+                    ? new(SafeVersion(firmware.Version), firmware.Confidence.ToString()) : null,
+                input.Inventory.DriverStore.Status,
+                input.Inventory.DriverStore.Packages.Count,
+                Math.Min(input.Inventory.DriverStore.Packages.Count, MaximumDriverStorePackages),
+                input.Inventory.DriverStore.Packages.Take(MaximumDriverStorePackages)
+                    .Select(package => new MsiUpdateDiagnosticDriverStorePackage(
+                        SafeDriverStorePublishedInf(package.PublishedInfName) ?? string.Empty,
+                        SafeDriverStoreOriginalInf(package.OriginalInfName) ?? string.Empty,
+                        SafeCatalogScalar(package.Provider, 128, allowSpace: true) ?? string.Empty,
+                        SafeCatalogScalar(package.Class, 64, allowSpace: true) ?? string.Empty,
+                        SafeVersion(package.Version) ?? string.Empty))
+                    .ToList()),
             MsiRows = capturedMsiRows,
             IntelDsaMatches = intelMatches.Take(MaximumIntelMatches).ToList(),
             Truncation = new()
@@ -286,7 +310,9 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
                 IntelMatchesOmitted = intelMatches.Count - intelCap,
                 LocalPnpRowsOmitted = pnpTotalCount - Math.Min(pnp.Count, MaximumLocalPnpRows),
                 SoftwareRowsOmitted = softwareTotalCount - Math.Min(software.Count, MaximumSoftwareRows),
-                BiosVersionsOmitted = Math.Max(0, input.Inventory.BiosVersions.Count - biosVersions.Count)
+                BiosVersionsOmitted = Math.Max(0, input.Inventory.BiosVersions.Count - biosVersions.Count),
+                DriverStorePackagesOmitted = Math.Max(0,
+                    input.Inventory.DriverStore.Packages.Count - MaximumDriverStorePackages)
             }
         };
 
@@ -518,6 +544,14 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
     private static string? SafeCatalogName(string? value) => SafeCatalogScalar(value, 128, allowSpace: true,
         allowedPunctuation: "._+-()&'");
 
+    private static string? SafeDriverStorePublishedInf(string value) =>
+        Regex.IsMatch(value, @"^oem\d+\.inf$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            ? value.ToLowerInvariant()
+            : null;
+
+    private static string? SafeDriverStoreOriginalInf(string value) =>
+        MsiUpdateInstalledInventory.IsAllowedDriverStoreOriginalInf(value) ? value : null;
+
     private static string? SafeInstalledName(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > 256) return null;
@@ -634,7 +668,8 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
 
     private static bool HasOmissions(MsiUpdateDiagnosticTruncation truncation) =>
         truncation.MsiRowsOmitted + truncation.IntelMatchesOmitted + truncation.LocalPnpRowsOmitted
-        + truncation.SoftwareRowsOmitted + truncation.BiosVersionsOmitted > 0;
+        + truncation.SoftwareRowsOmitted + truncation.BiosVersionsOmitted
+        + truncation.DriverStorePackagesOmitted > 0;
 
     private static List<T> Trim<T>(List<T> rows, Action<int> addOmitted)
     {

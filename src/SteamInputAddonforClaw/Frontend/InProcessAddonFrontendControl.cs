@@ -2200,7 +2200,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
         var msiTask = QueryMsiCatalogSafelyAsync(cancellationToken);
         var intelTask = _intelDsaCatalogClient.QueryAsync(cancellationToken);
-        var inventoryTask = CaptureMsiUpdateInventorySafelyAsync(cancellationToken);
+        var inventoryTask = CaptureMsiUpdateInventorySafelyAsync(hardware.Model, cancellationToken);
         await Task.WhenAll(msiTask, intelTask, inventoryTask).ConfigureAwait(false);
         var result = await msiTask.ConfigureAwait(false);
         var intel = await intelTask.ConfigureAwait(false);
@@ -2304,12 +2304,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private async Task<MsiUpdateInstalledInventory> CaptureMsiUpdateInventorySafelyAsync(CancellationToken cancellationToken)
+    private async Task<MsiUpdateInstalledInventory> CaptureMsiUpdateInventorySafelyAsync(
+        string? hardwareModelId,
+        CancellationToken cancellationToken)
     {
         try
         {
             return await MsiUpdateInstalledInventory.CaptureAsync(
-                _captureControllerFirmwareVersionForMsiUpdate, cancellationToken).ConfigureAwait(false);
+                _captureControllerFirmwareVersionForMsiUpdate, cancellationToken, hardwareModelId).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception)
