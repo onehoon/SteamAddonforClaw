@@ -1278,8 +1278,12 @@ public sealed class MsiUpdateInstalledVersionsTests
 
         Assert.Equal(catalogNames.Length, composed.Count);
         Assert.Equal(catalogNames.Length, diagnostics.Count);
-        Assert.All(diagnostics, diagnostic =>
-            Assert.Equal("Cg3emMappedNoMatchingPresentDevice", diagnostic.Outcome));
+        Assert.All(diagnostics.Where(diagnostic => diagnostic.Name is not
+                ("Windows Studio Effects" or "Realtek OED Driver" or "Realtek Audio Driver")),
+            diagnostic => Assert.Equal("Cg3emMappedNoMatchingPresentDevice", diagnostic.Outcome));
+        Assert.All(diagnostics.Where(diagnostic => diagnostic.Name is
+                ("Windows Studio Effects" or "Realtek OED Driver" or "Realtek Audio Driver")),
+            diagnostic => Assert.Equal("Cg3emInvalidOemPackageIdentity", diagnostic.Outcome));
     }
 
     [Fact]
@@ -1333,7 +1337,8 @@ public sealed class MsiUpdateInstalledVersionsTests
 
         var entries = new MsiLiveUpdateCatalogEntry[]
         {
-            new("Windows Studio Effects", "3.0.8.0", null, null),
+            new("Windows Studio Effects", "3.0.8.0", null, null, PackageVersion: "3.0.8.0",
+                OemPackageIdentity: "dism_mep,audio,component.inf_AudioProcessingObject_Microsoft"),
             new("Intel HID Event Filter", "2.2.2.17", null, null),
             new("Integrated Sensor Solution", "5.8.58.0", null, null, PackageVersion: "5.8.61.0"),
             new("Intel Chipset Driver", "10.1.56.28", null, null),
@@ -1347,8 +1352,10 @@ public sealed class MsiUpdateInstalledVersionsTests
             new("Intel Game Assist Driver", "1.9.602.30", null, null),
             new("IntelliGo APO Driver", "100.1.4.2709", null, null),
             new("Intel Smart Sound Technology driver", "20.43.12741.0", null, null),
-            new("Realtek OED Driver", "20.43.274.9", null, null),
-            new("Realtek Audio Driver", "10.0.378.1", null, null, PackageVersion: "10.0.378.1"),
+            new("Realtek OED Driver", "20.43.274.9", null, null, PackageVersion: "20.43.274.9",
+                OemPackageIdentity: "dism_intcoed,oemlibpath.inf_Extension_Realtek"),
+            new("Realtek Audio Driver", "10.0.378.1", null, null, PackageVersion: "10.0.378.1",
+                OemPackageIdentity: "dism_rtksdcaxumsi.inf_Extension_Realtek"),
             new("DTS Driver", "1.16.4.0", null, null),
             new("Goodix FingerPrinter Driver", "3.12144.0.100", null, null, PackageVersion: "3.12144.0.100"),
             new("Realtek Card Reader Driver", "10.0.26100.21378", null, null, PackageVersion: "10.0.26100.21378")
@@ -1393,8 +1400,17 @@ public sealed class MsiUpdateInstalledVersionsTests
         };
         var driverCategory = new MsiLiveUpdateCatalogCategoryResult(MsiLiveUpdateCatalogCategory.Driver,
             MsiLiveUpdateCatalogCategoryState.Success, entries);
+        var inventory = Inventory(devices) with
+        {
+            DriverStore = new("Completed",
+            [
+                new("oem901.inf", "mep_audio_component.inf", "Microsoft Corporation", "AudioProcessingObject", "3.0.8.0"),
+                new("oem902.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009"),
+                new("oem903.inf", "RtkSdcaXuMSI.inf", "Realtek", "Extension", "10.0.378.1")
+            ])
+        };
         var snapshot = MsiUpdateCatalogComposer.Compose(MsiResult(driverCategory),
-            IntelDsaCatalogResult.Failed("Http403"), Inventory(devices), hardwareModelId: "msi.claw.cg3em");
+            IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.cg3em");
         var composed = snapshot.Categories.Single(category =>
             category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries
             .ToDictionary(entry => entry.Name, StringComparer.Ordinal);
@@ -1432,6 +1448,153 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["Intel PPM Provision Driver"].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["Realtek OED Driver"].ComparisonStatus);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed["Realtek Audio Driver"].ComparisonStatus);
+    }
+
+    [Theory]
+    [InlineData("Windows Studio Effects", "3.0.8.0", "3.0.8.0", "UpToDate")]
+    [InlineData("Windows Studio Effects", "3.0.7.0", "3.0.8.0", "UpdateAvailable")]
+    [InlineData("Windows Studio Effects", "3.0.9.0", "3.0.8.0", "UpToDate")]
+    [InlineData("Realtek OED Driver", "20.43.274.009", "20.43.274.9", "UpToDate")]
+    [InlineData("Realtek OED Driver", "20.43.273.9", "20.43.274.9", "UpdateAvailable")]
+    [InlineData("Realtek OED Driver", "20.43.275.9", "20.43.274.9", "UpToDate")]
+    [InlineData("Realtek Audio Driver", "10.0.378.1", "10.0.378.1", "UpToDate")]
+    [InlineData("Realtek Audio Driver", "10.0.377.1", "10.0.378.1", "UpdateAvailable")]
+    [InlineData("Realtek Audio Driver", "10.0.379.1", "10.0.378.1", "UpToDate")]
+    public void CG3EM_package_rows_compare_only_exact_DriverStore_package_versions(
+        string name, string installedVersion, string packageVersion, string expectedStatus)
+    {
+        var row = GetCg3emDriverStoreCase(name);
+        var installed = new MsiUpdateInstalledDriverPackage("oem100.inf", row.OriginalInfName,
+            row.Provider, row.DeviceClass, installedVersion);
+        var catalog = new MsiLiveUpdateCatalogEntry(name, "999.0.0.0", null, null,
+            PackageVersion: packageVersion, DriverVersion: "999.0.0.0",
+            OemPackageIdentity: row.OemPackageIdentity);
+
+        var composed = ComposeCg3emDriverStoreEntry(catalog, new("Completed", [installed]));
+
+        Assert.Equal(installedVersion, composed.InstalledVersion);
+        Assert.Equal(packageVersion, composed.Version);
+        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Package, composed.LatestVersionKind);
+        Assert.Equal(Enum.Parse<FrontendMsiLiveUpdateComparisonStatus>(expectedStatus), composed.ComparisonStatus);
+    }
+
+    [Theory]
+    [InlineData("Windows Studio Effects")]
+    [InlineData("Realtek OED Driver")]
+    [InlineData("Realtek Audio Driver")]
+    public void CG3EM_package_rows_reject_missing_or_wrong_identity_evidence(string name)
+    {
+        var row = GetCg3emDriverStoreCase(name);
+        var package = new MsiUpdateInstalledDriverPackage("oem100.inf", row.OriginalInfName,
+            row.Provider, row.DeviceClass, row.PackageVersion);
+        var exactCatalogFields = new MsiLiveUpdateCatalogEntry(name, row.PackageVersion, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var noPackage = ComposeCg3emDriverStoreEntry(exactCatalogFields, new("Completed", []));
+        var wrongIdentity = ComposeCg3emDriverStoreEntry(
+            exactCatalogFields with { OemPackageIdentity = row.OemPackageIdentity + "_other" },
+            new("Completed", [package]));
+        var wrongInf = ComposeCg3emDriverStoreEntry(exactCatalogFields,
+            new("Completed", [package with { OriginalInfName = "different.inf" }]));
+        var wrongClass = ComposeCg3emDriverStoreEntry(exactCatalogFields,
+            new("Completed", [package with { Class = "System" }]));
+        var wrongProvider = ComposeCg3emDriverStoreEntry(exactCatalogFields,
+            new("Completed", [package with
+            {
+                Provider = string.Equals(row.Provider, "Realtek", StringComparison.OrdinalIgnoreCase)
+                    ? "Realtek Semiconductor Corp."
+                    : "Realtek"
+            }]));
+
+        foreach (var result in new[] { noPackage, wrongIdentity, wrongInf, wrongClass, wrongProvider })
+        {
+            Assert.Null(result.InstalledVersion);
+            Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, result.ComparisonStatus);
+        }
+        Assert.Equal("NoMatchingInstalledDriverPackage",
+            ComposeCg3emDriverStoreOutcome(exactCatalogFields, new("Completed", [])));
+    }
+
+    [Fact]
+    public void CG3EM_package_match_uses_case_insensitive_INF_provider_and_class_identity()
+    {
+        var row = GetCg3emDriverStoreCase("Realtek OED Driver");
+        var catalog = new MsiLiveUpdateCatalogEntry(row.CatalogName, null, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity.ToUpperInvariant());
+        var package = new MsiUpdateInstalledDriverPackage("OEM755.INF",
+            row.OriginalInfName.ToUpperInvariant(), row.Provider.ToUpperInvariant(),
+            row.DeviceClass.ToUpperInvariant(), "20.43.274.009");
+
+        var composed = ComposeCg3emDriverStoreEntry(catalog, new("Completed", [package]));
+
+        Assert.Equal("20.43.274.009", composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_package_comparison_does_not_fall_back_to_other_catalog_version_fields()
+    {
+        var row = GetCg3emDriverStoreCase("Windows Studio Effects");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, row.PackageVersion, null, null,
+            DriverVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var package = new MsiUpdateInstalledDriverPackage("oem901.inf", row.OriginalInfName,
+            row.Provider, row.DeviceClass, row.PackageVersion);
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", [package]));
+
+        Assert.Equal(row.PackageVersion, composed.InstalledVersion);
+        Assert.Null(composed.Version);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
+    }
+
+    [Theory]
+    [InlineData("Windows Studio Effects", "Microsoft")]
+    [InlineData("Realtek OED Driver", "Realtek")]
+    [InlineData("Realtek Audio Driver", "Realtek Semiconductor Corp.")]
+    public void CG3EM_package_rows_do_not_accept_provider_name_only_matches(string name, string broadProvider)
+    {
+        var row = GetCg3emDriverStoreCase(name);
+        var entry = new MsiLiveUpdateCatalogEntry(name, row.PackageVersion, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var result = ComposeCg3emDriverStoreEntry(entry, new("Completed",
+        [
+            new("oem100.inf", row.OriginalInfName, broadProvider, row.DeviceClass, row.PackageVersion)
+        ]));
+
+        Assert.Null(result.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, result.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_package_rows_reject_conflicting_duplicates_and_unavailable_capture()
+    {
+        var row = GetCg3emDriverStoreCase("Realtek OED Driver");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, row.PackageVersion, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var first = new MsiUpdateInstalledDriverPackage("oem100.inf", row.OriginalInfName,
+            row.Provider, row.DeviceClass, "20.43.274.9");
+        var second = first with { PublishedInfName = "oem101.inf", Version = "20.43.275.9" };
+
+        var conflicting = ComposeCg3emDriverStoreEntry(entry, new("Completed", [first, second]));
+        var unavailable = ComposeCg3emDriverStoreEntry(entry, new("TimedOut", [], "Cg3emDriverStoreTimedOut"));
+
+        Assert.Null(conflicting.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, conflicting.ComparisonStatus);
+        Assert.Null(unavailable.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, unavailable.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_WSE_and_Realtek_package_matches_ignore_unrelated_matching_PnP_devices()
+    {
+        var row = GetCg3emDriverStoreCase("Windows Studio Effects");
+        var pnp = DriverDevice(@"SWC\MEP_CAM&VEN_8086_DEV_B03E\INSTANCE", @"SWC\MEP_CAM&VEN_8086_DEV_B03E",
+            "SoftwareComponent", "Microsoft", "3.0.8.0");
+        var catalog = new MsiLiveUpdateCatalogEntry(row.CatalogName, row.PackageVersion, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var result = ComposeCg3emDriverStoreEntry(catalog, MsiUpdateDriverStoreCapture.NotRequested, pnp);
+
+        Assert.Null(result.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, result.ComparisonStatus);
     }
 
     [Fact]
@@ -2215,6 +2378,54 @@ public sealed class MsiUpdateInstalledVersionsTests
                 IntelDsaCatalogResult.Failed("Http403"), Inventory(devices), hardwareModelId: "msi.claw.cg3em")
             .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
     }
+
+    private static FrontendMsiLiveUpdateCatalogEntry ComposeCg3emDriverStoreEntry(
+        MsiLiveUpdateCatalogEntry entry,
+        MsiUpdateDriverStoreCapture driverStore,
+        params MsiUpdateInstalledPnpDevice[] devices)
+    {
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver,
+            MsiLiveUpdateCatalogCategoryState.Success, [entry]));
+        var inventory = Inventory(devices) with { DriverStore = driverStore };
+        return Assert.Single(MsiUpdateCatalogComposer.Compose(msi,
+                IntelDsaCatalogResult.Failed("Http403"), inventory, hardwareModelId: "msi.claw.cg3em")
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+    }
+
+    private static string ComposeCg3emDriverStoreOutcome(
+        MsiLiveUpdateCatalogEntry entry,
+        MsiUpdateDriverStoreCapture driverStore)
+    {
+        var diagnostics = new List<MsiUpdateCatalogMatchDiagnostic>();
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver,
+            MsiLiveUpdateCatalogCategoryState.Success, [entry]));
+        var inventory = Inventory() with { DriverStore = driverStore };
+        MsiUpdateCatalogComposer.Compose(msi, IntelDsaCatalogResult.Failed("Http403"), inventory,
+            onDiagnostic: diagnostics.Add, hardwareModelId: "msi.claw.cg3em");
+        return Assert.Single(diagnostics).Outcome;
+    }
+
+    private static Cg3emDriverStoreCase GetCg3emDriverStoreCase(string catalogName) => catalogName switch
+    {
+        "Windows Studio Effects" => new(catalogName,
+            "dism_mep,audio,component.inf_AudioProcessingObject_Microsoft", "mep_audio_component.inf",
+            "Microsoft Corporation", "AudioProcessingObject", "3.0.8.0"),
+        "Realtek OED Driver" => new(catalogName,
+            "dism_intcoed,oemlibpath.inf_Extension_Realtek", "IntcOED_OemLibPath.inf",
+            "Realtek Semiconductor Corp.", "Extension", "20.43.274.9"),
+        "Realtek Audio Driver" => new(catalogName,
+            "dism_rtksdcaxumsi.inf_Extension_Realtek", "RtkSdcaXuMSI.inf",
+            "Realtek", "Extension", "10.0.378.1"),
+        _ => throw new ArgumentOutOfRangeException(nameof(catalogName), catalogName, null)
+    };
+
+    private sealed record Cg3emDriverStoreCase(
+        string CatalogName,
+        string OemPackageIdentity,
+        string OriginalInfName,
+        string Provider,
+        string DeviceClass,
+        string PackageVersion);
 
     private static FrontendMsiLiveUpdateComparisonStatus ComposeBiosComparison(
         string offered, params string[] installed)

@@ -917,7 +917,9 @@ internal static class MsiUpdateCatalogComposer
 
     private static readonly MsiCg3emDriverMapping[] Cg3emDriverMappings =
     [
-        Mapping("Windows Studio Effects", ["SWC\\MEP_CAM&VEN_8086_DEV_B03E"], "Microsoft", ["SoftwareComponent"]),
+        Mapping("Windows Studio Effects", ["SWC\\MEP_CAM&VEN_8086_DEV_B03E"], "Microsoft", ["SoftwareComponent"],
+            driverStoreIdentity: new("dism_mep,audio,component.inf_AudioProcessingObject_Microsoft",
+                "mep_audio_component.inf", "Microsoft Corporation", "AudioProcessingObject")),
         Mapping("Intel HID Event Filter", ["ACPI\\INTC10CC"], "Intel", ["HIDClass"]),
         Mapping("Integrated Sensor Solution", ["PCI\\VEN_8086&DEV_E345", "PCI\\VEN_8086&DEV_E445"],
             "Intel", ["System"], comparable: false),
@@ -946,13 +948,17 @@ internal static class MsiUpdateCatalogComposer
             [
                 "INTELAUDIO\\DSP_CTLR_DEV_E328&VEN_8086&DEV_0222&SUBSYS_15101462",
                 "INTELAUDIO\\DSP_CTLR_DEV_E428&VEN_8086&DEV_0222&SUBSYS_15101462"
-            ], "Realtek Semiconductor Corp.", ["Extension"]),
+            ], "Realtek Semiconductor Corp.", ["Extension"],
+            driverStoreIdentity: new("dism_intcoed,oemlibpath.inf_Extension_Realtek",
+                "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension")),
         Mapping("Realtek Audio Driver",
             [
                 "SOUNDWIRE\\SDCA_10&MAN_025D&FUNC_0721&TYPE_06&VER_01&ADR_01&LID_03&UID_00&SUBSYS_15101462",
                 "SOUNDWIRE\\SDCA_10&MAN_025D&FUNC_0721&TYPE_03&VER_01&ADR_02&LID_03&UID_00&SUBSYS_15101462",
                 "SOUNDWIRE\\SDCA_10&MAN_025D&FUNC_0721&TYPE_01&VER_01&ADR_04&LID_03&UID_00&SUBSYS_15101462"
-            ], "Realtek", ["Extension"]),
+            ], "Realtek", ["Extension"],
+            driverStoreIdentity: new("dism_rtksdcaxumsi.inf_Extension_Realtek",
+                "RtkSdcaXuMSI.inf", "Realtek", "Extension")),
         Mapping("DTS Driver", ["SWC\\VEN_DTSI&AID_DTSI2"], "DTS",
             ["SoftwareComponent", "AudioProcessingObject"],
             ["SWC\\VEN_DTSI&HID_DTSIAPO4xCONTROLLER", "SWC\\VEN_DTSI&HID_DTSIAPO4xSERVICE"]),
@@ -990,11 +996,19 @@ internal static class MsiUpdateCatalogComposer
         string Provider,
         IReadOnlyList<string> DeviceClasses,
         IReadOnlyList<string> FallbackHardwareIds,
-        bool Comparable);
+        bool Comparable,
+        MsiCg3emDriverStoreIdentity? DriverStoreIdentity);
+
+    private sealed record MsiCg3emDriverStoreIdentity(
+        string OemPackageIdentity,
+        string OriginalInfName,
+        string Provider,
+        string DeviceClass);
 
     private static MsiCg3emDriverMapping Mapping(string catalogName, string[] hardwareIds,
-        string provider, string[] deviceClasses, string[]? fallbackHardwareIds = null, bool comparable = true) =>
-        new(catalogName, hardwareIds, provider, deviceClasses, fallbackHardwareIds ?? [], comparable);
+        string provider, string[] deviceClasses, string[]? fallbackHardwareIds = null, bool comparable = true,
+        MsiCg3emDriverStoreIdentity? driverStoreIdentity = null) =>
+        new(catalogName, hardwareIds, provider, deviceClasses, fallbackHardwareIds ?? [], comparable, driverStoreIdentity);
 
     internal static FrontendMsiLiveUpdateCatalogSnapshot Compose(
         MsiLiveUpdateCatalogQueryResult msi,
@@ -1141,19 +1155,34 @@ internal static class MsiUpdateCatalogComposer
         string? hardwareModelId,
         out MsiInstalledVersionResolution match)
     {
-        var latestVersion = entry.DriverVersion ?? entry.PackageVersion ?? entry.Version;
+        var packageVersionDomain = IsCg3emDriverStorePackageRow(category, entry, hardwareModelId);
+        var latestVersion = packageVersionDomain
+            ? entry.PackageVersion
+            : entry.DriverVersion ?? entry.PackageVersion ?? entry.Version;
         if (string.Equals(latestVersion, "UWP", StringComparison.OrdinalIgnoreCase)) latestVersion = null;
-        var versionKind = !string.IsNullOrWhiteSpace(entry.DriverVersion)
-            ? FrontendMsiLiveUpdateVersionKind.Driver
-            : !string.IsNullOrWhiteSpace(entry.PackageVersion)
+        var versionKind = packageVersionDomain
+            ? !string.IsNullOrWhiteSpace(entry.PackageVersion)
                 ? FrontendMsiLiveUpdateVersionKind.Package
-                : FrontendMsiLiveUpdateVersionKind.Catalog;
+                : FrontendMsiLiveUpdateVersionKind.Catalog
+            : !string.IsNullOrWhiteSpace(entry.DriverVersion)
+                ? FrontendMsiLiveUpdateVersionKind.Driver
+                : !string.IsNullOrWhiteSpace(entry.PackageVersion)
+                    ? FrontendMsiLiveUpdateVersionKind.Package
+                    : FrontendMsiLiveUpdateVersionKind.Catalog;
         match = ResolveMsiInstalledVersion(category, entry, inventory, hardwareModelId);
         var comparisonStatus = ResolveMsiComparisonStatus(
             category, entry, inventory, match, latestVersion, versionKind, hardwareModelId);
         return new(entry.Name, latestVersion, entry.ReleaseDate, entry.Description,
             match.Version, FrontendMsiLiveUpdateVersionSource.Msi, versionKind, match.Confidence, comparisonStatus);
     }
+
+    private static bool IsCg3emDriverStorePackageRow(
+        MsiLiveUpdateCatalogCategory category,
+        MsiLiveUpdateCatalogEntry entry,
+        string? hardwareModelId) =>
+        category == MsiLiveUpdateCatalogCategory.Driver
+        && string.Equals(hardwareModelId, "msi.claw.cg3em", StringComparison.OrdinalIgnoreCase)
+        && FindCg3emDriverMapping(entry.Name)?.DriverStoreIdentity is not null;
 
     private static FrontendMsiLiveUpdateComparisonStatus ResolveMsiComparisonStatus(
         MsiLiveUpdateCatalogCategory category,
@@ -1771,6 +1800,9 @@ internal static class MsiUpdateCatalogComposer
         MsiUpdateInstalledInventory inventory,
         MsiCg3emDriverMapping mapping)
     {
+        if (mapping.DriverStoreIdentity is { } driverStoreIdentity)
+            return ResolveCg3emDriverStorePackage(entry, inventory, driverStoreIdentity);
+
         var comparisonVersion = ResolveCg3emComparisonVersion(entry, mapping);
         var primaryCandidates = ResolveCg3emMappedCandidates(entry, inventory, mapping.PrimaryHardwareIds, mapping);
         var fallbackCandidates = mapping.FallbackHardwareIds.Count > 0
@@ -1802,6 +1834,53 @@ internal static class MsiUpdateCatalogComposer
 
         return MsiInstalledVersionResolution.Cg3emMapped(installedVersion, comparisonVersion,
             "Cg3emFixedPackageMapping", coherenceCandidates.Length, 1, mapping.Comparable);
+    }
+
+    private static MsiInstalledVersionResolution ResolveCg3emDriverStorePackage(
+        MsiLiveUpdateCatalogEntry entry,
+        MsiUpdateInstalledInventory inventory,
+        MsiCg3emDriverStoreIdentity identity)
+    {
+        var packageVersion = entry.PackageVersion;
+        if (string.IsNullOrWhiteSpace(entry.OemPackageIdentity)
+            || !string.Equals(entry.OemPackageIdentity.Trim(), identity.OemPackageIdentity,
+                StringComparison.OrdinalIgnoreCase))
+            return MsiInstalledVersionResolution.Cg3emMapped(null, null,
+                "Cg3emInvalidOemPackageIdentity", 0, 0, true);
+        if (!string.Equals(inventory.DriverStore.Status, "Completed", StringComparison.Ordinal))
+            return MsiInstalledVersionResolution.Cg3emMapped(null, packageVersion,
+                "Cg3emDriverStoreUnavailable", 0, 0, true);
+
+        var candidates = inventory.DriverStore.Packages
+            .Where(package => string.Equals(package.OriginalInfName, identity.OriginalInfName,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(package.Provider, identity.Provider, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(package.Class, identity.DeviceClass, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(package => package.PublishedInfName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (candidates.Length == 0)
+            return MsiInstalledVersionResolution.Cg3emMapped(null, packageVersion,
+                "NoMatchingInstalledDriverPackage", 0, 0, true);
+
+        var installedVersion = candidates[0].Version;
+        if (CompareNumericVersions(installedVersion, installedVersion)
+                != FrontendMsiLiveUpdateComparisonStatus.UpToDate
+            || candidates.Skip(1).Any(candidate =>
+                CompareNumericVersions(installedVersion, candidate.Version)
+                    != FrontendMsiLiveUpdateComparisonStatus.UpToDate
+                || CompareNumericVersions(candidate.Version, installedVersion)
+                    != FrontendMsiLiveUpdateComparisonStatus.UpToDate))
+            return MsiInstalledVersionResolution.Cg3emMapped(null, packageVersion,
+                "Cg3emConflictingDriverStorePackageVersions", candidates.Length,
+                candidates.Select(candidate => candidate.Version).Distinct(StringComparer.OrdinalIgnoreCase).Count(), true);
+
+        if (string.IsNullOrWhiteSpace(packageVersion)
+            || CompareNumericVersions(packageVersion, packageVersion) != FrontendMsiLiveUpdateComparisonStatus.UpToDate)
+            return MsiInstalledVersionResolution.Cg3emMapped(installedVersion, null,
+                "Cg3emMissingOrInvalidPackageVersion", candidates.Length, 1, true);
+
+        return MsiInstalledVersionResolution.Cg3emMapped(installedVersion, packageVersion,
+            "Cg3emInstalledInfPackageMatch", candidates.Length, 1, true);
     }
 
     private static MsiUpdateInstalledPnpDevice[] ResolveCg3emMappedCandidates(
