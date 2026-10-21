@@ -43,18 +43,18 @@ public sealed class SteamDeckDeviceStateMapperTests
     }
 
     [Fact]
-    public void Fresh_motion_maps_normalized_axes_to_native_fields_once()
+    public void Fresh_motion_maps_normalized_axes_to_corrected_native_fields()
     {
         var motion = Motion(1, 2, 3, 0.5, 0.25, -0.5);
 
         var mapped = SteamDeckDeviceStateMapper.Map(State(), motion: motion);
 
         Assert.Equal((short)8192, mapped.AccelX);
-        Assert.Equal((short)8192, mapped.AccelY);
-        Assert.Equal((short)4096, mapped.AccelZ);
+        Assert.Equal((short)-4096, mapped.AccelY);
+        Assert.Equal((short)8192, mapped.AccelZ);
         Assert.Equal((short)16, mapped.Pitch);
-        Assert.Equal((short)-48, mapped.Yaw);
-        Assert.Equal((short)32, mapped.Roll);
+        Assert.Equal((short)-32, mapped.Yaw);
+        Assert.Equal((short)-48, mapped.Roll);
         Assert.Equal((short)0, mapped.GyroQuatW);
         Assert.Equal((short)0, mapped.GyroQuatX);
         Assert.Equal((short)0, mapped.GyroQuatY);
@@ -62,9 +62,9 @@ public sealed class SteamDeckDeviceStateMapperTests
     }
 
     [Fact]
-    public void Real_stationary_gravity_and_valid_zero_gyro_are_preserved()
+    public void Face_up_raw_gravity_decodes_to_positive_sdl_z_and_zero_gyro_is_preserved()
     {
-        var mapped = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(0, 0, 0, 0, 0, 1));
+        var mapped = SteamDeckDeviceStateMapper.Map(State(), motion: MotionFromRaw(0, 0, 0, 0, 0, 1));
 
         Assert.Equal((short)0, mapped.Pitch);
         Assert.Equal((short)0, mapped.Yaw);
@@ -72,6 +72,52 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal((short)0, mapped.AccelX);
         Assert.Equal((short)-16384, mapped.AccelY);
         Assert.Equal((short)0, mapped.AccelZ);
+        Assert.Equal(1d, -mapped.AccelY / 16384d);
+    }
+
+    [Fact]
+    public void Raw_motion_normalizes_then_deck_native_fields_decode_to_the_original_sensor_axes()
+    {
+        const double rawGyroX = 1.25;
+        const double rawGyroY = -2.5;
+        const double rawGyroZ = 4.75;
+        const double rawAccelX = 0.25;
+        const double rawAccelY = -0.5;
+        const double rawAccelZ = 0.75;
+
+        var mapped = SteamDeckDeviceStateMapper.Map(
+            State(),
+            motion: MotionFromRaw(rawGyroX, rawGyroY, rawGyroZ, rawAccelX, rawAccelY, rawAccelZ));
+
+        Assert.Equal((short)20, mapped.Pitch);
+        Assert.Equal((short)-76, mapped.Yaw);
+        Assert.Equal((short)-40, mapped.Roll);
+        Assert.Equal((short)4096, mapped.AccelX);
+        Assert.Equal((short)-12288, mapped.AccelY);
+        Assert.Equal((short)-8192, mapped.AccelZ);
+
+        Assert.Equal(rawGyroX, mapped.Pitch / 16d);
+        Assert.Equal(rawGyroY, mapped.Roll / 16d);
+        Assert.Equal(rawGyroZ, -mapped.Yaw / 16d);
+        Assert.Equal(rawAccelX, mapped.AccelX / 16384d);
+        Assert.Equal(rawAccelY, mapped.AccelZ / 16384d);
+        Assert.Equal(rawAccelZ, -mapped.AccelY / 16384d);
+    }
+
+    [Theory]
+    [InlineData(1d, 0d, 0d)]
+    [InlineData(-1d, 0d, 0d)]
+    [InlineData(0d, 2d, 0d)]
+    [InlineData(0d, -2d, 0d)]
+    [InlineData(0d, 0d, 3d)]
+    [InlineData(0d, 0d, -3d)]
+    public void Isolated_raw_gyro_axis_decodes_to_the_same_signed_sdl_axis(double rawX, double rawY, double rawZ)
+    {
+        var mapped = SteamDeckDeviceStateMapper.Map(State(), motion: MotionFromRaw(rawX, rawY, rawZ, 0, 0, 0));
+
+        Assert.Equal(rawX, mapped.Pitch / 16d);
+        Assert.Equal(rawY, mapped.Roll / 16d);
+        Assert.Equal(rawZ, -mapped.Yaw / 16d);
     }
 
     [Fact]
@@ -104,24 +150,25 @@ public sealed class SteamDeckDeviceStateMapperTests
     [Fact]
     public void Motion_encoding_rounds_midpoints_away_from_zero_and_saturates_signed_fields()
     {
-        var rounded = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(0.03125, -0.03125, 0, 0, 0, 0));
+        var rounded = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(0.03125, 0.03125, 0.03125, 0, 0, 0));
         Assert.Equal((short)1, rounded.Pitch);
+        Assert.Equal((short)-1, rounded.Yaw);
         Assert.Equal((short)-1, rounded.Roll);
 
         var exactBoundaries = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(2048, -2048, 2048, 2, -2, 2));
         Assert.Equal(short.MaxValue, exactBoundaries.Pitch);
-        Assert.Equal(short.MinValue, exactBoundaries.Yaw);
+        Assert.Equal(short.MaxValue, exactBoundaries.Yaw);
         Assert.Equal(short.MinValue, exactBoundaries.Roll);
         Assert.Equal(short.MaxValue, exactBoundaries.AccelX);
-        Assert.Equal(short.MinValue, exactBoundaries.AccelY);
+        Assert.Equal(short.MaxValue, exactBoundaries.AccelY);
         Assert.Equal(short.MinValue, exactBoundaries.AccelZ);
 
         var saturated = SteamDeckDeviceStateMapper.Map(State(), motion: Motion(4000, -4000, 4000, 3, -3, 3));
         Assert.Equal(short.MaxValue, saturated.Pitch);
-        Assert.Equal(short.MinValue, saturated.Yaw);
+        Assert.Equal(short.MaxValue, saturated.Yaw);
         Assert.Equal(short.MinValue, saturated.Roll);
         Assert.Equal(short.MaxValue, saturated.AccelX);
-        Assert.Equal(short.MinValue, saturated.AccelY);
+        Assert.Equal(short.MaxValue, saturated.AccelY);
         Assert.Equal(short.MinValue, saturated.AccelZ);
     }
 
@@ -207,7 +254,7 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal((short)333, mapped.RStickX);
         Assert.Equal((short)-444, mapped.RStickY);
         Assert.Equal((short)16, mapped.Pitch);
-        Assert.Equal((short)-48, mapped.Yaw);
+        Assert.Equal((short)-32, mapped.Yaw);
     }
 
     [Fact]
@@ -417,6 +464,19 @@ public sealed class SteamDeckDeviceStateMapperTests
         new(gyroX, gyroY, gyroZ, accelX, accelY, accelZ,
             1000, 1000, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
             true, true, "gyro", "accelerometer");
+
+    private static MsiClawMotionState MotionFromRaw(
+        double rawGyroX,
+        double rawGyroY,
+        double rawGyroZ,
+        double rawAccelX,
+        double rawAccelY,
+        double rawAccelZ)
+    {
+        Assert.True(MsiClawMotionState.TryNormalizeSensorAxes(rawGyroX, rawGyroY, rawGyroZ, out var gyroX, out var gyroY, out var gyroZ));
+        Assert.True(MsiClawMotionState.TryNormalizeSensorAxes(rawAccelX, rawAccelY, rawAccelZ, out var accelX, out var accelY, out var accelZ));
+        return Motion(gyroX, gyroY, gyroZ, accelX, accelY, accelZ);
+    }
 
     private static void AssertImuNeutral(SteamDeckDeviceState state)
     {

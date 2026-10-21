@@ -101,19 +101,75 @@ public sealed class DualSenseEdgeDeviceStateMapperTests
     }
 
     [Fact]
-    public void MapsFreshMotionToAllSixEdgeFieldsUsingDirectNormalizedAxes()
+    public void MapsFreshMotionToCorrectedEdgeNativeFields()
     {
         var motion = Motion(10, -20, 30, 0.5, -1, 2, receiveTicks: 1000);
 
         var mapped = Map(State(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)), motion: motion, nowTicks: 1000);
 
         Assert.Equal((short)164, mapped.GyroX);
-        Assert.Equal((short)-328, mapped.GyroY);
-        Assert.Equal((short)492, mapped.GyroZ);
+        Assert.Equal((short)-492, mapped.GyroY);
+        Assert.Equal((short)-328, mapped.GyroZ);
         Assert.Equal((short)4096, mapped.AccelX);
-        Assert.Equal((short)-8192, mapped.AccelY);
-        Assert.Equal((short)16384, mapped.AccelZ);
+        Assert.Equal((short)-16384, mapped.AccelY);
+        Assert.Equal((short)-8192, mapped.AccelZ);
         Assert.NotEqual(0u, mapped.Buttons); // motion availability does not gate ordinary input
+    }
+
+    [Fact]
+    public void Raw_motion_normalizes_then_edge_native_fields_decode_to_the_original_sensor_axes()
+    {
+        const double rawGyroX = 1;
+        const double rawGyroY = -2;
+        const double rawGyroZ = 3;
+        const double rawAccelX = 0.25;
+        const double rawAccelY = -0.5;
+        const double rawAccelZ = 0.75;
+
+        var mapped = Map(
+            State(default),
+            motion: MotionFromRaw(rawGyroX, rawGyroY, rawGyroZ, rawAccelX, rawAccelY, rawAccelZ));
+
+        Assert.Equal((short)16, mapped.GyroX);
+        Assert.Equal((short)-33, mapped.GyroY);
+        Assert.Equal((short)49, mapped.GyroZ);
+        Assert.Equal((short)2048, mapped.AccelX);
+        Assert.Equal((short)-4096, mapped.AccelY);
+        Assert.Equal((short)6144, mapped.AccelZ);
+
+        Assert.InRange(Math.Abs(rawGyroX - mapped.GyroX / 16.384), 0d, 0.04d);
+        Assert.InRange(Math.Abs(rawGyroY - mapped.GyroY / 16.384), 0d, 0.04d);
+        Assert.InRange(Math.Abs(rawGyroZ - mapped.GyroZ / 16.384), 0d, 0.04d);
+        Assert.Equal(rawAccelX, mapped.AccelX / 8192d);
+        Assert.Equal(rawAccelY, mapped.AccelY / 8192d);
+        Assert.Equal(rawAccelZ, mapped.AccelZ / 8192d);
+    }
+
+    [Theory]
+    [InlineData(1d, 0d, 0d)]
+    [InlineData(-1d, 0d, 0d)]
+    [InlineData(0d, 2d, 0d)]
+    [InlineData(0d, -2d, 0d)]
+    [InlineData(0d, 0d, 3d)]
+    [InlineData(0d, 0d, -3d)]
+    public void Isolated_raw_gyro_axis_decodes_to_the_same_signed_sdl_axis(double rawX, double rawY, double rawZ)
+    {
+        var mapped = Map(State(default), motion: MotionFromRaw(rawX, rawY, rawZ, 0, 0, 0));
+
+        Assert.InRange(Math.Abs(rawX - mapped.GyroX / 16.384), 0d, 0.04d);
+        Assert.InRange(Math.Abs(rawY - mapped.GyroY / 16.384), 0d, 0.04d);
+        Assert.InRange(Math.Abs(rawZ - mapped.GyroZ / 16.384), 0d, 0.04d);
+    }
+
+    [Fact]
+    public void Face_up_raw_gravity_decodes_to_positive_sdl_z()
+    {
+        var mapped = Map(State(default), motion: MotionFromRaw(0, 0, 0, 0, 0, 1));
+
+        Assert.Equal((short)0, mapped.AccelX);
+        Assert.Equal((short)0, mapped.AccelY);
+        Assert.Equal((short)8192, mapped.AccelZ);
+        Assert.Equal(1d, mapped.AccelZ / 8192d);
     }
 
     [Fact]
@@ -122,9 +178,11 @@ public sealed class DualSenseEdgeDeviceStateMapperTests
         var tooLarge = Motion(10000, -10000, 1, 10, -10, 1, receiveTicks: 1000);
         var clamped = Map(State(default), motion: tooLarge, nowTicks: 1000);
         Assert.Equal(short.MaxValue, clamped.GyroX);
-        Assert.Equal(short.MinValue, clamped.GyroY);
+        Assert.Equal((short)-16, clamped.GyroY);
+        Assert.Equal(short.MinValue, clamped.GyroZ);
         Assert.Equal(short.MaxValue, clamped.AccelX);
-        Assert.Equal(short.MinValue, clamped.AccelY);
+        Assert.Equal((short)-8192, clamped.AccelY);
+        Assert.Equal(short.MinValue, clamped.AccelZ);
 
         AssertMotionNeutral(Map(State(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)), motion: tooLarge, nowTicks: 10000));
         AssertMotionNeutral(Map(State(default), motion: tooLarge with { HasAccelerometer = false }, nowTicks: 1000));
@@ -147,6 +205,19 @@ public sealed class DualSenseEdgeDeviceStateMapperTests
         gx, gy, gz, ax, ay, az,
         receiveTicks, receiveTicks, null, null,
         true, true, "Test", "Test");
+
+    private static MsiClawMotionState MotionFromRaw(
+        double rawGyroX,
+        double rawGyroY,
+        double rawGyroZ,
+        double rawAccelX,
+        double rawAccelY,
+        double rawAccelZ)
+    {
+        Assert.True(MsiClawMotionState.TryNormalizeSensorAxes(rawGyroX, rawGyroY, rawGyroZ, out var gyroX, out var gyroY, out var gyroZ));
+        Assert.True(MsiClawMotionState.TryNormalizeSensorAxes(rawAccelX, rawAccelY, rawAccelZ, out var accelX, out var accelY, out var accelZ));
+        return Motion(gyroX, gyroY, gyroZ, accelX, accelY, accelZ, receiveTicks: 1000);
+    }
 
     private static void AssertMotionNeutral(DSDeviceState state)
     {
