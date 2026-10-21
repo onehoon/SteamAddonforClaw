@@ -13,7 +13,7 @@ Correct the existing Steam-facing virtual-controller IMU output mapping for **bo
 
 The physical sensor readers, shared MSI Claw motion normalization, virtual-controller ownership, and source freshness logic already exist and must remain unchanged. The defect is at the controller-specific output boundary: the Steam Deck and Edge mappers currently use incorrect axis/sign permutations when converting the already-normalized motion snapshot into their distinct native HID report fields.
 
-Implement the two proven consumer-facing transforms below. Update existing deterministic unit tests so they assert the corrected output, rather than treating old behavior as a compatibility contract. Also correct the two misleading Yaw instructions in the read-only Claw Sensor Probe UI to make the user's subsequent physical characterization meaningful.
+Implement the two proven consumer-facing transforms below. Update existing deterministic unit tests so they assert the corrected output, rather than treating old behavior as a compatibility contract. Also localize the Probe's seven movement-phase labels/instructions into clear, actionable Korean for Korean UI users while retaining equivalent English for English UI users. Correct the previous reversed left/right Yaw hand instructions so a follow-up sensor capture is meaningful.
 
 This is a **target-output mapping correction**, not a sensor source redesign, a new feature, a motion runtime refactor, or CTW integration.
 
@@ -50,7 +50,9 @@ Supported product assumption: one Windows user and one interactive session; no m
 - tests/SteamInputAddonforClaw.Tests/DualSenseEdgeDeviceStateMapperTests.cs
   - Both currently contain assertions freezing the old permutations. Update them.
 - src/SteamInputAddonforClaw.UI/Views/ClawSensorProbePage.xaml.cs
-  - PhaseInstruction currently says "Keep the device level and rotate it left/right" for YAW. This confuses rotation about the world's vertical axis when the screen is flat with yaw about the controller's top/bottom (local Y) axis.
+  - PhaseInstruction currently says "Keep the device level and rotate it left/right" for YAW; all phase instructions and labels are currently hard-coded in English. Their movement wording is insufficiently clear for the user.
+- src/SteamInputAddonforClaw.UI/Strings/ko-KR/Resources.resw and en-US/Resources.resw
+  - Existing localization resources: extend only for the seven probe phase labels/instructions; retain an English equivalent in the English UI. No new localization service.
 
 ### 3.2 Consumer and virtual-report evidence
 
@@ -154,20 +156,27 @@ result.AccelZ = EncodeI16(fresh.AccelYG, 8192);
 
 In particular, **AccelX remains positive** with the Addon's current normalized MotionState; CTW's reference adapter has a different accelerometer sign basis, and applying its expressions blindly would double-invert axes. No changes to the Edge native report layout, feedback, rumble, LED, buttons or scale constants.
 
-### 5.3 Probe UI — correct two misleading Yaw instructions
+### 5.3 Probe UI — Korean instructions for physical movement, correctly distinguishing Yaw/Roll
 
-Modify only the YawLeft and YawRight PhaseInstruction strings in ClawSensorProbePage.xaml.cs. They should clearly distinguish Yaw from Roll.
+The user requested **clear Korean instructions** that say exactly which hand to move. Update all seven *user-facing* phase labels and motion instructions in the Claw Sensor Probe, using the existing WinUI3 ko-KR and en-US resources and the existing PhaseLabel/PhaseInstruction rendering path. Keep equivalent, unambiguous English instructions for English UI; do not hardcode Korean into English installations or introduce a new localization framework.
 
-Suggested wording (edit minimally for UI length):
+**Korean UI copy:**
 
-~~~csharp
-FrontendClawSensorProbePhase.YawLeft =>
-    "Yaw Left: Hold the screen upright facing you, top edge up. Turn the screen to face left (left edge toward you, right edge away), then return; do not tilt it like a steering wheel.",
-_ =>
-    "Yaw Right: Hold the screen upright facing you, top edge up. Turn the screen to face right (right edge toward you, left edge away), then return; do not tilt it like a steering wheel."
-~~~
+| Fixed internal phase | Korean title | User-facing Korean instruction |
+| --- | --- | --- |
+| Rest | 정지 | 화면이 위로 향하도록 기기를 평평한 책상에 놓고 손대지 마세요. |
+| RollLeft | 롤 왼쪽 | 기기를 세워 잡고 자동차 핸들처럼 **반시계 방향**으로 돌리세요. 왼손은 아래로, 오른손은 위로 움직입니다. 천천히 원위치로 돌아오세요. |
+| RollRight | 롤 오른쪽 | 기기를 세워 잡고 자동차 핸들처럼 **시계 방향**으로 돌리세요. 오른손은 아래로, 왼손은 위로 움직입니다. 천천히 원위치로 돌아오세요. |
+| PitchUp | 피치 위로 | 화면을 정면으로 향하게 세워 잡고, 기기 **위쪽을 몸에서 멀어지게** 기울이세요. 천천히 원위치로 돌아오세요. |
+| PitchDown | 피치 아래로 | 화면을 정면으로 향하게 세워 잡고, 기기 **위쪽을 몸쪽으로** 기울이세요. 천천히 원위치로 돌아오세요. |
+| YawLeft | 요 왼쪽 | 기기를 세워 잡고 **왼손을 앞으로 밀고, 오른손을 몸쪽으로 당기세요.** 화면이 왼쪽을 향합니다. 핸들처럼 기울이지 말고 원위치로 돌아오세요. |
+| YawRight | 요 오른쪽 | 기기를 세워 잡고 **오른손을 앞으로 밀고, 왼손을 몸쪽으로 당기세요.** 화면이 오른쪽을 향합니다. 핸들처럼 기울이지 말고 원위치로 돌아오세요. |
 
-Be precise about what the tester should physically do: rotation about the controller's **local vertical/top-edge Y axis**, not the screen-normal axis and not translation of the entire controller. Maintain the existing seven-phase labels, sequence, transition timing, CSV/report format, sensor selection and source acquisition. No new phase, wizard, graphic, calibration state or capture infrastructure.
+**"앞으로 밀기" means moving the hand away from the body.** The opposite hand comes toward the body; rotate the screen's facing direction in place, not translate the whole controller. Keep the upper edge pointing up during Yaw. Steering-wheel rotation is Roll, NOT Yaw. Tell users to return to the initial pose slowly.
+
+**Critical correction:** The previous work order's Yaw Left suggestion ("left edge toward you / right edge away") and its opposite Yaw Right instruction were REVERSED. The authoritative directions are **Yaw Left = left hand away, right hand toward you** and **Yaw Right = right hand away, left hand toward you**. Avoid reintroducing the inverted wording.
+
+Limits: localization/guidance only. Preserve existing seven phase enum IDs, ordering, countdown, probe sensor acquisition, sampling, UI timing, capture/report format, raw XYZ schema, JSON/CSV identifiers and process owner. Do not add a new wizard, calibration state, runtime transformation, graphic or general localization manager. Keep the initial/reset instruction consistent with the translated phase text. Existing UI resource/string tests may be extended; no hardware required for the PR.
 
 ## 6. Automated tests — must run before implementation PR completion
 
@@ -246,14 +255,14 @@ Do not modify:
 - XInput gyro-to-stick, mouse emulation, new motion axis abstractions, axis-configuration UI, new calibration machinery, or external CTW integration;
 - Claw Sensor Probe CSV schema, raw sample values or timing/workflow implementation.
 
-The fix is six assignments per target plus focused tests and two Probe UI strings. Keep one owner and one existing output mapper per target; do not introduce generic axis-transform engines, second normalization stages, wrappers, new locks or speculative race defenses.
+The fix is six assignments per target plus focused tests and a small, existing-resource-based localization of the seven Probe phase instructions. Keep one owner and one existing output mapper per target; do not introduce generic axis-transform engines, second normalization stages, wrappers, new locks or speculative race defenses.
 
 ## 8. User-only post-merge real-device validation (informational; NOT a CI/review blocker)
 
 The **user**, not local Codex, performs physical validation after merge. Lack of a physical MSI Claw or Steam installation must NOT block the coding PR if source tests pass.
 
 1. On the EX/CG3EM, the Claw Sensor Probe remains a **RAW physical sensor** diagnostic. Rerunning it does not by itself validate the two virtual output mappers.
-2. Rerun its Axis Characterization to isolate yaw correctly: keep the Claw upright, top edge pointing upward, and turn the **facing direction** left/right like turning your head. Do not rotate it like a steering wheel or pivot the device face-up on a tabletop. Record movement in one direction and the return distinctly; check raw gyro Y is dominant if the motion is about the intended local Y axis. Repeat dedicated Roll and Pitch separately as needed.
+2. Rerun its Axis Characterization using the Korean instructions above: Yaw Left means push LEFT hand away and pull RIGHT hand toward you; Yaw Right means push RIGHT hand away and pull LEFT hand toward you. Keep the controller upright and top edge up, turn its screen-facing direction rather than steering-wheel tilt, and distinguish the initial direction from the return. Check whether raw gyro Y is dominant for true local-axis Yaw; recheck Roll and Pitch separately.
 3. For **Steam Deck virtual presentation**, verify IMU from the virtual 28DE:1205 controller using a consumer-side SDL3 sensor tool (the CTW DeckImuProbe source is a reference example, not a required runtime integration). Verify face-up = SDL +Z gravity, upright = SDL +Y gravity, and Pitch/Yaw/Roll direction/axes independently; confirm Steam Input game behavior.
 4. For **DualSense Edge virtual presentation**, verify the Sony virtual controller's six IMU axes through a suitable SDL3 Sony sensor consumer, with the same face-up/upright and individually controlled rotations. The DeckImuProbe tool is Steam-Deck-specific and is NOT an Edge output validator unless separately adapted by the user.
 5. If an actual device disagrees, retain the RAW Probe capture and the downstream SDL capture together, then diagnose that **specific** boundary and source/model before considering any EX-only transformation. Do not preemptively add model-specific branches on conjecture.
@@ -267,7 +276,7 @@ Do not claim real-device success in the implementation PR if no user physical ru
 - Edge native gyro/accel six-field mapping corrected using the exact existing normalized source and Sony SDL consumer convention.
 - Both mappers use unchanged native scaling, finite/freshness guards, clamping and neutral policy.
 - Existing mapper tests updated; meaningful raw-to-normalized-to-native-to-SDL axis and stationary-gravity regressions added.
-- Two misleading Yaw Probe instructions corrected; no Probe acquisition/data-format change.
+- Seven Probe phase labels/instructions have clear Korean/English localized movement guidance with corrected Yaw Left/Right hand directions; no Probe acquisition/data-format change.
 - Build and relevant automated tests pass.
 - No unrequested changes to Full1902 lifecycle, physical/virtual ownership, CTW, native ABI or unrelated features.
 - Actual EX/A2VM user-device verification is deferred to **post-merge user role** and cannot be used as a code-review blocker.
