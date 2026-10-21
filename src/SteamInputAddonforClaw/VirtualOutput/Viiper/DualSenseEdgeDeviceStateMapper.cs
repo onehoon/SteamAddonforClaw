@@ -89,14 +89,14 @@ internal static class DualSenseEdgeDeviceStateMapper
             !double.IsFinite(fresh.AccelZG))
             return result;
 
-        // Initial PR-A reference mapping is direct: normalized source +X/+Y/+Z maps to Edge
-        // +X/+Y/+Z for both sensors. Physical reference-pose verification remains a hardware check.
+        // Map the Addon's normalized (rawX, rawZ, -rawY) snapshot back to Sony's native X/Y/Z
+        // sensor fields at this target boundary. Preserve the target's existing scale constants.
         result.GyroX = EncodeI16(fresh.GyroXDegPerSecond, 16.384);
-        result.GyroY = EncodeI16(fresh.GyroYDegPerSecond, 16.384);
-        result.GyroZ = EncodeI16(fresh.GyroZDegPerSecond, 16.384);
+        result.GyroY = EncodeI16(-fresh.GyroZDegPerSecond, 16.384);
+        result.GyroZ = EncodeI16(fresh.GyroYDegPerSecond, 16.384);
         result.AccelX = EncodeI16(fresh.AccelXG, 8192);
-        result.AccelY = EncodeI16(fresh.AccelYG, 8192);
-        result.AccelZ = EncodeI16(fresh.AccelZG, 8192);
+        result.AccelY = EncodeI16(-fresh.AccelZG, 8192);
+        result.AccelZ = EncodeI16(fresh.AccelYG, 8192);
         return result;
     }
 

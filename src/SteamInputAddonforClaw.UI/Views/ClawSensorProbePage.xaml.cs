@@ -283,7 +283,7 @@ public sealed partial class ClawSensorProbePage : UserControl
         GyroDiscoveryText.Text = "Gyroscope: Not discovered";
         AccelDiscoveryText.Text = "Accelerometer: Not discovered";
         PhaseText.Text = "Step: Not started";
-        InstructionText.Text = "Keep Still: Place the device on a flat surface and do not touch it.";
+        InstructionText.Text = PhaseInstruction(FrontendClawSensorProbePhase.Rest);
         LiveText.Text = $"Gyroscope: waiting{Environment.NewLine}Accelerometer: waiting";
         SummaryText.Text = string.Empty;
         ErrorText.Text = string.Empty;
@@ -412,23 +412,23 @@ public sealed partial class ClawSensorProbePage : UserControl
 
     private static string PhaseLabel(FrontendClawSensorProbePhase phase) => phase switch
     {
-        FrontendClawSensorProbePhase.Rest => "Keep Still",
-        FrontendClawSensorProbePhase.RollLeft => "Roll Left",
-        FrontendClawSensorProbePhase.RollRight => "Roll Right",
-        FrontendClawSensorProbePhase.PitchUp => "Pitch Up",
-        FrontendClawSensorProbePhase.PitchDown => "Pitch Down",
-        FrontendClawSensorProbePhase.YawLeft => "Yaw Left",
-        _ => "Yaw Right"
+        FrontendClawSensorProbePhase.Rest => "정지",
+        FrontendClawSensorProbePhase.RollLeft => "롤 왼쪽",
+        FrontendClawSensorProbePhase.RollRight => "롤 오른쪽",
+        FrontendClawSensorProbePhase.PitchUp => "피치 위로",
+        FrontendClawSensorProbePhase.PitchDown => "피치 아래로",
+        FrontendClawSensorProbePhase.YawLeft => "요 왼쪽",
+        _ => "요 오른쪽"
     };
 
     private static string PhaseInstruction(FrontendClawSensorProbePhase phase) => phase switch
     {
-        FrontendClawSensorProbePhase.Rest => "Keep Still: Place the device on a flat surface and do not touch it.",
-        FrontendClawSensorProbePhase.RollLeft => "Roll Left: Slowly lower the left side, then return to the starting position.",
-        FrontendClawSensorProbePhase.RollRight => "Roll Right: Slowly lower the right side, then return to the starting position.",
-        FrontendClawSensorProbePhase.PitchUp => "Pitch Up: Slowly tilt the top upward, then return to the starting position.",
-        FrontendClawSensorProbePhase.PitchDown => "Pitch Down: Slowly tilt the top downward, then return to the starting position.",
-        FrontendClawSensorProbePhase.YawLeft => "Yaw Left: Keep the device level and rotate it left, then return to center.",
-        _ => "Yaw Right: Keep the device level and rotate it right, then return to center."
+        FrontendClawSensorProbePhase.Rest => "화면이 위로 향하도록 기기를 평평한 책상에 놓고 손대지 마세요.",
+        FrontendClawSensorProbePhase.RollLeft => "기기를 세워 잡고 자동차 핸들처럼 반시계 방향으로 돌리세요. 왼손은 아래로, 오른손은 위로 움직입니다. 천천히 원위치로 돌아오세요.",
+        FrontendClawSensorProbePhase.RollRight => "기기를 세워 잡고 자동차 핸들처럼 시계 방향으로 돌리세요. 오른손은 아래로, 왼손은 위로 움직입니다. 천천히 원위치로 돌아오세요.",
+        FrontendClawSensorProbePhase.PitchUp => "화면을 정면으로 향하게 세워 잡고, 기기 위쪽을 몸에서 멀어지게 기울이세요. 천천히 원위치로 돌아오세요.",
+        FrontendClawSensorProbePhase.PitchDown => "화면을 정면으로 향하게 세워 잡고, 기기 위쪽을 몸쪽으로 기울이세요. 천천히 원위치로 돌아오세요.",
+        FrontendClawSensorProbePhase.YawLeft => "기기를 세워 잡고 왼손을 앞으로 밀고, 오른손을 몸쪽으로 당기세요. 화면이 왼쪽을 향합니다. 핸들처럼 기울이지 말고 원위치로 돌아오세요.",
+        _ => "기기를 세워 잡고 오른손을 앞으로 밀고, 왼손을 몸쪽으로 당기세요. 화면이 오른쪽을 향합니다. 핸들처럼 기울이지 말고 원위치로 돌아오세요."
     };
 }

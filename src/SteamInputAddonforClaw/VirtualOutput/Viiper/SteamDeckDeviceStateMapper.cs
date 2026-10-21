@@ -103,11 +103,11 @@ internal static class SteamDeckDeviceStateMapper
         if (IsUsableMotion(motion))
         {
             result.Pitch = EncodeI16(motion!.GyroXDegPerSecond, 16);
-            result.Yaw = EncodeI16(-motion.GyroZDegPerSecond, 16);
-            result.Roll = EncodeI16(motion.GyroYDegPerSecond, 16);
+            result.Yaw = EncodeI16(-motion.GyroYDegPerSecond, 16);
+            result.Roll = EncodeI16(-motion.GyroZDegPerSecond, 16);
             result.AccelX = EncodeI16(motion.AccelXG, 16384);
-            result.AccelY = EncodeI16(-motion.AccelZG, 16384);
-            result.AccelZ = EncodeI16(motion.AccelYG, 16384);
+            result.AccelY = EncodeI16(-motion.AccelYG, 16384);
+            result.AccelZ = EncodeI16(-motion.AccelZG, 16384);
         }
 
         return result;
