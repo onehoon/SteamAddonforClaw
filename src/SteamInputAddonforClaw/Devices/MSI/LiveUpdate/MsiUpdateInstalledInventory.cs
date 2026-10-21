@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 using System.Management;
 using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.Win32;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Controllers.Detection;
@@ -65,7 +66,7 @@ internal sealed record MsiUpdateInstalledInventory(
     private const int MaximumValueLength = 512;
     private const int MaximumWmiDurationSeconds = 15;
     private const int MaximumDriverStoreRows = 128;
-    private const int MaximumDriverStoreOutputCharacters = 64 * 1024;
+    internal const int MaximumDriverStoreOutputCharacters = 4 * 1024 * 1024;
     private const int MaximumDriverStoreErrorCharacters = 8 * 1024;
     internal const int DriverStoreTimeoutMilliseconds = 8_000;
     internal const int DriverStoreProcessCleanupGraceMilliseconds = 500;
@@ -79,27 +80,6 @@ internal sealed record MsiUpdateInstalledInventory(
         "RtkSdcaXuMSI.inf",
         "ishheci.inf"
     ];
-
-    internal const string DriverStorePowerShellScript = """
-$ErrorActionPreference = 'Stop'
-$allowed = @('mep_audio_component.inf', 'IntcOED_OemLibPath.inf', 'RtkSdcaXuMSI.inf', 'ishheci.inf')
-$matches = @(Get-WindowsDriver -Online -ErrorAction Stop | Where-Object {
-    $name = [IO.Path]::GetFileName([string]$_.OriginalFileName)
-    $allowed -contains $name
-} | ForEach-Object {
-    $name = [IO.Path]::GetFileName([string]$_.OriginalFileName)
-    [pscustomobject]@{
-        PublishedInfName = [string]$_.Driver
-        OriginalInfName = $name
-        Provider = [string]$_.ProviderName
-        Class = [string]$_.ClassName
-        Version = [string]$_.Version
-    }
-})
-$overflow = $matches.Count -gt 128
-$packages = @($matches | Select-Object -First 128)
-[pscustomobject]@{ Overflow = $overflow; Packages = $packages } | ConvertTo-Json -Depth 4 -Compress
-""";
 
     internal MsiUpdateDriverStoreCapture DriverStore { get; init; } = MsiUpdateDriverStoreCapture.NotRequested;
 
@@ -162,66 +142,64 @@ $packages = @($matches | Select-Object -First 128)
             ? "NotRequested"
             : isWindows ? "Capture" : "UnsupportedPlatform";
 
-    internal static MsiUpdateDriverStoreCapture ParseDriverStorePackagesJson(string? json)
+    internal static string[] GetDriverStoreArguments(string? deviceClass = null)
     {
-        if (json is null || json.Length == 0)
+        if (string.IsNullOrWhiteSpace(deviceClass))
+            return ["/enum-drivers", "/format", "xml"];
+
+        if (deviceClass is not ("System" or "Extension" or "AudioProcessingObject"))
+            throw new ArgumentOutOfRangeException(nameof(deviceClass));
+
+        return ["/enum-drivers", "/class", deviceClass, "/devices", "/format", "xml"];
+    }
+
+    internal static MsiUpdateDriverStoreCapture ParseDriverStorePackagesXml(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
             return new("EmptyOutput", [], "Cg3emDriverStoreEmptyOutput");
-        if (json.Length > MaximumDriverStoreOutputCharacters)
+        if (xml.Length > MaximumDriverStoreOutputCharacters)
             return new("OutputLimitExceeded", [], "Cg3emDriverStoreOutputLimitExceeded");
-        if (string.IsNullOrWhiteSpace(json))
-            return new("EmptyOutput", [], "Cg3emDriverStoreEmptyOutput");
 
         try
         {
-            using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 8 });
-            var root = document.RootElement;
-            var overflow = false;
-            JsonElement rows;
-            if (root.ValueKind == JsonValueKind.Object && TryGetProperty(root, "Packages", out var packages))
+            using var textReader = new StringReader(xml);
+            using var xmlReader = XmlReader.Create(textReader, new XmlReaderSettings
             {
-                rows = packages;
-                if (TryGetProperty(root, "Overflow", out var overflowValue)
-                    && overflowValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                    overflow = overflowValue.GetBoolean();
-            }
-            else
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersInDocument = MaximumDriverStoreOutputCharacters,
+                MaxCharactersFromEntities = 0,
+                IgnoreComments = true
+            });
+            var document = XDocument.Load(xmlReader, LoadOptions.None);
+            var driverElements = document.Root?.DescendantsAndSelf()
+                ?? Enumerable.Empty<XElement>();
+            driverElements = driverElements
+                .Where(element => string.Equals(element.Name.LocalName, "Driver", StringComparison.OrdinalIgnoreCase));
+            var parsed = new List<MsiUpdateInstalledDriverPackage>();
+            foreach (var driver in driverElements)
             {
-                rows = root;
-            }
-
-            if (overflow)
-                return new("RowLimitExceeded", [], "Cg3emDriverStoreRowLimitExceeded");
-
-            var items = rows.ValueKind switch
-            {
-                JsonValueKind.Array => rows.EnumerateArray().ToArray(),
-                JsonValueKind.Object => [rows],
-                JsonValueKind.Null => [],
-                _ => throw new JsonException("DriverStore output has an unexpected root value.")
-            };
-            if (items.Length > MaximumDriverStoreRows)
-                return new("RowLimitExceeded", [], "Cg3emDriverStoreRowLimitExceeded");
-
-            var parsed = new List<MsiUpdateInstalledDriverPackage>(items.Length);
-            foreach (var item in items)
-            {
-                if (item.ValueKind != JsonValueKind.Object
-                    || !TryGetString(item, "OriginalInfName", out var originalInfPath))
+                var publishedInfName = GetDriverStoreAttribute(driver, "DriverName");
+                var originalInfName = GetInfBasename(GetDriverStoreElementValue(driver, "OriginalName") ?? string.Empty);
+                if (string.IsNullOrWhiteSpace(publishedInfName) || string.IsNullOrWhiteSpace(originalInfName))
                     return new("InvalidOutput", [], "Cg3emDriverStoreInvalidOutput");
 
-                var originalInfName = GetInfBasename(originalInfPath);
                 if (!IsAllowedDriverStoreOriginalInf(originalInfName))
                     continue;
 
-                if (!TryGetString(item, "PublishedInfName", out var publishedInfName)
-                    || !Regex.IsMatch(publishedInfName, @"^oem\d+\.inf$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-                    || !TryGetString(item, "Provider", out var provider)
-                    || !IsSafeDriverStoreLabel(provider)
-                    || !TryGetString(item, "Class", out var deviceClass)
-                    || !IsSafeDriverStoreLabel(deviceClass)
-                    || !TryGetString(item, "Version", out var version)
-                    || !Regex.IsMatch(version, @"^\d+(?:\.\d+){1,3}$", RegexOptions.CultureInvariant))
+                publishedInfName = publishedInfName.Trim();
+                var provider = GetDriverStoreElementValue(driver, "ProviderName");
+                var deviceClass = GetDriverStoreElementValue(driver, "ClassName");
+                var rawVersion = GetDriverStoreElementValue(driver, "DriverVersion");
+                if (!Regex.IsMatch(publishedInfName, @"^oem\d+\.inf$",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                    || string.IsNullOrWhiteSpace(provider) || !IsSafeDriverStoreLabel(provider)
+                    || string.IsNullOrWhiteSpace(deviceClass) || !IsSafeDriverStoreLabel(deviceClass)
+                    || !TryParseDriverStoreVersion(rawVersion, out var version))
                     return new("InvalidOutput", [], "Cg3emDriverStoreInvalidOutput");
+
+                if (parsed.Count >= MaximumDriverStoreRows)
+                    return new("RowLimitExceeded", [], "Cg3emDriverStoreRowLimitExceeded");
 
                 parsed.Add(new(publishedInfName, originalInfName, provider, deviceClass, version));
             }
@@ -231,7 +209,11 @@ $packages = @($matches | Select-Object -First 128)
                 .ThenBy(package => package.PublishedInfName, StringComparer.OrdinalIgnoreCase)
                 .ToArray());
         }
-        catch (JsonException)
+        catch (XmlException)
+        {
+            return new("InvalidOutput", [], "Cg3emDriverStoreInvalidOutput");
+        }
+        catch (InvalidOperationException)
         {
             return new("InvalidOutput", [], "Cg3emDriverStoreInvalidOutput");
         }
@@ -307,23 +289,18 @@ $packages = @($matches | Select-Object -First 128)
         CancellationToken cancellationToken)
     {
         var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-        var powershellPath = Path.Combine(windowsDirectory, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+        var pnputilPath = Path.Combine(windowsDirectory, "System32", "pnputil.exe");
         var startInfo = new ProcessStartInfo
         {
-            FileName = powershellPath,
+            FileName = pnputilPath,
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             WorkingDirectory = Environment.SystemDirectory
         };
-        startInfo.ArgumentList.Add("-NoLogo");
-        startInfo.ArgumentList.Add("-NoProfile");
-        startInfo.ArgumentList.Add("-NonInteractive");
-        startInfo.ArgumentList.Add("-ExecutionPolicy");
-        startInfo.ArgumentList.Add("Bypass");
-        startInfo.ArgumentList.Add("-Command");
-        startInfo.ArgumentList.Add(DriverStorePowerShellScript);
+        foreach (var argument in GetDriverStoreArguments())
+            startInfo.ArgumentList.Add(argument);
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var standardOutput = new StringBuilder();
@@ -374,9 +351,9 @@ $packages = @($matches | Select-Object -First 128)
             return new("TimedOut", [], "Cg3emDriverStoreTimedOut");
         }
 
-        string json;
-        lock (outputGate) json = standardOutput.ToString();
-        return ParseDriverStoreProcessResult(json, process.ExitCode);
+        string xml;
+        lock (outputGate) xml = standardOutput.ToString();
+        return ParseDriverStoreProcessResult(xml, process.ExitCode);
     }
 
     internal static MsiUpdateDriverStoreCapture ParseDriverStoreProcessResult(
@@ -391,7 +368,7 @@ $packages = @($matches | Select-Object -First 128)
             return new("TimedOut", [], "Cg3emDriverStoreTimedOut");
         if (exitCode != 0)
             return new("Unavailable", [], "Cg3emDriverStoreCommandFailed");
-        return ParseDriverStorePackagesJson(standardOutput);
+        return ParseDriverStorePackagesXml(standardOutput);
     }
 
     private static void TryKill(Process process)
@@ -411,30 +388,36 @@ $packages = @($matches | Select-Object -First 128)
         catch (System.ComponentModel.Win32Exception) { }
     }
 
-    private static bool TryGetString(JsonElement element, string propertyName, out string value)
+    private static string? GetDriverStoreAttribute(XElement element, string name) =>
+        element.Attributes().FirstOrDefault(attribute =>
+            string.Equals(attribute.Name.LocalName, name, StringComparison.OrdinalIgnoreCase))?.Value.Trim();
+
+    private static string? GetDriverStoreElementValue(XElement element, string name)
     {
-        value = string.Empty;
-        if (!TryGetProperty(element, propertyName, out var property)
-            || property.ValueKind != JsonValueKind.String)
-            return false;
-        var raw = property.GetString()?.Trim();
-        if (string.IsNullOrWhiteSpace(raw) || raw.Length > 256) return false;
-        value = raw;
-        return true;
+        var value = element.Elements().FirstOrDefault(child =>
+            string.Equals(child.Name.LocalName, name, StringComparison.OrdinalIgnoreCase))?.Value.Trim();
+        return string.IsNullOrWhiteSpace(value) || value.Length > 256 ? null : value;
     }
 
-    private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
+    private static bool TryParseDriverStoreVersion(string? rawVersion, out string version)
     {
-        foreach (var property in element.EnumerateObject())
-        {
-            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
-            {
-                value = property.Value;
-                return true;
-            }
-        }
-        value = default;
-        return false;
+        version = string.Empty;
+        if (string.IsNullOrWhiteSpace(rawVersion) || rawVersion.Length > 256) return false;
+
+        var match = Regex.Match(rawVersion.Trim(), @"(?<version>\d+(?:\.\d+){1,3})$",
+            RegexOptions.CultureInvariant);
+        if (!match.Success || (match.Index > 0 && !char.IsWhiteSpace(rawVersion.Trim()[match.Index - 1])))
+            return false;
+
+        var candidate = match.Groups["version"].Value;
+        var components = candidate.Split('.');
+        if (components.Length is < 2 or > 4 || components.Any(component =>
+                component.Length is < 1 or > 10
+                || !uint.TryParse(component, NumberStyles.None, CultureInfo.InvariantCulture, out _)))
+            return false;
+
+        version = candidate;
+        return true;
     }
 
     private static string GetInfBasename(string path)
