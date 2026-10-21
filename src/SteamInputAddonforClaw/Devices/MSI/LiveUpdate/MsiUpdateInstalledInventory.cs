@@ -72,7 +72,7 @@ internal sealed record MsiUpdateInstalledInventory(
     private const int MaximumDriverStoreRows = 128;
     internal const int MaximumDriverStoreOutputCharacters = 4 * 1024 * 1024;
     private const int MaximumDriverStoreErrorCharacters = 8 * 1024;
-    internal const int DriverStoreTimeoutMilliseconds = 8_000;
+    internal const int DriverStoreTimeoutMilliseconds = 12_000;
     internal const int DriverStoreProcessCleanupGraceMilliseconds = 500;
     internal const int MaximumDriverStoreElapsedMilliseconds = 30_000;
     private static readonly TimeSpan DriverStoreTimeout = TimeSpan.FromMilliseconds(DriverStoreTimeoutMilliseconds);
