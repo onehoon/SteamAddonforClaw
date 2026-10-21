@@ -236,7 +236,7 @@ public sealed class MsiUpdateDriverStoreTests
 
         var disconnectedPackage = basePackage with { PublishedInfName = "oem678.inf", Version = "5.8.62.0" };
         var updated = MsiUpdateInstalledInventory.ApplyStartedBindingEvidence(
-            [basePackage, disconnectedPackage], evidence.Packages);
+            [basePackage, disconnectedPackage], evidence.Packages, "System");
 
         Assert.True(updated[0].HasStartedDevice);
         Assert.False(updated[1].HasStartedDevice);

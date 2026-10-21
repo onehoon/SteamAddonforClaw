@@ -347,7 +347,7 @@ internal sealed record MsiUpdateInstalledInventory(
                 includeDeviceStatuses: true, cancellationToken).ConfigureAwait(false);
             if (classCapture.Status == "Completed")
             {
-                packages = ApplyStartedBindingEvidence(packages, classCapture.Packages);
+                packages = ApplyStartedBindingEvidence(packages, classCapture.Packages, deviceClass);
                 if (packages.Any(package =>
                         string.Equals(package.Class, deviceClass, StringComparison.OrdinalIgnoreCase)
                         && package.HasStartedDevice is null))
@@ -367,9 +367,13 @@ internal sealed record MsiUpdateInstalledInventory(
 
     internal static MsiUpdateInstalledDriverPackage[] ApplyStartedBindingEvidence(
         IReadOnlyList<MsiUpdateInstalledDriverPackage> packages,
-        IReadOnlyList<MsiUpdateInstalledDriverPackage> classPackages) =>
+        IReadOnlyList<MsiUpdateInstalledDriverPackage> classPackages,
+        string scannedClass) =>
         packages.Select(package =>
         {
+            if (!string.Equals(package.Class, scannedClass, StringComparison.OrdinalIgnoreCase))
+                return package;
+
             var exactEvidence = classPackages.Where(candidate =>
                 string.Equals(candidate.PublishedInfName, package.PublishedInfName, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(candidate.OriginalInfName, package.OriginalInfName, StringComparison.OrdinalIgnoreCase)

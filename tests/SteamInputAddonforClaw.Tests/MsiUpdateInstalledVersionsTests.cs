@@ -1741,6 +1741,45 @@ public sealed class MsiUpdateInstalledVersionsTests
     }
 
     [Fact]
+    public void CG3EM_sequential_system_and_extension_scans_preserve_started_versions_for_comparison()
+    {
+        var iss = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var realtekOed = GetCg3emDriverStoreCase("Realtek OED Driver");
+        var systemDisconnected = new MsiUpdateInstalledDriverPackage(
+            "oem7.inf", iss.OriginalInfName, iss.Provider, iss.DeviceClass, "5.8.30.0");
+        var systemStarted = new MsiUpdateInstalledDriverPackage(
+            "oem677.inf", iss.OriginalInfName, iss.Provider, iss.DeviceClass, "5.8.61.0");
+        var extensionDisconnected = new MsiUpdateInstalledDriverPackage(
+            "oem439.inf", realtekOed.OriginalInfName, realtekOed.Provider, realtekOed.DeviceClass, "20.42.274.2");
+        var extensionStarted = new MsiUpdateInstalledDriverPackage(
+            "oem642.inf", realtekOed.OriginalInfName, realtekOed.Provider, realtekOed.DeviceClass, "20.43.274.009");
+        var basePackages = new[] { systemDisconnected, systemStarted, extensionDisconnected, extensionStarted };
+
+        var afterSystemScan = MsiUpdateInstalledInventory.ApplyStartedBindingEvidence(basePackages,
+        [
+            systemDisconnected with { HasStartedDevice = false },
+            systemStarted with { HasStartedDevice = true }
+        ], "System");
+        var afterExtensionScan = MsiUpdateInstalledInventory.ApplyStartedBindingEvidence(afterSystemScan,
+        [
+            extensionDisconnected with { HasStartedDevice = false },
+            extensionStarted with { HasStartedDevice = true }
+        ], "Extension");
+
+        var issCatalog = new MsiLiveUpdateCatalogEntry(iss.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: iss.PackageVersion, OemPackageIdentity: iss.OemPackageIdentity);
+        var realtekOedCatalog = new MsiLiveUpdateCatalogEntry(realtekOed.CatalogName, null, null, null,
+            PackageVersion: realtekOed.PackageVersion, OemPackageIdentity: realtekOed.OemPackageIdentity);
+        var issResult = ComposeCg3emDriverStoreEntry(issCatalog, new("Completed", afterExtensionScan));
+        var realtekOedResult = ComposeCg3emDriverStoreEntry(realtekOedCatalog, new("Completed", afterExtensionScan));
+
+        Assert.Equal("5.8.61.0", issResult.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, issResult.ComparisonStatus);
+        Assert.Equal("20.43.274.009", realtekOedResult.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, realtekOedResult.ComparisonStatus);
+    }
+
+    [Fact]
     public void CG3EM_Realtek_OED_selects_the_started_extension_package()
     {
         var row = GetCg3emDriverStoreCase("Realtek OED Driver");
