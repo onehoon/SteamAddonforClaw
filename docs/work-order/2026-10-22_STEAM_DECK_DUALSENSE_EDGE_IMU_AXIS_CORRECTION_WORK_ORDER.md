@@ -13,7 +13,7 @@ Correct the existing Steam-facing virtual-controller IMU output mapping for **bo
 
 The physical sensor readers, shared MSI Claw motion normalization, virtual-controller ownership, and source freshness logic already exist and must remain unchanged. The defect is at the controller-specific output boundary: the Steam Deck and Edge mappers currently use incorrect axis/sign permutations when converting the already-normalized motion snapshot into their distinct native HID report fields.
 
-Implement the two proven consumer-facing transforms below. Update existing deterministic unit tests so they assert the corrected output, rather than treating old behavior as a compatibility contract. Also localize the Probe's seven movement-phase labels/instructions into clear, actionable Korean for Korean UI users while retaining equivalent English for English UI users. Correct the previous reversed left/right Yaw hand instructions so a follow-up sensor capture is meaningful.
+Implement the two proven consumer-facing transforms below. Update existing deterministic unit tests so they assert the corrected output, rather than treating old behavior as a compatibility contract. Also replace the Probe's seven movement-phase labels/instructions with clear, actionable Korean-only text. English translations and additional localization resources are not required. Correct the previous reversed left/right Yaw hand instructions so a follow-up sensor capture is meaningful.
 
 This is a **target-output mapping correction**, not a sensor source redesign, a new feature, a motion runtime refactor, or CTW integration.
 
@@ -51,8 +51,7 @@ Supported product assumption: one Windows user and one interactive session; no m
   - Both currently contain assertions freezing the old permutations. Update them.
 - src/SteamInputAddonforClaw.UI/Views/ClawSensorProbePage.xaml.cs
   - PhaseInstruction currently says "Keep the device level and rotate it left/right" for YAW; all phase instructions and labels are currently hard-coded in English. Their movement wording is insufficiently clear for the user.
-- src/SteamInputAddonforClaw.UI/Strings/ko-KR/Resources.resw and en-US/Resources.resw
-  - Existing localization resources: extend only for the seven probe phase labels/instructions; retain an English equivalent in the English UI. No new localization service.
+- No resw/localization work is needed for this task. The existing Claw Sensor Probe phase strings are hard-coded in ClawSensorProbePage.xaml.cs; replace them directly with Korean strings in the existing methods.
 
 ### 3.2 Consumer and virtual-report evidence
 
@@ -158,9 +157,9 @@ In particular, **AccelX remains positive** with the Addon's current normalized M
 
 ### 5.3 Probe UI — Korean instructions for physical movement, correctly distinguishing Yaw/Roll
 
-The user requested **clear Korean instructions** that say exactly which hand to move. Update all seven *user-facing* phase labels and motion instructions in the Claw Sensor Probe, using the existing WinUI3 ko-KR and en-US resources and the existing PhaseLabel/PhaseInstruction rendering path. Keep equivalent, unambiguous English instructions for English UI; do not hardcode Korean into English installations or introduce a new localization framework.
+The user requested **Korean-only instructions** that say exactly which hand to move. Update all seven *user-facing* phase labels and motion instructions in the Claw Sensor Probe by replacing the existing hard-coded English strings directly in PhaseLabel / PhaseInstruction of ClawSensorProbePage.xaml.cs. **Do not add English equivalents, ko-KR/en-US .resw entries, resource lookups, language detection, or a localization layer.** This Developer Menu diagnostic uses Korean instructions regardless of app display language.
 
-**Korean UI copy:**
+**Required Korean-only UI copy:**
 
 | Fixed internal phase | Korean title | User-facing Korean instruction |
 | --- | --- | --- |
@@ -176,7 +175,7 @@ The user requested **clear Korean instructions** that say exactly which hand to 
 
 **Critical correction:** The previous work order's Yaw Left suggestion ("left edge toward you / right edge away") and its opposite Yaw Right instruction were REVERSED. The authoritative directions are **Yaw Left = left hand away, right hand toward you** and **Yaw Right = right hand away, left hand toward you**. Avoid reintroducing the inverted wording.
 
-Limits: localization/guidance only. Preserve existing seven phase enum IDs, ordering, countdown, probe sensor acquisition, sampling, UI timing, capture/report format, raw XYZ schema, JSON/CSV identifiers and process owner. Do not add a new wizard, calibration state, runtime transformation, graphic or general localization manager. Keep the initial/reset instruction consistent with the translated phase text. Existing UI resource/string tests may be extended; no hardware required for the PR.
+Limits: change only the existing phase labels/instructions and any initial/reset instruction text for consistency. Preserve existing seven phase enum IDs, ordering, countdown, probe sensor acquisition, sampling, UI timing, capture/report format, raw XYZ schema, JSON/CSV identifiers and process owner. Do not add a new wizard, calibration state, runtime transformation, graphic, resource strings or localization manager. Reuse the direct hard-coded strings already used on this diagnostic page. Existing narrow UI string tests may be updated; no hardware required for the PR.
 
 ## 6. Automated tests — must run before implementation PR completion
 
@@ -255,7 +254,7 @@ Do not modify:
 - XInput gyro-to-stick, mouse emulation, new motion axis abstractions, axis-configuration UI, new calibration machinery, or external CTW integration;
 - Claw Sensor Probe CSV schema, raw sample values or timing/workflow implementation.
 
-The fix is six assignments per target plus focused tests and a small, existing-resource-based localization of the seven Probe phase instructions. Keep one owner and one existing output mapper per target; do not introduce generic axis-transform engines, second normalization stages, wrappers, new locks or speculative race defenses.
+The fix is six assignments per target plus focused tests and a direct Korean-only replacement of the existing seven Probe phase labels/instructions. Keep one owner and one existing output mapper per target; do not introduce generic axis-transform engines, second normalization stages, wrappers, new locks or speculative race defenses.
 
 ## 8. User-only post-merge real-device validation (informational; NOT a CI/review blocker)
 
@@ -276,7 +275,7 @@ Do not claim real-device success in the implementation PR if no user physical ru
 - Edge native gyro/accel six-field mapping corrected using the exact existing normalized source and Sony SDL consumer convention.
 - Both mappers use unchanged native scaling, finite/freshness guards, clamping and neutral policy.
 - Existing mapper tests updated; meaningful raw-to-normalized-to-native-to-SDL axis and stationary-gravity regressions added.
-- Seven Probe phase labels/instructions have clear Korean/English localized movement guidance with corrected Yaw Left/Right hand directions; no Probe acquisition/data-format change.
+- Seven Probe phase labels/instructions have clear Korean-only movement guidance with corrected Yaw Left/Right hand directions; no English variants, localization resources, or Probe acquisition/data-format changes.
 - Build and relevant automated tests pass.
 - No unrequested changes to Full1902 lifecycle, physical/virtual ownership, CTW, native ABI or unrelated features.
 - Actual EX/A2VM user-device verification is deferred to **post-merge user role** and cannot be used as a code-review blocker.
