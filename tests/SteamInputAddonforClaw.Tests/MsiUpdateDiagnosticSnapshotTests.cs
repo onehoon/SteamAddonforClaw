@@ -121,7 +121,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
             new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
             new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
             [
-                new("Intel Graphics Driver", "2.0.0.0", null, null, DeviceId: gpuId),
+                new("Intel Arc Display Driver", "2.0.0.0", null, null, DeviceId: gpuId),
                 new("Intel Graphics Driver", "2.0.0.0", null, null, DeviceId: @"PCI\VEN_8086&DEV_9999"),
                 new("Intel Graphics Driver", "2.0.0.0", null, null),
                 new("Exact GPU Component", "2.0.0.0", null, null, DeviceId: gpuId),
@@ -161,6 +161,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
         Assert.Equal("SupersededByIntelDsa", document.MsiRows.Single(row => row.SourceCategory == "Driver" && row.SourceIndex == 0)
             .Latest.UnavailableReason);
+        Assert.Equal("Intel Arc Display Driver", document.MsiRows.Single(row => row.SourceCategory == "Driver" && row.SourceIndex == 0).Name);
         Assert.Equal(1, document.Sources.IntelDsa.ResolvedCount);
         Assert.Equal(1, document.Counts.AppendedIntelDsaRows);
         Assert.Contains(document.Inventory.LocalPnp, row => row.HardwareTypes.Contains(gpuId));

@@ -759,7 +759,6 @@ internal sealed record MsiUpdateInstalledInventory(
 internal sealed record IntelDsaResolvedDriver(
     IntelDsaComponentFamily Family,
     string PackageId,
-    string PackageName,
     string? LatestVersion,
     FrontendMsiLiveUpdateVersionKind VersionKind,
     string? ReleaseDate,
@@ -814,7 +813,7 @@ internal static class IntelDsaHardwareMatcher
                         .Max();
                     if (specificity < 0) continue;
                     var latestVersion = family == IntelDsaComponentFamily.Npu ? package.Version : component.Version;
-                    candidates.Add((new(family, package.Id, package.Name, latestVersion,
+                    candidates.Add((new(family, package.Id, latestVersion,
                         family == IntelDsaComponentFamily.Npu
                             ? FrontendMsiLiveUpdateVersionKind.Package
                             : FrontendMsiLiveUpdateVersionKind.Driver,
@@ -1226,6 +1225,7 @@ internal static class MsiUpdateCatalogComposer
             intel.ErrorKind);
         var intelRows = IntelDsaHardwareMatcher.Resolve(intel,
             inventory, msi.OperatingSystem ?? CurrentWindowsVersion());
+        var transferredIntelTitles = new List<(IntelDsaResolvedDriver Match, string Name)>();
         onResolvedIntelMatches?.Invoke(intelRows);
         foreach (var match in intelRows.Take(16)) onIntelMatch?.Invoke(match);
         var categoryResults = new List<FrontendMsiLiveUpdateCatalogCategorySnapshot>(4);
@@ -1245,7 +1245,7 @@ internal static class MsiUpdateCatalogComposer
                 {
                     categoryResults.Add(new(frontendCategory,
                         FrontendMsiLiveUpdateCatalogCategoryState.Success,
-                        intelRows.Select(MapIntelEntry).ToArray(), "MsiCategoryMissing"));
+                        intelRows.Select(entry => MapIntelEntry(entry)).ToArray(), "MsiCategoryMissing"));
                     continue;
                 }
 
@@ -1280,6 +1280,8 @@ internal static class MsiUpdateCatalogComposer
                             CandidateCount: duplicate.CandidateCount, VersionCount: duplicate.VersionCount));
                     if (duplicate.Suppress)
                     {
+                        if (TryResolveUniqueSuppressedIntelMatch(entry, intelRows, duplicate) is { } resolvedMatch)
+                            transferredIntelTitles.Add((resolvedMatch, entry.Name));
                         onRowDiagnostic?.Invoke(new(sourceCategory, sourceRow.SourceIndex, "SuppressedByIntelDsa",
                             duplicate.Outcome, null, null, null, 0, 0, duplicate.Outcome,
                             duplicate.CandidateCount, duplicate.VersionCount));
@@ -1312,7 +1314,16 @@ internal static class MsiUpdateCatalogComposer
                 {
                     foreach (var resolved in intelRows)
                     {
-                        entries.Add(MapIntelEntry(resolved));
+                        var transferredTitles = transferredIntelTitles
+                            .Where(item => item.Match.Family == resolved.Family
+                                && string.Equals(item.Match.Device.DeviceId, resolved.Device.DeviceId,
+                                    StringComparison.OrdinalIgnoreCase))
+                            .Select(item => item.Name)
+                            .Distinct(StringComparer.Ordinal)
+                            .Take(2)
+                            .ToArray();
+                        entries.Add(MapIntelEntry(resolved,
+                            transferredTitles.Length == 1 ? transferredTitles[0] : null));
                     }
                     if (categoryState == FrontendMsiLiveUpdateCatalogCategoryState.Failed && entries.Count > 0)
                     {
@@ -2305,13 +2316,14 @@ internal static class MsiUpdateCatalogComposer
             || Regex.IsMatch(entry.DeviceId, @"(?:^|\\)VID_0DB0&PID_190[12](?:&|\\|$)",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
 
-    private static FrontendMsiLiveUpdateCatalogEntry MapIntelEntry(IntelDsaResolvedDriver entry)
+    private static FrontendMsiLiveUpdateCatalogEntry MapIntelEntry(
+        IntelDsaResolvedDriver entry,
+        string? displayName = null)
     {
         var installedVersion = entry.Device.DriverVersion;
-        var deviceName = SafeDeviceName(entry.Device.WmiDeviceName ?? entry.Device.FriendlyName);
-        var displayName = string.IsNullOrWhiteSpace(deviceName)
-            ? entry.PackageName
-            : $"{entry.PackageName} — {deviceName}";
+        displayName = string.IsNullOrWhiteSpace(displayName)
+            ? GetIntelFamilyDisplayName(entry.Family)
+            : displayName;
         var exactHardwareMatch = entry.MatchReason.EndsWith(":HardwareId", StringComparison.Ordinal);
         var comparisonStatus = entry.Family switch
         {
@@ -2333,11 +2345,36 @@ internal static class MsiUpdateCatalogComposer
             comparisonStatus);
     }
 
-    private static string? SafeDeviceName(string? value)
+    private static string GetIntelFamilyDisplayName(IntelDsaComponentFamily family) => family switch
     {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-        var safe = new string(value.Where(static character => !char.IsControl(character)).Take(160).ToArray()).Trim();
-        return safe.Length == 0 ? null : safe;
+        IntelDsaComponentFamily.Graphics => "Intel Graphics Driver",
+        IntelDsaComponentFamily.Wireless => "Intel Wireless LAN Driver",
+        IntelDsaComponentFamily.Bluetooth => "Intel Bluetooth Driver",
+        IntelDsaComponentFamily.Npu => "Intel NPU Driver",
+        _ => "Intel Driver"
+    };
+
+    private static IntelDsaResolvedDriver? TryResolveUniqueSuppressedIntelMatch(
+        MsiLiveUpdateCatalogEntry entry,
+        IReadOnlyList<IntelDsaResolvedDriver> intelRows,
+        MsiIntelDuplicateEvaluation duplicate)
+    {
+        if (!duplicate.Suppress || duplicate.CandidateCount != 1) return null;
+
+        var family = KnownMsiIntelDriverNames.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, entry.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (family.Name is null) return null;
+
+        var familyRows = intelRows.Where(candidate => candidate.Family == family.Family).ToArray();
+        var candidates = duplicate.Outcome switch
+        {
+            "SuppressedByExactIdentity" => familyRows.Where(candidate => GetCatalogHardwareIds(entry)
+                .Where(IsPreciseCatalogHardwareId)
+                .Any(deviceId => IsMsiDeviceIdMatch(deviceId, candidate.Device))).ToArray(),
+            "SuppressedByUniqueDsaFamily" => familyRows,
+            _ => []
+        };
+        return candidates.Length == 1 ? candidates[0] : null;
     }
 
     private static MsiIntelDuplicateEvaluation EvaluateIntelDuplicate(
