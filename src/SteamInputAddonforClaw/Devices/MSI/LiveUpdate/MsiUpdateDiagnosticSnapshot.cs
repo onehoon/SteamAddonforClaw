@@ -164,7 +164,10 @@ internal sealed record MsiUpdateDiagnosticDriverStorePackage(
     string OriginalInfName,
     string Provider,
     string Class,
-    string Version);
+    string Version)
+{
+    public bool? HasStartedDevice { get; init; }
+}
 
 internal sealed record MsiUpdateDiagnosticPnpRow(
     int RowId,
@@ -305,7 +308,10 @@ internal static class MsiUpdateDiagnosticSnapshotBuilder
                         SafeDriverStoreOriginalInf(package.OriginalInfName) ?? string.Empty,
                         SafeCatalogScalar(package.Provider, 128, allowSpace: true) ?? string.Empty,
                         SafeCatalogScalar(package.Class, 64, allowSpace: true) ?? string.Empty,
-                        SafeVersion(package.Version) ?? string.Empty))
+                        SafeVersion(package.Version) ?? string.Empty)
+                    {
+                        HasStartedDevice = package.HasStartedDevice
+                    })
                     .ToList())
             {
                 DriverStoreElapsedMs = string.Equals(input.Inventory.DriverStore.Status, "NotRequested",

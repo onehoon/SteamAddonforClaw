@@ -455,6 +455,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         Assert.Equal(FrontendMsiLiveUpdateCatalogCategoryState.Success, driver.State);
         Assert.Equal("MsiCategoryMissing", driver.ErrorKind);
         Assert.Equal("32.0.101.9150", Assert.Single(driver.Entries).Version);
+        Assert.Equal("Intel Graphics Driver", driver.Entries[0].Name);
         Assert.Equal(FrontendMsiLiveUpdateVersionSource.IntelDsa, driver.Entries[0].LatestVersionSource);
         Assert.Equal(FrontendMsiLiveUpdateSourceState.Unavailable, combined.MsiSource!.State);
         Assert.Equal(FrontendMsiLiveUpdateCatalogState.PartialFailure, combined.State);
@@ -466,7 +467,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         var deviceId = @"PCI\VEN_8086&DEV_64A0&SUBSYS_146C1462&REV_04";
         var device = Device(deviceId, [deviceId], "DISPLAY", "Intel Arc Graphics", "32.0.100.1", 0x8086, 0x64A0);
         var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
-            [new("Intel Arc Graphics Driver", "32.0.101.8000", null, null, DeviceId: @"PCI\VEN_8086&DEV_64A0")]));
+            [new("Intel Arc Display Driver", "32.0.101.8000", null, null, DeviceId: @"PCI\VEN_8086&DEV_64A0")]));
         var intel = new IntelDsaCatalogResult(true,
         [IntelPackage("930514", "Intel Arc Graphics", false,
             IntelComponent("Graphics", "32.0.101.9150", "VEN_8086&DEV_64A0"))]);
@@ -476,14 +477,17 @@ public sealed class MsiUpdateInstalledVersionsTests
             category => category.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
 
         var entry = Assert.Single(driver.Entries);
+        Assert.Equal("Intel Arc Display Driver", entry.Name);
         Assert.Equal(FrontendMsiLiveUpdateVersionSource.IntelDsa, entry.LatestVersionSource);
         Assert.Equal("32.0.101.9150", entry.Version);
+        Assert.Equal("32.0.100.1", entry.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateVersionKind.Driver, entry.LatestVersionKind);
         Assert.Contains(diagnostics, item => item.Outcome == "SuppressedByExactIdentity"
             && item.CandidateCount == 1 && item.VersionCount == 1);
     }
 
     [Theory]
-    [InlineData("Intel Graphics Driver", "Graphics", "PCI", "VEN_8086&DEV_1234", "DISPLAY", "Intel Arc Graphics", 0x8086, 0x1234)]
+    [InlineData("Intel Arc Display Driver", "Graphics", "PCI", "VEN_8086&DEV_1234", "DISPLAY", "Intel Arc Graphics", 0x8086, 0x1234)]
     [InlineData("Intel Wireless LAN Driver", "Wireless", "PCI", "VEN_8086&DEV_5678", "NET", "Intel Wi-Fi 7", 0x8086, 0x5678)]
     [InlineData("Intel Bluetooth Driver", "Bluetooth", "USB", "VID_8087&PID_0033", "Bluetooth", "Intel Wireless Bluetooth", 0x8087, 0x0033)]
     [InlineData("Intel NPU Driver", "OtherDrivers", "PCI", "VEN_8086&DEV_643E", "System", "Intel AI Boost NPU", 0x8086, 0x643E)]
@@ -508,8 +512,35 @@ public sealed class MsiUpdateInstalledVersionsTests
         var entry = Assert.Single(driver.Entries);
         Assert.Equal(FrontendMsiLiveUpdateVersionSource.IntelDsa, entry.LatestVersionSource);
         Assert.Equal("3.0.0.0", entry.Version);
+        Assert.Equal(msiName, entry.Name);
         Assert.Contains(diagnostics, item => item.Outcome == "SuppressedByUniqueDsaFamily"
             && item.CandidateCount == 1 && item.Name == msiName);
+    }
+
+    [Theory]
+    [InlineData("Graphics", "PCI", "VEN_8086&DEV_1234", "DISPLAY", "Intel Arc Graphics", 0x8086, 0x1234, "Intel Graphics Driver")]
+    [InlineData("Wireless", "PCI", "VEN_8086&DEV_5678", "NET", "Intel Wi-Fi 7", 0x8086, 0x5678, "Intel Wireless LAN Driver")]
+    [InlineData("Bluetooth", "USB", "VID_8087&PID_0033", "Bluetooth", "Intel Wireless Bluetooth", 0x8087, 0x0033, "Intel Bluetooth Driver")]
+    [InlineData("OtherDrivers", "PCI", "VEN_8086&DEV_643E", "System", "Intel AI Boost NPU", 0x8086, 0x643E, "Intel NPU Driver")]
+    public void Intel_DSA_uses_short_family_title_when_no_MSI_row_was_suppressed(
+        string category, string bus, string detectionValue, string deviceClass, string deviceName,
+        ushort vendorId, ushort productId, string expectedName)
+    {
+        var deviceId = $"{bus}\\{detectionValue}";
+        var device = Device(deviceId, [deviceId], deviceClass, deviceName, "1.2.3.4", vendorId, productId);
+        var packageName = category == "OtherDrivers" ? "Intel NPU Driver" : $"Intel {category}";
+        var componentVersion = category == "OtherDrivers" ? null : "3.0.0.0";
+        var package = IntelPackage("family-fallback", packageName, false,
+            IntelComponent(category, componentVersion, detectionValue), version: "3.0.0.0");
+        var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver,
+            MsiLiveUpdateCatalogCategoryState.Success, []));
+
+        var entry = Assert.Single(MsiUpdateCatalogComposer.Compose(msi, new(true, [package]), Inventory(device))
+            .Categories.Single(item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver).Entries);
+
+        Assert.Equal(expectedName, entry.Name);
+        Assert.DoesNotContain(" — ", entry.Name, StringComparison.Ordinal);
+        Assert.Equal(FrontendMsiLiveUpdateVersionSource.IntelDsa, entry.LatestVersionSource);
     }
 
     [Fact]
@@ -543,7 +574,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         var deviceId = @"PCI\VEN_8086&DEV_1234&SUBSYS_11112222";
         var device = Device(deviceId, [deviceId], "DISPLAY", "Intel Arc Graphics", "1.0.0.0", 0x8086, 0x1234);
         var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
-            [new("Intel Graphics Driver", "2.0.0.0", null, null,
+            [new("Intel Arc Display Driver", "2.0.0.0", null, null,
                 DeviceId: @"PCI\VEN_8086&DEV_1234&SUBSYS_33334444")]));
         var intel = new IntelDsaCatalogResult(true,
             [IntelPackage("graphics", "Intel Arc Graphics", false,
@@ -554,8 +585,10 @@ public sealed class MsiUpdateInstalledVersionsTests
             item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
 
         Assert.Equal(2, driver.Entries.Count);
-        Assert.Contains(driver.Entries, item => item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.Msi);
-        Assert.Contains(driver.Entries, item => item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa);
+        Assert.Contains(driver.Entries, item => item.Name == "Intel Arc Display Driver"
+            && item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.Msi);
+        Assert.Contains(driver.Entries, item => item.Name == "Intel Graphics Driver"
+            && item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa);
         Assert.Contains(diagnostics, item => item.Outcome == "RetainedConflictingIdentity");
     }
 
@@ -567,7 +600,7 @@ public sealed class MsiUpdateInstalledVersionsTests
         var first = Device(firstId, [firstId], "DISPLAY", "Intel Arc A", "1.0.0.0", 0x8086, 0x1234);
         var second = Device(secondId, [secondId], "DISPLAY", "Intel Arc B", "1.0.0.1", 0x8086, 0x5678);
         var msi = MsiResult(new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
-            [new("Intel Graphics Driver", "2.0.0.0", null, null)]));
+            [new("Intel Arc Display Driver", "2.0.0.0", null, null)]));
         var intel = new IntelDsaCatalogResult(true,
             [IntelPackage("graphics", "Intel Arc Graphics", false,
                 IntelComponent("Graphics", "3.0.0.0", "VEN_8086&DEV_1234", "VEN_8086&DEV_5678"))]);
@@ -577,9 +610,10 @@ public sealed class MsiUpdateInstalledVersionsTests
             item => item.Category == FrontendMsiLiveUpdateCatalogCategory.Driver);
 
         Assert.Equal(3, driver.Entries.Count);
-        Assert.Contains(driver.Entries, item => item.Name == "Intel Graphics Driver"
+        Assert.Contains(driver.Entries, item => item.Name == "Intel Arc Display Driver"
             && item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.Msi);
-        Assert.Equal(2, driver.Entries.Count(item => item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa));
+        Assert.Equal(2, driver.Entries.Count(item => item.Name == "Intel Graphics Driver"
+            && item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa));
         Assert.Contains(diagnostics, item => item.Outcome == "RetainedAmbiguousFamily" && item.CandidateCount == 2);
     }
 
@@ -605,7 +639,8 @@ public sealed class MsiUpdateInstalledVersionsTests
 
         Assert.Equal(6, entries.Count);
         Assert.All(retainedNames, name => Assert.Contains(entries, item => item.Name == name));
-        Assert.DoesNotContain(entries, item => item.Name == "Intel Graphics Driver");
+        Assert.Contains(entries, item => item.Name == "Intel Graphics Driver"
+            && item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa);
     }
 
     [Fact]
@@ -681,7 +716,8 @@ public sealed class MsiUpdateInstalledVersionsTests
 
         Assert.Equal("6.0.9738.1", entry.InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateInstalledVersionConfidence.Heuristic, entry.InstalledVersionConfidence);
-        Assert.DoesNotContain(entries, item => item.Name == "Intel Arc Graphics Driver");
+        Assert.Contains(entries, item => item.Name == "Intel Arc Graphics Driver"
+            && item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa);
         Assert.Contains(entries, item => item.LatestVersionSource == FrontendMsiLiveUpdateVersionSource.IntelDsa
             && item.Version == "32.0.101.9150");
         Assert.Contains(diagnostics, item => item.Name == "Realtek Audio Driver"
@@ -1682,6 +1718,162 @@ public sealed class MsiUpdateInstalledVersionsTests
             Assert.Null(result.InstalledVersion);
             Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, result.ComparisonStatus);
         }
+    }
+
+    [Fact]
+    public void CG3EM_ISS_selects_only_the_started_package_when_versions_conflict()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem7.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.30.0") { HasStartedDevice = false },
+            new MsiUpdateInstalledDriverPackage("oem677.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.61.0") { HasStartedDevice = true }
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", packages));
+
+        Assert.Equal("5.8.61.0", composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_sequential_system_and_extension_scans_preserve_started_versions_for_comparison()
+    {
+        var iss = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var realtekOed = GetCg3emDriverStoreCase("Realtek OED Driver");
+        var systemDisconnected = new MsiUpdateInstalledDriverPackage(
+            "oem7.inf", iss.OriginalInfName, iss.Provider, iss.DeviceClass, "5.8.30.0");
+        var systemStarted = new MsiUpdateInstalledDriverPackage(
+            "oem677.inf", iss.OriginalInfName, iss.Provider, iss.DeviceClass, "5.8.61.0");
+        var extensionDisconnected = new MsiUpdateInstalledDriverPackage(
+            "oem439.inf", realtekOed.OriginalInfName, realtekOed.Provider, realtekOed.DeviceClass, "20.42.274.2");
+        var extensionStarted = new MsiUpdateInstalledDriverPackage(
+            "oem642.inf", realtekOed.OriginalInfName, realtekOed.Provider, realtekOed.DeviceClass, "20.43.274.009");
+        var basePackages = new[] { systemDisconnected, systemStarted, extensionDisconnected, extensionStarted };
+
+        var afterSystemScan = MsiUpdateInstalledInventory.ApplyStartedBindingEvidence(basePackages,
+        [
+            systemDisconnected with { HasStartedDevice = false },
+            systemStarted with { HasStartedDevice = true }
+        ], "System");
+        var afterExtensionScan = MsiUpdateInstalledInventory.ApplyStartedBindingEvidence(afterSystemScan,
+        [
+            extensionDisconnected with { HasStartedDevice = false },
+            extensionStarted with { HasStartedDevice = true }
+        ], "Extension");
+
+        var issCatalog = new MsiLiveUpdateCatalogEntry(iss.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: iss.PackageVersion, OemPackageIdentity: iss.OemPackageIdentity);
+        var realtekOedCatalog = new MsiLiveUpdateCatalogEntry(realtekOed.CatalogName, null, null, null,
+            PackageVersion: realtekOed.PackageVersion, OemPackageIdentity: realtekOed.OemPackageIdentity);
+        var issResult = ComposeCg3emDriverStoreEntry(issCatalog, new("Completed", afterExtensionScan));
+        var realtekOedResult = ComposeCg3emDriverStoreEntry(realtekOedCatalog, new("Completed", afterExtensionScan));
+
+        Assert.Equal("5.8.61.0", issResult.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, issResult.ComparisonStatus);
+        Assert.Equal("20.43.274.009", realtekOedResult.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, realtekOedResult.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_Realtek_OED_selects_the_started_extension_package()
+    {
+        var row = GetCg3emDriverStoreCase("Realtek OED Driver");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, null, null, null,
+            PackageVersion: "20.43.274.9", OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem439.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "20.42.274.2") { HasStartedDevice = false },
+            new MsiUpdateInstalledDriverPackage("oem642.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "20.43.274.009") { HasStartedDevice = true }
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", packages));
+
+        Assert.Equal("20.43.274.009", composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_conflicting_started_packages_remain_unknown()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem677.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.61.0") { HasStartedDevice = true },
+            new MsiUpdateInstalledDriverPackage("oem678.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.62.0") { HasStartedDevice = true }
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", packages));
+
+        Assert.Null(composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_conflicting_packages_with_no_started_binding_remain_unknown()
+    {
+        var row = GetCg3emDriverStoreCase("Realtek OED Driver");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, null, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem439.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "20.42.274.2") { HasStartedDevice = false },
+            new MsiUpdateInstalledDriverPackage("oem642.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "20.43.274.9") { HasStartedDevice = false }
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", packages));
+
+        Assert.Null(composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_partial_class_lookup_keeps_single_package_matches()
+    {
+        var row = GetCg3emDriverStoreCase("Windows Studio Effects");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, row.PackageVersion, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var package = new MsiUpdateInstalledDriverPackage("oem901.inf", row.OriginalInfName,
+            row.Provider, row.DeviceClass, row.PackageVersion);
+
+        var composed = ComposeCg3emDriverStoreEntry(entry,
+            new("Partial", [package], "Cg3emDriverStoreClassLookupFailed"));
+
+        Assert.Equal(row.PackageVersion, composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_partial_class_lookup_keeps_ambiguous_package_matches_unknown()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem7.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.30.0"),
+            new MsiUpdateInstalledDriverPackage("oem677.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.61.0")
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry,
+            new("Partial", packages, "Cg3emDriverStoreClassLookupFailed"));
+
+        Assert.Null(composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
     }
 
     [Fact]

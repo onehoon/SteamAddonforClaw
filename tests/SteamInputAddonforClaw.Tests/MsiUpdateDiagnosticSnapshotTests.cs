@@ -121,7 +121,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
             new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
             new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Success,
             [
-                new("Intel Graphics Driver", "2.0.0.0", null, null, DeviceId: gpuId),
+                new("Intel Arc Display Driver", "2.0.0.0", null, null, DeviceId: gpuId),
                 new("Intel Graphics Driver", "2.0.0.0", null, null, DeviceId: @"PCI\VEN_8086&DEV_9999"),
                 new("Intel Graphics Driver", "2.0.0.0", null, null),
                 new("Exact GPU Component", "2.0.0.0", null, null, DeviceId: gpuId),
@@ -161,6 +161,7 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
         Assert.Equal("SupersededByIntelDsa", document.MsiRows.Single(row => row.SourceCategory == "Driver" && row.SourceIndex == 0)
             .Latest.UnavailableReason);
+        Assert.Equal("Intel Arc Display Driver", document.MsiRows.Single(row => row.SourceCategory == "Driver" && row.SourceIndex == 0).Name);
         Assert.Equal(1, document.Sources.IntelDsa.ResolvedCount);
         Assert.Equal(1, document.Counts.AppendedIntelDsaRows);
         Assert.Contains(document.Inventory.LocalPnp, row => row.HardwareTypes.Contains(gpuId));
@@ -335,14 +336,15 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
             [
                 new("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0"),
                 new("oem755.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009")
-            ]) { ElapsedMs = 1_827 }
+                    { HasStartedDevice = true }
+            ]) { ElapsedMs = 1_827, AdditionalWarnings = ["Cg3emDriverStoreClassSystemTimedOut"] }
         };
         var input = ComposeInput(MsiResult(
                 new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Empty, [])),
-            IntelDsaCatalogResult.Failed("Http403"), inventory);
+            IntelDsaCatalogResult.Failed("Http403"), inventory with { Warnings = ["Cg3emDriverStoreClassLookupFailed", .. inventory.Warnings] });
 
         var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
         var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
@@ -356,6 +358,11 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         Assert.DoesNotContain("FileRepository", json, StringComparison.OrdinalIgnoreCase);
         using var parsed = JsonDocument.Parse(json);
         Assert.Equal(1_827, parsed.RootElement.GetProperty("inventory").GetProperty("driverStoreElapsedMs").GetInt64());
+        Assert.True(parsed.RootElement.GetProperty("inventory").GetProperty("driverStorePackages")
+            .EnumerateArray().Single(row => row.GetProperty("publishedInfName").GetString() == "oem755.inf")
+            .GetProperty("hasStartedDevice").GetBoolean());
+        Assert.Contains("Cg3emDriverStoreClassLookupFailed", parsed.RootElement.GetProperty("sources")
+            .GetProperty("inventoryWarnings").EnumerateArray().Select(warning => warning.GetString()));
     }
 
     [Theory]

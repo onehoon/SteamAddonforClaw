@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Text;
 using SteamInputAddonforClaw.Devices.MSI.LiveUpdate;
 using Xunit;
 
@@ -7,21 +7,22 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class MsiUpdateDriverStoreTests
 {
     [Fact]
-    public void Powershell_projection_uses_the_Dism_object_property_names_and_never_emits_paths()
+    public void PnPUtil_arguments_use_only_the_read_only_XML_driver_inventory_command()
     {
-        var script = MsiUpdateInstalledInventory.DriverStorePowerShellScript;
+        Assert.Equal(new[] { "/enum-drivers", "/format", "xml" },
+            MsiUpdateInstalledInventory.GetDriverStoreArguments());
+    }
 
-        Assert.Contains("Get-WindowsDriver -Online -ErrorAction Stop", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("-All", script, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, script.Split("Get-WindowsDriver", StringSplitOptions.None).Length - 1);
-        Assert.Contains("$_.Driver", script, StringComparison.Ordinal);
-        Assert.Contains("$_.OriginalFileName", script, StringComparison.Ordinal);
-        Assert.Contains("$_.ProviderName", script, StringComparison.Ordinal);
-        Assert.Contains("$_.ClassName", script, StringComparison.Ordinal);
-        Assert.Contains("$_.Version", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("$_.PublishedName", script, StringComparison.Ordinal);
-        Assert.Contains("[IO.Path]::GetFileName", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("FileRepository", script, StringComparison.OrdinalIgnoreCase);
+    [Fact]
+    public void Class_scoped_arguments_are_built_only_from_supported_driver_classes()
+    {
+        Assert.Equal(new[] { "/enum-drivers", "/class", "System", "/devices", "/format", "xml" },
+            MsiUpdateInstalledInventory.GetDriverStoreArguments("System"));
+        Assert.Equal(new[] { "/enum-drivers", "/class", "Extension", "/devices", "/format", "xml" },
+            MsiUpdateInstalledInventory.GetDriverStoreArguments("Extension"));
+        Assert.Equal(new[] { "/enum-drivers", "/class", "AudioProcessingObject", "/devices", "/format", "xml" },
+            MsiUpdateInstalledInventory.GetDriverStoreArguments("AudioProcessingObject"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MsiUpdateInstalledInventory.GetDriverStoreArguments("Other"));
     }
 
     [Fact]
@@ -36,9 +37,9 @@ public sealed class MsiUpdateDriverStoreTests
     {
         var results = new[]
         {
-            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{\"Packages\":[]}", 0),
-            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{}", 0, timedOut: true),
-            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{}", 5)
+            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult(EmptyDriverStoreXml, 0),
+            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult(EmptyDriverStoreXml, 0, timedOut: true),
+            MsiUpdateInstalledInventory.ParseDriverStoreProcessResult(EmptyDriverStoreXml, 5)
         };
 
         Assert.Equal(new[] { "Completed", "TimedOut", "Unavailable" }, results.Select(result => result.Status));
@@ -53,8 +54,8 @@ public sealed class MsiUpdateDriverStoreTests
 
     [Theory]
     [InlineData("msi.claw.cg3em", "Completed", true)]
+    [InlineData("msi.claw.cg3em", "Partial", true)]
     [InlineData("msi.claw.cg3em", "TimedOut", true)]
-    [InlineData("msi.claw.cg3em", "Unavailable", true)]
     [InlineData("msi.claw.a2vm.8", "Completed", false)]
     [InlineData("msi.claw.cg3em", "NotRequested", false)]
     public void DriverStore_capture_log_is_limited_to_requested_CG3EM_scans(
@@ -78,118 +79,183 @@ public sealed class MsiUpdateDriverStoreTests
     }
 
     [Fact]
-    public void Parser_reads_a_list_case_insensitively_and_normalizes_original_INF_basename()
+    public void XML_parser_reads_observed_fields_case_insensitively_and_normalizes_original_INF_basename()
     {
-        const string json = """
-            {"packages":[
-              {"publishedinfname":"oem677.inf","originalinfname":"C:\\Windows\\System32\\DriverStore\\FileRepository\\ishheci.inf","provider":"Intel","class":"System","version":"5.8.61.0"},
-              {"PublishedInfName":"oem755.inf","OriginalInfName":"IntcOED_OemLibPath.inf","Provider":"Realtek Semiconductor Corp.","Class":"Extension","Version":"20.43.274.009"},
-              {"PublishedInfName":"oem900.inf","OriginalInfName":"unrelated.inf","Provider":"Private Publisher","Class":"System","Version":"1.0.0.0"}
-            ],"overflow":false}
-            """;
-
-        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson(json);
+        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml($"""
+            <DriverStore>
+              <Driver DriverName="oem677.inf">
+                <OriginalName>C:\Windows\System32\DriverStore\FileRepository\ISHHECI.INF</OriginalName>
+                <ProviderName>Intel</ProviderName><ClassName>System</ClassName>
+                <DriverVersion>12/05/2025 5.8.61.0</DriverVersion>
+              </Driver>
+              <dRiVeR drivername="oem755.inf">
+                <originalname>IntcOED_OemLibPath.inf</originalname>
+                <providername>Realtek Semiconductor Corp.</providername><classname>Extension</classname>
+                <driverversion>01/23/2026 20.43.274.009</driverversion>
+              </dRiVeR>
+              {Driver("oem690.inf", "RtkSdcaXuMSI.inf", "Realtek", "Extension", "10.0.378.1")}
+              {Driver("oem6.inf", "mep_audio_component.inf", "Microsoft Corporation", "AudioProcessingObject", "3.0.8.0")}
+              {Driver("oem900.inf", "unrelated.inf", "Private Publisher", "System", "1.0.0.0")}
+            </DriverStore>
+            """);
 
         Assert.Equal("Completed", result.Status);
-        Assert.Equal(2, result.Packages.Count);
-        Assert.Contains(result.Packages, package => package.OriginalInfName == "ishheci.inf"
+        Assert.Equal(4, result.Packages.Count);
+        Assert.Contains(result.Packages, package => string.Equals(package.OriginalInfName, "ishheci.inf",
+                StringComparison.OrdinalIgnoreCase)
             && package.PublishedInfName == "oem677.inf" && package.Version == "5.8.61.0");
+        Assert.Contains(result.Packages, package => package.OriginalInfName == "IntcOED_OemLibPath.inf"
+            && package.PublishedInfName == "oem755.inf" && package.Version == "20.43.274.009");
+        Assert.Contains(result.Packages, package => package.OriginalInfName == "RtkSdcaXuMSI.inf");
+        Assert.Contains(result.Packages, package => package.OriginalInfName == "mep_audio_component.inf");
         Assert.DoesNotContain(result.Packages, package => package.Provider == "Private Publisher");
     }
 
     [Fact]
-    public void Parser_accepts_a_single_projected_package_object()
+    public void XML_parser_accepts_a_valid_empty_inventory_but_not_empty_process_output()
     {
-        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson("""
-            {"PublishedInfName":"oem1.inf","OriginalInfName":"RtkSdcaXuMSI.inf","Provider":"Realtek","Class":"Extension","Version":"10.0.378.1"}
-            """);
+        var emptyList = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(EmptyDriverStoreXml);
+        var emptyOutput = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(string.Empty);
 
-        var package = Assert.Single(result.Packages);
-        Assert.Equal("RtkSdcaXuMSI.inf", package.OriginalInfName);
-        Assert.Equal("Completed", result.Status);
-    }
-
-    [Fact]
-    public void Parser_accepts_an_empty_package_array_as_a_successful_no_match_inventory()
-    {
-        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson("{\"Packages\":[]}");
-
-        Assert.Equal("Completed", result.Status);
-        Assert.Empty(result.Packages);
+        Assert.Equal("Completed", emptyList.Status);
+        Assert.Empty(emptyList.Packages);
+        Assert.Equal("EmptyOutput", emptyOutput.Status);
+        Assert.Equal("Cg3emDriverStoreEmptyOutput", emptyOutput.Warning);
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Parser_reports_empty_output_without_fabricating_an_empty_inventory(string json)
+    [InlineData("not-xml")]
+    [InlineData("<DriverStore><Driver DriverName=\"oem1.inf\"><OriginalName>ishheci.inf</OriginalName></DriverStore>")]
+    [InlineData("<!DOCTYPE x [<!ENTITY e SYSTEM 'file:///c:/secret'>]><DriverStore>&e;</DriverStore>")]
+    [InlineData("<DriverStore><Driver DriverName=\"not-a-published-inf\"><OriginalName>ishheci.inf</OriginalName><ProviderName>Intel</ProviderName><ClassName>System</ClassName><DriverVersion>5.8.61.0</DriverVersion></Driver></DriverStore>")]
+    [InlineData("<DriverStore><Driver DriverName=\"oem1.inf\"><OriginalName>ishheci.inf</OriginalName><ProviderName>Intel</ProviderName><ClassName>System</ClassName><DriverVersion>12/05/2025 invalid</DriverVersion></Driver></DriverStore>")]
+    public void XML_parser_fails_closed_for_malformed_or_incomplete_allowlisted_rows(string xml)
     {
-        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson(json);
-
-        Assert.Equal("EmptyOutput", result.Status);
-        Assert.Equal("Cg3emDriverStoreEmptyOutput", result.Warning);
-        Assert.Empty(result.Packages);
-    }
-
-    [Theory]
-    [InlineData("not-json")]
-    [InlineData("{\"packages\":[{\"OriginalInfName\":null}]}")]
-    [InlineData("{\"packages\":[{\"OriginalInfName\":\"ishheci.inf\",\"PublishedInfName\":\"oem1.inf\",\"Provider\":null,\"Class\":\"System\",\"Version\":\"5.8.61.0\"}]}")]
-    [InlineData("{\"packages\":[{\"OriginalInfName\":\"ishheci.inf\",\"PublishedInfName\":\"not-a-published-inf\",\"Provider\":\"Intel\",\"Class\":\"System\",\"Version\":\"5.8.61.0\"}]}")]
-    [InlineData("{\"packages\":[{\"OriginalInfName\":\"ishheci.inf\",\"PublishedInfName\":\"oem1.inf\",\"Provider\":\"Intel\",\"Class\":\"System\",\"Version\":\"unknown\"}]}")]
-    public void Parser_fails_closed_for_malformed_or_incomplete_allowlisted_rows(string json)
-    {
-        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson(json);
+        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(xml);
 
         Assert.Equal("InvalidOutput", result.Status);
         Assert.Empty(result.Packages);
     }
 
     [Fact]
-    public void Parser_rejects_json_over_the_output_limit()
+    public void XML_parser_accepts_large_unrelated_driver_lists_without_applying_the_matching_row_limit()
     {
-        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson(new string(' ', 64 * 1024 + 1));
+        var unrelated = string.Concat(Enumerable.Range(1, 400).Select(index => $"""
+            <Driver DriverName="oem{index}.inf"><OriginalName>unrelated{index}.inf</OriginalName>
+              <ProviderName>Other</ProviderName><ClassName>System</ClassName><DriverVersion>1.0.0.0</DriverVersion>
+              <Ignored>{new string('x', 200)}</Ignored>
+            </Driver>
+            """));
+        var xml = $"<DriverStore>{unrelated}{Driver("oem900.inf", "ishheci.inf", "Intel", "System", "5.8.61.0")}</DriverStore>";
 
-        Assert.Equal("OutputLimitExceeded", result.Status);
-        Assert.Empty(result.Packages);
+        Assert.True(xml.Length > 64 * 1024);
+        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(xml);
+
+        Assert.Equal("Completed", result.Status);
+        Assert.Single(result.Packages);
     }
 
     [Fact]
-    public void Parser_rejects_excessive_rows_and_explicit_overflow()
+    public void XML_parser_rejects_excessive_matching_rows_and_oversized_document()
     {
-        var row = new
-        {
-            PublishedInfName = "oem1.inf",
-            OriginalInfName = "ishheci.inf",
-            Provider = "Intel",
-            Class = "System",
-            Version = "5.8.61.0"
-        };
-        var tooMany = JsonSerializer.Serialize(Enumerable.Repeat(row, 129));
-        var tooManyResult = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson(tooMany);
-        var overflowResult = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson("""
-            {"Overflow":true,"Packages":[]}
-            """);
+        var tooManyRows = $"<DriverStore>{string.Concat(Enumerable.Range(1, 129)
+            .Select(index => Driver($"oem{index}.inf", "ishheci.inf", "Intel", "System", "5.8.61.0")))}</DriverStore>";
+        var tooLarge = $"<DriverStore><Ignored>{new string('x', MsiUpdateInstalledInventory.MaximumDriverStoreOutputCharacters + 1)}</Ignored></DriverStore>";
 
-        Assert.Equal("RowLimitExceeded", tooManyResult.Status);
-        Assert.Equal("RowLimitExceeded", overflowResult.Status);
-        Assert.Empty(tooManyResult.Packages);
-        Assert.Empty(overflowResult.Packages);
+        Assert.Equal("RowLimitExceeded", MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(tooManyRows).Status);
+        Assert.Equal("OutputLimitExceeded", MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(tooLarge).Status);
     }
 
     [Fact]
     public void Parser_preserves_duplicate_driver_packages_for_conservative_matching()
     {
-        const string json = """
-            {"Packages":[
-              {"PublishedInfName":"oem1.inf","OriginalInfName":"ishheci.inf","Provider":"Intel","Class":"System","Version":"5.8.61.0"},
-              {"PublishedInfName":"oem2.inf","OriginalInfName":"ishheci.inf","Provider":"Intel","Class":"System","Version":"5.8.62.0"}
-            ]}
-            """;
+        var xml = $"<DriverStore>{Driver("oem1.inf", "ishheci.inf", "Intel", "System", "5.8.61.0")}{Driver("oem2.inf", "ishheci.inf", "Intel", "System", "5.8.62.0")}</DriverStore>";
 
-        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesJson(json);
+        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(xml);
 
         Assert.Equal(2, result.Packages.Count);
         Assert.Equal(new[] { "5.8.61.0", "5.8.62.0" }, result.Packages.Select(package => package.Version));
+    }
+
+    [Fact]
+    public void Conflicting_numeric_versions_request_one_class_lookup_and_equal_versions_do_not()
+    {
+        var packages = new[]
+        {
+            Package("oem7.inf", "ishheci.inf", "Intel", "System", "5.8.30.0"),
+            Package("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0"),
+            Package("oem439.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.42.274.2"),
+            Package("oem642.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009"),
+            Package("oem690.inf", "RtkSdcaXuMSI.inf", "Realtek", "Extension", "10.0.378.1"),
+            Package("oem6.inf", "mep_audio_component.inf", "Microsoft Corporation", "AudioProcessingObject", "3.0.8.0")
+        };
+
+        Assert.Equal(new[] { "System", "Extension" },
+            MsiUpdateCatalogComposer.GetCg3emDriverStoreClassesRequiringStartedBinding(packages));
+
+        var numericallyEqual = new[]
+        {
+            Package("oem1.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009"),
+            Package("oem2.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.9")
+        };
+        Assert.Empty(MsiUpdateCatalogComposer.GetCg3emDriverStoreClassesRequiringStartedBinding(numericallyEqual));
+    }
+
+    [Fact]
+    public void Class_XML_parser_aggregates_multiple_device_rows_into_one_started_package()
+    {
+        var xml = $"""
+            <DriverStore>
+              <Driver DriverName="oem690.inf">
+                <OriginalName>RtkSdcaXuMSI.inf</OriginalName><ProviderName>Realtek</ProviderName><ClassName>Extension</ClassName>
+                <DriverVersion>10/15/2026 10.0.378.1</DriverVersion>
+                <Devices><Device><Status>Started</Status></Device><Device><Status>Started</Status></Device><Device><Status>Started</Status></Device></Devices>
+              </Driver>
+              {Driver("oem1.inf", "unrelated.inf", "Intel", "System", "5.8.61.0")}
+            </DriverStore>
+            """;
+
+        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(xml, includeDeviceStatuses: true);
+
+        Assert.Equal("Completed", result.Status);
+        var package = Assert.Single(result.Packages);
+        Assert.Equal("oem690.inf", package.PublishedInfName);
+        Assert.True(package.HasStartedDevice);
+    }
+
+    [Fact]
+    public void Started_binding_evidence_requires_exact_published_and_package_identity()
+    {
+        var basePackage = Package("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0");
+        var evidence = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml($"""
+            <DriverStore>
+              {DriverWithDevice("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0", "Started")}
+              {DriverWithDevice("oem678.inf", "ishheci.inf", "Intel", "System", "5.8.62.0", "Disconnected")}
+            </DriverStore>
+            """, includeDeviceStatuses: true);
+
+        var disconnectedPackage = basePackage with { PublishedInfName = "oem678.inf", Version = "5.8.62.0" };
+        var updated = MsiUpdateInstalledInventory.ApplyStartedBindingEvidence(
+            [basePackage, disconnectedPackage], evidence.Packages, "System");
+
+        Assert.True(updated[0].HasStartedDevice);
+        Assert.False(updated[1].HasStartedDevice);
+    }
+
+    [Fact]
+    public void Class_XML_parser_leaves_missing_binding_status_unknown()
+    {
+        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml($"""
+            <DriverStore>
+              <Driver DriverName="oem677.inf">
+                <OriginalName>ishheci.inf</OriginalName><ProviderName>Intel</ProviderName><ClassName>System</ClassName>
+                <DriverVersion>5.8.61.0</DriverVersion><Devices><Device /></Devices>
+              </Driver>
+            </DriverStore>
+            """, includeDeviceStatuses: true);
+
+        Assert.Equal("Completed", result.Status);
+        Assert.Null(Assert.Single(result.Packages).HasStartedDevice);
     }
 
     [Fact]
@@ -205,10 +271,32 @@ public sealed class MsiUpdateDriverStoreTests
     [Fact]
     public void Process_result_fails_closed_on_timeout_output_limit_and_nonzero_exit()
     {
-        Assert.Equal("TimedOut", MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{}", 0, timedOut: true).Status);
-        Assert.Equal("OutputLimitExceeded", MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{}", 0,
+        Assert.Equal("TimedOut", MsiUpdateInstalledInventory.ParseDriverStoreProcessResult(EmptyDriverStoreXml, 0, timedOut: true).Status);
+        Assert.Equal("OutputLimitExceeded", MsiUpdateInstalledInventory.ParseDriverStoreProcessResult(EmptyDriverStoreXml, 0,
             outputLimitExceeded: true).Status);
-        Assert.Equal("Unavailable", MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{}", 5).Status);
-        Assert.Equal("Completed", MsiUpdateInstalledInventory.ParseDriverStoreProcessResult("{\"Packages\":[]}", 0).Status);
+        Assert.Equal("Unavailable", MsiUpdateInstalledInventory.ParseDriverStoreProcessResult(EmptyDriverStoreXml, 5).Status);
+        Assert.Equal("Completed", MsiUpdateInstalledInventory.ParseDriverStoreProcessResult(EmptyDriverStoreXml, 0).Status);
     }
+
+    private const string EmptyDriverStoreXml = "<DriverStore />";
+
+    private static MsiUpdateInstalledDriverPackage Package(
+        string published, string original, string provider, string deviceClass, string version) =>
+        new(published, original, provider, deviceClass, version);
+
+    private static string Driver(string published, string original, string provider, string deviceClass, string version) => $"""
+        <Driver DriverName="{published}">
+          <OriginalName>{original}</OriginalName><ProviderName>{provider}</ProviderName>
+          <ClassName>{deviceClass}</ClassName><DriverVersion>{version}</DriverVersion>
+        </Driver>
+        """;
+
+    private static string DriverWithDevice(string published, string original, string provider,
+        string deviceClass, string version, string status) => $"""
+        <Driver DriverName="{published}">
+          <OriginalName>{original}</OriginalName><ProviderName>{provider}</ProviderName>
+          <ClassName>{deviceClass}</ClassName><DriverVersion>{version}</DriverVersion>
+          <Devices><Device><Status>{status}</Status></Device></Devices>
+        </Driver>
+        """;
 }
