@@ -1685,6 +1685,123 @@ public sealed class MsiUpdateInstalledVersionsTests
     }
 
     [Fact]
+    public void CG3EM_ISS_selects_only_the_started_package_when_versions_conflict()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem7.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.30.0") { HasStartedDevice = false },
+            new MsiUpdateInstalledDriverPackage("oem677.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.61.0") { HasStartedDevice = true }
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", packages));
+
+        Assert.Equal("5.8.61.0", composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_Realtek_OED_selects_the_started_extension_package()
+    {
+        var row = GetCg3emDriverStoreCase("Realtek OED Driver");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, null, null, null,
+            PackageVersion: "20.43.274.9", OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem439.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "20.42.274.2") { HasStartedDevice = false },
+            new MsiUpdateInstalledDriverPackage("oem642.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "20.43.274.009") { HasStartedDevice = true }
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", packages));
+
+        Assert.Equal("20.43.274.009", composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_conflicting_started_packages_remain_unknown()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem677.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.61.0") { HasStartedDevice = true },
+            new MsiUpdateInstalledDriverPackage("oem678.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.62.0") { HasStartedDevice = true }
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", packages));
+
+        Assert.Null(composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_conflicting_packages_with_no_started_binding_remain_unknown()
+    {
+        var row = GetCg3emDriverStoreCase("Realtek OED Driver");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, null, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem439.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "20.42.274.2") { HasStartedDevice = false },
+            new MsiUpdateInstalledDriverPackage("oem642.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "20.43.274.9") { HasStartedDevice = false }
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry, new("Completed", packages));
+
+        Assert.Null(composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_partial_class_lookup_keeps_single_package_matches()
+    {
+        var row = GetCg3emDriverStoreCase("Windows Studio Effects");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, row.PackageVersion, null, null,
+            PackageVersion: row.PackageVersion, OemPackageIdentity: row.OemPackageIdentity);
+        var package = new MsiUpdateInstalledDriverPackage("oem901.inf", row.OriginalInfName,
+            row.Provider, row.DeviceClass, row.PackageVersion);
+
+        var composed = ComposeCg3emDriverStoreEntry(entry,
+            new("Partial", [package], "Cg3emDriverStoreClassLookupFailed"));
+
+        Assert.Equal(row.PackageVersion, composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpToDate, composed.ComparisonStatus);
+    }
+
+    [Fact]
+    public void CG3EM_partial_class_lookup_keeps_ambiguous_package_matches_unknown()
+    {
+        var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");
+        var entry = new MsiLiveUpdateCatalogEntry(row.CatalogName, "5.8.58.0", null, null,
+            PackageVersion: "5.8.61.0", OemPackageIdentity: row.OemPackageIdentity);
+        var packages = new[]
+        {
+            new MsiUpdateInstalledDriverPackage("oem7.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.30.0"),
+            new MsiUpdateInstalledDriverPackage("oem677.inf", row.OriginalInfName,
+                row.Provider, row.DeviceClass, "5.8.61.0")
+        };
+
+        var composed = ComposeCg3emDriverStoreEntry(entry,
+            new("Partial", packages, "Cg3emDriverStoreClassLookupFailed"));
+
+        Assert.Null(composed.InstalledVersion);
+        Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.Unknown, composed.ComparisonStatus);
+    }
+
+    [Fact]
     public void A2VM_ISS_does_not_consume_CG3EM_DriverStore_package_evidence()
     {
         var row = GetCg3emDriverStoreCase("Integrated Sensor Solution");

@@ -43,7 +43,10 @@ internal sealed record MsiUpdateInstalledDriverPackage(
     string OriginalInfName,
     string Provider,
     string Class,
-    string Version);
+    string Version)
+{
+    internal bool? HasStartedDevice { get; init; }
+}
 
 internal sealed record MsiUpdateDriverStoreCapture(
     string Status,
@@ -53,6 +56,7 @@ internal sealed record MsiUpdateDriverStoreCapture(
     internal static MsiUpdateDriverStoreCapture NotRequested { get; } = new("NotRequested", []);
 
     internal long? ElapsedMs { get; init; }
+    internal IReadOnlyList<string> AdditionalWarnings { get; init; } = [];
 }
 
 internal sealed record MsiUpdateInstalledInventory(
@@ -153,7 +157,9 @@ internal sealed record MsiUpdateInstalledInventory(
         return ["/enum-drivers", "/class", deviceClass, "/devices", "/format", "xml"];
     }
 
-    internal static MsiUpdateDriverStoreCapture ParseDriverStorePackagesXml(string? xml)
+    internal static MsiUpdateDriverStoreCapture ParseDriverStorePackagesXml(
+        string? xml,
+        bool includeDeviceStatuses = false)
     {
         if (string.IsNullOrWhiteSpace(xml))
             return new("EmptyOutput", [], "Cg3emDriverStoreEmptyOutput");
@@ -201,7 +207,11 @@ internal sealed record MsiUpdateInstalledInventory(
                 if (parsed.Count >= MaximumDriverStoreRows)
                     return new("RowLimitExceeded", [], "Cg3emDriverStoreRowLimitExceeded");
 
-                parsed.Add(new(publishedInfName, originalInfName, provider, deviceClass, version));
+                var package = new MsiUpdateInstalledDriverPackage(
+                    publishedInfName, originalInfName, provider, deviceClass, version);
+                if (includeDeviceStatuses)
+                    package = package with { HasStartedDevice = GetHasStartedDevice(driver) };
+                parsed.Add(package);
             }
 
             return new("Completed", parsed
@@ -217,6 +227,27 @@ internal sealed record MsiUpdateInstalledInventory(
         {
             return new("InvalidOutput", [], "Cg3emDriverStoreInvalidOutput");
         }
+    }
+
+    private static bool? GetHasStartedDevice(XElement driver)
+    {
+        var devices = driver.Elements().FirstOrDefault(element =>
+            string.Equals(element.Name.LocalName, "Devices", StringComparison.OrdinalIgnoreCase));
+        if (devices is null) return null;
+
+        var deviceElements = devices.Elements().Where(element =>
+            string.Equals(element.Name.LocalName, "Device", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (deviceElements.Length == 0) return false;
+
+        var statuses = deviceElements.Select(device => device.Elements().FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, "Status", StringComparison.OrdinalIgnoreCase))?.Value.Trim())
+            .ToArray();
+        if (statuses.Any(status => string.Equals(status, "Started", StringComparison.OrdinalIgnoreCase)))
+            return true;
+        if (statuses.Any(string.IsNullOrWhiteSpace)) return null;
+        return statuses.All(status => string.Equals(status, "Disconnected", StringComparison.OrdinalIgnoreCase))
+            ? false
+            : null;
     }
 
     private static MsiUpdateDriverStoreCapture CaptureCg3emDriverStore(
@@ -238,6 +269,7 @@ internal sealed record MsiUpdateInstalledInventory(
         {
             var capture = CaptureDriverStoreProcessAsync(cancellationToken).GetAwaiter().GetResult();
             if (capture.Status != "Completed") warnings.Add(capture.Warning ?? "Cg3emDriverStoreUnavailable");
+            warnings.AddRange(capture.AdditionalWarnings);
             return capture;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -288,6 +320,101 @@ internal sealed record MsiUpdateInstalledInventory(
     private static async Task<MsiUpdateDriverStoreCapture> CaptureDriverStoreProcessCoreAsync(
         CancellationToken cancellationToken)
     {
+        var scanStartedAt = Stopwatch.GetTimestamp();
+        var baseCapture = await CaptureDriverStoreCommandAsync(
+            GetDriverStoreArguments(), DriverStoreTimeout - DriverStoreProcessCleanupGrace,
+            includeDeviceStatuses: false, cancellationToken).ConfigureAwait(false);
+        if (baseCapture.Status != "Completed") return baseCapture;
+
+        var classes = MsiUpdateCatalogComposer.GetCg3emDriverStoreClassesRequiringStartedBinding(baseCapture.Packages);
+        if (classes.Length == 0) return baseCapture;
+
+        var packages = baseCapture.Packages;
+        var warnings = new List<string>();
+        foreach (var deviceClass in classes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var remaining = DriverStoreTimeout - Stopwatch.GetElapsedTime(scanStartedAt);
+            var commandTimeout = remaining - DriverStoreProcessCleanupGrace;
+            if (commandTimeout <= TimeSpan.Zero)
+            {
+                warnings.Add(GetDriverStoreClassWarning(deviceClass, "TimedOut"));
+                continue;
+            }
+
+            var classCapture = await CaptureDriverStoreCommandAsync(
+                GetDriverStoreArguments(deviceClass), commandTimeout,
+                includeDeviceStatuses: true, cancellationToken).ConfigureAwait(false);
+            if (classCapture.Status == "Completed")
+            {
+                packages = ApplyStartedBindingEvidence(packages, classCapture.Packages);
+                if (packages.Any(package =>
+                        string.Equals(package.Class, deviceClass, StringComparison.OrdinalIgnoreCase)
+                        && package.HasStartedDevice is null))
+                    warnings.Add(GetDriverStoreClassWarning(deviceClass, "StartedBindingMissing"));
+                continue;
+            }
+
+            warnings.Add(GetDriverStoreClassWarning(deviceClass, classCapture.Status));
+        }
+
+        return new(warnings.Count == 0 ? "Completed" : "Partial", packages,
+            warnings.Count == 0 ? null : "Cg3emDriverStoreClassLookupFailed")
+        {
+            AdditionalWarnings = warnings
+        };
+    }
+
+    internal static MsiUpdateInstalledDriverPackage[] ApplyStartedBindingEvidence(
+        IReadOnlyList<MsiUpdateInstalledDriverPackage> packages,
+        IReadOnlyList<MsiUpdateInstalledDriverPackage> classPackages) =>
+        packages.Select(package =>
+        {
+            var exactEvidence = classPackages.Where(candidate =>
+                string.Equals(candidate.PublishedInfName, package.PublishedInfName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(candidate.OriginalInfName, package.OriginalInfName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(candidate.Provider, package.Provider, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(candidate.Class, package.Class, StringComparison.OrdinalIgnoreCase)).ToArray();
+            bool? hasStartedDevice = exactEvidence.Any(candidate => candidate.HasStartedDevice == true)
+                ? true
+                : exactEvidence.Length > 0 && exactEvidence.All(candidate => candidate.HasStartedDevice == false)
+                    ? false
+                    : null;
+            return package with { HasStartedDevice = hasStartedDevice };
+        }).ToArray();
+
+    private static string GetDriverStoreClassWarning(string deviceClass, string status)
+    {
+        var classToken = deviceClass switch
+        {
+            "System" => "System",
+            "Extension" => "Extension",
+            "AudioProcessingObject" => "AudioProcessingObject",
+            _ => "Other"
+        };
+        var statusToken = status switch
+        {
+            "TimedOut" => "TimedOut",
+            "OutputLimitExceeded" => "OutputLimitExceeded",
+            "InvalidOutput" => "InvalidOutput",
+            "EmptyOutput" => "EmptyOutput",
+            "RowLimitExceeded" => "RowLimitExceeded",
+            "StartedBindingMissing" => "StartedBindingMissing",
+            "Unavailable" => "Unavailable",
+            _ => "Failed"
+        };
+        return $"Cg3emDriverStoreClass{classToken}{statusToken}";
+    }
+
+    private static async Task<MsiUpdateDriverStoreCapture> CaptureDriverStoreCommandAsync(
+        string[] arguments,
+        TimeSpan timeout,
+        bool includeDeviceStatuses,
+        CancellationToken cancellationToken)
+    {
+        if (timeout <= TimeSpan.Zero)
+            return new("TimedOut", [], "Cg3emDriverStoreTimedOut");
+
         var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var pnputilPath = Path.Combine(windowsDirectory, "System32", "pnputil.exe");
         var startInfo = new ProcessStartInfo
@@ -299,7 +426,7 @@ internal sealed record MsiUpdateInstalledInventory(
             RedirectStandardError = true,
             WorkingDirectory = Environment.SystemDirectory
         };
-        foreach (var argument in GetDriverStoreArguments())
+        foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
@@ -325,15 +452,15 @@ internal sealed record MsiUpdateInstalledInventory(
             AppendBounded(standardOutput, eventArgs.Data, MaximumDriverStoreOutputCharacters);
         process.ErrorDataReceived += (_, eventArgs) =>
             AppendBounded(standardError, eventArgs.Data, MaximumDriverStoreErrorCharacters);
-        if (!process.Start()) return new("Unavailable", [], "Cg3emDriverStoreStartFailed");
-
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(DriverStoreTimeout);
-        var exitTask = process.WaitForExitAsync(timeoutSource.Token);
         try
         {
+            if (!process.Start()) return new("Unavailable", [], "Cg3emDriverStoreStartFailed");
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutSource.CancelAfter(timeout);
+            var exitTask = process.WaitForExitAsync(timeoutSource.Token);
             var first = await Task.WhenAny(exitTask, outputLimitExceeded.Task).ConfigureAwait(false);
             if (first == outputLimitExceeded.Task)
             {
@@ -343,6 +470,11 @@ internal sealed record MsiUpdateInstalledInventory(
 
             await exitTask.ConfigureAwait(false);
             process.WaitForExit();
+
+            string xml;
+            lock (outputGate) xml = standardOutput.ToString();
+            return ParseDriverStoreProcessResult(xml, process.ExitCode,
+                includeDeviceStatuses: includeDeviceStatuses);
         }
         catch (OperationCanceledException)
         {
@@ -350,17 +482,29 @@ internal sealed record MsiUpdateInstalledInventory(
             if (cancellationToken.IsCancellationRequested) throw;
             return new("TimedOut", [], "Cg3emDriverStoreTimedOut");
         }
-
-        string xml;
-        lock (outputGate) xml = standardOutput.ToString();
-        return ParseDriverStoreProcessResult(xml, process.ExitCode);
+        catch (System.ComponentModel.Win32Exception)
+        {
+            await TryKillAndWaitForExitAsync(process).ConfigureAwait(false);
+            return new("Unavailable", [], "Cg3emDriverStoreStartFailed");
+        }
+        catch (InvalidOperationException)
+        {
+            await TryKillAndWaitForExitAsync(process).ConfigureAwait(false);
+            return new("Unavailable", [], "Cg3emDriverStoreCommandFailed");
+        }
+        catch (Exception)
+        {
+            await TryKillAndWaitForExitAsync(process).ConfigureAwait(false);
+            return new("Unavailable", [], "Cg3emDriverStoreCommandFailed");
+        }
     }
 
     internal static MsiUpdateDriverStoreCapture ParseDriverStoreProcessResult(
         string? standardOutput,
         int exitCode,
         bool timedOut = false,
-        bool outputLimitExceeded = false)
+        bool outputLimitExceeded = false,
+        bool includeDeviceStatuses = false)
     {
         if (outputLimitExceeded)
             return new("OutputLimitExceeded", [], "Cg3emDriverStoreOutputLimitExceeded");
@@ -368,7 +512,7 @@ internal sealed record MsiUpdateInstalledInventory(
             return new("TimedOut", [], "Cg3emDriverStoreTimedOut");
         if (exitCode != 0)
             return new("Unavailable", [], "Cg3emDriverStoreCommandFailed");
-        return ParseDriverStorePackagesXml(standardOutput);
+        return ParseDriverStorePackagesXml(standardOutput, includeDeviceStatuses);
     }
 
     private static void TryKill(Process process)
@@ -999,6 +1143,28 @@ internal static class MsiUpdateCatalogComposer
         Mapping("Goodix FingerPrinter Driver", ["USB\\VID_27C6&PID_6090"], "Goodix", ["Biometric"]),
         Mapping("Realtek Card Reader Driver", ["PCI\\VEN_10EC&DEV_5264"], "Realtek", ["MTD"])
     ];
+
+    internal static string[] GetCg3emDriverStoreClassesRequiringStartedBinding(
+        IReadOnlyList<MsiUpdateInstalledDriverPackage> packages)
+    {
+        var classes = new List<string>();
+        foreach (var mapping in Cg3emDriverMappings)
+        {
+            if (mapping.DriverStoreIdentity is not { } identity) continue;
+            var candidates = packages.Where(package =>
+                string.Equals(package.OriginalInfName, identity.OriginalInfName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(package.Provider, identity.Provider, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(package.Class, identity.DeviceClass, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (candidates.Length < 2
+                || candidates.Skip(1).All(candidate => AreEqualNumericVersions(candidates[0].Version, candidate.Version)))
+                continue;
+
+            if (!classes.Contains(identity.DeviceClass, StringComparer.OrdinalIgnoreCase))
+                classes.Add(identity.DeviceClass);
+        }
+
+        return classes.ToArray();
+    }
 
     private sealed record MsiInstalledVersionResolution(
         string? Version,
@@ -1892,7 +2058,7 @@ internal static class MsiUpdateCatalogComposer
                 StringComparison.OrdinalIgnoreCase))
             return MsiInstalledVersionResolution.Cg3emMapped(null, null,
                 "Cg3emInvalidOemPackageIdentity", 0, 0, true);
-        if (!string.Equals(inventory.DriverStore.Status, "Completed", StringComparison.Ordinal))
+        if (inventory.DriverStore.Status is not ("Completed" or "Partial"))
             return MsiInstalledVersionResolution.Cg3emMapped(null, packageVersion,
                 "Cg3emDriverStoreUnavailable", 0, 0, true);
 
@@ -1908,16 +2074,34 @@ internal static class MsiUpdateCatalogComposer
                 "NoMatchingInstalledDriverPackage", 0, 0, true);
 
         var installedVersion = candidates[0].Version;
-        if (CompareNumericVersions(installedVersion, installedVersion)
-                != FrontendMsiLiveUpdateComparisonStatus.UpToDate
-            || candidates.Skip(1).Any(candidate =>
-                CompareNumericVersions(installedVersion, candidate.Version)
-                    != FrontendMsiLiveUpdateComparisonStatus.UpToDate
-                || CompareNumericVersions(candidate.Version, installedVersion)
-                    != FrontendMsiLiveUpdateComparisonStatus.UpToDate))
+        var versionsConflict = candidates.Skip(1).Any(candidate =>
+            !AreEqualNumericVersions(installedVersion, candidate.Version));
+        if (versionsConflict)
+        {
+            if (candidates.Any(candidate => candidate.HasStartedDevice is null))
+                return MsiInstalledVersionResolution.Cg3emMapped(null, packageVersion,
+                    "Cg3emStartedBindingUnavailable", candidates.Length,
+                    candidates.Select(candidate => candidate.Version).Distinct(StringComparer.OrdinalIgnoreCase).Count(), true);
+
+            var startedPackages = candidates.Where(candidate => candidate.HasStartedDevice == true).ToArray();
+            if (startedPackages.Length == 0)
+                return MsiInstalledVersionResolution.Cg3emMapped(null, packageVersion,
+                    "Cg3emNoStartedDriverStorePackage", candidates.Length,
+                    candidates.Select(candidate => candidate.Version).Distinct(StringComparer.OrdinalIgnoreCase).Count(), true);
+
+            installedVersion = startedPackages[0].Version;
+            if (!AreEqualNumericVersions(installedVersion, installedVersion)
+                || startedPackages.Skip(1).Any(candidate => !AreEqualNumericVersions(installedVersion, candidate.Version)))
+                return MsiInstalledVersionResolution.Cg3emMapped(null, packageVersion,
+                    "Cg3emConflictingStartedDriverStorePackageVersions", candidates.Length,
+                    startedPackages.Select(candidate => candidate.Version).Distinct(StringComparer.OrdinalIgnoreCase).Count(), true);
+        }
+        else if (CompareNumericVersions(installedVersion, installedVersion)
+            != FrontendMsiLiveUpdateComparisonStatus.UpToDate)
+        {
             return MsiInstalledVersionResolution.Cg3emMapped(null, packageVersion,
-                "Cg3emConflictingDriverStorePackageVersions", candidates.Length,
-                candidates.Select(candidate => candidate.Version).Distinct(StringComparer.OrdinalIgnoreCase).Count(), true);
+                "Cg3emInvalidDriverStorePackageVersion", candidates.Length, 0, true);
+        }
 
         if (string.IsNullOrWhiteSpace(packageVersion)
             || CompareNumericVersions(packageVersion, packageVersion) != FrontendMsiLiveUpdateComparisonStatus.UpToDate)

@@ -2207,10 +2207,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var inventory = await inventoryTask.ConfigureAwait(false);
         if (MsiUpdateInstalledInventory.ShouldLogDriverStoreCapture(hardware.Model, inventory.DriverStore))
         {
-            AppLog.Info("MsiUpdates", "CG3EM DriverStore package capture completed.",
+            AppLog.Info("MsiUpdates", "CG3EM DriverStore package capture finished.",
                 ("Event", "MSI.DriverStoreCapture"), ("Model", hardware.Model!),
                 ("Status", inventory.DriverStore.Status), ("ElapsedMs", inventory.DriverStore.ElapsedMs),
-                ("PackageCount", inventory.DriverStore.Packages.Count));
+                ("PackageCount", inventory.DriverStore.Packages.Count),
+                ("Warning", inventory.DriverStore.Warning),
+                ("ClassLookupWarnings", string.Join(",", inventory.DriverStore.AdditionalWarnings)));
         }
 
         var rowDiagnostics = new List<MsiUpdateCatalogRowDiagnostic>();

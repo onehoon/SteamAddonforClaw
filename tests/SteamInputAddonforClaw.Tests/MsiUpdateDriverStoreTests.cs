@@ -14,6 +14,18 @@ public sealed class MsiUpdateDriverStoreTests
     }
 
     [Fact]
+    public void Class_scoped_arguments_are_built_only_from_supported_driver_classes()
+    {
+        Assert.Equal(new[] { "/enum-drivers", "/class", "System", "/devices", "/format", "xml" },
+            MsiUpdateInstalledInventory.GetDriverStoreArguments("System"));
+        Assert.Equal(new[] { "/enum-drivers", "/class", "Extension", "/devices", "/format", "xml" },
+            MsiUpdateInstalledInventory.GetDriverStoreArguments("Extension"));
+        Assert.Equal(new[] { "/enum-drivers", "/class", "AudioProcessingObject", "/devices", "/format", "xml" },
+            MsiUpdateInstalledInventory.GetDriverStoreArguments("AudioProcessingObject"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MsiUpdateInstalledInventory.GetDriverStoreArguments("Other"));
+    }
+
+    [Fact]
     public void DriverStore_timeout_and_process_cleanup_policies_are_short_and_finite()
     {
         Assert.Equal(8_000, MsiUpdateInstalledInventory.DriverStoreTimeoutMilliseconds);
@@ -166,6 +178,87 @@ public sealed class MsiUpdateDriverStoreTests
     }
 
     [Fact]
+    public void Conflicting_numeric_versions_request_one_class_lookup_and_equal_versions_do_not()
+    {
+        var packages = new[]
+        {
+            Package("oem7.inf", "ishheci.inf", "Intel", "System", "5.8.30.0"),
+            Package("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0"),
+            Package("oem439.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.42.274.2"),
+            Package("oem642.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009"),
+            Package("oem690.inf", "RtkSdcaXuMSI.inf", "Realtek", "Extension", "10.0.378.1"),
+            Package("oem6.inf", "mep_audio_component.inf", "Microsoft Corporation", "AudioProcessingObject", "3.0.8.0")
+        };
+
+        Assert.Equal(new[] { "System", "Extension" },
+            MsiUpdateCatalogComposer.GetCg3emDriverStoreClassesRequiringStartedBinding(packages));
+
+        var numericallyEqual = new[]
+        {
+            Package("oem1.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009"),
+            Package("oem2.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.9")
+        };
+        Assert.Empty(MsiUpdateCatalogComposer.GetCg3emDriverStoreClassesRequiringStartedBinding(numericallyEqual));
+    }
+
+    [Fact]
+    public void Class_XML_parser_aggregates_multiple_device_rows_into_one_started_package()
+    {
+        var xml = $"""
+            <DriverStore>
+              <Driver DriverName="oem690.inf">
+                <OriginalName>RtkSdcaXuMSI.inf</OriginalName><ProviderName>Realtek</ProviderName><ClassName>Extension</ClassName>
+                <DriverVersion>10/15/2026 10.0.378.1</DriverVersion>
+                <Devices><Device><Status>Started</Status></Device><Device><Status>Started</Status></Device><Device><Status>Started</Status></Device></Devices>
+              </Driver>
+              {Driver("oem1.inf", "unrelated.inf", "Intel", "System", "5.8.61.0")}
+            </DriverStore>
+            """;
+
+        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml(xml, includeDeviceStatuses: true);
+
+        Assert.Equal("Completed", result.Status);
+        var package = Assert.Single(result.Packages);
+        Assert.Equal("oem690.inf", package.PublishedInfName);
+        Assert.True(package.HasStartedDevice);
+    }
+
+    [Fact]
+    public void Started_binding_evidence_requires_exact_published_and_package_identity()
+    {
+        var basePackage = Package("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0");
+        var evidence = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml($"""
+            <DriverStore>
+              {DriverWithDevice("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0", "Started")}
+              {DriverWithDevice("oem678.inf", "ishheci.inf", "Intel", "System", "5.8.62.0", "Disconnected")}
+            </DriverStore>
+            """, includeDeviceStatuses: true);
+
+        var disconnectedPackage = basePackage with { PublishedInfName = "oem678.inf", Version = "5.8.62.0" };
+        var updated = MsiUpdateInstalledInventory.ApplyStartedBindingEvidence(
+            [basePackage, disconnectedPackage], evidence.Packages);
+
+        Assert.True(updated[0].HasStartedDevice);
+        Assert.False(updated[1].HasStartedDevice);
+    }
+
+    [Fact]
+    public void Class_XML_parser_leaves_missing_binding_status_unknown()
+    {
+        var result = MsiUpdateInstalledInventory.ParseDriverStorePackagesXml($"""
+            <DriverStore>
+              <Driver DriverName="oem677.inf">
+                <OriginalName>ishheci.inf</OriginalName><ProviderName>Intel</ProviderName><ClassName>System</ClassName>
+                <DriverVersion>5.8.61.0</DriverVersion><Devices><Device /></Devices>
+              </Driver>
+            </DriverStore>
+            """, includeDeviceStatuses: true);
+
+        Assert.Equal("Completed", result.Status);
+        Assert.Null(Assert.Single(result.Packages).HasStartedDevice);
+    }
+
+    [Fact]
     public async Task Inventory_capture_honors_pre_cancelled_manual_request()
     {
         using var cancellation = new CancellationTokenSource();
@@ -187,10 +280,23 @@ public sealed class MsiUpdateDriverStoreTests
 
     private const string EmptyDriverStoreXml = "<DriverStore />";
 
+    private static MsiUpdateInstalledDriverPackage Package(
+        string published, string original, string provider, string deviceClass, string version) =>
+        new(published, original, provider, deviceClass, version);
+
     private static string Driver(string published, string original, string provider, string deviceClass, string version) => $"""
         <Driver DriverName="{published}">
           <OriginalName>{original}</OriginalName><ProviderName>{provider}</ProviderName>
           <ClassName>{deviceClass}</ClassName><DriverVersion>{version}</DriverVersion>
+        </Driver>
+        """;
+
+    private static string DriverWithDevice(string published, string original, string provider,
+        string deviceClass, string version, string status) => $"""
+        <Driver DriverName="{published}">
+          <OriginalName>{original}</OriginalName><ProviderName>{provider}</ProviderName>
+          <ClassName>{deviceClass}</ClassName><DriverVersion>{version}</DriverVersion>
+          <Devices><Device><Status>{status}</Status></Device></Devices>
         </Driver>
         """;
 }

@@ -335,14 +335,15 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
             [
                 new("oem677.inf", "ishheci.inf", "Intel", "System", "5.8.61.0"),
                 new("oem755.inf", "IntcOED_OemLibPath.inf", "Realtek Semiconductor Corp.", "Extension", "20.43.274.009")
-            ]) { ElapsedMs = 1_827 }
+                    { HasStartedDevice = true }
+            ]) { ElapsedMs = 1_827, AdditionalWarnings = ["Cg3emDriverStoreClassSystemTimedOut"] }
         };
         var input = ComposeInput(MsiResult(
                 new(MsiLiveUpdateCatalogCategory.Bios, MsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(MsiLiveUpdateCatalogCategory.Firmware, MsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(MsiLiveUpdateCatalogCategory.Driver, MsiLiveUpdateCatalogCategoryState.Empty, []),
                 new(MsiLiveUpdateCatalogCategory.Utility, MsiLiveUpdateCatalogCategoryState.Empty, [])),
-            IntelDsaCatalogResult.Failed("Http403"), inventory);
+            IntelDsaCatalogResult.Failed("Http403"), inventory with { Warnings = ["Cg3emDriverStoreClassLookupFailed", .. inventory.Warnings] });
 
         var document = MsiUpdateDiagnosticSnapshotBuilder.Build(input);
         var json = Encoding.UTF8.GetString(MsiUpdateDiagnosticSnapshotBuilder.SerializeWithinLimit(document));
@@ -356,6 +357,11 @@ public sealed class MsiUpdateDiagnosticSnapshotTests
         Assert.DoesNotContain("FileRepository", json, StringComparison.OrdinalIgnoreCase);
         using var parsed = JsonDocument.Parse(json);
         Assert.Equal(1_827, parsed.RootElement.GetProperty("inventory").GetProperty("driverStoreElapsedMs").GetInt64());
+        Assert.True(parsed.RootElement.GetProperty("inventory").GetProperty("driverStorePackages")
+            .EnumerateArray().Single(row => row.GetProperty("publishedInfName").GetString() == "oem755.inf")
+            .GetProperty("hasStartedDevice").GetBoolean());
+        Assert.Contains("Cg3emDriverStoreClassLookupFailed", parsed.RootElement.GetProperty("sources")
+            .GetProperty("inventoryWarnings").EnumerateArray().Select(warning => warning.GetString()));
     }
 
     [Theory]
