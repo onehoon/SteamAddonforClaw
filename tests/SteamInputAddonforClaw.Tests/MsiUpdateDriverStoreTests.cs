@@ -28,7 +28,7 @@ public sealed class MsiUpdateDriverStoreTests
     [Fact]
     public void DriverStore_timeout_and_process_cleanup_policies_are_short_and_finite()
     {
-        Assert.Equal(8_000, MsiUpdateInstalledInventory.DriverStoreTimeoutMilliseconds);
+        Assert.Equal(12_000, MsiUpdateInstalledInventory.DriverStoreTimeoutMilliseconds);
         Assert.InRange(MsiUpdateInstalledInventory.DriverStoreProcessCleanupGraceMilliseconds, 1, 1_000);
     }
 
