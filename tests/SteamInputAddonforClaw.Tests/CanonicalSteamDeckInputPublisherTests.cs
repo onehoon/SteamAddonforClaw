@@ -508,6 +508,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         source.Value = TriggerInput(16, 0);
         await ticks.TickAsync();
         await sink.WaitForCountAsync(2);
+        await WaitForTriggerLogCountAsync(2);
 
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
         source.Value = TriggerInput(40, 0);
@@ -517,9 +518,11 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         AppLog.MinimumLevelOverride = AppLogLevel.Debug;
         await ticks.TickAsync();
         await sink.WaitForCountAsync(4);
+        await WaitForTriggerLogCountAsync(3);
         source.Value = TriggerInput(64, 0);
         await ticks.TickAsync();
         await sink.WaitForCountAsync(5);
+        await WaitForTriggerLogCountAsync(4);
         await publisher.StopAsync();
 
         AppLog.DrainForTests();
@@ -533,6 +536,22 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Contains("LTrigger=5139", lines[2]);
         Assert.Contains("Reason=LTriggerAnalogChange", lines[3]);
         Assert.Contains("LTrigger=8223", lines[3]);
+    }
+
+    private static async Task WaitForTriggerLogCountAsync(int expected)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var path = AppLog.CurrentLogFilePath;
+        while (true)
+        {
+            AppLog.DrainForTests();
+            var text = File.Exists(path) ? LogFileTestHelper.ReadAllText(path) : string.Empty;
+            var count = text.Split('\n')
+                .Count(line => line.Contains("Event=SteamDeckTriggerTransition", StringComparison.Ordinal));
+            if (count >= expected) return;
+
+            await Task.Delay(10, timeout.Token);
+        }
     }
 
     [Fact]
