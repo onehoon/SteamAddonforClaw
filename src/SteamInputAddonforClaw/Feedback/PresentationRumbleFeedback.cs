@@ -409,8 +409,19 @@ internal sealed class DualSenseEdgeRumbleFeedbackAdapter : IDisposable
             lock (_callbackWriteGate)
             {
                 if (Volatile.Read(ref _disposed) != 0) return;
-                try { _sink.SetRumble(rumble); }
-                finally { ScheduleSafetyStop(rumble); }
+                var isStop = rumble.Equals(TwoMotorRumble.Stopped);
+                var shouldUpdateSafetyStop = !isStop;
+                try
+                {
+                    var result = _sink.SetRumble(rumble);
+                    if (isStop)
+                        shouldUpdateSafetyStop = result.Status != PhysicalRumbleWriteStatus.Failed;
+                }
+                finally
+                {
+                    if (shouldUpdateSafetyStop)
+                        ScheduleSafetyStop(rumble);
+                }
             }
         }
         catch
