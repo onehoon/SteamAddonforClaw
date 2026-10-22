@@ -449,6 +449,116 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Trigger_diagnostics_log_baseline_edges_and_meaningful_motion_only_after_successful_publishes()
+    {
+        var source = new Snapshot(TriggerInput(0, 0));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks);
+        publisher.Start();
+
+        var states = new[]
+        {
+            TriggerInput(0, 0),
+            TriggerInput(16, 0),
+            TriggerInput(40, 0),
+            TriggerInput(40, 16, leftFull: true),
+            TriggerInput(0, 16, rightFull: true),
+            TriggerInput(0, 0),
+            TriggerInput(0, 0), // unchanged 4 ms tick: no diagnostic spam
+        };
+
+        for (var index = 0; index < states.Length; index++)
+        {
+            source.Value = states[index];
+            await ticks.TickAsync();
+            await sink.WaitForCountAsync(index + 1);
+        }
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath)
+            .Split('\n')
+            .Where(line => line.Contains("Event=SteamDeckTriggerTransition", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(6, lines.Length);
+        Assert.Contains("Reason=Baseline", lines[0]);
+        Assert.Contains("Reason=LTriggerPress+LTriggerAnalogChange", lines[1]);
+        Assert.Contains("Reason=LTriggerAnalogChange", lines[2]);
+        Assert.Contains("Reason=L2FullPullEdge+RTriggerPress+RTriggerAnalogChange", lines[3]);
+        Assert.Contains("Reason=LTriggerRelease+LTriggerAnalogChange+L2FullPullEdge+R2FullPullEdge", lines[4]);
+        Assert.Contains("Reason=RTriggerRelease+RTriggerAnalogChange+R2FullPullEdge", lines[5]);
+        Assert.Contains("LTrigger=5139", lines[2]);
+        Assert.Contains("RTrigger=2055", lines[3]);
+        Assert.Contains("PublishedStateCount=6", lines[5]);
+    }
+
+    [Fact]
+    public async Task Trigger_diagnostic_restarts_with_baseline_after_debug_is_disabled_and_reenabled()
+    {
+        var source = new Snapshot(TriggerInput(0, 0));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks);
+        publisher.Start();
+
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(1);
+        source.Value = TriggerInput(16, 0);
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(2);
+
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        source.Value = TriggerInput(40, 0);
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(3);
+
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(4);
+        source.Value = TriggerInput(64, 0);
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(5);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath)
+            .Split('\n')
+            .Where(line => line.Contains("Event=SteamDeckTriggerTransition", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(4, lines.Length);
+        Assert.Contains("Reason=LTriggerPress+LTriggerAnalogChange", lines[1]);
+        Assert.Contains("Reason=Baseline", lines[2]);
+        Assert.Contains("LTrigger=5139", lines[2]);
+        Assert.Contains("Reason=LTriggerAnalogChange", lines[3]);
+        Assert.Contains("LTrigger=8223", lines[3]);
+    }
+
+    [Fact]
+    public async Task Rejected_set_state_does_not_emit_trigger_publication_diagnostics()
+    {
+        var faultObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sink = new FakeSink { Accept = false };
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            new Snapshot(TriggerInput(255, 255, leftFull: true, rightFull: true)),
+            sink,
+            ticks,
+            _ => faultObserved.TrySetResult(true));
+        publisher.Start();
+
+        await ticks.TickAsync();
+        await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.DoesNotContain("Event=SteamDeckTriggerTransition", log);
+        Assert.Equal(0, publisher.PublishedStateCount);
+    }
+
+    [Fact]
     public void Overlapping_pulses_are_logged_without_changing_the_output()
     {
         var time = new FakeTimeProvider();
@@ -1310,6 +1420,14 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         new(gyroX, gyroY, gyroZ, accelX, accelY, accelZ,
             1000, 1000, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
             true, true, "gyro", "accelerometer");
+
+    private static ControllerState TriggerInput(byte left, byte right, bool leftFull = false, bool rightFull = false)
+        => new(
+            new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, leftFull, rightFull),
+            default,
+            default,
+            new TriggerState(left, right),
+            new AuxiliaryButtonState([false, false]));
 
     private static void AssertImuNeutral(SteamDeckDeviceState state)
     {
