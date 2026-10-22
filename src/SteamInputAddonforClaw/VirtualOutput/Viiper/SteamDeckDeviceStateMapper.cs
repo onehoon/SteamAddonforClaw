@@ -23,6 +23,7 @@ internal static class SteamDeckDeviceStateMapper
     // the canonical ABI, so this mapper reuses that same 0..32767 target range; TriggerScalingTests
     // pins the exact conversion.
     internal const ushort MaxAnalogTrigger = (ushort)short.MaxValue;
+    private const double DeckGyroScale = 32768.0 / 2000.0;
 
     internal static SteamDeckDeviceState Map(
         ControllerState state,
@@ -102,9 +103,9 @@ internal static class SteamDeckDeviceStateMapper
 
         if (IsUsableMotion(motion))
         {
-            result.Pitch = EncodeI16(motion!.GyroXDegPerSecond, 16);
-            result.Yaw = EncodeI16(-motion.GyroYDegPerSecond, 16);
-            result.Roll = EncodeI16(-motion.GyroZDegPerSecond, 16);
+            result.Pitch = EncodeI16(motion!.GyroXDegPerSecond, DeckGyroScale);
+            result.Yaw = EncodeI16(-motion.GyroYDegPerSecond, DeckGyroScale);
+            result.Roll = EncodeI16(-motion.GyroZDegPerSecond, DeckGyroScale);
             result.AccelX = EncodeI16(motion.AccelXG, 16384);
             result.AccelY = EncodeI16(-motion.AccelYG, 16384);
             result.AccelZ = EncodeI16(-motion.AccelZG, 16384);
