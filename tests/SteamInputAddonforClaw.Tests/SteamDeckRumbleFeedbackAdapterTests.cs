@@ -220,6 +220,38 @@ public sealed class SteamDeckRumbleFeedbackAdapterTests : IDisposable
     }
 
     [Fact]
+    public async Task Selected_receive_is_logged_before_a_blocking_physical_sink_completes()
+    {
+        using var sinkEntered = new ManualResetEventSlim();
+        using var releaseSink = new ManualResetEventSlim();
+        var sink = new BlockingSink(sinkEntered, releaseSink);
+        var (adapter, drive) = Arm(sink, rumbleSafetyStop: TimeSpan.FromSeconds(30));
+        using var _ = adapter;
+        var callback = Task.Run(() => drive(EbRumble(0x1234, 0x5678)));
+
+        try
+        {
+            Assert.True(sinkEntered.Wait(TimeSpan.FromSeconds(2)), "The physical sink was not entered.");
+
+            var inFlightLog = ReadLog();
+            Assert.Single(inFlightLog.Split('\n'), line => line.Contains("Event=SteamDeckFeedbackRx", StringComparison.Ordinal));
+            Assert.DoesNotContain("Event=SteamDeckFeedbackSinkResult", inFlightLog);
+
+            releaseSink.Set();
+            await callback.WaitAsync(TimeSpan.FromSeconds(2));
+
+            var completedLog = ReadLog();
+            Assert.Single(completedLog.Split('\n'), line => line.Contains("Event=SteamDeckFeedbackRx", StringComparison.Ordinal));
+            Assert.Single(completedLog.Split('\n'), line => line.Contains("Event=SteamDeckFeedbackSinkResult", StringComparison.Ordinal));
+        }
+        finally
+        {
+            releaseSink.Set();
+            await callback.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+    }
+
+    [Fact]
     public void Sink_failures_are_logged_even_when_the_same_eb_frame_is_rate_limited()
     {
         var sink = new RecordingSink { Result = new(PhysicalRumbleWriteStatus.Failed, "EndpointUnavailable") };
@@ -351,7 +383,7 @@ public sealed class SteamDeckRumbleFeedbackAdapterTests : IDisposable
     }
 
     private static (SteamDeckRumbleFeedbackAdapter Adapter, Action<byte[]> Drive) Arm(
-        RecordingSink sink, TimeSpan? untimedHapticSafetyStop = null, TimeSpan? rumbleSafetyStop = null)
+        IPhysicalRumbleSink sink, TimeSpan? untimedHapticSafetyStop = null, TimeSpan? rumbleSafetyStop = null)
     {
         SteamDeckOutputCallback? captured = null;
         var adapter = SteamDeckRumbleFeedbackAdapter.TryArm(
@@ -407,6 +439,17 @@ public sealed class SteamDeckRumbleFeedbackAdapterTests : IDisposable
                 await Task.Delay(10);
             }
             lock (_sync) Assert.True(Writes.Count >= count, $"expected {count} writes, saw {Writes.Count}");
+        }
+    }
+
+    private sealed class BlockingSink(ManualResetEventSlim entered, ManualResetEventSlim release) : IPhysicalRumbleSink
+    {
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
+        {
+            entered.Set();
+            if (!release.Wait(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The test did not release the blocked physical sink.");
+            return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
         }
     }
 }

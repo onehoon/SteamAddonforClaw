@@ -302,6 +302,13 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
             lock (_callbackWriteGate)
             {
                 if (Volatile.Read(ref _disposed) != 0) return;
+                if (shouldLogReceive)
+                    LogSteamDeckFeedbackRx(
+                        diagnosticRxSequence,
+                        report,
+                        length,
+                        decoded,
+                        rumble.Equals(TwoMotorRumble.Stopped) ? "Stop" : "SinkAttempted");
                 result = _sink.SetRumble(rumble);
                 if (result.Status == PhysicalRumbleWriteStatus.Failed)
                     AppLog.Debug("Rumble", "Production rumble write failed.",
@@ -311,12 +318,13 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
             ScheduleSafetyStop(decoded, rumble, diagnosticsEnabled ? diagnosticRxSequence : null);
             if (diagnosticsEnabled && (shouldLogReceive || result.Status != PhysicalRumbleWriteStatus.Succeeded))
             {
-                LogSteamDeckFeedbackRx(
-                    diagnosticRxSequence,
-                    report,
-                    length,
-                    decoded,
-                    rumble.Equals(TwoMotorRumble.Stopped) ? "Stop" : "SinkAttempted");
+                if (!shouldLogReceive)
+                    LogSteamDeckFeedbackRx(
+                        diagnosticRxSequence,
+                        report,
+                        length,
+                        decoded,
+                        rumble.Equals(TwoMotorRumble.Stopped) ? "Stop" : "SinkAttempted");
                 LogSteamDeckFeedbackSinkResult(diagnosticRxSequence, report, decoded, rumble, result);
             }
         }
