@@ -73,13 +73,14 @@ public sealed class SettingsStoreTests : IDisposable
     [InlineData("{}", true)]
     [InlineData("{\"GyroscopeEnabled\":true}", true)]
     [InlineData("{\"GyroscopeEnabled\":false}", false)]
-    public void Gyroscope_preference_defaults_on_and_round_trips_exact_boolean_values(string json, bool expected)
+    public void Existing_settings_without_gyro_key_keep_legacy_on_default_and_round_trip_values(string json, bool expected)
     {
         var path = Path.Combine(_testDirectory, "gyroscope-settings.json");
         Directory.CreateDirectory(_testDirectory);
         File.WriteAllText(path, json);
 
         Assert.Equal(expected, new SettingsStore(path).Load().GyroscopeEnabled);
+        Assert.Equal(json, File.ReadAllText(path));
 
         var store = new SettingsStore(path);
         store.Save(new AppSettings { GyroscopeEnabled = expected });
@@ -251,6 +252,8 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(defaults.SuppressDeveloperMenuWarning, root.GetProperty("SuppressDeveloperMenuWarning").GetBoolean());
         Assert.Equal(defaults.ClawHudEnabled, root.GetProperty("ClawHudEnabled").GetBoolean());
         Assert.Equal(defaults.DeveloperMenuEnabled, root.GetProperty("DeveloperMenuEnabled").GetBoolean());
+        Assert.False(defaults.GyroscopeEnabled);
+        Assert.False(root.GetProperty("GyroscopeEnabled").GetBoolean());
         Assert.Equal(defaults.QuickSettingsCurrentPowerSourceOnly, root.GetProperty("QuickSettingsCurrentPowerSourceOnly").GetBoolean());
         Assert.False(root.TryGetProperty("ScreenshotSaveFolder", out _));
         Assert.True(root.GetProperty("FrontButtonMapping").ValueKind == System.Text.Json.JsonValueKind.Object);
@@ -262,6 +265,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(defaults.SuppressDeveloperMenuWarning, reloaded.SuppressDeveloperMenuWarning);
         Assert.Equal(defaults.ClawHudEnabled, reloaded.ClawHudEnabled);
         Assert.Equal(defaults.DeveloperMenuEnabled, reloaded.DeveloperMenuEnabled);
+        Assert.False(reloaded.GyroscopeEnabled);
         Assert.Equal(defaults.QuickSettingsCurrentPowerSourceOnly, reloaded.QuickSettingsCurrentPowerSourceOnly);
         Assert.Equal(defaults.FrontButtonMapping, reloaded.FrontButtonMapping);
         Assert.Equal(defaults.BackButtonMapping, reloaded.BackButtonMapping);

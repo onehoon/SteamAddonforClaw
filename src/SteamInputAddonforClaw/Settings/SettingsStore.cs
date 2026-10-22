@@ -35,7 +35,12 @@ public sealed class SettingsStore
         {
             if (!File.Exists(_settingsPath))
             {
-                var defaults = new AppSettings { FrontButtonMapping = selectedFrontButtonMappingDefault };
+                var defaults = new AppSettings
+                {
+                    FrontButtonMapping = selectedFrontButtonMappingDefault,
+                    // Only fresh settings files default gyro off; existing files retain the legacy fallback.
+                    GyroscopeEnabled = false
+                };
                 try
                 {
                     Save(defaults);
