@@ -58,7 +58,7 @@ public sealed partial class ControllerPage : UserControl
     private FrontendControllerForSteamSnapshot _controllerForSteam = FrontendControllerForSteamSnapshot.Unavailable(SteamVirtualControllerPreference.SteamDeck);
     private bool _applyingGyroscopeState;
     private int _gyroscopeMutationInProgress;
-    private bool _lastKnownGyroscopeEnabled = true;
+    private bool _lastKnownGyroscopeEnabled;
     /// <summary>Suppresses change handlers while the page writes persisted state INTO the controls,
     /// so restoring the UI never looks like a user edit and re-saves.</summary>
     private bool _isLoading;

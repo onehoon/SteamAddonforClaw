@@ -24,7 +24,7 @@ public sealed class SteamVirtualControllerUiTests
         Assert.True(title >= 0 && unavailable > controllerXaml.IndexOf("SteamVirtualControllerExpander", StringComparison.Ordinal) && mapping > unavailable);
         Assert.Equal("Controller for Steam Game", (string?)expander.Attribute("Header"));
         Assert.Equal("Controller_SteamVirtualControllerExpander", (string?)expander.Attribute(x + "Uid"));
-        Assert.Equal("False", (string?)expander.Attribute("IsExpanded"));
+        Assert.Equal("True", (string?)expander.Attribute("IsExpanded"));
         Assert.Contains("Text=\"Choose the controller used by Steam and configure gyroscope input.\"", controllerXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Controller_SteamControllerRow", controllerXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Controller_GyroscopeRow", controllerXaml, StringComparison.Ordinal);
@@ -49,8 +49,9 @@ public sealed class SteamVirtualControllerUiTests
         var gyroCard = Assert.Single(gyroItems.Elements(), element => element.Name.LocalName == "SettingsCard");
         Assert.Equal("Controller_GyroscopeCard", (string?)gyroCard.Attribute(x + "Uid"));
         Assert.Equal("Gyroscope", (string?)gyroCard.Attribute("Header"));
-        Assert.Single(gyroCard.Elements(), element => element.Name.LocalName == "ToggleSwitch"
+        var gyroToggle = Assert.Single(gyroCard.Elements(), element => element.Name.LocalName == "ToggleSwitch"
             && (string?)element.Attribute(x + "Name") == "GyroscopeEnabledToggle");
+        Assert.Equal("False", (string?)gyroToggle.Attribute("IsOn"));
         Assert.Contains("SteamVirtualControllerComboBox.Visibility = available ? Visibility.Visible : Visibility.Collapsed", controllerCode, StringComparison.Ordinal);
         Assert.Contains("SteamVirtualControllerUnavailableText.Visibility = available ? Visibility.Collapsed : Visibility.Visible", controllerCode, StringComparison.Ordinal);
         Assert.Contains("SteamVirtualControllerComboBox.IsEnabled = CanEditSteamVirtualController", controllerCode, StringComparison.Ordinal);

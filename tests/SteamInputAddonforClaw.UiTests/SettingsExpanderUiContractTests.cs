@@ -7,7 +7,7 @@ namespace SteamInputAddonforClaw.UiTests;
 public sealed class SettingsExpanderUiContractTests
 {
     [Fact]
-    public void Every_view_expander_has_one_parent_icon_and_starts_collapsed_without_child_card_icons()
+    public void Only_the_Steam_controller_expander_starts_open_and_child_cards_have_no_icons()
     {
         var viewsDirectory = Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views");
         var expanders = Directory.EnumerateFiles(viewsDirectory, "*.xaml", SearchOption.AllDirectories)
@@ -20,11 +20,11 @@ public sealed class SettingsExpanderUiContractTests
         Assert.NotEmpty(expanders);
         foreach (var (path, expander) in expanders)
         {
-            var name = (string?)expander.Attribute("Header")
-                ?? "unnamed expander";
+            var name = (string?)expander.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"));
+            var shouldStartExpanded = string.Equals(name, "SteamVirtualControllerExpander", StringComparison.Ordinal);
             Assert.True(
-                string.Equals("False", (string?)expander.Attribute("IsExpanded"), StringComparison.OrdinalIgnoreCase),
-                $"{Path.GetFileName(path)}: {name} must start collapsed.");
+                string.Equals(shouldStartExpanded ? "True" : "False", (string?)expander.Attribute("IsExpanded"), StringComparison.OrdinalIgnoreCase),
+                $"{Path.GetFileName(path)}: {name ?? "unnamed expander"} has an unexpected initial expansion state.");
 
             Assert.Single(expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon");
             foreach (var card in expander.Descendants().Where(element => element.Name.LocalName == "SettingsCard"))

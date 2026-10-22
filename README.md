@@ -86,7 +86,7 @@ Choose the global **Steam Deck** or **DualSense Edge** option in **Controller �
 
 ## Gyroscope / IMU — Steam Input configuration
 
-The global **Gyroscope** switch is on by default in **Controller → Controller for Steam Game**. When on and the Addon is presenting a Steam-facing virtual controller, available physical **gyroscope and accelerometer** data is passed to Steam Input. Turning it off stops motion-sensor collection and sends no motion input; ordinary controller input and the virtual-device connection remain active. The Addon does **not** perform gyro-to-mouse or gyro-to-joystick conversion itself, and its **Xbox 360 presentation does not provide gyro input**.
+The global **Gyroscope** switch is off by default on a new installation; an existing saved choice is preserved. When on and the Addon is presenting a Steam-facing virtual controller, available physical **gyroscope and accelerometer** data is passed to Steam Input. Turning it off stops motion-sensor collection and sends no motion input; ordinary controller input and the virtual-device connection remain active. The Addon does **not** perform gyro-to-mouse or gyro-to-joystick conversion itself, and its **Xbox 360 presentation does not provide gyro input**.
 
 DualSense Edge presentation also forwards available motion data through its existing publisher path. Edge button, PS/Quick Access, rumble, and motion behavior have not been comprehensively verified across every supported device and game.
 
