@@ -7,6 +7,9 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class SteamDeckDeviceStateMapperTests
 {
+    private const double DeckGyroScale = 32768.0 / 2000.0;
+    private const double GyroRoundTripTolerance = 0.5 / DeckGyroScale;
+
     [Fact]
     public void Neutral_state_leaves_unused_deck_fields_zero()
     {
@@ -53,8 +56,8 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal((short)-4096, mapped.AccelY);
         Assert.Equal((short)8192, mapped.AccelZ);
         Assert.Equal((short)16, mapped.Pitch);
-        Assert.Equal((short)-32, mapped.Yaw);
-        Assert.Equal((short)-48, mapped.Roll);
+        Assert.Equal((short)-33, mapped.Yaw);
+        Assert.Equal((short)-49, mapped.Roll);
         Assert.Equal((short)0, mapped.GyroQuatW);
         Assert.Equal((short)0, mapped.GyroQuatX);
         Assert.Equal((short)0, mapped.GyroQuatY);
@@ -90,15 +93,15 @@ public sealed class SteamDeckDeviceStateMapperTests
             motion: MotionFromRaw(rawGyroX, rawGyroY, rawGyroZ, rawAccelX, rawAccelY, rawAccelZ));
 
         Assert.Equal((short)20, mapped.Pitch);
-        Assert.Equal((short)-76, mapped.Yaw);
-        Assert.Equal((short)-40, mapped.Roll);
+        Assert.Equal((short)-78, mapped.Yaw);
+        Assert.Equal((short)-41, mapped.Roll);
         Assert.Equal((short)4096, mapped.AccelX);
         Assert.Equal((short)-12288, mapped.AccelY);
         Assert.Equal((short)-8192, mapped.AccelZ);
 
-        Assert.Equal(rawGyroX, mapped.Pitch / 16d);
-        Assert.Equal(rawGyroY, mapped.Roll / 16d);
-        Assert.Equal(rawGyroZ, -mapped.Yaw / 16d);
+        AssertGyroRoundTrip(rawGyroX, mapped.Pitch);
+        AssertGyroRoundTrip(rawGyroY, mapped.Roll);
+        AssertGyroRoundTrip(rawGyroZ, (short)-mapped.Yaw);
         Assert.Equal(rawAccelX, mapped.AccelX / 16384d);
         Assert.Equal(rawAccelY, mapped.AccelZ / 16384d);
         Assert.Equal(rawAccelZ, -mapped.AccelY / 16384d);
@@ -115,9 +118,9 @@ public sealed class SteamDeckDeviceStateMapperTests
     {
         var mapped = SteamDeckDeviceStateMapper.Map(State(), motion: MotionFromRaw(rawX, rawY, rawZ, 0, 0, 0));
 
-        Assert.Equal(rawX, mapped.Pitch / 16d);
-        Assert.Equal(rawY, mapped.Roll / 16d);
-        Assert.Equal(rawZ, -mapped.Yaw / 16d);
+        AssertGyroRoundTrip(rawX, mapped.Pitch);
+        AssertGyroRoundTrip(rawY, mapped.Roll);
+        AssertGyroRoundTrip(rawZ, (short)-mapped.Yaw);
     }
 
     [Fact]
@@ -254,7 +257,7 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal((short)333, mapped.RStickX);
         Assert.Equal((short)-444, mapped.RStickY);
         Assert.Equal((short)16, mapped.Pitch);
-        Assert.Equal((short)-32, mapped.Yaw);
+        Assert.Equal((short)-33, mapped.Yaw);
     }
 
     [Fact]
@@ -500,6 +503,12 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal((short)0, state.LPadY);
         Assert.Equal((byte)0, state.LPadPress);
         Assert.Equal((ushort)0, state.LPadForce);
+    }
+
+    private static void AssertGyroRoundTrip(double expected, short encoded)
+    {
+        var decoded = encoded / DeckGyroScale;
+        Assert.InRange(decoded, expected - GyroRoundTripTolerance, expected + GyroRoundTripTolerance);
     }
 
     private static GamepadButtons Button(string name) => name switch

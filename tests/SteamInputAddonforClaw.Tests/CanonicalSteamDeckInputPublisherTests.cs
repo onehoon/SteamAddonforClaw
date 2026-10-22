@@ -131,7 +131,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Equal(1, publisher.PublishedStateCount);
         Assert.Equal((byte)1, sink.States[0].A);
         Assert.Equal((short)16, sink.States[0].Pitch);
-        Assert.Equal((short)-32, sink.States[0].Yaw);
+        Assert.Equal((short)-33, sink.States[0].Yaw);
         AssertRightPadNeutral(sink.States[0]);
     }
 
@@ -161,7 +161,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         await ticks.TickAsync();
         await sink.WaitForCountAsync(1);
         Assert.Equal((short)16, sink.States[0].Pitch);
-        Assert.Equal((short)-32, sink.States[0].Yaw);
+        Assert.Equal((short)-33, sink.States[0].Yaw);
 
         source.Value = new ControllerState(new GamepadButtons(false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false), new(11, -12), new(13, -14), default, new([false, false]));
         motion = Motion(-1, 4, -2, -0.25, 0.5, 0.75);
@@ -169,8 +169,8 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         await sink.WaitForCountAsync(2);
         Assert.Equal((byte)1, sink.States[1].B);
         Assert.Equal((short)-16, sink.States[1].Pitch);
-        Assert.Equal((short)-64, sink.States[1].Yaw);
-        Assert.Equal((short)32, sink.States[1].Roll);
+        Assert.Equal((short)-66, sink.States[1].Yaw);
+        Assert.Equal((short)33, sink.States[1].Roll);
         Assert.Equal((short)13, sink.States[1].RStickX);
 
         motion = motion with { HasAccelerometer = false };
@@ -321,7 +321,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Equal((byte)1, sink.States[1].A);
         Assert.Equal((byte)1, sink.States[1].QuickAccess);
         Assert.Equal((short)16, sink.States[1].Pitch);
-        Assert.Equal((short)-32, sink.States[1].Yaw);
+        Assert.Equal((short)-33, sink.States[1].Yaw);
         Assert.Equal((short)8192, sink.States[1].AccelX);
 
         // After the pulse duration elapses, normal publication continues with QuickAccess neutral.
