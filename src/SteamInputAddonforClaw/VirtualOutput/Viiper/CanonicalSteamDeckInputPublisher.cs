@@ -48,6 +48,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
     private const int DiagnosticStickActivityThreshold = 4096;
     private const ushort DiagnosticTriggerActivityThreshold = 1024;
+    private const int DiagnosticTriggerMovementThreshold = 2048;
 
     /// <summary>Test-only seam so the join-timeout fail-closed path can be exercised deterministically.</summary>
     internal TimeSpan WorkerJoinTimeoutForTests { get; set; } = DefaultWorkerJoinTimeout;
@@ -114,6 +115,11 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private long _motionGyroUniqueReceiveTickCount;
     private long _motionGyroRepeatedReceiveTickCount;
     private long _motionPreviousGyroReceiveTicks;
+    private bool _hasTriggerDiagnosticSnapshot;
+    private ushort _lastLoggedLTrigger;
+    private ushort _lastLoggedRTrigger;
+    private byte _lastLoggedL2Digital;
+    private byte _lastLoggedR2Digital;
 
     internal CanonicalSteamDeckInputPublisher(
         IControllerStateSnapshotSource snapshot,
@@ -151,6 +157,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _publisherStartedTimestamp = _timestampProvider();
         _lastHeartbeatTimestamp = _publisherStartedTimestamp;
         _firstOrdinaryInputPublished = false;
+        ResetTriggerDiagnosticSnapshot();
         ResetTimingDiagnosticsForNewRun();
 
         if (_ticks is not null)
@@ -527,6 +534,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
             return false;
         }
         _publishedStateCount++;
+        LogTriggerTransitionIfNeeded(state, diagnosticsEnabled);
 
         if (pulseDiagnosticsEnabled)
         {
@@ -541,6 +549,64 @@ internal sealed class CanonicalSteamDeckInputPublisher
 
         if (diagnosticsEnabled) EmitHeartbeatIfDue();
         return true;
+    }
+
+    private void LogTriggerTransitionIfNeeded(SteamDeckDeviceState state, bool diagnosticsEnabled)
+    {
+        if (!diagnosticsEnabled)
+        {
+            ResetTriggerDiagnosticSnapshot();
+            return;
+        }
+
+        string? reason = null;
+        if (!_hasTriggerDiagnosticSnapshot)
+        {
+            reason = "Baseline";
+        }
+        else
+        {
+            if (_lastLoggedLTrigger == 0 && state.LTrigger > 0) AppendTriggerDiagnosticReason(ref reason, "LTriggerPress");
+            if (_lastLoggedLTrigger > 0 && state.LTrigger == 0) AppendTriggerDiagnosticReason(ref reason, "LTriggerRelease");
+            if (Math.Abs((int)state.LTrigger - _lastLoggedLTrigger) >= DiagnosticTriggerMovementThreshold)
+                AppendTriggerDiagnosticReason(ref reason, "LTriggerAnalogChange");
+            if (_lastLoggedL2Digital != state.L2Digital) AppendTriggerDiagnosticReason(ref reason, "L2FullPullEdge");
+
+            if (_lastLoggedRTrigger == 0 && state.RTrigger > 0) AppendTriggerDiagnosticReason(ref reason, "RTriggerPress");
+            if (_lastLoggedRTrigger > 0 && state.RTrigger == 0) AppendTriggerDiagnosticReason(ref reason, "RTriggerRelease");
+            if (Math.Abs((int)state.RTrigger - _lastLoggedRTrigger) >= DiagnosticTriggerMovementThreshold)
+                AppendTriggerDiagnosticReason(ref reason, "RTriggerAnalogChange");
+            if (_lastLoggedR2Digital != state.R2Digital) AppendTriggerDiagnosticReason(ref reason, "R2FullPullEdge");
+        }
+
+        if (reason is null) return;
+
+        AppLog.Debug("SteamOutput", "Steam Deck trigger state published.",
+            ("Event", "SteamDeckTriggerTransition"),
+            ("LTrigger", state.LTrigger),
+            ("RTrigger", state.RTrigger),
+            ("L2Digital", state.L2Digital),
+            ("R2Digital", state.R2Digital),
+            ("PublishedStateCount", _publishedStateCount),
+            ("Reason", reason));
+
+        _lastLoggedLTrigger = state.LTrigger;
+        _lastLoggedRTrigger = state.RTrigger;
+        _lastLoggedL2Digital = state.L2Digital;
+        _lastLoggedR2Digital = state.R2Digital;
+        _hasTriggerDiagnosticSnapshot = true;
+    }
+
+    private static void AppendTriggerDiagnosticReason(ref string? reason, string value)
+        => reason = reason is null ? value : string.Concat(reason, "+", value);
+
+    private void ResetTriggerDiagnosticSnapshot()
+    {
+        _hasTriggerDiagnosticSnapshot = false;
+        _lastLoggedLTrigger = 0;
+        _lastLoggedRTrigger = 0;
+        _lastLoggedL2Digital = 0;
+        _lastLoggedR2Digital = 0;
     }
 
     private MsiClawMotionState CaptureMotionSnapshot()

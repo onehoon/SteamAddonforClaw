@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -207,6 +209,9 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
     // EB rumble a 5 s dead-man window (matching the deleted bridge's intent).
     internal static readonly TimeSpan DefaultUntimedHapticSafetyStop = TimeSpan.FromSeconds(1);
     internal static readonly TimeSpan DefaultRumbleSafetyStop = TimeSpan.FromSeconds(5);
+    private const int DiagnosticRawPrefixLength = 64;
+    private const int DiagnosticOtherOpcodeExampleLimit = 4;
+    private static readonly long RumbleDiagnosticSampleIntervalTicks = Math.Max(1, Stopwatch.Frequency / 10);
 
     private readonly IPhysicalRumbleSink _sink;
     private readonly Func<bool> _clearNativeCallback;
@@ -217,6 +222,12 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
     private readonly object _safetyGate = new();
     private CancellationTokenSource? _safetyStop;
     private long _feedbackSequence;
+    private long _diagnosticRxSequence;
+    private readonly int[] _diagnosticOtherOpcodeCounts = new int[257];
+    private bool _diagnosticRunActive;
+    private bool _hasLastLoggedRumble;
+    private TwoMotorRumble _lastLoggedRumble;
+    private long _lastRumbleDiagnosticTimestamp;
     private int _disposed;
 
     private SteamDeckRumbleFeedbackAdapter(IPhysicalRumbleSink sink, Func<bool> clearNativeCallback, TimeSpan untimedHapticSafetyStop, TimeSpan rumbleSafetyStop)
@@ -257,27 +268,65 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
         try
         {
             if (Volatile.Read(ref _disposed) != 0) return;
-            if (data == 0 || length == 0) return;
+            var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
+            PrepareDiagnosticRun(diagnosticsEnabled);
+            if (data == 0 || length == 0)
+            {
+                if (diagnosticsEnabled)
+                {
+                    var rxSequence = Interlocked.Increment(ref _diagnosticRxSequence);
+                    var decodedEmpty = SteamDeckRumbleDecoder.Decode(ReadOnlySpan<byte>.Empty);
+                    if (ShouldLogOtherOpcodeExample(null))
+                        LogSteamDeckFeedbackRx(rxSequence, [], length, decodedEmpty, "Ignored");
+                }
+                return;
+            }
             var report = new byte[(int)Math.Min(length, 512u)];
             Marshal.Copy(data, report, 0, report.Length);
             var decoded = SteamDeckRumbleDecoder.Decode(report);
-            if (!decoded.HasPhysicalTranslation) return;
+            var diagnosticRxSequence = diagnosticsEnabled ? Interlocked.Increment(ref _diagnosticRxSequence) : 0;
+            var shouldLogReceive = diagnosticsEnabled && ShouldLogSteamDeckFeedback(report, decoded);
+            if (!decoded.HasPhysicalTranslation)
+            {
+                if (shouldLogReceive)
+                    LogSteamDeckFeedbackRx(diagnosticRxSequence, report, length, decoded, "Ignored");
+                return;
+            }
 
             // A haptic command 0 is an explicit STOP, not persistent motor state.
             var rumble = decoded.Command == SteamDeckFeedbackCommand.Haptic && decoded.Haptic?.CommandType == 0
                 ? TwoMotorRumble.Stopped
                 : decoded.Rumble;
 
+            PhysicalRumbleWriteResult result;
             lock (_callbackWriteGate)
             {
                 if (Volatile.Read(ref _disposed) != 0) return;
-                var result = _sink.SetRumble(rumble);
+                if (shouldLogReceive)
+                    LogSteamDeckFeedbackRx(
+                        diagnosticRxSequence,
+                        report,
+                        length,
+                        decoded,
+                        rumble.Equals(TwoMotorRumble.Stopped) ? "Stop" : "SinkAttempted");
+                result = _sink.SetRumble(rumble);
                 if (result.Status == PhysicalRumbleWriteStatus.Failed)
                     AppLog.Debug("Rumble", "Production rumble write failed.",
                         ("Event", "ProductionRumbleWriteFailed"), ("Presentation", "SteamDeck"), ("Command", decoded.Command), ("Reason", result.Reason));
             }
 
-            ScheduleSafetyStop(decoded, rumble);
+            ScheduleSafetyStop(decoded, rumble, diagnosticsEnabled ? diagnosticRxSequence : null);
+            if (diagnosticsEnabled && (shouldLogReceive || result.Status != PhysicalRumbleWriteStatus.Succeeded))
+            {
+                if (!shouldLogReceive)
+                    LogSteamDeckFeedbackRx(
+                        diagnosticRxSequence,
+                        report,
+                        length,
+                        decoded,
+                        rumble.Equals(TwoMotorRumble.Stopped) ? "Stop" : "SinkAttempted");
+                LogSteamDeckFeedbackSinkResult(diagnosticRxSequence, report, decoded, rumble, result);
+            }
         }
         catch
         {
@@ -285,7 +334,157 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
         }
     }
 
-    private void ScheduleSafetyStop(SteamDeckFeedbackDecodeResult decoded, TwoMotorRumble rumble)
+    private void PrepareDiagnosticRun(bool diagnosticsEnabled)
+    {
+        if (!diagnosticsEnabled)
+        {
+            _diagnosticRunActive = false;
+            return;
+        }
+
+        if (_diagnosticRunActive) return;
+        Array.Clear(_diagnosticOtherOpcodeCounts, 0, _diagnosticOtherOpcodeCounts.Length);
+        _hasLastLoggedRumble = false;
+        _lastLoggedRumble = default;
+        _lastRumbleDiagnosticTimestamp = 0;
+        _diagnosticRunActive = true;
+    }
+
+    private bool ShouldLogSteamDeckFeedback(byte[] report, SteamDeckFeedbackDecodeResult decoded)
+    {
+        if (report.Length == 0) return ShouldLogOtherOpcodeExample(null);
+
+        var opcode = report[0];
+        if (opcode is 0xEA or 0x8F or 0xDC) return true;
+        if (opcode == 0xEB && decoded.Command == SteamDeckFeedbackCommand.Rumble)
+            return ShouldLogRumble(decoded.Rumble);
+
+        return ShouldLogOtherOpcodeExample(opcode);
+    }
+
+    private bool ShouldLogRumble(TwoMotorRumble rumble)
+    {
+        var now = Stopwatch.GetTimestamp();
+        if (!_hasLastLoggedRumble)
+        {
+            RememberRumbleDiagnostic(rumble, now);
+            return true;
+        }
+
+        if (rumble.Equals(TwoMotorRumble.Stopped))
+        {
+            if (_lastLoggedRumble.Equals(TwoMotorRumble.Stopped)) return false;
+            RememberRumbleDiagnostic(rumble, now);
+            return true;
+        }
+
+        if (_lastLoggedRumble.Equals(TwoMotorRumble.Stopped) ||
+            now - _lastRumbleDiagnosticTimestamp >= RumbleDiagnosticSampleIntervalTicks)
+        {
+            RememberRumbleDiagnostic(rumble, now);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void RememberRumbleDiagnostic(TwoMotorRumble rumble, long timestamp)
+    {
+        _lastLoggedRumble = rumble;
+        _lastRumbleDiagnosticTimestamp = timestamp;
+        _hasLastLoggedRumble = true;
+    }
+
+    private bool ShouldLogOtherOpcodeExample(byte? opcode)
+    {
+        var index = opcode ?? 256;
+        return Interlocked.Increment(ref _diagnosticOtherOpcodeCounts[index]) <= DiagnosticOtherOpcodeExampleLimit;
+    }
+
+    private static void LogSteamDeckFeedbackRx(
+        long rxSequence,
+        byte[] report,
+        uint originalLength,
+        SteamDeckFeedbackDecodeResult decoded,
+        string disposition)
+    {
+        var rawLength = Math.Min(report.Length, DiagnosticRawPrefixLength);
+        var fields = new List<(string Key, object? Value)>
+        {
+            ("Event", "SteamDeckFeedbackRx"),
+            ("Presentation", "SteamDeck"),
+            ("RxSeq", rxSequence),
+            ("Opcode", report.Length == 0 ? "None" : report[0].ToString("X2", CultureInfo.InvariantCulture)),
+            ("OriginalLength", originalLength),
+            ("CapturedLength", report.Length),
+            ("RawHex", Convert.ToHexString(report.AsSpan(0, rawLength))),
+            ("RawTruncated", originalLength > DiagnosticRawPrefixLength),
+            ("DecodeResult", decoded.Command),
+            ("HasPhysicalTranslation", decoded.HasPhysicalTranslation),
+            ("Disposition", disposition),
+        };
+
+        if (report.Length > 0)
+        {
+            switch (report[0])
+            {
+                case 0xEB when decoded.Command == SteamDeckFeedbackCommand.Rumble:
+                    fields.Add(("RumbleType", decoded.RumbleType));
+                    fields.Add(("RumbleIntensity", decoded.RumbleIntensity));
+                    fields.Add(("RumbleLeftGain", decoded.RumbleLeftGain));
+                    fields.Add(("RumbleRightGain", decoded.RumbleRightGain));
+                    fields.Add(("Large16", decoded.Rumble.LargeMotor));
+                    fields.Add(("Small16", decoded.Rumble.SmallMotor));
+                    break;
+                case 0xEA when decoded.Haptic is { } haptic:
+                    fields.Add(("Side", haptic.Side));
+                    fields.Add(("CommandType", haptic.CommandType));
+                    fields.Add(("UiIntensity", haptic.UiIntensity));
+                    fields.Add(("DbGain", haptic.DbGain));
+                    fields.Add(("IsModernSdlLayout", haptic.IsModernSdlLayout));
+                    if (haptic.DurationMilliseconds is short durationMilliseconds)
+                        fields.Add(("DurationMilliseconds", durationMilliseconds));
+                    if (decoded.Strength8 is byte strength8)
+                        fields.Add(("Strength8", strength8));
+                    break;
+                case 0x8F when decoded.HapticPulse is { } pulse:
+                    fields.Add(("Side", pulse.Side));
+                    fields.Add(("OnDurationMicroseconds", pulse.OnDurationMicroseconds));
+                    fields.Add(("OffIntervalMicroseconds", pulse.OffIntervalMicroseconds));
+                    fields.Add(("Count", pulse.Count));
+                    fields.Add(("GainRaw", pulse.GainRaw));
+                    fields.Add(("IsLinuxLayout", pulse.IsLinuxLayout));
+                    break;
+            }
+        }
+
+        AppLog.Debug("Rumble", "Steam Deck host feedback received.", fields.ToArray());
+    }
+
+    private static void LogSteamDeckFeedbackSinkResult(
+        long rxSequence,
+        byte[] report,
+        SteamDeckFeedbackDecodeResult decoded,
+        TwoMotorRumble rumble,
+        PhysicalRumbleWriteResult result)
+    {
+        AppLog.Debug("Rumble", "Steam Deck host feedback physical sink attempt completed.",
+            ("Event", "SteamDeckFeedbackSinkResult"),
+            ("Presentation", "SteamDeck"),
+            ("RxSeq", rxSequence),
+            ("Opcode", report.Length == 0 ? "None" : report[0].ToString("X2", CultureInfo.InvariantCulture)),
+            ("DecodeResult", decoded.Command),
+            ("Large16", rumble.LargeMotor),
+            ("Small16", rumble.SmallMotor),
+            ("Status", result.Status),
+            ("Reason", result.Reason),
+            ("Stopped", rumble.Equals(TwoMotorRumble.Stopped)));
+    }
+
+    private void ScheduleSafetyStop(
+        SteamDeckFeedbackDecodeResult decoded,
+        TwoMotorRumble rumble,
+        long? sourceDiagnosticRxSequence)
     {
         CancellationToken token;
         long sequence;
@@ -315,10 +514,14 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
             token = _safetyStop.Token;
         }
 
-        _ = StopAfterDelayAsync(sequence, delay, token);
+        _ = StopAfterDelayAsync(sequence, delay, token, sourceDiagnosticRxSequence);
     }
 
-    private async Task StopAfterDelayAsync(long sequence, TimeSpan delay, CancellationToken token)
+    private async Task StopAfterDelayAsync(
+        long sequence,
+        TimeSpan delay,
+        CancellationToken token,
+        long? sourceDiagnosticRxSequence)
     {
         try
         {
@@ -332,7 +535,17 @@ internal sealed class SteamDeckRumbleFeedbackAdapter : IDisposable
             lock (_callbackWriteGate)
             {
                 if (Volatile.Read(ref _disposed) != 0) return;
-                _sink.SetRumble(TwoMotorRumble.Stopped);
+                var result = _sink.SetRumble(TwoMotorRumble.Stopped);
+                if (AppLog.IsEnabled(AppLogLevel.Debug))
+                    AppLog.Debug("Rumble", "Steam Deck feedback safety stop completed.",
+                        ("Event", "SteamDeckFeedbackSafetyStop"),
+                        ("Presentation", "SteamDeck"),
+                        ("RxSeq", sourceDiagnosticRxSequence?.ToString(CultureInfo.InvariantCulture) ?? "NotAvailable"),
+                        ("Large16", TwoMotorRumble.Stopped.LargeMotor),
+                        ("Small16", TwoMotorRumble.Stopped.SmallMotor),
+                        ("Status", result.Status),
+                        ("Reason", result.Reason),
+                        ("Stopped", true));
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
