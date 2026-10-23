@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "runtime_version": "1.0.8",
-  "tag": "steamaddon-runtime-v1.0.8",
+  "runtime_version": "1.0.9",
+  "tag": "steamaddon-runtime-v1.0.9",
   "asset": "ClawHUDRuntime.zip",
-  "source_commit": "fb714115d35431b97315918a73bbf3c61381fe33",
-  "sha256": "ad599915bc88333de51e3015fa35e4c67410d6a372d91f6f7b8be0d1ba13cad2"
+  "source_commit": "3d85dde0b116a42c25f38cf6a4a244679fed49b3",
+  "sha256": "6f39ebedabe2b77417b80d4d3cf5df15ecfecfc25dfd03eecbffdb2ee88b89b5"
 }
