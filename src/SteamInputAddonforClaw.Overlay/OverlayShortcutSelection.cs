@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Contracts.Frontend;
+
 namespace SteamInputAddonforClaw.Overlay;
 
 /// <summary>Transient bounded selection for the currently rendered Shortcut grid.</summary>
@@ -29,6 +31,20 @@ internal sealed class OverlayShortcutSelection
     }
 
     internal void Reset() => Configure(tileCount: 0, columnCount: 0);
+
+    internal static int FindTileIndex(Guid? tileId, IReadOnlyList<FrontendShortcutTile> tiles)
+    {
+        if (tileId is not { } id)
+            return -1;
+
+        for (var index = 0; index < tiles.Count; index++)
+        {
+            if (tiles[index].TileId == id)
+                return index;
+        }
+
+        return -1;
+    }
 
     internal bool Select(int index)
     {

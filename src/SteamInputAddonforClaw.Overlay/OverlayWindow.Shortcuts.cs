@@ -11,9 +11,23 @@ namespace SteamInputAddonforClaw.Overlay;
 public sealed partial class OverlayWindow
 {
     private const int ShortcutVisualColumnCount = 3;
+
+    private sealed record ShortcutTileControls(
+        Border Border,
+        FontIcon Icon,
+        TextBlock Title,
+        TextBlock Status,
+        StackPanel Header,
+        StackPanel Content)
+    {
+        public bool IsSelected { get; set; }
+    }
+
     private FrontendShortcutDashboardSnapshot _shortcutSnapshot =
         FrontendShortcutDashboardSnapshot.Unavailable();
-    private readonly Dictionary<Guid, Border> _shortcutTiles = new();
+    private readonly Dictionary<Guid, ShortcutTileControls> _shortcutTiles = new();
+    private IReadOnlyList<FrontendShortcutTile> _renderedShortcutTiles = [];
+    private Guid? _renderedShortcutSelectedTileId;
     private Grid? _shortcutGrid;
     private bool _shortcutExecutionInFlight;
     private bool _isVisible;
@@ -27,6 +41,8 @@ public sealed partial class OverlayWindow
             ColumnSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
             RowSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
         };
+        for (var column = 0; column < ShortcutVisualColumnCount; column++)
+            _shortcutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         RenderShortcutSnapshot();
         return _shortcutGrid;
     }
@@ -65,107 +81,176 @@ public sealed partial class OverlayWindow
     {
         if (_shortcutGrid is null) return;
 
-        _shortcutTiles.Clear();
-        _shortcutGrid.Children.Clear();
-        _shortcutGrid.RowDefinitions.Clear();
-        _shortcutGrid.ColumnDefinitions.Clear();
-
-        if (!_shortcutSnapshot.Available || _shortcutSnapshot.Tiles.Count == 0)
-            return;
-        for (var column = 0; column < ShortcutVisualColumnCount; column++)
-            _shortcutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        for (var index = 0; index < _shortcutSnapshot.Tiles.Count; index++)
+        IReadOnlyList<FrontendShortcutTile> tiles = _shortcutSnapshot.Available
+            ? _shortcutSnapshot.Tiles
+            : [];
+        var reconciliation = OverlayShortcutTileReconciliation.Between(_renderedShortcutTiles, tiles);
+        if (reconciliation.IsUnchanged)
         {
-            if (index % ShortcutVisualColumnCount == 0)
-                _shortcutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            var tile = _shortcutSnapshot.Tiles[index];
-            var tilePadding = OverlayQamResources.Get("QamTilePadding", new Thickness(12));
-            var tileSize = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333);
-            var contentWidth = Math.Max(1, tileSize - tilePadding.Left - tilePadding.Right);
-            var hasStatus = !string.IsNullOrWhiteSpace(tile.StatusText);
-            var title = new TextBlock
-            {
-                Text = tile.Title,
-                TextWrapping = TextWrapping.Wrap,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                TextAlignment = TextAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                MaxWidth = contentWidth,
-                MaxLines = hasStatus ? 1 : 2,
-            };
-            OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
-
-            var header = new StackPanel
-            {
-                Orientation = Orientation.Vertical,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                MaxWidth = contentWidth,
-                Spacing = hasStatus ? 4 : 6,
-            };
-            header.Children.Add(new FontIcon
-            {
-                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons"),
-                Glyph = tile.IconGlyph,
-                FontSize = 24,
-                HorizontalAlignment = HorizontalAlignment.Center,
-            });
-            header.Children.Add(title);
-
-            var content = new StackPanel
-            {
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Spacing = hasStatus ? 4 : 0,
-            };
-            content.Children.Add(header);
-            if (hasStatus)
-            {
-                var status = new TextBlock
-                {
-                    Text = tile.StatusText,
-                    TextWrapping = TextWrapping.Wrap,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    TextAlignment = TextAlignment.Center,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    MaxWidth = contentWidth,
-                    MaxLines = 2,
-                };
-                OverlayQamResources.ApplyTextStyle(status, "QamCaptionTextStyle");
-                content.Children.Add(status);
-            }
-
-            var border = new Border
-            {
-                Child = content,
-                Padding = tilePadding,
-                Width = tileSize,
-                Height = tileSize,
-                CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
-                BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
-                BorderBrush = OverlayQamResources.Brush("QamFocusBorderBrush"),
-                Background = OverlayQamResources.Brush("QamTileBrush"),
-                Opacity = tile.Enabled ? 1.0 : OverlayQamResources.Get("QamDisabledOpacity", 0.48),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                IsHitTestVisible = true,
-            };
-            border.Tapped += (_, _) => OnShortcutTileTapped(tile);
-            Grid.SetRow(border, index / ShortcutVisualColumnCount);
-            Grid.SetColumn(border, index % ShortcutVisualColumnCount);
-            _shortcutGrid.Children.Add(border);
-            _shortcutTiles[tile.TileId] = border;
+            ApplyShortcutSelectionVisual();
+            return;
         }
 
+        foreach (var tileId in reconciliation.RemovedTileIds)
+        {
+            if (!_shortcutTiles.Remove(tileId, out var controls)) continue;
+            _shortcutGrid.Children.Remove(controls.Border);
+        }
+
+        var added = reconciliation.AddedTileIds.ToHashSet();
+        var updated = reconciliation.UpdatedTileIds.ToHashSet();
+        var repositioned = reconciliation.RepositionedTileIds.ToHashSet();
+        for (var index = 0; index < tiles.Count; index++)
+        {
+            var tile = tiles[index];
+            if (added.Contains(tile.TileId))
+            {
+                var controls = CreateShortcutTile(tile, index,
+                    GetSelectedShortcutTile()?.TileId == tile.TileId);
+                _shortcutTiles.Add(tile.TileId, controls);
+                _shortcutGrid.Children.Add(controls.Border);
+                continue;
+            }
+
+            if (!_shortcutTiles.TryGetValue(tile.TileId, out var existing))
+                continue;
+
+            if (updated.Contains(tile.TileId))
+                UpdateShortcutTile(existing, tile);
+            if (repositioned.Contains(tile.TileId))
+                UpdateShortcutTilePosition(existing.Border, index);
+        }
+
+        var requiredRowCount = (tiles.Count + ShortcutVisualColumnCount - 1) / ShortcutVisualColumnCount;
+        while (_shortcutGrid.RowDefinitions.Count < requiredRowCount)
+            _shortcutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        while (_shortcutGrid.RowDefinitions.Count > requiredRowCount)
+            _shortcutGrid.RowDefinitions.RemoveAt(_shortcutGrid.RowDefinitions.Count - 1);
+
+        _renderedShortcutTiles = tiles.ToArray();
         ApplyShortcutSelectionVisual();
     }
 
-    private void OnShortcutTileTapped(FrontendShortcutTile tile)
+    private ShortcutTileControls CreateShortcutTile(FrontendShortcutTile tile, int index, bool selected)
     {
-        SelectShortcutTile(tile.TileId, "Pointer");
-        if (tile.Enabled)
-            RequestShortcutExecution(tile.TileId);
+        var tilePadding = OverlayQamResources.Get("QamTilePadding", new Thickness(12));
+        var tileSize = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333);
+        var contentWidth = Math.Max(1, tileSize - tilePadding.Left - tilePadding.Right);
+        var hasStatus = !string.IsNullOrWhiteSpace(tile.StatusText);
+        var title = new TextBlock
+        {
+            Text = tile.Title,
+            TextWrapping = TextWrapping.Wrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextAlignment = TextAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MaxWidth = contentWidth,
+            MaxLines = hasStatus ? 1 : 2,
+        };
+        OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
+
+        var icon = new FontIcon
+        {
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons"),
+            Glyph = tile.IconGlyph,
+            FontSize = 24,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var header = new StackPanel
+        {
+            Orientation = Orientation.Vertical,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = contentWidth,
+            Spacing = hasStatus ? 4 : 6,
+        };
+        header.Children.Add(icon);
+        header.Children.Add(title);
+
+        var status = new TextBlock
+        {
+            Text = tile.StatusText ?? string.Empty,
+            TextWrapping = TextWrapping.Wrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextAlignment = TextAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MaxWidth = contentWidth,
+            MaxLines = 2,
+            Visibility = hasStatus ? Visibility.Visible : Visibility.Collapsed,
+        };
+        OverlayQamResources.ApplyTextStyle(status, "QamCaptionTextStyle");
+
+        var content = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Spacing = hasStatus ? 4 : 0,
+        };
+        content.Children.Add(header);
+        content.Children.Add(status);
+
+        var border = new Border
+        {
+            Child = content,
+            Padding = tilePadding,
+            Width = tileSize,
+            Height = tileSize,
+            CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
+            BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
+            BorderBrush = _rowSelectedBrush,
+            Background = OverlayQamResources.Brush(selected ? "QamTileSelectedBrush" : "QamTileBrush"),
+            Opacity = tile.Enabled ? 1.0 : OverlayQamResources.Get("QamDisabledOpacity", 0.48),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsHitTestVisible = true,
+        };
+        border.Tapped += (_, _) => OnShortcutTileTapped(tile.TileId);
+        UpdateShortcutTilePosition(border, index);
+        return new(border, icon, title, status, header, content) { IsSelected = selected };
+    }
+
+    private static void UpdateShortcutTilePosition(Border border, int index)
+    {
+        var row = index / ShortcutVisualColumnCount;
+        var column = index % ShortcutVisualColumnCount;
+        if (Grid.GetRow(border) != row) Grid.SetRow(border, row);
+        if (Grid.GetColumn(border) != column) Grid.SetColumn(border, column);
+    }
+
+    private static void UpdateShortcutTile(ShortcutTileControls controls, FrontendShortcutTile tile)
+    {
+        if (controls.Title.Text != tile.Title)
+            controls.Title.Text = tile.Title;
+        if (controls.Icon.Glyph != tile.IconGlyph)
+            controls.Icon.Glyph = tile.IconGlyph;
+
+        var statusText = tile.StatusText ?? string.Empty;
+        if (controls.Status.Text != statusText)
+            controls.Status.Text = statusText;
+
+        var hasStatus = !string.IsNullOrWhiteSpace(tile.StatusText);
+        var visibility = hasStatus ? Visibility.Visible : Visibility.Collapsed;
+        if (controls.Status.Visibility != visibility)
+            controls.Status.Visibility = visibility;
+        var titleMaxLines = hasStatus ? 1 : 2;
+        if (controls.Title.MaxLines != titleMaxLines)
+            controls.Title.MaxLines = titleMaxLines;
+        var headerSpacing = hasStatus ? 4 : 6;
+        if (controls.Header.Spacing != headerSpacing)
+            controls.Header.Spacing = headerSpacing;
+        var contentSpacing = hasStatus ? 4 : 0;
+        if (controls.Content.Spacing != contentSpacing)
+            controls.Content.Spacing = contentSpacing;
+
+        var opacity = tile.Enabled ? 1.0 : OverlayQamResources.Get("QamDisabledOpacity", 0.48);
+        if (controls.Border.Opacity != opacity)
+            controls.Border.Opacity = opacity;
+    }
+
+    private void OnShortcutTileTapped(Guid tileId)
+    {
+        SelectShortcutTile(tileId, "Pointer");
+        if (_shortcutSnapshot.Tiles.FirstOrDefault(item => item.TileId == tileId) is { Enabled: true })
+            RequestShortcutExecution(tileId);
     }
 
     private void RequestShortcutExecution(Guid tileId)
