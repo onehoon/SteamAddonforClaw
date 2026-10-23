@@ -32,6 +32,42 @@ public sealed class OverlayDelayedCommitNavigationTests
     }
 
     [Fact]
+    public void Root_dismissal_stops_navigation_before_flush_and_failed_dismissal_requires_a_fresh_gesture()
+    {
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var beginStart = app.IndexOf("private void BeginUserDismiss", StringComparison.Ordinal);
+        var beginEnd = app.IndexOf("private async Task SendUserDismissAsync", beginStart, StringComparison.Ordinal);
+        Assert.True(beginStart >= 0 && beginEnd > beginStart);
+        var begin = app[beginStart..beginEnd];
+        Assert.True(begin.IndexOf("Interlocked.CompareExchange(ref _userDismissInProgress, 1, 0)", StringComparison.Ordinal)
+            < begin.IndexOf("_window?.CancelNumericSliderHoldRepeat();", StringComparison.Ordinal));
+        Assert.True(begin.IndexOf("_window?.CancelNumericSliderHoldRepeat();", StringComparison.Ordinal)
+            < begin.IndexOf("SendUserDismissAsync(outsideClick)", StringComparison.Ordinal));
+
+        var navigationStart = app.IndexOf("private Task HandleNavigationAsync", StringComparison.Ordinal);
+        var navigationEnd = app.IndexOf("private Task HandleCommandAsync", navigationStart, StringComparison.Ordinal);
+        Assert.True(navigationStart >= 0 && navigationEnd > navigationStart);
+        var navigation = app[navigationStart..navigationEnd];
+        var dispatcherActionStart = navigation.IndexOf("TryEnqueue(() =>", StringComparison.Ordinal);
+        var dismissGate = navigation.IndexOf("if (Volatile.Read(ref _userDismissInProgress) != 0)", StringComparison.Ordinal);
+        var dispatchSwitch = navigation.IndexOf("switch (action)", StringComparison.Ordinal);
+        Assert.True(dispatcherActionStart >= 0 && dismissGate > dispatcherActionStart && dispatchSwitch > dismissGate);
+        Assert.Contains("case OverlayNavigationAction.RepeatNavigateLeft:", navigation, StringComparison.Ordinal);
+        Assert.Contains("case OverlayNavigationAction.RepeatNavigateRight:", navigation, StringComparison.Ordinal);
+
+        var dismissStart = app.IndexOf("private async Task SendUserDismissAsync", StringComparison.Ordinal);
+        var dismissEnd = app.IndexOf("private async Task ConnectAndRunAsync", dismissStart, StringComparison.Ordinal);
+        Assert.True(dismissStart >= 0 && dismissEnd > dismissStart);
+        var dismiss = app[dismissStart..dismissEnd];
+        Assert.True(dismiss.IndexOf("if (!dismissalSent)", StringComparison.Ordinal)
+            < dismiss.IndexOf("Interlocked.Exchange(ref _userDismissInProgress, 0)", StringComparison.Ordinal));
+
+        var navigationSource = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+        Assert.Contains("internal void CancelNumericSliderHoldRepeat() => _numericSliderRepeatTarget.Clear();", navigationSource, StringComparison.Ordinal);
+        Assert.Contains("if (_window?.TryHandleBack() != true)\n                            BeginUserDismiss(outsideClick: null);", navigation, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Profile_has_no_selected_detail_navigation_and_uses_shared_page_leave_callbacks()
     {
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");

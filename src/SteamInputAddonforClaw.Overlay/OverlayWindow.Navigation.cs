@@ -66,6 +66,8 @@ public sealed partial class OverlayWindow
         _numericSliderRepeatTarget.TryAdjust(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta);
     }
 
+    internal void CancelNumericSliderHoldRepeat() => _numericSliderRepeatTarget.Clear();
+
     internal void ActivateSelectedRow()
     {
         if (OnShortcutPage())

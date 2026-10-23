@@ -342,4 +342,23 @@ public sealed class OverlayRowSelectionTests
         Assert.True(target.TryAdjust(AddonQuickSettingsTabId.Device, slider, -1));
         Assert.Equal(new[] { -1 }, deltas);
     }
+
+    [Fact]
+    public void Clearing_a_repeat_target_blocks_the_held_gesture_until_a_fresh_horizontal_press_arms_it_again()
+    {
+        var deltas = new List<int>();
+        var slider = new OverlayRowCapabilities(() => true, Adjust: deltas.Add, AllowsDpadHoldRepeat: true);
+        var target = new OverlayNumericSliderRepeatTarget();
+        target.Arm(AddonQuickSettingsTabId.Device, slider, +1);
+
+        target.Clear();
+        Assert.False(target.TryAdjust(AddonQuickSettingsTabId.Device, slider, +1));
+        Assert.Empty(deltas);
+
+        // A new ordinary horizontal action calls Arm after applying its initial step.
+        deltas.Add(+1);
+        target.Arm(AddonQuickSettingsTabId.Device, slider, +1);
+        Assert.True(target.TryAdjust(AddonQuickSettingsTabId.Device, slider, +1));
+        Assert.Equal(new[] { 1, 1 }, deltas);
+    }
 }
