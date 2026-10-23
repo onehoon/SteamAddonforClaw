@@ -77,6 +77,131 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
     }
 
     [Fact]
+    public void Toggle_on_and_off_reconcile_only_child_rows_and_preserve_control_identities()
+    {
+        var header = ToggleRow(QuickSettingsRowId.DeviceTdpEnabled);
+        var stableChild = NumericRow(QuickSettingsRowId.DeviceTdpAcPl1, 20);
+        var conditionalChild = NumericRow(QuickSettingsRowId.DeviceTdpAcPl2, 25) with { Visible = false };
+        var off = new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP", [header, stableChild, conditionalChild]);
+
+        var offPlan = OverlayQuickSettingsSectionRendering.PlanRows(
+            new Dictionary<QuickSettingsRowId, QuickSettingsRenderedRowDescriptor>(), off);
+        var offDescriptors = offPlan.DesiredRows.ToDictionary(row => row.Row.RowId);
+        var headerControl = new object();
+        var stableChildControl = new object();
+        var offControls = new Dictionary<QuickSettingsRowId, object>
+        {
+            [header.RowId] = headerControl,
+            [stableChild.RowId] = stableChildControl,
+        };
+
+        var on = off with
+        {
+            Rows =
+            [
+                header with { Label = "Internal toggle label changed", Value = QuickSettingsValue.Boolean(true) },
+                stableChild,
+                conditionalChild with { Visible = true },
+            ],
+        };
+        var onPlan = OverlayQuickSettingsSectionRendering.PlanRows(offDescriptors, on);
+        var onControls = ApplyRowPlan(offDescriptors, offControls, onPlan);
+
+        Assert.Equal([conditionalChild.RowId], onPlan.ChangedRowIds);
+        Assert.Same(headerControl, onControls[header.RowId]);
+        Assert.Same(stableChildControl, onControls[stableChild.RowId]);
+        Assert.NotSame(stableChildControl, onControls[conditionalChild.RowId]);
+
+        var onDescriptors = onPlan.DesiredRows.ToDictionary(row => row.Row.RowId);
+        var offAgain = on with
+        {
+            Rows = [header with { Value = QuickSettingsValue.Boolean(false) }, stableChild, conditionalChild with { Visible = false }],
+        };
+        var offAgainPlan = OverlayQuickSettingsSectionRendering.PlanRows(onDescriptors, offAgain);
+        var offAgainControls = ApplyRowPlan(onDescriptors, onControls, offAgainPlan);
+
+        Assert.Equal([conditionalChild.RowId], offAgainPlan.ChangedRowIds);
+        Assert.DoesNotContain(conditionalChild.RowId, offAgainControls.Keys);
+        Assert.Same(headerControl, offAgainControls[header.RowId]);
+        Assert.Same(stableChildControl, offAgainControls[stableChild.RowId]);
+    }
+
+    [Fact]
+    public void Row_plan_replaces_only_rows_with_incompatible_rendering_metadata()
+    {
+        var header = ToggleRow(QuickSettingsRowId.DeviceTdpEnabled);
+        var child = NumericRow(QuickSettingsRowId.DeviceTdpAcPl1, 20);
+        var before = new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP", [header, child]);
+        var existing = OverlayQuickSettingsSectionRendering.PlanRows(
+            new Dictionary<QuickSettingsRowId, QuickSettingsRenderedRowDescriptor>(), before);
+        var currentDescriptors = existing.DesiredRows.ToDictionary(row => row.Row.RowId);
+        var changed = before with
+        {
+            Rows =
+            [
+                header,
+                child with { Label = "PL1 value" },
+            ],
+        };
+
+        var plan = OverlayQuickSettingsSectionRendering.PlanRows(currentDescriptors, changed);
+
+        Assert.Equal([child.RowId], plan.ChangedRowIds);
+
+        var differentRenderer = changed with
+        {
+            Rows = [header, child with { CommitPolicy = QuickSettingsCommitPolicy.Immediate }],
+        };
+        plan = OverlayQuickSettingsSectionRendering.PlanRows(currentDescriptors, differentRenderer);
+        Assert.Equal([child.RowId], plan.ChangedRowIds);
+    }
+
+    [Fact]
+    public void Selection_tracks_row_id_across_insertions_and_falls_back_when_selected_row_disappears()
+    {
+        var selection = new OverlayRowSelection();
+        var enabled = QuickSettingsRowId.DeviceTdpEnabled;
+        var firstChild = QuickSettingsRowId.DeviceTdpAcPl1;
+        var conditionalChild = QuickSettingsRowId.DeviceTdpAcPl2;
+        var capabilities = new OverlayRowCapabilities(() => true);
+        selection.SetRows([capabilities, capabilities, capabilities], preferredIndex: 2);
+
+        var afterInsertion = new QuickSettingsRowId?[] { enabled, conditionalChild, firstChild };
+        var preferredIndex = OverlayQuickSettingsSectionRendering.FindPreferredRowIndex(afterInsertion, conditionalChild);
+        selection.SetRows([capabilities, capabilities, capabilities], preferredIndex);
+
+        Assert.Equal(1, selection.SelectedIndex);
+        Assert.Equal(conditionalChild, afterInsertion[selection.SelectedIndex!.Value]);
+
+        var afterRemoval = new QuickSettingsRowId?[] { enabled, firstChild };
+        preferredIndex = OverlayQuickSettingsSectionRendering.FindPreferredRowIndex(afterRemoval, conditionalChild);
+        selection.SetRows([capabilities, capabilities], preferredIndex);
+
+        Assert.Null(preferredIndex);
+        Assert.Equal(0, selection.SelectedIndex);
+        Assert.Equal(enabled, afterRemoval[selection.SelectedIndex!.Value]);
+    }
+
+    private static Dictionary<QuickSettingsRowId, object> ApplyRowPlan(
+        IReadOnlyDictionary<QuickSettingsRowId, QuickSettingsRenderedRowDescriptor> previousRows,
+        IReadOnlyDictionary<QuickSettingsRowId, object> previousControls,
+        QuickSettingsSectionRowPlan plan)
+    {
+        var controls = new Dictionary<QuickSettingsRowId, object>();
+        foreach (var row in plan.DesiredRows)
+        {
+            if (!plan.ChangedRowIds.Contains(row.Row.RowId) &&
+                previousRows.ContainsKey(row.Row.RowId) &&
+                previousControls.TryGetValue(row.Row.RowId, out var control))
+                controls.Add(row.Row.RowId, control);
+            else
+                controls.Add(row.Row.RowId, new object());
+        }
+
+        return controls;
+    }
+
+    [Fact]
     public void Profile_fps_value_only_update_identifies_only_the_changed_power_source_row()
     {
         var before = ProfileFpsPage(ac: 60, dc: 45);
