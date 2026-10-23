@@ -25,11 +25,16 @@ public sealed class OverlayControllerInputRouterTests
     {
         private readonly List<OverlayNavigationAction> _actions = [];
         private readonly SemaphoreSlim _signal = new(0);
-        public Func<OverlayNavigationAction, Task> Callback => action =>
+        private readonly Func<OverlayNavigationAction, Task>? _afterEnqueue;
+
+        public Delivery(Func<OverlayNavigationAction, Task>? afterEnqueue = null) => _afterEnqueue = afterEnqueue;
+
+        public Func<OverlayNavigationAction, Task> Callback => async action =>
         {
             lock (_actions) _actions.Add(action);
             _signal.Release();
-            return Task.CompletedTask;
+            if (_afterEnqueue is not null)
+                await _afterEnqueue(action);
         };
         // Cumulative: waits until at least <paramref name="count"/> actions have been delivered in
         // total, so a test may call it more than once as it drives successive edges.
@@ -94,6 +99,249 @@ public sealed class OverlayControllerInputRouterTests
         Assert.Equal(
             new[] { OverlayNavigationAction.NavigateUp, OverlayNavigationAction.NavigateDown, OverlayNavigationAction.NavigateLeft, OverlayNavigationAction.NavigateRight },
             actions);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Held_horizontal_dpad_emits_immediately_then_repeats_and_stops_on_release(bool left)
+    {
+        var source = new FakeSource();
+        var initialAction = left ? OverlayNavigationAction.NavigateLeft : OverlayNavigationAction.NavigateRight;
+        var repeatAction = left ? OverlayNavigationAction.RepeatNavigateLeft : OverlayNavigationAction.RepeatNavigateRight;
+        var releaseThirdDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var repeatCount = 0;
+        var delivery = new Delivery(async action =>
+        {
+            if (action == repeatAction && Interlocked.Increment(ref repeatCount) == 2)
+                await releaseThirdDelivery.Task;
+        });
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(left ? Buttons(left: true) : Buttons(right: true));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var initial = await delivery.WaitForAsync(1);
+        Assert.Equal(initialAction, initial[0]);
+
+        var actions = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { initialAction, repeatAction }, actions);
+        Assert.InRange(stopwatch.Elapsed, TimeSpan.FromMilliseconds(250), TimeSpan.FromSeconds(5));
+
+        var continued = await delivery.WaitForAsync(3);
+        Assert.Equal(new[] { initialAction, repeatAction, repeatAction }, continued);
+
+        source.Raise(Buttons());
+        releaseThirdDelivery.TrySetResult();
+        await Task.Delay(200);
+        Assert.Equal(new[] { initialAction, repeatAction, repeatAction }, delivery.Snapshot());
+    }
+
+    [Fact]
+    public async Task Release_before_initial_repeat_delay_cancels_the_pending_repeat()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(right: true));
+        await delivery.WaitForAsync(1);
+        source.Raise(Buttons());
+        await Task.Delay(400);
+
+        Assert.Equal(new[] { OverlayNavigationAction.NavigateRight }, delivery.Snapshot());
+    }
+
+    [Fact]
+    public async Task Horizontal_dpad_held_at_capture_start_requires_neutral_before_repeat_can_arm()
+    {
+        var source = new FakeSource { LatestState = State(Buttons(right: true)) };
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(right: true));
+        await Task.Delay(400);
+        Assert.Empty(delivery.Snapshot());
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(right: true));
+        var actions = await delivery.WaitForAsync(1);
+        Assert.Equal(OverlayNavigationAction.NavigateRight, actions[0]);
+        actions = await delivery.WaitForAsync(2);
+        Assert.Equal(OverlayNavigationAction.RepeatNavigateRight, actions[1]);
+    }
+
+    [Fact]
+    public async Task Held_dpad_up_and_down_remain_single_shot()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(up: true));
+        await delivery.WaitForAsync(1);
+        source.Raise(Buttons());
+        source.Raise(Buttons(down: true));
+        await delivery.WaitForAsync(2);
+        await Task.Delay(400);
+
+        Assert.Equal(new[] { OverlayNavigationAction.NavigateUp, OverlayNavigationAction.NavigateDown }, delivery.Snapshot());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cardinal_to_diagonal_cancels_an_active_horizontal_repeat(bool left)
+    {
+        var source = new FakeSource();
+        var initialAction = left ? OverlayNavigationAction.NavigateLeft : OverlayNavigationAction.NavigateRight;
+        var repeatAction = left ? OverlayNavigationAction.RepeatNavigateLeft : OverlayNavigationAction.RepeatNavigateRight;
+        var releaseRepeatDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var repeatEnteredDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delivery = new Delivery(async action =>
+        {
+            if (action == repeatAction)
+            {
+                repeatEnteredDelivery.TrySetResult();
+                await releaseRepeatDelivery.Task;
+            }
+        });
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(left ? Buttons(left: true) : Buttons(right: true));
+        var initial = await delivery.WaitForAsync(1);
+        Assert.Equal(initialAction, initial[0]);
+        var repeated = await delivery.WaitForAsync(2);
+        Assert.Equal(repeatAction, repeated[1]);
+        await repeatEnteredDelivery.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        source.Raise(left ? Buttons(down: true, left: true) : Buttons(up: true, right: true));
+        source.Raise(left ? Buttons(down: true, left: true, b: true) : Buttons(up: true, right: true, b: true)); // ordering sentinel after cancellation
+        releaseRepeatDelivery.TrySetResult();
+        var afterDiagonal = await delivery.WaitForAsync(3);
+        Assert.Equal(new[]
+        {
+            initialAction,
+            repeatAction,
+            OverlayNavigationAction.Back,
+        }, afterDiagonal);
+
+        await Task.Delay(200);
+        Assert.Equal(afterDiagonal, delivery.Snapshot());
+    }
+
+    [Theory]
+    [InlineData("stop")]
+    [InlineData("source")]
+    [InlineData("dispose")]
+    public async Task Router_retirement_and_source_loss_stop_horizontal_repeat(string stopMode)
+    {
+        var source = new FakeSource();
+        var releaseRepeatDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delivery = stopMode == "dispose"
+            ? new Delivery()
+            : new Delivery(action => action == OverlayNavigationAction.RepeatNavigateLeft
+                ? releaseRepeatDelivery.Task
+                : Task.CompletedTask);
+        var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+        source.Raise(Buttons(left: true));
+        var actions = await delivery.WaitForAsync(1);
+        Assert.Equal(OverlayNavigationAction.NavigateLeft, actions[0]);
+        actions = await delivery.WaitForAsync(2);
+        Assert.Equal(OverlayNavigationAction.RepeatNavigateLeft, actions[1]);
+
+        switch (stopMode)
+        {
+            case "stop": router.StopAcceptingNavigation(); break;
+            case "source": router.NotifySourceUnavailable(); break;
+            case "dispose": router.Dispose(); break;
+        }
+
+        if (stopMode != "dispose")
+            releaseRepeatDelivery.TrySetResult();
+        var stoppedAt = delivery.Snapshot();
+        await Task.Delay(200);
+        Assert.Equal(stoppedAt, delivery.Snapshot());
+        router.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cardinal_to_diagonal_emits_only_the_initial_cardinal_until_full_neutral(bool left)
+    {
+        var initial = left ? OverlayNavigationAction.NavigateLeft : OverlayNavigationAction.NavigateRight;
+        var afterNeutral = left ? OverlayNavigationAction.NavigateDown : OverlayNavigationAction.NavigateUp;
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(left ? Buttons(left: true) : Buttons(right: true));
+        source.Raise(left ? Buttons(down: true, left: true) : Buttons(up: true, right: true));
+        source.Raise(left ? Buttons(left: true) : Buttons(right: true)); // cardinal again, still disarmed
+        source.Raise(left ? Buttons(left: true, a: true) : Buttons(right: true, a: true));
+        var throughSentinel = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { initial, OverlayNavigationAction.Accept }, throughSentinel);
+
+        source.Raise(Buttons());
+        source.Raise(left ? Buttons(down: true) : Buttons(up: true));
+        var actions = await delivery.WaitForAsync(3);
+        Assert.Equal(new[] { initial, OverlayNavigationAction.Accept, afterNeutral }, actions);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Starting_capture_in_diagonal_requires_neutral_before_any_dpad_action(bool upRight)
+    {
+        var source = new FakeSource
+        {
+            LatestState = State(upRight ? Buttons(up: true, right: true) : Buttons(down: true, left: true)),
+        };
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(upRight ? Buttons(right: true, a: true) : Buttons(left: true, a: true)); // cardinal without neutral
+        var throughSentinel = await delivery.WaitForAsync(1);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept }, throughSentinel);
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(up: true));
+        var actions = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept, OverlayNavigationAction.NavigateUp }, actions);
+    }
+
+    [Fact]
+    public async Task Entering_diagonal_from_neutral_emits_no_action_until_full_neutral()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(up: true, right: true));
+        source.Raise(Buttons(up: true));
+        source.Raise(Buttons(up: true, a: true));
+        var firstSentinel = await delivery.WaitForAsync(1);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept }, firstSentinel);
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(down: true, left: true));
+        source.Raise(Buttons(down: true, left: true, a: true));
+        var secondSentinel = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept, OverlayNavigationAction.Accept }, secondSentinel);
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(left: true));
+        var actions = await delivery.WaitForAsync(3);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept, OverlayNavigationAction.Accept, OverlayNavigationAction.NavigateLeft }, actions);
     }
 
     [Fact]
@@ -171,7 +419,7 @@ public sealed class OverlayControllerInputRouterTests
         source.Raise(Buttons(rb: true)); // still held
         source.Raise(Buttons(rb: true));
         await delivery.WaitForAsync(1);
-        await Task.Delay(100);
+        await Task.Delay(400);
         Assert.Equal(new[] { OverlayNavigationAction.NextTab }, delivery.Snapshot());
     }
 
@@ -249,6 +497,24 @@ public sealed class OverlayControllerInputRouterTests
         Assert.False(wait.IsCompleted);
 
         source.Raise(Buttons()); // release
+        Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Suppressed_diagonal_still_blocks_publisher_release_until_all_dpad_directions_are_neutral()
+    {
+        var source = new FakeSource();
+        using var router = new OverlayControllerInputRouter(source, _ => Task.CompletedTask);
+        router.Start();
+        source.Raise(Buttons(up: true, right: true));
+
+        var wait = router.WaitForConsumedControlsReleaseAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        source.Raise(Buttons(right: true));
+        Assert.False(wait.IsCompleted);
+
+        source.Raise(Buttons());
         Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
@@ -341,7 +607,7 @@ public sealed class OverlayControllerInputRouterTests
         source.RaiseState(Sticks(left: Stick(Active, 0)));  // still held
         source.RaiseState(Sticks(left: Stick(30_000, 0)));  // farther, same direction
         await delivery.WaitForAsync(1);
-        await Task.Delay(100);
+        await Task.Delay(400);
         Assert.Equal(new[] { OverlayNavigationAction.NavigateRight }, delivery.Snapshot());
 
         source.RaiseState(Sticks(left: Stick(0, 0)));       // neutral -> re-arm

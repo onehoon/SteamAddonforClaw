@@ -58,6 +58,7 @@ public partial class App : Application
             return;
         }
 
+        _window?.CancelNumericSliderHoldRepeat();
         _ = SendUserDismissAsync(outsideClick);
     }
 
@@ -459,6 +460,9 @@ public partial class App : Application
         OverlayLog.Debug("Navigation", $"{action} received.");
         if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
         {
+            if (Volatile.Read(ref _userDismissInProgress) != 0)
+                return;
+
             try
             {
                 switch (action)
@@ -484,6 +488,12 @@ public partial class App : Application
                         break;
                     case OverlayNavigationAction.NavigateRight:
                         _window?.AdjustSelectedRow(+1);
+                        break;
+                    case OverlayNavigationAction.RepeatNavigateLeft:
+                        _window?.RepeatAdjustSelectedNumericSlider(-1);
+                        break;
+                    case OverlayNavigationAction.RepeatNavigateRight:
+                        _window?.RepeatAdjustSelectedNumericSlider(+1);
                         break;
                     case OverlayNavigationAction.Accept:
                         _window?.ActivateSelectedRow();

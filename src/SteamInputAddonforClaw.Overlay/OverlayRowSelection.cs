@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Contracts.Frontend;
+
 namespace SteamInputAddonforClaw.Overlay;
 
 // OQ5-UI-04: the narrow capability contract a selectable Overlay row exposes. Enough for the
@@ -6,7 +8,8 @@ namespace SteamInputAddonforClaw.Overlay;
 internal sealed record OverlayRowCapabilities(
     Func<bool> IsSelectable,
     Action? Activate = null,
-    Action<int>? Adjust = null);
+    Action<int>? Adjust = null,
+    bool AllowsDpadHoldRepeat = false);
 
 // One logical controller selection for the active Overlay page. Pure state: it knows nothing
 // about controller hardware, tabs, XAML, scrolling, settings, or feature mutation. Bounded /
@@ -17,6 +20,7 @@ internal sealed class OverlayRowSelection
     private int? _selectedIndex;
 
     internal int? SelectedIndex => _selectedIndex;
+    internal OverlayRowCapabilities? SelectedCapabilities => Current;
 
     // Swap in the active page's rows and select its first selectable row (or clear).
     internal void SetRows(IReadOnlyList<OverlayRowCapabilities> rows) => SetRows(rows, preferredIndex: null);
@@ -105,5 +109,48 @@ internal sealed class OverlayRowSelection
             if (_rows[i].IsSelectable())
                 return i;
         return null;
+    }
+}
+
+// A transient Overlay-only guard tying controller repeats to the exact enabled slider targeted by
+// the initial press. It deliberately carries no Runtime or transport authority.
+internal sealed class OverlayNumericSliderRepeatTarget
+{
+    private AddonQuickSettingsTabId? _tab;
+    private OverlayRowCapabilities? _row;
+    private int _delta;
+
+    internal void Arm(AddonQuickSettingsTabId tab, OverlayRowCapabilities? row, int delta)
+    {
+        Clear();
+        if (delta is not (-1 or 1) || row is not { AllowsDpadHoldRepeat: true, Adjust: not null } || !row.IsSelectable())
+            return;
+
+        _tab = tab;
+        _row = row;
+        _delta = delta;
+    }
+
+    internal bool TryAdjust(AddonQuickSettingsTabId tab, OverlayRowCapabilities? selectedRow, int delta)
+    {
+        if (_row is null)
+            return false;
+
+        if (_tab != tab || !ReferenceEquals(_row, selectedRow) || _delta != delta ||
+            !_row.AllowsDpadHoldRepeat || _row.Adjust is not { } adjust || !_row.IsSelectable())
+        {
+            Clear();
+            return false;
+        }
+
+        adjust(_delta);
+        return true;
+    }
+
+    internal void Clear()
+    {
+        _tab = null;
+        _row = null;
+        _delta = 0;
     }
 }

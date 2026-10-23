@@ -239,6 +239,8 @@ public sealed partial class OverlayWindow
     private void RebuildQuickSettingsContent(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
     {
         var (preferredRowId, previousSelection) = CaptureQuickSettingsSelection(surface);
+        if (_tabState.SelectedTab == surface.TabId)
+            _numericSliderRepeatTarget.Clear();
 
         surface.ToggleRows.Clear();
         surface.NumericSliderRows.Clear();
@@ -275,6 +277,11 @@ public sealed partial class OverlayWindow
     {
         var (preferredRowId, previousSelection) = CaptureQuickSettingsSelection(surface);
         var requestedIds = page.Sections.Select(section => section.SectionId).ToHashSet();
+        var shapeChanged = surface.RenderedSections.Count != requestedIds.Count || page.Sections.Any(section =>
+            !surface.RenderedSections.TryGetValue(section.SectionId, out var rendered) ||
+            !OverlayQuickSettingsSectionRendering.HasSameShape(rendered.Section, section));
+        if (shapeChanged && _tabState.SelectedTab == surface.TabId)
+            _numericSliderRepeatTarget.Clear();
 
         foreach (var sectionId in surface.RenderedSections.Keys.Where(id => !requestedIds.Contains(id)).ToArray())
         {

@@ -5,6 +5,21 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
 
+internal static class OverlayNavigationWireValidation
+{
+    internal static bool IsValidNavigation(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.Navigation
+        && message.Navigation is { } action && Enum.IsDefined(action)
+        && message.Command is null && message.State is null && message.Error is null
+        && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null
+        && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null
+        && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null
+        && !OverlayShortcutWireValidation.HasShortcutPayload(message)
+        && !OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message)
+        && !OverlayProductionControlsWireValidation.HasPayload(message);
+}
+
 internal static class OverlayCommandWireValidation
 {
     internal static bool IsValidCommand(OverlayWireMessage message) =>

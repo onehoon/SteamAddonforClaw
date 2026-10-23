@@ -39,7 +39,7 @@ public sealed class OverlayTransportTests
     [Fact]
     public void Active_profile_show_remains_a_narrow_overlay_command()
     {
-        Assert.Equal(20, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(21, OverlayTransportProtocol.CurrentVersion);
         Assert.Equal(88, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
@@ -51,6 +51,38 @@ public sealed class OverlayTransportTests
         Assert.False(OverlayCommandWireValidation.IsValidCommand(command with { Navigation = OverlayNavigationAction.NavigateDown }));
         Assert.False(OverlayCommandWireValidation.IsValidCommand(command with { ProtocolVersion = OverlayTransportProtocol.CurrentVersion - 1 }));
         Assert.False(OverlayCommandWireValidation.IsValidCommand(command with { Command = (OverlayCommand)99 }));
+    }
+
+    [Fact]
+    public async Task Repeat_only_navigation_actions_round_trip_and_unknown_navigation_is_rejected()
+    {
+        Assert.Equal(21, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(88, FrontendTransportProtocol.CurrentVersion);
+
+        foreach (var action in new[]
+        {
+            OverlayNavigationAction.RepeatNavigateLeft,
+            OverlayNavigationAction.RepeatNavigateRight,
+        })
+        {
+            var message = await RoundTripAsync(new(
+                OverlayTransportProtocol.CurrentVersion,
+                OverlayWireMessageKind.Navigation,
+                Navigation: action));
+            Assert.True(OverlayNavigationWireValidation.IsValidNavigation(message));
+            Assert.Equal(action, message.Navigation);
+        }
+
+        var validRepeat = new OverlayWireMessage(
+            OverlayTransportProtocol.CurrentVersion,
+            OverlayWireMessageKind.Navigation,
+            Navigation: OverlayNavigationAction.RepeatNavigateRight);
+        Assert.False(OverlayNavigationWireValidation.IsValidNavigation(validRepeat with { Navigation = (OverlayNavigationAction)99 }));
+        Assert.False(OverlayNavigationWireValidation.IsValidNavigation(validRepeat with { Command = OverlayCommand.Show }));
+        Assert.False(OverlayNavigationWireValidation.IsValidNavigation(validRepeat with
+        {
+            QuickSettingsPage = new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, null, true, null, [], []),
+        }));
     }
 
     [Fact]
@@ -262,6 +294,7 @@ public sealed class OverlayTransportTests
 
         Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
         Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        Assert.False(await server.SendNavigationAsync((OverlayNavigationAction)99));
         Assert.True(await server.SendNavigationAsync(OverlayNavigationAction.NavigateDown));
         await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
         lock (actions) Assert.Equal([OverlayNavigationAction.NavigateDown], actions);
@@ -269,6 +302,37 @@ public sealed class OverlayTransportTests
 
         Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
         await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Overlay_client_rejects_an_unknown_navigation_enum_value()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var run = client.RunAsync(_ => Task.CompletedTask, _ => Task.CompletedTask);
+        await pipe.WaitForConnectionAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        using var writeGate = new SemaphoreSlim(1, 1);
+        var hello = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
+        Assert.Equal(OverlayWireMessageKind.Handshake, hello.Kind);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(pipe,
+            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState,
+                TabOrderState: AddonQuickSettingsTabOrderProduct.Create(AddonQuickSettingsTabOrderContract.DefaultOrder)),
+            writeGate, CancellationToken.None);
+        var ready = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
+        Assert.Equal(OverlayState.Ready, ready.State);
+
+        var payload = System.Text.Encoding.UTF8.GetBytes(
+            "{\"ProtocolVersion\":21,\"Kind\":\"Navigation\",\"Navigation\":99}");
+        var prefix = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(prefix, payload.Length);
+        await pipe.WriteAsync(prefix);
+        await pipe.WriteAsync(payload);
+        await pipe.FlushAsync();
+
+        await Assert.ThrowsAsync<FrontendProtocolException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
@@ -280,6 +344,7 @@ public sealed class OverlayTransportTests
 
         // No client connected yet -> unready.
         Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.Accept));
+        Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.RepeatNavigateLeft));
 
         await using var client = new NamedPipeOverlayClient(pipeName);
         var run = client.RunAsync(_ => Task.CompletedTask, _ => Task.CompletedTask);
@@ -287,11 +352,13 @@ public sealed class OverlayTransportTests
 
         // Ready but still Hidden (no Show yet).
         Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.Accept));
+        Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.RepeatNavigateRight));
 
         Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
         Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
         // Back to Hidden -> rejected again.
         Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.Accept));
+        Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.RepeatNavigateLeft));
 
         Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
         await run.WaitAsync(TimeSpan.FromSeconds(5));

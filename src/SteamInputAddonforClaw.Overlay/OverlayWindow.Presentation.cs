@@ -77,6 +77,7 @@ public sealed partial class OverlayWindow
     internal async Task HideForPocAsync()
     {
         _isVisible = false;
+        _numericSliderRepeatTarget.Clear();
         // Normal user Back/outside-click flushes valid drafts before sending DismissRequested.
         // A Runtime-forced Hide remains lifecycle cleanup: cancel any still-unsubmitted work and
         // never wait for a debounce or feature mutation here.

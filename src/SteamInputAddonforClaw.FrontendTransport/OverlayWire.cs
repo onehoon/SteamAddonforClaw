@@ -43,13 +43,26 @@ internal static class OverlayTransportProtocol
     // Version 18 adds the shared Profile Minimum GPU Clock section and AC/DC driver-clock indexes.
     // Version 19 adds a payload-free conditional no-running-game Profile recheck request.
     // Version 20 adds correlated Controller for Steam / gyroscope mutations.
-    internal const int CurrentVersion = 20;
+    // Version 21 adds repeat-only semantic Left/Right navigation actions for selected native numeric sliders.
+    internal const int CurrentVersion = 21;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
 internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerForSteamMutationRequest, ControllerForSteamMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest }
 internal enum OverlayCommand { Show, Hide, Shutdown, ShowActiveProfile }
-internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
+internal enum OverlayNavigationAction
+{
+    NavigateUp,
+    NavigateDown,
+    NavigateLeft,
+    NavigateRight,
+    Accept,
+    Back,
+    PreviousTab,
+    NextTab,
+    RepeatNavigateLeft,
+    RepeatNavigateRight,
+}
 internal enum OverlayState { Ready, Visible, Hidden }
 
 /// <summary>Overlay -> Runtime shared Quick Settings mutation request (SF-V2-06 section 9.2).

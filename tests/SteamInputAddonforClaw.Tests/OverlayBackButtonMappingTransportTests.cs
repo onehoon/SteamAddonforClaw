@@ -19,7 +19,7 @@ public sealed class OverlayBackButtonMappingTransportTests
     [Fact]
     public void Overlay_protocol_is_v18()
     {
-        Assert.Equal(20, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(21, OverlayTransportProtocol.CurrentVersion);
     }
 
     [Fact]

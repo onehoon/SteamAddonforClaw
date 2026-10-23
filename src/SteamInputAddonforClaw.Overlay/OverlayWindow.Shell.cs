@@ -299,6 +299,7 @@ public sealed partial class OverlayWindow
     // then apply the row-selection visual.
     private void ApplySelectedTabVisualState()
     {
+        _numericSliderRepeatTarget.Clear();
         var selected = _tabState.SelectedTab;
         PageTitle.Text = LabelFor(selected);
         ApplySelectedHeaderVisual();
