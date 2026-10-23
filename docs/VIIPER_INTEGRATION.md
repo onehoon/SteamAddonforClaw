@@ -20,7 +20,7 @@ Steam/Big Picture, Settings selects Steam Deck (default) or DualSense Edge
 | Item | Current contract |
 | --- | --- |
 | Canonical embedded API | `lib/viiper` typed ABI |
-| Embedded VIIPER revision | `cc7880899c481d3ddcd99b348226454486b73d34` |
+| Embedded VIIPER revision | `1b99127271e0ef07c8f0e7e637498f82b24143d8` |
 | Tracked Windows usbip-win2 package | `0.9.8.1` |
 | Steam/BPM presentation | Steam Deck (default) or DualSense Edge (experimental), by Settings preference |
 | Regular Windows routing target | Typed Xbox360 |
