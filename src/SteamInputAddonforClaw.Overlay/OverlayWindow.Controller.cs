@@ -308,6 +308,9 @@ public sealed partial class OverlayWindow
 
     internal void ApplyFrontendSettingsState(FrontendSettingsSnapshot settings, bool controllerLedAvailable, bool settingsAvailable)
     {
+        var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller
+            ? _rowSelection.SelectedIndex
+            : null;
         _frontendSettingsSnapshot = settings;
         _frontendSettingsAvailable = settingsAvailable;
         _controllerForSteam = settings.ControllerForSteam;
@@ -316,6 +319,7 @@ public sealed partial class OverlayWindow
         RenderControllerForSteamRows();
         RenderControllerLedRows();
         ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
+        RestoreControllerRowSelection(preferredControllerIndex);
     }
 
     internal void ApplyFrontendSettingsMutationResult(
@@ -342,6 +346,9 @@ public sealed partial class OverlayWindow
         bool led,
         ControllerForSteamMutationKind? controllerForSteamMutation = null)
     {
+        var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller
+            ? _rowSelection.SelectedIndex
+            : null;
         if (led) _controllerLedMutationInFlight = false;
         else if (controllerForSteamMutation == ControllerForSteamMutationKind.Controller)
         {
@@ -357,6 +364,22 @@ public sealed partial class OverlayWindow
         RenderControllerForSteamRows();
         RenderControllerLedRows();
         RenderQuickSettingsCurrentPowerSourceRow();
+        RestoreControllerRowSelection(preferredControllerIndex);
+    }
+
+    private void RestoreControllerRowSelection(int? preferredIndex)
+    {
+        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Controller ||
+            _steamControllerMutationInFlight ||
+            _gyroscopeMutationInFlight ||
+            _backButtonMutationInFlight ||
+            _controllerLedMutationInFlight ||
+            _controllerVibrationMutationInFlight)
+            return;
+
+        // Reconcile only after every Controller renderer has applied its current availability.
+        _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
+        ApplyRowSelectionVisual();
     }
 
     private void RequestControllerLedEnabled(bool enabled)
