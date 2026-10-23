@@ -12,11 +12,55 @@ internal static class OverlayQuickSettingsSectionRendering
         QuickSettingsRowId RowId,
         QuickSettingsControlKind ControlKind,
         QuickSettingsSliderKind? SliderKind,
+        QuickSettingsCommitPolicy CommitPolicy,
         bool Visible,
         bool WellFormed,
         string Label,
         string? NumericSuffix,
         QuickSettingsDiscreteOption[]? DiscreteOptions);
+
+    internal static IReadOnlyList<QuickSettingsRenderedRowDescriptor> DescribeRows(QuickSettingsSection section)
+    {
+        var usesFeatureHeader = TryGetFeatureHeaderToggle(section, out var headerToggle);
+        return section.Rows
+            .Where(row => row.Visible && QuickSettingsRowRendering.IsWellFormed(row))
+            .Select(row =>
+            {
+                var isHeader = usesFeatureHeader && row.RowId == headerToggle.RowId;
+                return new QuickSettingsRenderedRowDescriptor(
+                    row,
+                    isHeader,
+                    isHeader ? section.Label! : row.Label,
+                    isHeader);
+            })
+            .ToArray();
+    }
+
+    internal static QuickSettingsSectionRowPlan PlanRows(
+        IReadOnlyDictionary<QuickSettingsRowId, QuickSettingsRenderedRowDescriptor> existingRows,
+        QuickSettingsSection section)
+    {
+        var desiredRows = DescribeRows(section);
+        var desiredById = desiredRows.ToDictionary(row => row.Row.RowId);
+        var changedRowIds = existingRows.Keys
+            .Concat(desiredById.Keys)
+            .Where(rowId => !existingRows.TryGetValue(rowId, out var existing) ||
+                !desiredById.TryGetValue(rowId, out var desired) ||
+                !CanReuseRenderer(existing, desired))
+            .ToHashSet();
+        return new QuickSettingsSectionRowPlan(desiredRows, changedRowIds);
+    }
+
+    internal static int? FindPreferredRowIndex(
+        IReadOnlyList<QuickSettingsRowId?> rowIds,
+        QuickSettingsRowId? preferredRowId)
+    {
+        if (preferredRowId is not { } target) return null;
+        for (var index = 0; index < rowIds.Count; index++)
+            if (rowIds[index] == target)
+                return index;
+        return null;
+    }
 
     internal static bool TryGetFeatureHeaderToggle(QuickSettingsSection section, out QuickSettingsRow toggleRow)
     {
@@ -46,6 +90,7 @@ internal static class OverlayQuickSettingsSectionRendering
             if (oldShape.RowId != newShape.RowId ||
                 oldShape.ControlKind != newShape.ControlKind ||
                 oldShape.SliderKind != newShape.SliderKind ||
+                oldShape.CommitPolicy != newShape.CommitPolicy ||
                 oldShape.Visible != newShape.Visible ||
                 oldShape.WellFormed != newShape.WellFormed ||
                 !string.Equals(oldShape.Label, newShape.Label, StringComparison.Ordinal) ||
@@ -64,11 +109,32 @@ internal static class OverlayQuickSettingsSectionRendering
             row.RowId,
             row.ControlKind,
             row.ControlKind == QuickSettingsControlKind.Slider ? spec?.Kind : null,
+            row.CommitPolicy,
             row.Visible,
             QuickSettingsRowRendering.IsWellFormed(row),
             row.Label,
             spec is { Kind: QuickSettingsSliderKind.Numeric } ? spec.Suffix : null,
             spec is { Kind: QuickSettingsSliderKind.Discrete } ? spec.Options?.ToArray() : null);
+    }
+
+    private static bool CanReuseRenderer(
+        QuickSettingsRenderedRowDescriptor previous,
+        QuickSettingsRenderedRowDescriptor current)
+    {
+        var oldShape = RowShapeOf(previous.Row);
+        var newShape = RowShapeOf(current.Row);
+        return oldShape.RowId == newShape.RowId &&
+            oldShape.ControlKind == newShape.ControlKind &&
+            oldShape.SliderKind == newShape.SliderKind &&
+            oldShape.CommitPolicy == newShape.CommitPolicy &&
+            oldShape.Visible == newShape.Visible &&
+            oldShape.WellFormed == newShape.WellFormed &&
+            (current.IsFeatureHeader || string.Equals(oldShape.Label, newShape.Label, StringComparison.Ordinal)) &&
+            string.Equals(oldShape.NumericSuffix, newShape.NumericSuffix, StringComparison.Ordinal) &&
+            DiscreteOptionsEqual(oldShape.DiscreteOptions, newShape.DiscreteOptions) &&
+            previous.IsFeatureHeader == current.IsFeatureHeader &&
+            previous.StrongLabel == current.StrongLabel &&
+            string.Equals(previous.DisplayLabel, current.DisplayLabel, StringComparison.Ordinal);
     }
 
     private static bool DiscreteOptionsEqual(
@@ -81,13 +147,34 @@ internal static class OverlayQuickSettingsSectionRendering
     }
 }
 
+internal sealed record QuickSettingsRenderedRowDescriptor(
+    QuickSettingsRow Row,
+    bool IsFeatureHeader,
+    string DisplayLabel,
+    bool StrongLabel);
+
+internal sealed record QuickSettingsSectionRowPlan(
+    IReadOnlyList<QuickSettingsRenderedRowDescriptor> DesiredRows,
+    IReadOnlySet<QuickSettingsRowId> ChangedRowIds);
+
 public sealed partial class OverlayWindow
 {
+    private sealed class RenderedQuickSettingsRow
+    {
+        internal required QuickSettingsRenderedRowDescriptor Descriptor { get; set; }
+        internal required OverlayRow Row { get; init; }
+    }
+
     private sealed class RenderedQuickSettingsSection
     {
         internal required QuickSettingsSection Section { get; set; }
-        internal Border? Card { get; init; }
-        internal required IReadOnlyList<OverlayRow> Rows { get; init; }
+        internal Border? Card { get; set; }
+        internal StackPanel? RowStack { get; set; }
+        internal StackPanel? DetailStack { get; set; }
+        internal Border? Heading { get; set; }
+        internal string? HeadingLabel { get; set; }
+        internal Dictionary<QuickSettingsRowId, RenderedQuickSettingsRow> RenderedRows { get; } = new();
+        internal IReadOnlyList<OverlayRow> Rows { get; set; } = [];
     }
 
     // Page-local state shared by the generic Device/Profile renderer. Binding is assigned only after
@@ -170,8 +257,8 @@ public sealed partial class OverlayWindow
         return content;
     }
 
-    // Render the binder's current effective page. Stable sections update their existing controls;
-    // only sections whose renderer shape changed replace their own card and rows.
+    // Render the binder's current effective page. Value-only updates touch changed rows; structural
+    // updates retain each section card and every compatible row control.
     private void RenderQuickSettingsPage(QuickSettingsSurface surface, QuickSettingsRowId? forceRowId = null)
     {
         if (surface.Binding is null) return;
@@ -267,7 +354,7 @@ public sealed partial class OverlayWindow
     // Full rebuild is reserved for the initial render and whole-page availability transitions.
     private void RebuildQuickSettingsContent(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
     {
-        var (preferredRowId, previousSelection) = CaptureQuickSettingsSelection(surface);
+        var preferredRowId = CaptureQuickSettingsSelection(surface);
         if (_tabState.SelectedTab == surface.TabId)
             _numericSliderRepeatTarget.Clear();
 
@@ -296,15 +383,15 @@ public sealed partial class OverlayWindow
 
         UpdateQuickSettingsPageRows(surface, page);
         ApplyQuickSettingsSectionSeparators(surface, page);
-        RestoreQuickSettingsSelection(surface, preferredRowId, previousSelection, bringIntoView: true);
+        RestoreQuickSettingsSelection(surface, preferredRowId, bringIntoView: true);
     }
 
-    // An authoritative section update keeps every same-ID/same-shape section attached and replaces
-    // only changed or removed sections. In particular, a feature toggle may add/remove child rows
-    // without detaching unrelated feature cards and their ToggleSwitch instances.
+    // An authoritative section update keeps same-ID sections attached and reconciles changed rows
+    // inside their existing card. A feature toggle may add/remove child rows without detaching its
+    // header ToggleSwitch or unrelated feature cards.
     private void ReconcileQuickSettingsSections(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
     {
-        var (preferredRowId, previousSelection) = CaptureQuickSettingsSelection(surface);
+        var preferredRowId = CaptureQuickSettingsSelection(surface);
         var requestedIds = page.Sections.Select(section => section.SectionId).ToHashSet();
         var shapeChanged = surface.RenderedSections.Count != requestedIds.Count || page.Sections.Any(section =>
             !surface.RenderedSections.TryGetValue(section.SectionId, out var rendered) ||
@@ -328,59 +415,125 @@ public sealed partial class OverlayWindow
                 continue;
             }
 
-            if (rendered is not null)
-                RemoveQuickSettingsSection(surface, rendered);
-
-            surface.RenderedSections[section.SectionId] = BuildQuickSettingsSection(surface, section);
+            surface.RenderedSections[section.SectionId] = rendered is null
+                ? BuildQuickSettingsSection(surface, section)
+                : ReconcileQuickSettingsSection(surface, rendered, section);
         }
 
         ReorderQuickSettingsSectionCards(surface, page);
         ApplyQuickSettingsSectionSeparators(surface, page);
         UpdateQuickSettingsPageRows(surface, page);
-        RestoreQuickSettingsSelection(surface, preferredRowId, previousSelection, bringIntoView: false);
+        RestoreQuickSettingsSelection(surface, preferredRowId, bringIntoView: false);
     }
 
     private RenderedQuickSettingsSection BuildQuickSettingsSection(QuickSettingsSurface surface, QuickSettingsSection section)
     {
-        var visibleRows = section.Rows.Where(row => row.Visible).ToArray();
-        if (visibleRows.Length == 0)
+        var desiredRows = OverlayQuickSettingsSectionRendering.DescribeRows(section);
+        if (desiredRows.Count == 0)
             return new RenderedQuickSettingsSection { Section = section, Rows = [] };
 
         var sectionPanel = new StackPanel();
-        var usesFeatureHeader = OverlayQuickSettingsSectionRendering.TryGetFeatureHeaderToggle(section, out var featureHeaderToggle);
-        var rows = new List<OverlayRow>();
         var rowStack = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
-
-        if (usesFeatureHeader && TryCreateQuickSettingsRow(surface, featureHeaderToggle, out var headerRow, section.Label, strongLabel: true))
-        {
-            rows.Add(headerRow);
-            RegisterRowPointerSelection(headerRow.Container);
-            rowStack.Children.Add(headerRow.Container);
-        }
-        else if (!usesFeatureHeader && !string.IsNullOrEmpty(section.Label))
-        {
-            rowStack.Children.Add(CreateOverlaySectionHeadingRow(section.Label));
-        }
-
         var detailStack = CreateOverlayDetailStack();
-        foreach (var row in usesFeatureHeader ? visibleRows.Skip(1) : visibleRows)
-        {
-            if (!TryCreateQuickSettingsRow(surface, row, out var overlayRow)) continue;
-            rows.Add(overlayRow);
-            RegisterRowPointerSelection(overlayRow.Container);
-            detailStack.Children.Add(overlayRow.Container);
-        }
-
-        if (detailStack.Children.Count > 0)
-            rowStack.Children.Add(detailStack);
-
-        sectionPanel.Children.Add(rowStack);
-        return new RenderedQuickSettingsSection
+        var rendered = new RenderedQuickSettingsSection
         {
             Section = section,
-            Card = CreateOverlaySectionCard(sectionPanel),
-            Rows = rows,
+            RowStack = rowStack,
+            DetailStack = detailStack,
         };
+
+        if (!desiredRows.Any(row => row.IsFeatureHeader) && !string.IsNullOrEmpty(section.Label))
+        {
+            rendered.Heading = CreateOverlaySectionHeadingRow(section.Label);
+            rendered.HeadingLabel = section.Label;
+            rowStack.Children.Add(rendered.Heading);
+        }
+
+        rowStack.Children.Add(detailStack);
+        sectionPanel.Children.Add(rowStack);
+        rendered.Card = CreateOverlaySectionCard(sectionPanel);
+
+        foreach (var descriptor in desiredRows)
+        {
+            var row = CreateRenderedQuickSettingsRow(surface, descriptor);
+            rendered.RenderedRows.Add(descriptor.Row.RowId, row);
+            if (descriptor.IsFeatureHeader)
+                rowStack.Children.Insert(0, row.Row.Container);
+            else
+                detailStack.Children.Add(row.Row.Container);
+        }
+
+        rendered.Rows = desiredRows.Select(descriptor => rendered.RenderedRows[descriptor.Row.RowId].Row).ToArray();
+        return rendered;
+    }
+
+    private RenderedQuickSettingsSection ReconcileQuickSettingsSection(
+        QuickSettingsSurface surface,
+        RenderedQuickSettingsSection rendered,
+        QuickSettingsSection section)
+    {
+        var plan = OverlayQuickSettingsSectionRendering.PlanRows(
+            rendered.RenderedRows.ToDictionary(pair => pair.Key, pair => pair.Value.Descriptor), section);
+        if (plan.DesiredRows.Count == 0)
+        {
+            RemoveQuickSettingsSection(surface, rendered);
+            return new RenderedQuickSettingsSection { Section = section, Rows = [] };
+        }
+
+        if (rendered.Card is null || rendered.RowStack is null || rendered.DetailStack is null)
+            return BuildQuickSettingsSection(surface, section);
+
+        foreach (var rowId in plan.ChangedRowIds)
+            if (rendered.RenderedRows.TryGetValue(rowId, out var oldRow))
+                RemoveRenderedQuickSettingsRow(surface, rendered, rowId, oldRow);
+
+        var desiredHeader = plan.DesiredRows.FirstOrDefault(row => row.IsFeatureHeader);
+        var desiredHeadingLabel = desiredHeader is null && !string.IsNullOrEmpty(section.Label)
+            ? section.Label
+            : null;
+        if (!string.Equals(rendered.HeadingLabel, desiredHeadingLabel, StringComparison.Ordinal))
+        {
+            if (rendered.Heading is not null)
+                rendered.RowStack.Children.Remove(rendered.Heading);
+            rendered.Heading = desiredHeadingLabel is null ? null : CreateOverlaySectionHeadingRow(desiredHeadingLabel);
+            rendered.HeadingLabel = desiredHeadingLabel;
+            if (rendered.Heading is not null)
+                rendered.RowStack.Children.Insert(0, rendered.Heading);
+        }
+
+        foreach (var descriptor in plan.DesiredRows)
+        {
+            if (!rendered.RenderedRows.TryGetValue(descriptor.Row.RowId, out var renderedRow))
+            {
+                renderedRow = CreateRenderedQuickSettingsRow(surface, descriptor);
+                rendered.RenderedRows.Add(descriptor.Row.RowId, renderedRow);
+                if (descriptor.IsFeatureHeader)
+                    rendered.RowStack.Children.Insert(0, renderedRow.Row.Container);
+                else
+                    rendered.DetailStack.Children.Add(renderedRow.Row.Container);
+            }
+            else
+                renderedRow.Descriptor = descriptor;
+
+            ApplyQuickSettingsRowValue(surface, descriptor.Row);
+        }
+
+        for (var index = 0; index < plan.DesiredRows.Count; index++)
+        {
+            var descriptor = plan.DesiredRows[index];
+            var renderedRow = rendered.RenderedRows[descriptor.Row.RowId];
+            if (descriptor.IsFeatureHeader)
+                PlaceQuickSettingsChild(rendered.RowStack, renderedRow.Row.Container, 0);
+            else
+                PlaceQuickSettingsChild(rendered.DetailStack, renderedRow.Row.Container,
+                    plan.DesiredRows.Take(index).Count(row => !row.IsFeatureHeader));
+        }
+
+        var topRowCount = desiredHeader is not null || rendered.Heading is not null ? 1 : 0;
+        PlaceQuickSettingsChild(rendered.RowStack, rendered.DetailStack, topRowCount);
+        rendered.Section = section;
+        rendered.Rows = plan.DesiredRows.Select(descriptor => rendered.RenderedRows[descriptor.Row.RowId].Row).ToArray();
+        return rendered;
     }
 
     private static void RemoveQuickSettingsSection(QuickSettingsSurface surface, RenderedQuickSettingsSection section)
@@ -388,13 +541,51 @@ public sealed partial class OverlayWindow
         if (section.Card is not null)
             surface.Content.Children.Remove(section.Card);
 
-        foreach (var row in section.Rows)
-        {
-            if (row.QuickSettingsRowId is not { } rowId) continue;
-            surface.ToggleRows.Remove(rowId);
-            surface.NumericSliderRows.Remove(rowId);
-            surface.ValueRows.Remove(rowId);
-        }
+        foreach (var rowId in section.RenderedRows.Keys.ToArray())
+            RemoveQuickSettingsRowState(surface, rowId);
+        section.RenderedRows.Clear();
+    }
+
+    private static void RemoveRenderedQuickSettingsRow(
+        QuickSettingsSurface surface,
+        RenderedQuickSettingsSection section,
+        QuickSettingsRowId rowId,
+        RenderedQuickSettingsRow row)
+    {
+        if (row.Descriptor.IsFeatureHeader)
+            section.RowStack?.Children.Remove(row.Row.Container);
+        else
+            section.DetailStack?.Children.Remove(row.Row.Container);
+        section.RenderedRows.Remove(rowId);
+        RemoveQuickSettingsRowState(surface, rowId);
+    }
+
+    private static void RemoveQuickSettingsRowState(QuickSettingsSurface surface, QuickSettingsRowId rowId)
+    {
+        surface.ToggleRows.Remove(rowId);
+        surface.NumericSliderRows.Remove(rowId);
+        surface.ValueRows.Remove(rowId);
+    }
+
+    private static void PlaceQuickSettingsChild(Panel parent, UIElement child, int targetIndex)
+    {
+        var currentIndex = parent.Children.IndexOf(child);
+        if (currentIndex == targetIndex) return;
+        if (currentIndex >= 0)
+            parent.Children.RemoveAt(currentIndex);
+        parent.Children.Insert(Math.Min(targetIndex, parent.Children.Count), child);
+    }
+
+    private RenderedQuickSettingsRow CreateRenderedQuickSettingsRow(
+        QuickSettingsSurface surface,
+        QuickSettingsRenderedRowDescriptor descriptor)
+    {
+        if (!TryCreateQuickSettingsRow(surface, descriptor.Row, out var row,
+                descriptor.IsFeatureHeader ? descriptor.DisplayLabel : null,
+                descriptor.StrongLabel))
+            throw new InvalidOperationException("A malformed Quick Settings row reached the Overlay renderer.");
+        RegisterRowPointerSelection(row.Container);
+        return new RenderedQuickSettingsRow { Descriptor = descriptor, Row = row };
     }
 
     private static void ReorderQuickSettingsSectionCards(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
@@ -433,28 +624,27 @@ public sealed partial class OverlayWindow
         _pageRows[surface.TabId] = rows;
     }
 
-    private (QuickSettingsRowId? RowId, int? Index) CaptureQuickSettingsSelection(QuickSettingsSurface surface)
+    private QuickSettingsRowId? CaptureQuickSettingsSelection(QuickSettingsSurface surface)
     {
         if (_tabState.SelectedTab != surface.TabId ||
             !_pageRows.TryGetValue(surface.TabId, out var oldRows) ||
             _rowSelection.SelectedIndex is not { } selectedIndex || selectedIndex < 0 || selectedIndex >= oldRows.Count)
-            return (null, _rowSelection.SelectedIndex);
+            return null;
 
-        return (oldRows[selectedIndex].QuickSettingsRowId, selectedIndex);
+        return oldRows[selectedIndex].QuickSettingsRowId;
     }
 
     private void RestoreQuickSettingsSelection(
         QuickSettingsSurface surface,
         QuickSettingsRowId? preferredRowId,
-        int? previousSelection,
         bool bringIntoView)
     {
         if (_tabState.SelectedTab != surface.TabId) return;
 
-        int? preferredIndex = null;
-        if (preferredRowId is { } rowId && _pageRows.TryGetValue(surface.TabId, out var rows))
-            for (var index = 0; index < rows.Count; index++)
-                if (rows[index].QuickSettingsRowId == rowId) { preferredIndex = index; break; }
+        var rowIds = _pageRows.TryGetValue(surface.TabId, out var rows)
+            ? rows.Select(row => row.QuickSettingsRowId).ToArray()
+            : Array.Empty<QuickSettingsRowId?>();
+        var preferredIndex = OverlayQuickSettingsSectionRendering.FindPreferredRowIndex(rowIds, preferredRowId);
 
         _rowSelection.SetRows(CapabilitiesFor(surface.TabId), preferredIndex);
         ApplyRowSelectionVisual();
@@ -463,7 +653,7 @@ public sealed partial class OverlayWindow
             selectedRowIndex >= 0 && selectedRowIndex < currentRows.Count
                 ? currentRows[selectedRowIndex].QuickSettingsRowId
                 : null;
-        if (bringIntoView || selectedIndex != previousSelection || selectedRowId != preferredRowId)
+        if (bringIntoView || selectedRowId != preferredRowId)
             BringSelectedRowIntoView();
     }
 
