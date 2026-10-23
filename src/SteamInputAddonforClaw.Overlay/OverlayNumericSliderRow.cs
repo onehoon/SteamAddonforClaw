@@ -86,7 +86,8 @@ internal sealed class OverlayNumericSliderRow
         Capabilities = new OverlayRowCapabilities(
             IsSelectable: () => _model.IsAvailable,
             Activate: null,
-            Adjust: OnControllerAdjust);
+            Adjust: OnControllerAdjust,
+            AllowsDpadHoldRepeat: true);
     }
 
     internal void ApplyState(bool isAvailable, double minimum, double maximum, double step, double value)

@@ -192,6 +192,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     // write gate as commands so navigation and command frames cannot interleave bytes.
     internal async Task<bool> SendNavigationAsync(OverlayNavigationAction action, CancellationToken token = default)
     {
+        if (!Enum.IsDefined(action)) return false;
+
         NamedPipeServerStream? pipe;
         lock (_sync)
         {

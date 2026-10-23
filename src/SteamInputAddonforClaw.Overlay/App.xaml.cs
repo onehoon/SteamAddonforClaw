@@ -485,6 +485,12 @@ public partial class App : Application
                     case OverlayNavigationAction.NavigateRight:
                         _window?.AdjustSelectedRow(+1);
                         break;
+                    case OverlayNavigationAction.RepeatNavigateLeft:
+                        _window?.RepeatAdjustSelectedNumericSlider(-1);
+                        break;
+                    case OverlayNavigationAction.RepeatNavigateRight:
+                        _window?.RepeatAdjustSelectedNumericSlider(+1);
+                        break;
                     case OverlayNavigationAction.Accept:
                         _window?.ActivateSelectedRow();
                         break;

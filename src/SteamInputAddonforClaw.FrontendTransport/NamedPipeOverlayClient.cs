@@ -163,10 +163,11 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.Navigation)
                 {
-                    if (message.Navigation is null || message.Command is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
+                    var navigation = message.Navigation.GetValueOrDefault();
+                    if (!OverlayNavigationWireValidation.IsValidNavigation(message))
                         throw new FrontendProtocolException("Invalid Overlay navigation message.");
                     if (navigationHandler is not null)
-                        await navigationHandler(message.Navigation.Value).ConfigureAwait(false);
+                        await navigationHandler(navigation).ConfigureAwait(false);
                     continue;
                 }
                 if (message.Kind == OverlayWireMessageKind.QuickSettingsPageState)

@@ -1020,10 +1020,15 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("_window?.SelectPreviousTab();", app);
         Assert.Contains("case OverlayNavigationAction.NextTab:", app);
         Assert.Contains("_window?.SelectNextTab();", app);
+        Assert.Contains("case OverlayNavigationAction.RepeatNavigateLeft:", app);
+        Assert.Contains("_window?.RepeatAdjustSelectedNumericSlider(-1);", app);
+        Assert.Contains("case OverlayNavigationAction.RepeatNavigateRight:", app);
+        Assert.Contains("_window?.RepeatAdjustSelectedNumericSlider(+1);", app);
         Assert.Contains("_tabState.ResetForShow();", shell);
         Assert.Contains("NavigateUp", navigation);
         Assert.Contains("NavigateDown", navigation);
         Assert.Contains("AdjustSelectedRow", navigation);
+        Assert.Contains("_numericSliderRepeatTarget.TryAdjust(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta)", navigation);
     }
 
     [Fact]

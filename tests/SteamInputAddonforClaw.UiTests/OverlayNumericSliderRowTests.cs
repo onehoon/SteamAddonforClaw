@@ -116,6 +116,7 @@ public sealed class OverlayNumericSliderRowTests
         Assert.Contains("_slider.ValueChanged += OnSliderValueChanged", source);
         Assert.Contains("_model.RequestSet(args.NewValue)", source);
         Assert.Contains("_model.RequestAdjust(delta)", source);
+        Assert.Contains("AllowsDpadHoldRepeat: true", source);
         Assert.Contains("Activate: null", source);
         Assert.Contains("IsTabStop = false", source);
         Assert.Contains("IsFocusEngagementEnabled = false", source);

@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay;
 using Xunit;
 
@@ -266,5 +267,79 @@ public sealed class OverlayRowSelectionTests
 
         Assert.Equal(0, activations);
         Assert.Empty(deltas);
+    }
+
+    [Fact]
+    public void Numeric_slider_repeat_target_adjusts_only_the_original_selected_row_and_direction()
+    {
+        var deltas = new List<int>();
+        var slider = new OverlayRowCapabilities(() => true, Adjust: deltas.Add, AllowsDpadHoldRepeat: true);
+        var target = new OverlayNumericSliderRepeatTarget();
+
+        target.Arm(AddonQuickSettingsTabId.Device, slider, +1);
+
+        Assert.True(target.TryAdjust(AddonQuickSettingsTabId.Device, slider, +1));
+        Assert.Equal(new[] { 1 }, deltas);
+        Assert.False(target.TryAdjust(AddonQuickSettingsTabId.Device, slider, -1));
+        Assert.Equal(new[] { 1 }, deltas);
+    }
+
+    [Fact]
+    public void Numeric_slider_repeat_target_rejects_other_tabs_rows_and_replacements()
+    {
+        var deltas = new List<int>();
+        var slider = new OverlayRowCapabilities(() => true, Adjust: deltas.Add, AllowsDpadHoldRepeat: true);
+        var replacement = new OverlayRowCapabilities(() => true, Adjust: deltas.Add, AllowsDpadHoldRepeat: true);
+        var target = new OverlayNumericSliderRepeatTarget();
+
+        target.Arm(AddonQuickSettingsTabId.Device, slider, -1);
+        Assert.False(target.TryAdjust(AddonQuickSettingsTabId.Profile, slider, -1));
+        Assert.False(target.TryAdjust(AddonQuickSettingsTabId.Device, replacement, -1));
+        Assert.Empty(deltas);
+    }
+
+    [Fact]
+    public void Numeric_slider_repeat_target_rejects_default_non_slider_capabilities()
+    {
+        var deltas = new List<int>();
+        var toggle = new OverlayRowCapabilities(() => true, Adjust: deltas.Add);
+        var numericStepper = new OverlayRowCapabilities(() => true, Adjust: deltas.Add);
+        var target = new OverlayNumericSliderRepeatTarget();
+
+        target.Arm(AddonQuickSettingsTabId.Controller, toggle, +1);
+        Assert.False(target.TryAdjust(AddonQuickSettingsTabId.Controller, toggle, +1));
+        target.Arm(AddonQuickSettingsTabId.Controller, numericStepper, +1);
+        Assert.False(target.TryAdjust(AddonQuickSettingsTabId.Controller, numericStepper, +1));
+
+        Assert.Empty(deltas);
+    }
+
+    [Fact]
+    public void Numeric_slider_repeat_target_requires_current_availability_and_clears_when_it_is_lost()
+    {
+        var available = true;
+        var deltas = new List<int>();
+        var slider = new OverlayRowCapabilities(() => available, Adjust: deltas.Add, AllowsDpadHoldRepeat: true);
+        var target = new OverlayNumericSliderRepeatTarget();
+        target.Arm(AddonQuickSettingsTabId.Profile, slider, +1);
+
+        available = false;
+        Assert.False(target.TryAdjust(AddonQuickSettingsTabId.Profile, slider, +1));
+        available = true;
+        Assert.False(target.TryAdjust(AddonQuickSettingsTabId.Profile, slider, +1));
+        Assert.Empty(deltas);
+    }
+
+    [Fact]
+    public void Numeric_slider_repeat_target_survives_value_only_refresh_when_the_row_is_reused()
+    {
+        var deltas = new List<int>();
+        var slider = new OverlayRowCapabilities(() => true, Adjust: deltas.Add, AllowsDpadHoldRepeat: true);
+        var target = new OverlayNumericSliderRepeatTarget();
+        target.Arm(AddonQuickSettingsTabId.Device, slider, -1);
+
+        // Value-only refresh retains the same capability/row instance and selectable state.
+        Assert.True(target.TryAdjust(AddonQuickSettingsTabId.Device, slider, -1));
+        Assert.Equal(new[] { -1 }, deltas);
     }
 }

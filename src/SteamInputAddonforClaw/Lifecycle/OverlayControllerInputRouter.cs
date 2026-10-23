@@ -30,6 +30,12 @@ internal sealed class OverlayControllerInputRouter : IDisposable
     // back inside the smaller neutral band -- simple hysteresis against analog jitter.
     private const int StickActivationThreshold = 16_000;
     private const int StickNeutralThreshold = 8_000;
+    private static readonly TimeSpan DpadRepeatDelay = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan DpadRepeatInterval = TimeSpan.FromMilliseconds(75);
+
+    private readonly record struct QueuedNavigationAction(
+        OverlayNavigationAction Action,
+        CancellationTokenSource? RepeatSource = null);
 
     // OQ4 section 6.1 + OQ5-UI-02 section 6: the semantic mapping. Every entry here is also a
     // "consumed control" the section 7 release gate waits for, so adding LB/RB (PreviousTab/NextTab)
@@ -48,13 +54,15 @@ internal sealed class OverlayControllerInputRouter : IDisposable
 
     private readonly IMsiClawPreparedInputSource _source;
     private readonly Func<OverlayNavigationAction, Task> _deliver;
-    private readonly Channel<OverlayNavigationAction> _actions =
-        Channel.CreateUnbounded<OverlayNavigationAction>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<QueuedNavigationAction> _actions =
+        Channel.CreateUnbounded<QueuedNavigationAction>(new UnboundedChannelOptions { SingleReader = true });
     private readonly object _sync = new();
     private ControllerState _previousState;
     private bool _dpadArmed;
     private bool _leftStickArmed;
     private bool _rightStickArmed;
+    private CancellationTokenSource? _dpadRepeatCancellation;
+    private OverlayNavigationAction? _dpadRepeatDirection;
     private TaskCompletionSource<OverlayConsumedControlsReleaseOutcome>? _releaseWaiter;
     private Task? _deliveryLoop;
     private bool _accepting;
@@ -94,6 +102,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         {
             if (!_accepting) return;
             _accepting = false;
+            CancelDpadRepeatLocked();
             _actions.Writer.TryComplete();
         }
         AppLog.Info("OverlayCapture", "Overlay input router stopped accepting navigation.", ("Event", "OverlayRouterStopped"));
@@ -127,6 +136,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         {
             _sourceUnavailable = true;
             _accepting = false;
+            CancelDpadRepeatLocked();
             _actions.Writer.TryComplete();
             _releaseWaiter?.TrySetResult(OverlayConsumedControlsReleaseOutcome.SourceUnavailable);
             _releaseWaiter = null;
@@ -147,7 +157,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
                 foreach (var (held, action) in Bindings)
                     if (!IsDpadAction(action) && held(buttons) && !held(_previousState.Buttons))
                     {
-                        _actions.Writer.TryWrite(action);
+                        _actions.Writer.TryWrite(new(action));
                         AppLog.Debug("OverlayCapture", "Navigation action.", ("Event", "OverlayNavigation"), ("Action", action));
                     }
                 TryQueueStickNavigation(state.LeftStick, ref _leftStickArmed, "Left");
@@ -170,25 +180,33 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         if (directionCount == 0)
         {
             _dpadArmed = true;
+            CancelDpadRepeatLocked();
             return;
         }
+
+        if (directionCount != 1)
+        {
+            _dpadArmed = false;
+            CancelDpadRepeatLocked();
+            return;
+        }
+
+        var action = DpadAction(buttons);
+        if (action is null)
+            return;
 
         if (!_dpadArmed)
-            return;
-
-        _dpadArmed = false;
-        if (directionCount != 1)
-            return;
-
-        foreach (var (held, action) in Bindings)
         {
-            if (!IsDpadAction(action) || !held(buttons))
-                continue;
-
-            _actions.Writer.TryWrite(action);
-            AppLog.Debug("OverlayCapture", "Navigation action.", ("Event", "OverlayNavigation"), ("Action", action));
+            if (_dpadRepeatDirection != action)
+                CancelDpadRepeatLocked();
             return;
         }
+
+        _dpadArmed = false;
+        _actions.Writer.TryWrite(new(action.Value));
+        AppLog.Debug("OverlayCapture", "Navigation action.", ("Event", "OverlayNavigation"), ("Action", action));
+        if (action is OverlayNavigationAction.NavigateLeft or OverlayNavigationAction.NavigateRight)
+            StartDpadRepeatLocked(action.Value);
     }
 
     private static int DpadDirectionCount(GamepadButtons buttons) =>
@@ -202,6 +220,96 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         OverlayNavigationAction.NavigateDown or
         OverlayNavigationAction.NavigateLeft or
         OverlayNavigationAction.NavigateRight;
+
+    private static OverlayNavigationAction? DpadAction(GamepadButtons buttons)
+    {
+        foreach (var (held, action) in Bindings)
+            if (IsDpadAction(action) && held(buttons))
+                return action;
+        return null;
+    }
+
+    private void StartDpadRepeatLocked(OverlayNavigationAction action)
+    {
+        CancelDpadRepeatLocked();
+        var cancellation = new CancellationTokenSource();
+        _dpadRepeatCancellation = cancellation;
+        _dpadRepeatDirection = action;
+        _ = RunDpadRepeatAsync(action, cancellation);
+    }
+
+    private void CancelDpadRepeatLocked()
+    {
+        var cancellation = _dpadRepeatCancellation;
+        _dpadRepeatCancellation = null;
+        _dpadRepeatDirection = null;
+        cancellation?.Cancel();
+    }
+
+    private async Task RunDpadRepeatAsync(OverlayNavigationAction direction, CancellationTokenSource cancellation)
+    {
+        var token = cancellation.Token;
+        try
+        {
+            await Task.Delay(DpadRepeatDelay, token).ConfigureAwait(false);
+            while (true)
+            {
+                lock (_sync)
+                {
+                    if (!CanRepeatDpadLocked(direction, cancellation))
+                        return;
+                    _actions.Writer.TryWrite(new(RepeatActionFor(direction), cancellation));
+                }
+
+                await Task.Delay(DpadRepeatInterval, token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                if (ReferenceEquals(_dpadRepeatCancellation, cancellation))
+                {
+                    _dpadRepeatCancellation = null;
+                    _dpadRepeatDirection = null;
+                }
+            }
+            cancellation.Dispose();
+        }
+    }
+
+    private static OverlayNavigationAction RepeatActionFor(OverlayNavigationAction direction) => direction switch
+    {
+        OverlayNavigationAction.NavigateLeft => OverlayNavigationAction.RepeatNavigateLeft,
+        OverlayNavigationAction.NavigateRight => OverlayNavigationAction.RepeatNavigateRight,
+        _ => throw new ArgumentOutOfRangeException(nameof(direction), direction, "Only horizontal D-pad navigation repeats."),
+    };
+
+    private static OverlayNavigationAction DirectionForRepeat(OverlayNavigationAction action) => action switch
+    {
+        OverlayNavigationAction.RepeatNavigateLeft => OverlayNavigationAction.NavigateLeft,
+        OverlayNavigationAction.RepeatNavigateRight => OverlayNavigationAction.NavigateRight,
+        _ => throw new ArgumentOutOfRangeException(nameof(action), action, "The action is not a D-pad repeat."),
+    };
+
+    private bool CanRepeatDpadLocked(OverlayNavigationAction direction, CancellationTokenSource cancellation) =>
+        _accepting && !_disposed && !_sourceUnavailable && _source.IsRunning &&
+        ReferenceEquals(_dpadRepeatCancellation, cancellation) &&
+        _dpadRepeatDirection == direction &&
+        DpadDirectionCount(_previousState.Buttons) == 1 &&
+        DpadAction(_previousState.Buttons) == direction;
+
+    private bool IsQueuedRepeatCurrent(QueuedNavigationAction queued)
+    {
+        if (queued.RepeatSource is not { } cancellation)
+            return true;
+
+        lock (_sync)
+            return CanRepeatDpadLocked(DirectionForRepeat(queued.Action), cancellation);
+    }
 
     // OQ5-UI-03 section 4: one stick deflection emits at most one dominant-axis action. Armed only
     // while neutral; disarms on fire and re-arms once both axes are back inside the neutral band.
@@ -220,7 +328,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
                 ? (y > 0 ? OverlayNavigationAction.NavigateUp : OverlayNavigationAction.NavigateDown)
                 : (x > 0 ? OverlayNavigationAction.NavigateRight : OverlayNavigationAction.NavigateLeft);
             armed = false;
-            _actions.Writer.TryWrite(action);
+            _actions.Writer.TryWrite(new(action));
             AppLog.Debug("OverlayCapture", "Navigation action.", ("Event", "OverlayNavigation"), ("Action", action), ("Source", which + "Stick"));
         }
         else if (absX <= StickNeutralThreshold && absY <= StickNeutralThreshold)
@@ -233,10 +341,13 @@ internal sealed class OverlayControllerInputRouter : IDisposable
     {
         try
         {
-            await foreach (var action in _actions.Reader.ReadAllAsync().ConfigureAwait(false))
+            await foreach (var queued in _actions.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                try { await _deliver(action).ConfigureAwait(false); }
-                catch (Exception exception) { AppLog.Warn("OverlayCapture", "Overlay navigation delivery failed.", exception, ("Action", action)); }
+                if (!IsQueuedRepeatCurrent(queued))
+                    continue;
+
+                try { await _deliver(queued.Action).ConfigureAwait(false); }
+                catch (Exception exception) { AppLog.Warn("OverlayCapture", "Overlay navigation delivery failed.", exception, ("Action", queued.Action)); }
             }
         }
         catch (Exception exception) { AppLog.Warn("OverlayCapture", "Overlay navigation delivery loop ended unexpectedly.", exception); }
@@ -266,6 +377,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
             if (_disposed) return;
             _disposed = true;
             _accepting = false;
+            CancelDpadRepeatLocked();
             _actions.Writer.TryComplete();
             _releaseWaiter?.TrySetResult(OverlayConsumedControlsReleaseOutcome.SourceUnavailable);
             _releaseWaiter = null;

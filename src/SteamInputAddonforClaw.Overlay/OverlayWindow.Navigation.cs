@@ -16,6 +16,7 @@ public sealed partial class OverlayWindow
 
     private readonly Dictionary<AddonQuickSettingsTabId, IReadOnlyList<OverlayRow>> _pageRows = new();
     private readonly OverlayRowSelection _rowSelection = new();
+    private readonly OverlayNumericSliderRepeatTarget _numericSliderRepeatTarget = new();
     private readonly Brush _rowSelectedFillBrush;
     private static readonly Brush RowUnselectedFillBrush = OverlayQamResources.Brush("QamSectionBrush");
 
@@ -43,13 +44,26 @@ public sealed partial class OverlayWindow
     // the fallback row is never mutated under a stale highlight.
     internal void AdjustSelectedRow(int delta)
     {
+        _numericSliderRepeatTarget.Clear();
         if (OnShortcutPage())
         {
             if (delta < 0 ? _shortcutSelection.MoveLeft() : _shortcutSelection.MoveRight())
                 ApplyShortcutSelectionVisual();
             return;
         }
-        if (_rowSelection.AdjustSelected(delta)) RefreshRowSelectionAfterMove();
+        if (_rowSelection.AdjustSelected(delta))
+        {
+            RefreshRowSelectionAfterMove();
+            return;
+        }
+
+        _numericSliderRepeatTarget.Arm(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta);
+    }
+
+    internal void RepeatAdjustSelectedNumericSlider(int delta)
+    {
+        if (OnShortcutPage()) return;
+        _numericSliderRepeatTarget.TryAdjust(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta);
     }
 
     internal void ActivateSelectedRow()
@@ -67,7 +81,10 @@ public sealed partial class OverlayWindow
     private void MoveRowSelection(bool up)
     {
         if (up ? _rowSelection.MovePrevious() : _rowSelection.MoveNext())
+        {
+            _numericSliderRepeatTarget.Clear();
             RefreshRowSelectionAfterMove();
+        }
     }
 
     private void RefreshRowSelectionAfterMove()
@@ -169,6 +186,7 @@ public sealed partial class OverlayWindow
         for (var index = 0; index < rows.Count; index++)
         {
             if (!ReferenceEquals(rows[index].Container, container)) continue;
+            _numericSliderRepeatTarget.Clear();
             if (_rowSelection.TrySelect(index)) ApplyRowSelectionVisual();
             return;
         }
