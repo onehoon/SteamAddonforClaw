@@ -142,9 +142,12 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
             sampleInterval: TimeSpan.Zero, timeout: TimeSpan.FromSeconds(1));
 
         var readiness = await waiter.WaitForFirstUnambiguousControlHidAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
 
         Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
         Assert.Equal(2, enumerator.Calls);
+        Assert.DoesNotContain("[ERROR]", log);
     }
 
     [Fact]
@@ -159,8 +162,35 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
         Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
         Assert.Contains("FailureClass=PnpReadFailed", log);
         Assert.Contains("NativeWin32Error=5", log);
+        Assert.Contains("Event=MsiPnpObservationTimedOut", log);
+        Assert.Contains("Operation=SetupDiGetDeviceRegistryPropertyW", log);
         Assert.Contains("SPDRP_HARDWAREID=1", log);
-        Assert.DoesNotContain("[ERROR]", log);
+        var errorLines = log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.Contains("[ERROR]", StringComparison.Ordinal)).ToArray();
+        Assert.Single(errorLines);
+    }
+
+    [Fact]
+    public async Task A2vmFirstControlHidReadiness_PersistentTypedPnpReadLogsOneTerminalError()
+    {
+        var waiter = new ControllerTopologyWaiter(new PersistentPnpFailureEnumerator(),
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
+            sampleInterval: TimeSpan.Zero, timeout: TimeSpan.FromMilliseconds(10));
+
+        var readiness = await waiter.WaitForFirstUnambiguousControlHidAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        var errorLines = log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.Contains("[ERROR]", StringComparison.Ordinal)).ToArray();
+
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
+        Assert.Single(errorLines);
+        Assert.Contains("Event=A2vmInitialControlHidUnavailable", errorLines[0]);
+        Assert.Contains("FailureClass=PnpReadFailed", errorLines[0]);
+        Assert.Contains("NativeOperation=SetupDiGetDeviceRegistryPropertyW", errorLines[0]);
+        Assert.Contains("NativeWin32Error=5", errorLines[0]);
+        Assert.Contains("SPDRP_HARDWAREID=1", errorLines[0]);
+        Assert.Contains("Action=Passive", errorLines[0]);
     }
 
     [Fact]

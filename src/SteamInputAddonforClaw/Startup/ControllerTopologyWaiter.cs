@@ -137,7 +137,8 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             : terminalPnpReadFailure is not null
                 ? "PnpReadFailed"
             : GetFailureClass(lastObservation);
-        AppLog.Warn("ControllerTopology", "Topology readiness ended without a stable controller topology.", terminalFailure,
+        var terminalFields = new (string Key, object? Value)[]
+        {
             ("FailureClass", failureClass),
             ("NativeOperation", terminalPnpReadFailure?.Operation),
             ("NativeWin32Error", terminalPnpReadFailure?.Win32Error),
@@ -151,7 +152,22 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             ("A2vm230ControlEndpointCandidateCount", lastObservation.A2vm230ControlEndpointCandidateCount),
             ("ConsecutiveStableSnapshots", stableSnapshotCount),
             ("RequiredStableSnapshots", _requiredStableSnapshots),
-            ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Action", "Passive"));
+            ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Action", "Passive"),
+        };
+        if (enumerationFailure is null && terminalPnpReadFailure is { } pnpFailure)
+        {
+            AppLog.Error("ControllerTopology", "MSI PnP observation failed after the bounded startup topology wait.",
+                pnpFailure,
+                new[]
+                {
+                    ("Event", (object?)"MsiPnpObservationTimedOut"),
+                }.Concat(terminalFields).Concat(pnpFailure.ToLogFields()).ToArray());
+        }
+        else
+        {
+            AppLog.Warn("ControllerTopology", "Topology readiness ended without a stable controller topology.", terminalFailure,
+                terminalFields);
+        }
         return ControllerTopologyReadiness.Indeterminate;
     }
 
@@ -225,11 +241,29 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             return ControllerTopologyReadiness.Indeterminate;
         }
 
-        AppLog.Warn("ControllerTopology", "No single supported MSI control HID became available within the bounded wait.", terminalPnpReadFailure,
-            ("Event", "A2vmInitialControlHidUnavailable"), ("Attempts", attempt),
-            ("CandidateCount", lastCandidateCount), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
-            ("NativeOperation", terminalPnpReadFailure?.Operation), ("NativeWin32Error", terminalPnpReadFailure?.Win32Error),
-            ("Action", "Passive"));
+        if (terminalPnpReadFailure is { } pnpFailure)
+        {
+            AppLog.Error("ControllerTopology", "MSI PnP observation failed before a supported control HID became available.",
+                pnpFailure,
+                new[]
+                {
+                    ("Event", (object?)"A2vmInitialControlHidUnavailable"),
+                    ("FailureClass", (object?)"PnpReadFailed"),
+                    ("Attempts", attempt),
+                    ("CandidateCount", lastCandidateCount),
+                    ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                    ("NativeOperation", pnpFailure.Operation),
+                    ("NativeWin32Error", pnpFailure.Win32Error),
+                    ("Action", "Passive"),
+                }.Concat(pnpFailure.ToLogFields()).ToArray());
+        }
+        else
+        {
+            AppLog.Warn("ControllerTopology", "No single supported MSI control HID became available within the bounded wait.", null,
+                ("Event", "A2vmInitialControlHidUnavailable"), ("Attempts", attempt),
+                ("CandidateCount", lastCandidateCount), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                ("Action", "Passive"));
+        }
         return ControllerTopologyReadiness.Indeterminate;
     }
 
