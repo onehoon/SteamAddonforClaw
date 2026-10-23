@@ -77,6 +77,116 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
     }
 
     [Fact]
+    public void Profile_fps_value_only_update_identifies_only_the_changed_power_source_row()
+    {
+        var before = ProfileFpsPage(ac: 60, dc: 45);
+        var after = ProfileFpsPage(ac: 75, dc: 45);
+
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, after));
+        Assert.Equal(
+            [QuickSettingsRowId.ProfileFpsLimitAc],
+            QuickSettingsRowRendering.FindChangedValueRowIds(before, after));
+        Assert.Empty(QuickSettingsRowRendering.FindChangedValueRowIds(before, before));
+    }
+
+    [Fact]
+    public void Linked_tdp_preview_identifies_only_rows_whose_effective_values_changed()
+    {
+        var before = new QuickSettingsPageSnapshot(
+            QuickSettingsPageId.Device,
+            null,
+            true,
+            null,
+            [new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP",
+            [
+                ToggleRow(QuickSettingsRowId.DeviceTdpEnabled),
+                NumericRow(QuickSettingsRowId.DeviceTdpAcPl1, 20),
+                NumericRow(QuickSettingsRowId.DeviceTdpAcPl2, 25),
+                NumericRow(QuickSettingsRowId.DeviceTdpDcPl1, 15),
+                NumericRow(QuickSettingsRowId.DeviceTdpDcPl2, 20),
+            ])],
+            [new QuickSettingsLinkedSliderConstraint(
+                QuickSettingsRowId.DeviceTdpAcPl1,
+                QuickSettingsRowId.DeviceTdpAcPl2,
+                MinimumGap: 1)]);
+        var after = before with
+        {
+            Sections =
+            [
+                before.Sections[0] with
+                {
+                    Rows =
+                    [
+                        before.Sections[0].Rows[0],
+                        before.Sections[0].Rows[1] with { Value = QuickSettingsValue.Integer(26) },
+                        before.Sections[0].Rows[2] with { Value = QuickSettingsValue.Integer(27) },
+                        before.Sections[0].Rows[3],
+                        before.Sections[0].Rows[4],
+                    ],
+                },
+            ],
+        };
+
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, after));
+        Assert.Equal(
+            [QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2],
+            QuickSettingsRowRendering.FindChangedValueRowIds(before, after));
+    }
+
+    [Fact]
+    public void Value_only_page_update_rejects_context_shape_availability_and_range_changes()
+    {
+        var before = ProfileFpsPage(ac: 60, dc: 45);
+        var changedValue = ProfileFpsPage(ac: 75, dc: 45);
+        var fpsSection = before.Sections[0];
+
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, changedValue));
+        Assert.False(QuickSettingsRowRendering.IsValueOnlyPageUpdate(
+            before, changedValue with { ProfileTarget = QuickSettingsProfileTarget.ForSteam(481) }));
+        Assert.False(QuickSettingsRowRendering.IsValueOnlyPageUpdate(
+            before, changedValue with { Available = false }));
+        Assert.False(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before with
+        {
+            Sections = [fpsSection with { Rows = [fpsSection.Rows[0] with { Available = false }, .. fpsSection.Rows.Skip(1)] }],
+        }, changedValue));
+        Assert.False(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before with
+        {
+            Sections = [fpsSection with
+            {
+                Rows = [fpsSection.Rows[0], fpsSection.Rows[1] with
+                {
+                    SliderSpec = fpsSection.Rows[1].SliderSpec! with { Maximum = 144 },
+                }, fpsSection.Rows[2]],
+            }],
+        }, changedValue));
+        Assert.False(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before with
+        {
+            Sections = [fpsSection with { Label = "FPS Limit" }],
+        }, changedValue));
+    }
+
+    private static QuickSettingsPageSnapshot ProfileFpsPage(int ac, int dc)
+    {
+        var target = QuickSettingsProfileTarget.ForSteam(480);
+        var enabled = ToggleRow(QuickSettingsRowId.ProfileFpsLimitEnabled);
+        var acRow = NumericRow(QuickSettingsRowId.ProfileFpsLimitAc, ac) with
+        {
+            SliderSpec = new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 30, Maximum: 120, Step: 5),
+        };
+        var dcRow = NumericRow(QuickSettingsRowId.ProfileFpsLimitDc, dc) with
+        {
+            SliderSpec = new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 30, Maximum: 120, Step: 5),
+        };
+        return new QuickSettingsPageSnapshot(
+            QuickSettingsPageId.Profile,
+            target,
+            true,
+            null,
+            [new QuickSettingsSection(QuickSettingsSectionId.ProfileFpsLimit, "Intel FPS Limit", [enabled, acRow, dcRow])],
+            []);
+    }
+
+    [Fact]
     public void Profile_controller_uses_the_generic_toggle_and_discrete_row_renderers()
     {
         var options = new[]
@@ -128,5 +238,15 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
         Writable: true,
         QuickSettingsValue.Integer(10),
         new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 0, Maximum: 20),
+        QuickSettingsCommitPolicy.TrailingDebounce300);
+
+    private static QuickSettingsRow NumericRow(QuickSettingsRowId rowId, int value) => new(
+        rowId,
+        rowId.ToString(),
+        QuickSettingsControlKind.Slider,
+        Available: true,
+        Writable: true,
+        QuickSettingsValue.Integer(value),
+        new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 8, Maximum: 37),
         QuickSettingsCommitPolicy.TrailingDebounce300);
 }

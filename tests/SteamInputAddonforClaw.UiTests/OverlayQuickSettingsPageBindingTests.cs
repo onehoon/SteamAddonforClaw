@@ -385,13 +385,49 @@ public sealed class OverlayQuickSettingsPageBindingTests
         var linked = new[] { new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, 2) };
         var mutate = new GatedMutate();
         using var binding = NewBinding(TdpPage(pl1Ac: 25, pl2Ac: 26, linked: linked), mutate.Func, new ManualDelay().Func);
+        var before = binding.BuildEffectivePage();
 
-        binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsValue.Integer(26));
+        Assert.True(binding.ScheduleSlider(
+            QuickSettingsRowId.DeviceTdpAcPl1,
+            QuickSettingsValue.Integer(26),
+            out var changedRowIds));
+        var after = binding.BuildEffectivePage();
 
         Assert.True(binding.TryGetPendingValue(QuickSettingsRowId.DeviceTdpAcPl1, out var lower));
         Assert.Equal(26, lower.IntegerValue);
         Assert.True(binding.TryGetPendingValue(QuickSettingsRowId.DeviceTdpAcPl2, out var upper));
         Assert.Equal(28, upper.IntegerValue); // companion corrected immediately, before settlement
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, after));
+        Assert.Equal(
+            [QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2],
+            changedRowIds);
+        Assert.Equal(changedRowIds, QuickSettingsRowRendering.FindChangedValueRowIds(before, after));
+    }
+
+    [Fact]
+    public void Profile_intel_fps_preview_changes_only_the_edited_ac_or_dc_row()
+    {
+        var basePage = ProfilePage(480);
+        var fpsSection = new QuickSettingsSection(QuickSettingsSectionId.ProfileFpsLimit, "Intel FPS Limit",
+        [
+            Toggle(QuickSettingsRowId.ProfileFpsLimitEnabled, true),
+            Numeric(QuickSettingsRowId.ProfileFpsLimitAc, 60, 30, 120),
+            Numeric(QuickSettingsRowId.ProfileFpsLimitDc, 45, 30, 120),
+        ]);
+        var page = basePage with { Sections = [.. basePage.Sections, fpsSection] };
+        using var binding = NewProfileBinding(page, new GatedMutate().Func, new ManualDelay().Func);
+        var before = binding.BuildEffectivePage();
+
+        Assert.True(binding.ScheduleSlider(
+            QuickSettingsRowId.ProfileFpsLimitAc,
+            QuickSettingsValue.Integer(65),
+            out var changedRowIds));
+
+        var after = binding.BuildEffectivePage();
+        Assert.Equal([QuickSettingsRowId.ProfileFpsLimitAc], changedRowIds);
+        Assert.Equal(45, after.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileFpsLimit)
+            .Rows.Single(row => row.RowId == QuickSettingsRowId.ProfileFpsLimitDc).Value!.IntegerValue);
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, after));
     }
 
     [Fact]
@@ -759,6 +795,58 @@ public sealed class OverlayQuickSettingsPageBindingTests
 
         Assert.Same(resultPage, binding.AuthoritativePage);
         Assert.Equal("TDP toggle failed", binding.LastLocalFailureMessage);
+    }
+
+    [Fact]
+    public async Task Failed_pointer_toggle_with_unchanged_authority_is_included_in_value_refresh()
+    {
+        const QuickSettingsRowId rowId = QuickSettingsRowId.DeviceTdpEnabled;
+        var before = TdpPage(tdpEnabled: false);
+        var mutate = new GatedMutate();
+        using var binding = NewBinding(before, mutate.Func);
+
+        // ToggleSwitch changes its native IsOn before raising Toggled.
+        var nativeSwitchIsOn = true;
+        var task = binding.SubmitImmediateToggleAsync(rowId, desired: true);
+        mutate.CompleteNext(Failure("TDP toggle failed", TdpPage(tdpEnabled: false)));
+        Assert.True(await task);
+
+        var after = binding.BuildEffectivePage();
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, after));
+        Assert.Empty(QuickSettingsRowRendering.FindChangedValueRowIds(before, after));
+
+        var rowsToApply = QuickSettingsRowRendering.FindValueRowsToApply(before, after, rowId);
+        Assert.Contains(rowId, rowsToApply);
+        if (rowsToApply.Contains(rowId))
+            nativeSwitchIsOn = after.Sections.SelectMany(section => section.Rows)
+                .Single(row => row.RowId == rowId).Value!.BooleanValue!.Value;
+
+        Assert.False(nativeSwitchIsOn);
+    }
+
+    [Fact]
+    public async Task Successful_pointer_toggle_applies_authoritative_value_and_shape_changes_use_full_path()
+    {
+        const QuickSettingsRowId rowId = QuickSettingsRowId.DeviceTdpEnabled;
+        var before = TdpPage(tdpEnabled: false);
+        var mutate = new GatedMutate();
+        using var binding = NewBinding(before, mutate.Func);
+
+        var nativeSwitchIsOn = true;
+        var task = binding.SubmitImmediateToggleAsync(rowId, desired: true);
+        mutate.CompleteNext(Success(TdpPage(tdpEnabled: true)));
+        Assert.True(await task);
+
+        var after = binding.BuildEffectivePage();
+        var rowsToApply = QuickSettingsRowRendering.FindValueRowsToApply(before, after, rowId);
+        Assert.Contains(rowId, rowsToApply);
+        if (rowsToApply.Contains(rowId))
+            nativeSwitchIsOn = after.Sections.SelectMany(section => section.Rows)
+                .Single(row => row.RowId == rowId).Value!.BooleanValue!.Value;
+        Assert.True(nativeSwitchIsOn);
+
+        var structuralPage = TdpPage(tdpEnabled: true, hideDcRows: true);
+        Assert.False(QuickSettingsRowRendering.IsValueOnlyPageUpdate(after, structuralPage));
     }
 
     [Fact]
