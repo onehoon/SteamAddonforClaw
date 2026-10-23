@@ -1580,6 +1580,52 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
+    public async Task Final_native_pnp_read_failure_after_mode_transition_logs_one_terminal_error()
+    {
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousMinimumLevel = AppLog.MinimumLevelOverride;
+        var logDirectory = Path.Combine(Path.GetTempPath(), $"FinalNativePnpOwnershipTests-{Guid.NewGuid():N}");
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = logDirectory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+
+        try
+        {
+            var h = new Harness
+            {
+                InitialMode = MsiClawNativeMode.XInput,
+                FinalModeAfterSwitch = MsiClawNativeMode.DirectInput,
+                FailPnpCaptureAfterFirstModeSwitch = true,
+            };
+
+            var result = await h.Build().AcquireAsync(default);
+            AppLog.DrainForTests();
+            var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+            var errorLines = log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("[ERROR]", StringComparison.Ordinal)).ToArray();
+
+            Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+            Assert.True(result.ModeWriteIssued);
+            Assert.Equal(1, h.SwitchCalls);
+            Assert.False(h.InputSource.StartCalled);
+            Assert.Empty(h.HidHideApplied);
+            Assert.Single(errorLines);
+            Assert.Contains("Event=DisabledOwnershipPnpReadFailed", errorLines[0]);
+            Assert.Contains("Phase=FinalNativeState", errorLines[0]);
+            Assert.Contains("ModeWriteIssued=True", errorLines[0]);
+            Assert.Contains("Win32Error=5", errorLines[0]);
+            Assert.Contains("SPDRP_HARDWAREID=1", errorLines[0]);
+        }
+        finally
+        {
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousMinimumLevel;
+            if (Directory.Exists(logDirectory)) Directory.Delete(logDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Transient_native_pnp_read_recovers_before_mode_input_and_hidhide_mutations()
     {
         var h = new Harness
@@ -3154,6 +3200,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public Func<IReadOnlyList<ControllerDeviceInfo>>? Pid1902DeviceSnapshot { get; set; }
         public Func<FrontendCenterMStartupState>? AuthoritySnapshot { get; set; }
         public bool FailNativeCaptureAfterFirstModeSwitch { get; set; }
+        public bool FailPnpCaptureAfterFirstModeSwitch { get; set; }
         public bool ThrowGlobalPnpSnapshotAfterFirstModeSwitch { get; set; }
         public bool OldPid1902PresentDuringSettle { get; set; }
         public string DirectInputPnp { get; set; } = PrimaryPnp;
@@ -3242,6 +3289,13 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                         return Task.FromResult(new NativeStateCaptureResult(RecoveryCurrentStatus, null, RecoveryCurrentStatus.ToString()));
                     return Task.FromResult(Capture(RecoveryCurrentMode, MsiClawIdentityConfidence.Strong, RecoveryCurrentPhysKey));
                 }
+                if (FailPnpCaptureAfterFirstModeSwitch && SwitchCalls == 1)
+                    return Task.FromResult(new NativeStateCaptureResult(NativeStateCaptureStatus.Failed, null,
+                        "NativeStatePnpReadFailed")
+                    {
+                        PnpReadFailure = new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+                            "SPDRP_HARDWAREID", 128, PrimaryPnp, 17),
+                    });
                 if (FailNativeCaptureAfterFirstModeSwitch && SwitchCalls == 1)
                     return Task.FromResult(new NativeStateCaptureResult(NativeStateCaptureStatus.Failed, null, "Simulated unrelated PnP property read failure."));
                 _nonRecoveringCaptureCount++;

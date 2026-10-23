@@ -203,10 +203,72 @@ internal sealed class MsiClawModeController(
             return result;
         }
 
+        var writeDeadline = started + _timeout;
+        var pnpReadFailures = 0;
+        PnpDeviceReadException? lastPnpReadFailure = null;
+        var lastPnpReadPhase = string.Empty;
+        var pendingPnpReadFailure = false;
+        var pnpRecoveryLogged = false;
+
+        void RecordPnpReadFailure(PnpDeviceReadException exception, string phase)
+        {
+            pnpReadFailures++;
+            lastPnpReadFailure = exception;
+            lastPnpReadPhase = phase;
+            pendingPnpReadFailure = true;
+            var fields = new (string Key, object? Value)[]
+            {
+                ("Event", "NativeModePnpReadRetry"), ("Phase", phase), ("Attempts", pnpReadFailures),
+                ("ElapsedMs", (long)(_now() - started).TotalMilliseconds),
+            }.Concat(exception.ToLogFields()).ToArray();
+            AppLog.Debug("NativeMode", "Native mode PnP observation will be retried within its existing deadline.", fields);
+        }
+
+        void RecordPnpReadRecovery(string phase)
+        {
+            if (!pendingPnpReadFailure) return;
+            pendingPnpReadFailure = false;
+            if (pnpRecoveryLogged || lastPnpReadFailure is null) return;
+            pnpRecoveryLogged = true;
+            AppLog.Info("NativeMode", "Native mode PnP observation recovered after a read failure.",
+                ("Event", "NativeModePnpReadRecovered"), ("Phase", phase), ("Attempts", pnpReadFailures),
+                ("ElapsedMs", (long)(_now() - started).TotalMilliseconds),
+                ("Operation", lastPnpReadFailure.Operation), ("Win32Error", lastPnpReadFailure.Win32Error));
+        }
+
+        MsiClawModeTransitionResult PnpReadTimedOut(string phase)
+        {
+            AppLog.Warn("NativeMode", "Native mode PnP observation did not recover within the existing transition deadline.",
+                lastPnpReadFailure,
+                ("Event", "NativeModePnpReadTimedOut"), ("Phase", phase), ("Attempts", pnpReadFailures),
+                ("ElapsedMs", (long)(_now() - started).TotalMilliseconds), ("WriteSucceeded", writeSucceeded));
+            return Complete(MsiClawModeTransitionStatus.TimedOut, sourceMode,
+                $"PnP read failed during {phase}: {lastPnpReadFailure?.Message ?? "unknown failure"}", writeSucceeded);
+        }
+
         if (!MsiClawModeTopology.TryGet(target, out var targetTopology))
             return Complete(MsiClawModeTransitionStatus.UnsupportedDevice, sourceMode, "Unsupported target native mode.");
 
-        var devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator);
+        // The initial source lookup shares the existing source/HID-write deadline. Only a typed
+        // SetupAPI/PnP read failure is retried; policy and identity results remain authoritative.
+        IReadOnlyList<ControllerDeviceInfo> devices;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator);
+                RecordPnpReadRecovery("SourceResolution");
+                break;
+            }
+            catch (PnpDeviceReadException exception)
+            {
+                RecordPnpReadFailure(exception, "SourceResolution");
+                if (_now() >= writeDeadline) return PnpReadTimedOut("SourceResolution");
+                await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         var source = ResolveSource(devices, expectedIdentity);
         if (source.Status is not MsiClawModeTransitionStatus.Succeeded)
         {
@@ -225,7 +287,6 @@ internal sealed class MsiClawModeController(
 
         // Keep the original bounded source/HID-write phase. A successful write starts a separate
         // full verification budget so native HID latency cannot consume the PnP settle window.
-        var writeDeadline = started + _timeout;
         MsiClawControlHidDevice? control = source.Control;
         var commandStartLogged = false;
         while (true)
@@ -250,7 +311,24 @@ internal sealed class MsiClawModeController(
             if (_now() >= writeDeadline)
                 return Complete(MsiClawModeTransitionStatus.WriteFailed, source.Mode, "Control HID write failed.", true);
             await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
-            devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator);
+            // Do not retry a failed write because of a PnP read fault, and do not reuse a stale
+            // control descriptor. Re-resolve the source passively before the next existing write attempt.
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator);
+                    RecordPnpReadRecovery("SourceRefresh");
+                    break;
+                }
+                catch (PnpDeviceReadException exception)
+                {
+                    RecordPnpReadFailure(exception, "SourceRefresh");
+                    if (_now() >= writeDeadline) return PnpReadTimedOut("SourceRefresh");
+                    await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+                }
+            }
             source = ResolveSource(devices, expectedIdentity);
             if (source.Status is not MsiClawModeTransitionStatus.Succeeded)
             {
@@ -273,11 +351,26 @@ internal sealed class MsiClawModeController(
             poll++;
             var probeStarted = Stopwatch.GetTimestamp();
             var verificationStarted = Stopwatch.GetTimestamp();
-            var current = deviceEnumerator.EnumeratePresentDevices(MsiClawHardware.VendorId, targetTopology.ProductId);
+            IReadOnlyList<ControllerDeviceInfo> current;
+            bool oldPidPresent;
+            try
+            {
+                current = deviceEnumerator.EnumeratePresentDevices(MsiClawHardware.VendorId, targetTopology.ProductId);
+                oldPidPresent = oldPid is { } oldProductId
+                    && deviceEnumerator.IsPresent(MsiClawHardware.VendorId, oldProductId);
+                RecordPnpReadRecovery("TargetVerification");
+            }
+            catch (PnpDeviceReadException exception)
+            {
+                RecordPnpReadFailure(exception, "TargetVerification");
+                if (_now() < verificationDeadline)
+                    await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
             var exactVerificationMs = Stopwatch.GetElapsedTime(verificationStarted).TotalMilliseconds;
             var targetProbeMs = Stopwatch.GetElapsedTime(probeStarted).TotalMilliseconds;
             targetPidPresent = current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId);
-            oldPidDisappeared = oldPid is not { } oldProductId || !deviceEnumerator.IsPresent(MsiClawHardware.VendorId, oldProductId);
+            oldPidDisappeared = oldPid is null || !oldPidPresent;
             // TargetPidPresent: any present node with the target PID, regardless of topology --
             // distinguishes "PID_1902 hasn't appeared yet" from "PID_1902 is present but the
             // strict control-HID candidate below hasn't shown up yet".
@@ -318,6 +411,8 @@ internal sealed class MsiClawModeController(
             }
             await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
         }
+        if (pendingPnpReadFailure && lastPnpReadPhase == "TargetVerification")
+            return PnpReadTimedOut("TargetVerification");
         // Bounded window expired. Distinguish "target never appeared" from "target appeared but the
         // old native-mode device stayed present" so the caller can fail closed with a real reason.
         if (targetSeen && !oldPidDisappeared)

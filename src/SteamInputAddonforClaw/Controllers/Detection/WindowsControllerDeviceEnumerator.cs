@@ -113,17 +113,8 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         var wantedProductIds = productIds.ToHashSet();
         using var set = OpenPresentSet();
         var light = ReadLightweightDevices(set.Handle);
-        var candidates = light.Values.Where(node => IsMatchingInstanceId(node.InstanceId, vendorId, wantedProductIds)).ToArray();
-        var candidateIds = candidates.Select(node => node.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var selected = SelectScopedInstanceIds(light.Values.Select(node => (node.InstanceId, node.DevInst)),
-            vendorId, wantedProductIds, AncestorIds);
-
-        return selected.Select(id =>
-            {
-                if (!light.TryGetValue(id, out var node)) return null;
-                return Hydrate(set.Handle, node, isScopedCandidate: candidateIds.Contains(id));
-            })
-            .Where(device => device is not null).Cast<ControllerDeviceInfo>().ToArray();
+        var candidateIds = SelectScopedCandidateInstanceIds(light.Keys, vendorId, wantedProductIds);
+        return candidateIds.Select(id => Hydrate(set.Handle, light[id], isScopedCandidate: true)).ToArray();
     }
 
     public ControllerDeviceInfo? FindPresentDevice(string instanceId) =>
@@ -301,26 +292,16 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         return identity.VendorId == vendorId && identity.ProductId is { } productId && productIds.Contains(productId);
     }
 
-    internal static IReadOnlySet<string> SelectScopedInstanceIds(
-        IEnumerable<(string InstanceId, uint DevInst)> presentDevices,
+    internal static IReadOnlySet<string> SelectScopedCandidateInstanceIds(
+        IEnumerable<string> presentInstanceIds,
         ushort vendorId,
-        IReadOnlySet<ushort> productIds,
-        Func<uint, IEnumerable<string>> getAncestors)
+        IReadOnlySet<ushort> productIds)
     {
-        ArgumentNullException.ThrowIfNull(presentDevices);
+        ArgumentNullException.ThrowIfNull(presentInstanceIds);
         ArgumentNullException.ThrowIfNull(productIds);
-        ArgumentNullException.ThrowIfNull(getAncestors);
-        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var device in presentDevices)
-        {
-            if (!IsMatchingInstanceId(device.InstanceId, vendorId, productIds)) continue;
-            selected.Add(device.InstanceId);
-            foreach (var ancestorId in getAncestors(device.DevInst))
-            {
-                if (!string.IsNullOrWhiteSpace(ancestorId)) selected.Add(ancestorId);
-            }
-        }
-        return selected;
+        return presentInstanceIds
+            .Where(instanceId => IsMatchingInstanceId(instanceId, vendorId, productIds))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     internal static (ushort? VendorId, ushort? ProductId) GetHydratedIdentity(

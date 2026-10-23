@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class WindowsControllerDeviceEnumeratorTests
 {
     [Fact]
-    public void ScopedSelection_CollectsAllKnownMsiPidsAndOnlyTheirAncestors()
+    public void ScopedSelection_HydratesOnlyIndependentlyDiscoveredKnownMsiCandidates()
     {
         const string root1902 = @"USB\VID_0DB0&PID_1902\CLAW_A";
         const string child1902 = @"HID\VID_0DB0&PID_1902&MI_00&COL01\CLAW_A";
@@ -15,37 +15,33 @@ public sealed class WindowsControllerDeviceEnumeratorTests
         const string pid1903 = @"HID\VID_0DB0&PID_1903&MI_00&COL01\CLAW_A";
         const string unrelated = @"HID\VID_045E&PID_0B13\GAMEPAD";
         const string misleadingAncestor = @"ROOT\ANCESTOR_ONLY";
-        var devices = new[]
+        var presentInstanceIds = new[]
         {
-            (root1902, 1u), (child1902, 2u), (control1902, 3u), (pid1901, 4u), (pid1903, 5u), (unrelated, 6u),
+            root1902, child1902, control1902, pid1901, pid1903, unrelated, misleadingAncestor,
         };
-        var ancestorCalls = new List<uint>();
 
-        var selected = WindowsControllerDeviceEnumerator.SelectScopedInstanceIds(
-            devices,
+        var selected = WindowsControllerDeviceEnumerator.SelectScopedCandidateInstanceIds(
+            presentInstanceIds,
             0x0DB0,
-            new HashSet<ushort> { 0x1901, 0x1902, 0x1903 },
-            devInst =>
-            {
-                ancestorCalls.Add(devInst);
-                return devInst switch
-                {
-                    2 => [root1902, misleadingAncestor],
-                    3 => [root1902],
-                    4 => [@"USB\VID_0DB0&PID_1901\CLAW_A"],
-                    5 => [@"USB\VID_0DB0&PID_1903\CLAW_A"],
-                    _ => [],
-                };
-            });
+            new HashSet<ushort> { 0x1901, 0x1902, 0x1903 });
 
         Assert.Contains(root1902, selected);
         Assert.Contains(child1902, selected);
         Assert.Contains(control1902, selected);
         Assert.Contains(pid1901, selected);
         Assert.Contains(pid1903, selected);
-        Assert.Contains(misleadingAncestor, selected);
+        Assert.DoesNotContain(misleadingAncestor, selected);
         Assert.DoesNotContain(unrelated, selected);
-        Assert.Equal(new uint[] { 1, 2, 3, 4, 5 }, ancestorCalls);
+
+        var hydratedIds = selected.Select(ReadHardwareIdsForHydration).ToArray();
+        Assert.Equal(selected.Count, hydratedIds.Length);
+        Assert.DoesNotContain(misleadingAncestor, hydratedIds);
+
+        string ReadHardwareIdsForHydration(string instanceId) =>
+            instanceId == misleadingAncestor
+                ? throw new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+                    "SPDRP_HARDWAREID", 128, instanceId, 91)
+                : instanceId;
     }
 
     [Fact]
