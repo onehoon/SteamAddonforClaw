@@ -65,6 +65,32 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
+    public void SelectedControllerRowCanBeRestoredAfterAnIntermediateFallbackDuringRefresh()
+    {
+        var ledAvailable = true;
+        var rows = new[]
+        {
+            Row(),
+            Row(),
+            Row(),
+            new OverlayRowCapabilities(() => ledAvailable),
+        };
+        var selection = new OverlayRowSelection();
+        selection.SetRows(rows);
+        Assert.True(selection.TrySelect(3));
+
+        var preferredIndex = selection.SelectedIndex;
+        ledAvailable = false;
+        selection.SetRows(rows, preferredIndex); // An earlier sibling renderer sees the stale LED availability.
+        Assert.Equal(0, selection.SelectedIndex);
+
+        ledAvailable = true;
+        selection.SetRows(rows, preferredIndex); // Final Controller reconciliation restores the saved row.
+
+        Assert.Equal(3, selection.SelectedIndex);
+    }
+
+    [Fact]
     public void SetRowsWithAnInvalidOrUnselectablePreferredIndexFallsBackToFirstSelectable()
     {
         var selection = new OverlayRowSelection();

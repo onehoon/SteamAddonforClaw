@@ -75,6 +75,41 @@ public sealed class OverlayControllerRendererTests
     }
 
     [Fact]
+    public void Controller_frontend_settings_success_and_failure_restore_selection_after_LED_state_is_applied()
+    {
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+
+        var stateStart = controller.IndexOf("internal void ApplyFrontendSettingsState(", StringComparison.Ordinal);
+        var resultStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationResult(", stateStart, StringComparison.Ordinal);
+        var failureStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", resultStart, StringComparison.Ordinal);
+        var settingsState = controller[stateStart..resultStart];
+        Assert.Contains("var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller", settingsState);
+        Assert.True(settingsState.IndexOf("RenderControllerForSteamRows();", StringComparison.Ordinal)
+            < settingsState.IndexOf("RenderControllerLedRows();", StringComparison.Ordinal));
+        Assert.True(settingsState.IndexOf("RenderControllerLedRows();", StringComparison.Ordinal)
+            < settingsState.IndexOf("RestoreControllerRowSelection(preferredControllerIndex);", StringComparison.Ordinal));
+
+        var mutationResult = controller[resultStart..failureStart];
+        Assert.Contains("ApplyFrontendSettingsState(response.Settings, response.ControllerLedAvailable, response.SettingsAvailable);", mutationResult);
+
+        var ledRequestStart = controller.IndexOf("private void RequestControllerLedEnabled(", failureStart, StringComparison.Ordinal);
+        var failure = controller[failureStart..ledRequestStart];
+        Assert.Contains("var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller", failure);
+        Assert.True(failure.IndexOf("RenderControllerLedRows();", StringComparison.Ordinal)
+            < failure.IndexOf("RestoreControllerRowSelection(preferredControllerIndex);", StringComparison.Ordinal));
+
+        var restoreStart = controller.IndexOf("private void RestoreControllerRowSelection(", StringComparison.Ordinal);
+        var restoreEnd = controller.IndexOf("private void RequestControllerLedEnabled(", restoreStart, StringComparison.Ordinal);
+        var restore = controller[restoreStart..restoreEnd];
+        Assert.Contains("_steamControllerMutationInFlight", restore);
+        Assert.Contains("_gyroscopeMutationInFlight", restore);
+        Assert.Contains("_backButtonMutationInFlight", restore);
+        Assert.Contains("_controllerLedMutationInFlight", restore);
+        Assert.Contains("_controllerVibrationMutationInFlight", restore);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", restore);
+    }
+
+    [Fact]
     public void Controller_page_uses_only_back_mapping_bootstrap_availability_and_authoritative_state()
     {
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
