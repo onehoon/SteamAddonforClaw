@@ -107,7 +107,7 @@ public sealed class OverlayQamVisualResourcesTests
         AssertResourceValue(resources, "QamRowCornerRadius", "2");
         Assert.Equal("#1AFFFFFF", Resource(resources, "QamSeparatorBrush").Attribute("Color")?.Value);
         AssertResourceValue(resources, "QamSectionSeparatorThickness", "0,1,0,0");
-        AssertResourceValue(resources, "QamSectionPadding", "16,12,16,12");
+        AssertResourceValue(resources, "QamSectionPadding", "16,10,16,10");
         Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value == "QamRowSeparatorThickness");
         Assert.Contains("BorderThickness = OverlayQamResources.Get(\"QamSelectionBorderThickness\", new Thickness(0))", rowChrome);
         Assert.DoesNotContain("QamSeparatorBrush", rowChrome);
@@ -161,11 +161,11 @@ public sealed class OverlayQamVisualResourcesTests
         var separator = quickSettings[separatorStart..separatorEnd];
 
         AssertResourceValue(resources, "QamSectionSpacing", "0");
-        AssertResourceValue(resources, "QamSectionPadding", "16,12,16,12");
+        AssertResourceValue(resources, "QamSectionPadding", "16,10,16,10");
         Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", quickSettings);
         Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", controller);
         Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", clawHud);
-        Assert.Contains("Padding = OverlayQamResources.Get(\"QamSectionPadding\", new Thickness(16, 12, 16, 12))", sectionCard);
+        Assert.Contains("Padding = OverlayQamResources.Get(\"QamSectionPadding\", new Thickness(16, 10, 16, 10))", sectionCard);
         Assert.Contains("SetOverlaySectionSeparator(rendered.Card, hasFeature)", quickSettings);
         Assert.Contains("SetOverlaySectionSeparator(_clawHudCard.Container, visible: false)", clawHud);
         Assert.Contains("SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true)", clawHud);

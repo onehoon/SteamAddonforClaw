@@ -708,7 +708,7 @@ public sealed partial class OverlayWindow
         {
             Child = child,
             Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
-            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 12, 16, 12)),
+            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 10, 16, 10)),
             BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush"),
             BorderThickness = new Thickness(0),
             CornerRadius = OverlayQamResources.Get("QamSectionCornerRadius", new CornerRadius(0)),
