@@ -385,13 +385,49 @@ public sealed class OverlayQuickSettingsPageBindingTests
         var linked = new[] { new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, 2) };
         var mutate = new GatedMutate();
         using var binding = NewBinding(TdpPage(pl1Ac: 25, pl2Ac: 26, linked: linked), mutate.Func, new ManualDelay().Func);
+        var before = binding.BuildEffectivePage();
 
-        binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsValue.Integer(26));
+        Assert.True(binding.ScheduleSlider(
+            QuickSettingsRowId.DeviceTdpAcPl1,
+            QuickSettingsValue.Integer(26),
+            out var changedRowIds));
+        var after = binding.BuildEffectivePage();
 
         Assert.True(binding.TryGetPendingValue(QuickSettingsRowId.DeviceTdpAcPl1, out var lower));
         Assert.Equal(26, lower.IntegerValue);
         Assert.True(binding.TryGetPendingValue(QuickSettingsRowId.DeviceTdpAcPl2, out var upper));
         Assert.Equal(28, upper.IntegerValue); // companion corrected immediately, before settlement
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, after));
+        Assert.Equal(
+            [QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2],
+            changedRowIds);
+        Assert.Equal(changedRowIds, QuickSettingsRowRendering.FindChangedValueRowIds(before, after));
+    }
+
+    [Fact]
+    public void Profile_intel_fps_preview_changes_only_the_edited_ac_or_dc_row()
+    {
+        var basePage = ProfilePage(480);
+        var fpsSection = new QuickSettingsSection(QuickSettingsSectionId.ProfileFpsLimit, "Intel FPS Limit",
+        [
+            Toggle(QuickSettingsRowId.ProfileFpsLimitEnabled, true),
+            Numeric(QuickSettingsRowId.ProfileFpsLimitAc, 60, 30, 120),
+            Numeric(QuickSettingsRowId.ProfileFpsLimitDc, 45, 30, 120),
+        ]);
+        var page = basePage with { Sections = [.. basePage.Sections, fpsSection] };
+        using var binding = NewProfileBinding(page, new GatedMutate().Func, new ManualDelay().Func);
+        var before = binding.BuildEffectivePage();
+
+        Assert.True(binding.ScheduleSlider(
+            QuickSettingsRowId.ProfileFpsLimitAc,
+            QuickSettingsValue.Integer(65),
+            out var changedRowIds));
+
+        var after = binding.BuildEffectivePage();
+        Assert.Equal([QuickSettingsRowId.ProfileFpsLimitAc], changedRowIds);
+        Assert.Equal(45, after.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileFpsLimit)
+            .Rows.Single(row => row.RowId == QuickSettingsRowId.ProfileFpsLimitDc).Value!.IntegerValue);
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, after));
     }
 
     [Fact]

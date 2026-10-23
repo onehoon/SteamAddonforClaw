@@ -103,6 +103,9 @@ public sealed partial class OverlayWindow
         internal Dictionary<QuickSettingsRowId, OverlayValueRow> ValueRows { get; } = new();
         internal Dictionary<QuickSettingsSectionId, RenderedQuickSettingsSection> RenderedSections { get; } = new();
         internal bool? RenderedAvailable { get; set; }
+        // Last applied projection for renderer delta classification only. The binding remains the
+        // sole source of effective/authoritative values and mutation context.
+        internal QuickSettingsPageSnapshot? RenderedPage { get; set; }
     }
 
     private readonly Dictionary<QuickSettingsPageId, QuickSettingsSurface> _quickSettingsSurfaces = new();
@@ -133,6 +136,7 @@ public sealed partial class OverlayWindow
         binding.SettledAsynchronously += () => RenderQuickSettingsPage(surface);
         surface.Binding = binding;
         surface.RenderedAvailable = null;
+        surface.RenderedPage = null;
         RenderQuickSettingsPage(surface);
     }
 
@@ -173,6 +177,16 @@ public sealed partial class OverlayWindow
         if (surface.Binding is null) return;
         var page = surface.Binding.BuildEffectivePage();
 
+        if (surface.RenderedPage is { } previousPage &&
+            QuickSettingsRowRendering.IsValueOnlyPageUpdate(previousPage, page))
+        {
+            var changedRowIds = QuickSettingsRowRendering.FindChangedValueRowIds(previousPage, page);
+            if (changedRowIds.Count > 0)
+                ApplyQuickSettingsRowValues(surface, page, changedRowIds);
+            surface.RenderedPage = page;
+            return;
+        }
+
         if (!page.Available)
         {
             if (surface.RenderedAvailable != false)
@@ -182,20 +196,35 @@ public sealed partial class OverlayWindow
             ReconcileQuickSettingsSections(surface, page);
         else
             RebuildQuickSettingsContent(surface, page);
+
+        surface.RenderedPage = page;
     }
 
     // Value-only updates change neither the section container nor any row control instance.
     private static void UpdateQuickSettingsRowValues(QuickSettingsSurface surface, QuickSettingsSection section)
     {
         foreach (var row in section.Rows)
-        {
-            if (surface.ToggleRows.TryGetValue(row.RowId, out var toggle))
-                ApplyQuickSettingsToggleState(toggle, row);
-            else if (surface.NumericSliderRows.TryGetValue(row.RowId, out var numericSlider))
-                ApplyQuickSettingsNumericSliderState(numericSlider, row);
-            else if (surface.ValueRows.TryGetValue(row.RowId, out var valueRow))
-                ApplyQuickSettingsValueState(valueRow, row);
-        }
+            ApplyQuickSettingsRowValue(surface, row);
+    }
+
+    private static void ApplyQuickSettingsRowValues(
+        QuickSettingsSurface surface,
+        QuickSettingsPageSnapshot page,
+        IReadOnlySet<QuickSettingsRowId> rowIds)
+    {
+        foreach (var row in page.Sections.SelectMany(section => section.Rows))
+            if (rowIds.Contains(row.RowId))
+                ApplyQuickSettingsRowValue(surface, row);
+    }
+
+    private static void ApplyQuickSettingsRowValue(QuickSettingsSurface surface, QuickSettingsRow row)
+    {
+        if (surface.ToggleRows.TryGetValue(row.RowId, out var toggle))
+            ApplyQuickSettingsToggleState(toggle, row);
+        else if (surface.NumericSliderRows.TryGetValue(row.RowId, out var numericSlider))
+            ApplyQuickSettingsNumericSliderState(numericSlider, row);
+        else if (surface.ValueRows.TryGetValue(row.RowId, out var valueRow))
+            ApplyQuickSettingsValueState(valueRow, row);
     }
 
     private static void ApplyQuickSettingsToggleState(OverlayToggleRow toggle, QuickSettingsRow row)
@@ -591,8 +620,21 @@ public sealed partial class OverlayWindow
     private void ScheduleQuickSettingsSlider(QuickSettingsSurface surface, QuickSettingsRowId rowId, QuickSettingsValue desired)
     {
         if (surface.Binding is null) return;
-        surface.Binding.ScheduleSlider(rowId, desired);
-        RenderQuickSettingsPage(surface);
+        surface.Binding.ScheduleSlider(rowId, desired, out var changedRowIds);
+        var page = surface.Binding.BuildEffectivePage();
+        var renderedPage = surface.RenderedPage;
+        if (renderedPage is null || !renderedPage.Available || !page.Available ||
+            renderedPage.PageId != page.PageId || renderedPage.ProfileTarget != page.ProfileTarget)
+        {
+            RenderQuickSettingsPage(surface);
+            return;
+        }
+
+        // Always reapply the edited row so a rejected mutation restores the current effective
+        // value. The binding returns only additional group members whose linked value changed.
+        changedRowIds = changedRowIds.Append(rowId).ToHashSet();
+        ApplyQuickSettingsRowValues(surface, page, changedRowIds);
+        surface.RenderedPage = page;
     }
 
     private static string FormatDiscreteLabel(IReadOnlyList<QuickSettingsDiscreteOption> options, double index)

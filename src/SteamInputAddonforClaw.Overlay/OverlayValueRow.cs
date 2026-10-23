@@ -235,9 +235,17 @@ internal sealed class OverlayValueRow
     // semantic boundaries and for unavailable or malformed rows.
     private void Render()
     {
-        _valueText.Text = _model.ConstraintsValid ? _formatValue(_model.PreviewValue) : "--";
-        _previousButton.IsEnabled = _model.CanDecrease;
-        _nextButton.IsEnabled = _model.CanIncrease;
+        var valueText = _model.ConstraintsValid ? _formatValue(_model.PreviewValue) : "--";
+        if (_valueText.Text != valueText)
+            _valueText.Text = valueText;
+
+        var canDecrease = _model.CanDecrease;
+        if (_previousButton.IsEnabled != canDecrease)
+            _previousButton.IsEnabled = canDecrease;
+
+        var canIncrease = _model.CanIncrease;
+        if (_nextButton.IsEnabled != canIncrease)
+            _nextButton.IsEnabled = canIncrease;
     }
 
     internal static string FormatInteger(double value) => value.ToString("0", CultureInfo.InvariantCulture);

@@ -278,7 +278,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("FailureText", source);
         Assert.DoesNotContain("UnavailableText", source);
 
-        var renderQuickSettingsPage = source[source.IndexOf("private void RenderQuickSettingsPage(QuickSettingsSurface surface)", StringComparison.Ordinal)..
+        var renderQuickSettingsPage = source[source.IndexOf("private void RenderQuickSettingsPage(", StringComparison.Ordinal)..
             source.IndexOf("private static void UpdateQuickSettingsRowValues", StringComparison.Ordinal)];
         Assert.Contains("ReconcileQuickSettingsSections(surface, page);", renderQuickSettingsPage);
         Assert.Contains("RebuildQuickSettingsContent(surface, page);", renderQuickSettingsPage);
@@ -371,6 +371,49 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("ApplyRowSelectionVisual();", selection);
         Assert.Contains("selectedIndex != previousSelection || selectedRowId != preferredRowId", selection);
         Assert.Contains("BringSelectedRowIntoView();", selection);
+    }
+
+    [Fact]
+    public void Value_only_quick_settings_updates_skip_page_reconciliation_selection_and_scroll_work()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var render = source[source.IndexOf("private void RenderQuickSettingsPage(", StringComparison.Ordinal)..
+            source.IndexOf("private static void UpdateQuickSettingsRowValues", StringComparison.Ordinal)];
+        var fastPathStart = render.IndexOf("if (surface.RenderedPage is", StringComparison.Ordinal);
+        var fastPathEnd = render.IndexOf("if (!page.Available)", fastPathStart, StringComparison.Ordinal);
+        Assert.True(fastPathStart >= 0 && fastPathEnd > fastPathStart);
+        var fastPath = render[fastPathStart..fastPathEnd];
+
+        Assert.Contains("QuickSettingsRowRendering.IsValueOnlyPageUpdate", fastPath);
+        Assert.Contains("FindChangedValueRowIds", fastPath);
+        Assert.Contains("ApplyQuickSettingsRowValues", fastPath);
+        Assert.DoesNotContain("ReconcileQuickSettingsSections", fastPath);
+        Assert.DoesNotContain("RebuildQuickSettingsContent", fastPath);
+        Assert.DoesNotContain("RestoreQuickSettingsSelection", fastPath);
+        Assert.DoesNotContain("ApplyRowSelectionVisual", fastPath);
+        Assert.DoesNotContain("BringSelectedRowIntoView", fastPath);
+        Assert.DoesNotContain("_numericSliderRepeatTarget.Clear()", fastPath);
+        Assert.Contains("ReconcileQuickSettingsSections(surface, page);", render);
+        Assert.Contains("RebuildQuickSettingsContent(surface, page);", render);
+    }
+
+    [Fact]
+    public void Quick_settings_value_diff_is_scoped_to_changed_row_ids_and_can_restore_a_rejected_preview()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var update = source[source.IndexOf("private static void ApplyQuickSettingsRowValues", StringComparison.Ordinal)..
+            source.IndexOf("private static void ApplyQuickSettingsToggleState", StringComparison.Ordinal)];
+        var scheduleStart = source.IndexOf("private void ScheduleQuickSettingsSlider", StringComparison.Ordinal);
+        var schedule = source[scheduleStart..
+            source.IndexOf("private static string FormatDiscreteLabel", scheduleStart, StringComparison.Ordinal)];
+
+        Assert.Contains("rowIds.Contains(row.RowId)", update);
+        Assert.Contains("ScheduleSlider(rowId, desired, out var changedRowIds)", schedule);
+        Assert.Contains("changedRowIds.Append(rowId).ToHashSet()", schedule);
+        Assert.Contains("ApplyQuickSettingsRowValues(surface, page, changedRowIds)", schedule);
+        var targetedUpdate = schedule[schedule.IndexOf("changedRowIds = changedRowIds.Append", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("RenderQuickSettingsPage", targetedUpdate);
+        Assert.DoesNotContain("ReconcileQuickSettingsSections", schedule);
     }
 
     [Fact]
@@ -618,6 +661,39 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("surface.NumericSliderRows.TryGetValue(row.RowId, out var numericSlider)", update);
         Assert.Contains("ApplyQuickSettingsNumericSliderState(numericSlider, row)", update);
         Assert.DoesNotContain("new OverlayNumericSliderRow", update);
+    }
+
+    [Fact]
+    public void Numeric_slider_native_properties_are_applied_only_when_the_value_changes()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayNumericSliderRow.cs");
+        var render = source[source.IndexOf("private void Render()", StringComparison.Ordinal)..
+            source.IndexOf("private static void ApplyQamSliderResources", StringComparison.Ordinal)];
+
+        Assert.Contains("if (_valueText.Text != valueText)", render);
+        Assert.Contains("if (_slider.IsEnabled != _model.IsAvailable)", render);
+        Assert.Contains("if (_slider.Minimum != expandedMinimum)", render);
+        Assert.Contains("if (_slider.Maximum != expandedMaximum)", render);
+        Assert.Contains("if (_slider.Minimum != _model.Minimum)", render);
+        Assert.Contains("if (_slider.Maximum != _model.Maximum)", render);
+        Assert.Contains("if (_slider.StepFrequency != _model.Step)", render);
+        Assert.Contains("if (_slider.Value != _model.PreviewValue)", render);
+        Assert.True(render.IndexOf("_slider.Minimum = expandedMinimum", StringComparison.Ordinal)
+            < render.IndexOf("_slider.Maximum = expandedMaximum", StringComparison.Ordinal));
+        Assert.True(render.IndexOf("_slider.Maximum = expandedMaximum", StringComparison.Ordinal)
+            < render.IndexOf("_slider.Minimum = _model.Minimum", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Value_row_native_text_and_button_states_are_applied_only_when_changed()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs");
+        var render = source[source.IndexOf("private void Render()", StringComparison.Ordinal)..
+            source.IndexOf("internal static string FormatInteger", StringComparison.Ordinal)];
+
+        Assert.Contains("if (_valueText.Text != valueText)", render);
+        Assert.Contains("if (_previousButton.IsEnabled != canDecrease)", render);
+        Assert.Contains("if (_nextButton.IsEnabled != canIncrease)", render);
     }
 
     [Fact]

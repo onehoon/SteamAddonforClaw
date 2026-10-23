@@ -44,6 +44,55 @@ internal static class QuickSettingsRowRendering
             if (options[i].Value == value) return i;
         return -1;
     }
+
+    // A value-only update is safe to apply without rebuilding row capabilities or restoring
+    // selection only while all page, profile, section, renderer, availability, and mutation
+    // metadata remain stable. Runtime values are the sole permitted difference.
+    internal static bool IsValueOnlyPageUpdate(QuickSettingsPageSnapshot previous, QuickSettingsPageSnapshot current)
+    {
+        if (!previous.Available || !current.Available ||
+            previous.PageId != current.PageId || previous.ProfileTarget != current.ProfileTarget ||
+            !string.Equals(previous.Message, current.Message, StringComparison.Ordinal) ||
+            previous.Sections.Count != current.Sections.Count ||
+            !previous.LinkedSliderConstraints.SequenceEqual(current.LinkedSliderConstraints))
+            return false;
+
+        for (var sectionIndex = 0; sectionIndex < previous.Sections.Count; sectionIndex++)
+        {
+            var oldSection = previous.Sections[sectionIndex];
+            var newSection = current.Sections[sectionIndex];
+            if (!OverlayQuickSettingsSectionRendering.HasSameShape(oldSection, newSection) ||
+                !string.Equals(oldSection.Message, newSection.Message, StringComparison.Ordinal))
+                return false;
+
+            for (var rowIndex = 0; rowIndex < oldSection.Rows.Count; rowIndex++)
+            {
+                var oldRow = oldSection.Rows[rowIndex];
+                var newRow = newSection.Rows[rowIndex];
+                if (oldRow.Available != newRow.Available || oldRow.Writable != newRow.Writable ||
+                    oldRow.CommitPolicy != newRow.CommitPolicy || oldRow.CommitGroupId != newRow.CommitGroupId ||
+                    oldRow.SliderSpec?.Minimum != newRow.SliderSpec?.Minimum ||
+                    oldRow.SliderSpec?.Maximum != newRow.SliderSpec?.Maximum ||
+                    oldRow.SliderSpec?.Step != newRow.SliderSpec?.Step)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    internal static HashSet<QuickSettingsRowId> FindChangedValueRowIds(
+        QuickSettingsPageSnapshot previous,
+        QuickSettingsPageSnapshot current)
+    {
+        var previousRows = previous.Sections.SelectMany(section => section.Rows)
+            .ToDictionary(row => row.RowId);
+        var changed = new HashSet<QuickSettingsRowId>();
+        foreach (var row in current.Sections.SelectMany(section => section.Rows))
+            if (!previousRows.TryGetValue(row.RowId, out var oldRow) || oldRow.Value != row.Value)
+                changed.Add(row.RowId);
+        return changed;
+    }
 }
 
 // Section 20: a small typed discriminated pending-draft identity -- row-keyed when a slider has no
@@ -240,14 +289,25 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
     // itself from the pre-toggle authoritative section (e.g. DeviceTdpEnabled still true) and later
     // re-enable a feature the user just turned off. The caller re-renders immediately after this
     // returns, so a rejected controller/pointer edit just snaps back to the current effective value.
-    internal bool ScheduleSlider(QuickSettingsRowId rowId, QuickSettingsValue desired)
+    internal bool ScheduleSlider(QuickSettingsRowId rowId, QuickSettingsValue desired) =>
+        ScheduleSlider(rowId, desired, out _);
+
+    // Supplies the exact effective draft rows changed by this edit so the WinUI surface can update
+    // the edited row and only linked/group companions whose values actually moved, without scanning
+    // or reconciling unrelated page controls on a high-frequency slider input.
+    internal bool ScheduleSlider(
+        QuickSettingsRowId rowId,
+        QuickSettingsValue desired,
+        out IReadOnlySet<QuickSettingsRowId> changedRowIds)
     {
+        changedRowIds = new HashSet<QuickSettingsRowId>();
         if (_disposed || _mutationBusy) return false;
         if (FindRow(rowId) is not { ControlKind: QuickSettingsControlKind.Slider } row) return false;
         if (!CanMutate(row)) return false;
         if (row.CommitPolicy is not { Mode: QuickSettingsCommitMode.TrailingDebounce, DelayMilliseconds: > 0 } policy) return false;
 
         var key = QuickSettingsPendingKey.For(row);
+        Dictionary<QuickSettingsRowId, QuickSettingsValue?> previousValues;
         if (!_pending.TryGetValue(key, out var entry))
         {
             Dictionary<QuickSettingsRowId, QuickSettingsValue> values;
@@ -257,6 +317,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
             if (row.CommitGroupId is null)
             {
                 values = new Dictionary<QuickSettingsRowId, QuickSettingsValue> { [rowId] = desired };
+                previousValues = new Dictionary<QuickSettingsRowId, QuickSettingsValue?> { [rowId] = row.Value };
                 order = [rowId];
                 sectionId = FindSectionForRow(rowId)?.SectionId ?? default;
             }
@@ -264,6 +325,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
             {
                 if (FindSectionForRow(rowId) is not { } section) return false;
                 if (!TrySeedSectionDraft(section, out values, out order)) return false;
+                previousValues = values.ToDictionary(pair => pair.Key, pair => (QuickSettingsValue?)pair.Value);
                 sectionId = section.SectionId;
             }
 
@@ -278,9 +340,15 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
             };
             _pending[key] = entry;
         }
+        else
+            previousValues = entry.Values.ToDictionary(pair => pair.Key, pair => (QuickSettingsValue?)pair.Value);
 
         entry.Values[rowId] = desired;
         ApplyLinkedConstraints(entry.Values, rowId);
+        changedRowIds = entry.Values
+            .Where(pair => !previousValues.TryGetValue(pair.Key, out var previousValue) || previousValue != pair.Value)
+            .Select(pair => pair.Key)
+            .ToHashSet();
 
         var values2 = entry.Order.Select(id => new QuickSettingsRowValue(id, entry.Values[id])).ToArray();
         var intent = new QuickSettingsMutationIntent(_authoritativePage.PageId, _authoritativePage.ProfileTarget, rowId, values2);

@@ -113,29 +113,45 @@ internal sealed class OverlayNumericSliderRow
 
     private void Render()
     {
-        _valueText.Text = _model.ConstraintsValid ? _formatValue(_model.PreviewValue) : "--";
+        var valueText = _model.ConstraintsValid ? _formatValue(_model.PreviewValue) : "--";
+        if (_valueText.Text != valueText)
+            _valueText.Text = valueText;
 
         _suppress = true;
         try
         {
-            _slider.IsEnabled = _model.IsAvailable;
+            if (_slider.IsEnabled != _model.IsAvailable)
+                _slider.IsEnabled = _model.IsAvailable;
             if (!_model.ConstraintsValid)
             {
-                _slider.Minimum = 0;
-                _slider.Maximum = 1;
-                _slider.StepFrequency = 1;
-                _slider.Value = 0;
+                if (_slider.Minimum != 0)
+                    _slider.Minimum = 0;
+                if (_slider.Maximum != 1)
+                    _slider.Maximum = 1;
+                if (_slider.StepFrequency != 1)
+                    _slider.StepFrequency = 1;
+                if (_slider.Value != 0)
+                    _slider.Value = 0;
                 return;
             }
 
             // Expand before narrowing the range so an old slider value can never violate an
-            // intermediate Minimum/Maximum assignment during authoritative range changes.
-            _slider.Minimum = Math.Min(_slider.Minimum, _model.Minimum);
-            _slider.Maximum = Math.Max(_slider.Maximum, _model.Maximum);
-            _slider.Minimum = _model.Minimum;
-            _slider.Maximum = _model.Maximum;
-            _slider.StepFrequency = _model.Step;
-            _slider.Value = _model.PreviewValue;
+            // intermediate Minimum/Maximum assignment during authoritative range changes. Each
+            // dependency property is touched only when its effective value differs.
+            var expandedMinimum = Math.Min(_slider.Minimum, _model.Minimum);
+            if (_slider.Minimum != expandedMinimum)
+                _slider.Minimum = expandedMinimum;
+            var expandedMaximum = Math.Max(_slider.Maximum, _model.Maximum);
+            if (_slider.Maximum != expandedMaximum)
+                _slider.Maximum = expandedMaximum;
+            if (_slider.Minimum != _model.Minimum)
+                _slider.Minimum = _model.Minimum;
+            if (_slider.Maximum != _model.Maximum)
+                _slider.Maximum = _model.Maximum;
+            if (_slider.StepFrequency != _model.Step)
+                _slider.StepFrequency = _model.Step;
+            if (_slider.Value != _model.PreviewValue)
+                _slider.Value = _model.PreviewValue;
         }
         finally
         {
