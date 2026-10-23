@@ -96,6 +96,80 @@ public sealed class OverlayControllerInputRouterTests
             actions);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cardinal_to_diagonal_emits_only_the_initial_cardinal_until_full_neutral(bool left)
+    {
+        var initial = left ? OverlayNavigationAction.NavigateLeft : OverlayNavigationAction.NavigateRight;
+        var afterNeutral = left ? OverlayNavigationAction.NavigateDown : OverlayNavigationAction.NavigateUp;
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(left ? Buttons(left: true) : Buttons(right: true));
+        source.Raise(left ? Buttons(down: true, left: true) : Buttons(up: true, right: true));
+        source.Raise(left ? Buttons(left: true) : Buttons(right: true)); // cardinal again, still disarmed
+        source.Raise(left ? Buttons(left: true, a: true) : Buttons(right: true, a: true));
+        var throughSentinel = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { initial, OverlayNavigationAction.Accept }, throughSentinel);
+
+        source.Raise(Buttons());
+        source.Raise(left ? Buttons(down: true) : Buttons(up: true));
+        var actions = await delivery.WaitForAsync(3);
+        Assert.Equal(new[] { initial, OverlayNavigationAction.Accept, afterNeutral }, actions);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Starting_capture_in_diagonal_requires_neutral_before_any_dpad_action(bool upRight)
+    {
+        var source = new FakeSource
+        {
+            LatestState = State(upRight ? Buttons(up: true, right: true) : Buttons(down: true, left: true)),
+        };
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(upRight ? Buttons(right: true, a: true) : Buttons(left: true, a: true)); // cardinal without neutral
+        var throughSentinel = await delivery.WaitForAsync(1);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept }, throughSentinel);
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(up: true));
+        var actions = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept, OverlayNavigationAction.NavigateUp }, actions);
+    }
+
+    [Fact]
+    public async Task Entering_diagonal_from_neutral_emits_no_action_until_full_neutral()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(up: true, right: true));
+        source.Raise(Buttons(up: true));
+        source.Raise(Buttons(up: true, a: true));
+        var firstSentinel = await delivery.WaitForAsync(1);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept }, firstSentinel);
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(down: true, left: true));
+        source.Raise(Buttons(down: true, left: true, a: true));
+        var secondSentinel = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept, OverlayNavigationAction.Accept }, secondSentinel);
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(left: true));
+        var actions = await delivery.WaitForAsync(3);
+        Assert.Equal(new[] { OverlayNavigationAction.Accept, OverlayNavigationAction.Accept, OverlayNavigationAction.NavigateLeft }, actions);
+    }
+
     [Fact]
     public async Task A_rising_edge_maps_to_accept_and_B_rising_edge_maps_to_back()
     {
@@ -249,6 +323,24 @@ public sealed class OverlayControllerInputRouterTests
         Assert.False(wait.IsCompleted);
 
         source.Raise(Buttons()); // release
+        Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Suppressed_diagonal_still_blocks_publisher_release_until_all_dpad_directions_are_neutral()
+    {
+        var source = new FakeSource();
+        using var router = new OverlayControllerInputRouter(source, _ => Task.CompletedTask);
+        router.Start();
+        source.Raise(Buttons(up: true, right: true));
+
+        var wait = router.WaitForConsumedControlsReleaseAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        source.Raise(Buttons(right: true));
+        Assert.False(wait.IsCompleted);
+
+        source.Raise(Buttons());
         Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 

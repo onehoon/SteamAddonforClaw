@@ -52,6 +52,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         Channel.CreateUnbounded<OverlayNavigationAction>(new UnboundedChannelOptions { SingleReader = true });
     private readonly object _sync = new();
     private ControllerState _previousState;
+    private bool _dpadArmed;
     private bool _leftStickArmed;
     private bool _rightStickArmed;
     private TaskCompletionSource<OverlayConsumedControlsReleaseOutcome>? _releaseWaiter;
@@ -78,6 +79,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
             // deflected -- when capture begins must not emit an action. A stick that starts
             // outside the neutral band starts disarmed and must return to neutral before it can fire.
             _previousState = _source.LatestState;
+            _dpadArmed = DpadDirectionCount(_previousState.Buttons) == 0;
             _leftStickArmed = IsStickNeutral(_previousState.LeftStick);
             _rightStickArmed = IsStickNeutral(_previousState.RightStick);
             _deliveryLoop = Task.Run(DeliveryLoopAsync);
@@ -141,8 +143,9 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         {
             if (!_disposed && _accepting)
             {
+                TryQueueDpadNavigation(buttons);
                 foreach (var (held, action) in Bindings)
-                    if (held(buttons) && !held(_previousState.Buttons))
+                    if (!IsDpadAction(action) && held(buttons) && !held(_previousState.Buttons))
                     {
                         _actions.Writer.TryWrite(action);
                         AppLog.Debug("OverlayCapture", "Navigation action.", ("Event", "OverlayNavigation"), ("Action", action));
@@ -158,6 +161,47 @@ internal sealed class OverlayControllerInputRouter : IDisposable
             }
         }
     }
+
+    // Treat the D-pad as one Overlay gesture. A diagonal (or a direct cardinal change without a
+    // neutral report) disarms navigation until every direction has been released.
+    private void TryQueueDpadNavigation(GamepadButtons buttons)
+    {
+        var directionCount = DpadDirectionCount(buttons);
+        if (directionCount == 0)
+        {
+            _dpadArmed = true;
+            return;
+        }
+
+        if (!_dpadArmed)
+            return;
+
+        _dpadArmed = false;
+        if (directionCount != 1)
+            return;
+
+        foreach (var (held, action) in Bindings)
+        {
+            if (!IsDpadAction(action) || !held(buttons))
+                continue;
+
+            _actions.Writer.TryWrite(action);
+            AppLog.Debug("OverlayCapture", "Navigation action.", ("Event", "OverlayNavigation"), ("Action", action));
+            return;
+        }
+    }
+
+    private static int DpadDirectionCount(GamepadButtons buttons) =>
+        (buttons.DPadUp ? 1 : 0) +
+        (buttons.DPadDown ? 1 : 0) +
+        (buttons.DPadLeft ? 1 : 0) +
+        (buttons.DPadRight ? 1 : 0);
+
+    private static bool IsDpadAction(OverlayNavigationAction action) => action is
+        OverlayNavigationAction.NavigateUp or
+        OverlayNavigationAction.NavigateDown or
+        OverlayNavigationAction.NavigateLeft or
+        OverlayNavigationAction.NavigateRight;
 
     // OQ5-UI-03 section 4: one stick deflection emits at most one dominant-axis action. Armed only
     // while neutral; disarms on fire and re-arms once both axes are back inside the neutral band.
