@@ -29,13 +29,13 @@ public sealed partial class OverlayWindow
     // with its current Runtime-projected tile count and three-column layout.
     internal void NavigateUp()
     {
-        if (OnShortcutPage()) { if (_shortcutSelection.MoveUp()) ApplyShortcutSelectionVisual(); return; }
+        if (OnShortcutPage()) { if (_shortcutSelection.MoveUp()) ApplyShortcutSelectionVisual(bringIntoView: true); return; }
         MoveRowSelection(up: true);
     }
 
     internal void NavigateDown()
     {
-        if (OnShortcutPage()) { if (_shortcutSelection.MoveDown()) ApplyShortcutSelectionVisual(); return; }
+        if (OnShortcutPage()) { if (_shortcutSelection.MoveDown()) ApplyShortcutSelectionVisual(bringIntoView: true); return; }
         MoveRowSelection(up: false);
     }
 
@@ -48,7 +48,7 @@ public sealed partial class OverlayWindow
         if (OnShortcutPage())
         {
             if (delta < 0 ? _shortcutSelection.MoveLeft() : _shortcutSelection.MoveRight())
-                ApplyShortcutSelectionVisual();
+                ApplyShortcutSelectionVisual(bringIntoView: true);
             return;
         }
         if (_rowSelection.AdjustSelected(delta))
@@ -107,20 +107,35 @@ public sealed partial class OverlayWindow
         }
     }
 
-    private void ApplyShortcutSelectionVisual()
+    private void ApplyShortcutSelectionVisual(bool bringIntoView = false)
     {
         var selectedTile = GetSelectedShortcutTile();
-        foreach (var (tileId, tile) in _shortcutTiles)
+        var selectedTileId = selectedTile?.TileId;
+        if (_renderedShortcutSelectedTileId != selectedTileId)
         {
-            var selected = selectedTile?.TileId == tileId;
-            tile.BorderBrush = _rowSelectedBrush;
-            tile.Background = OverlayQamResources.Brush(selected ? "QamTileSelectedBrush" : "QamTileBrush");
+            if (_renderedShortcutSelectedTileId is { } previousId
+                && _shortcutTiles.TryGetValue(previousId, out var previousControls))
+                ApplyShortcutTileSelectionVisual(previousControls, selected: false);
+            if (selectedTileId is { } nextId
+                && _shortcutTiles.TryGetValue(nextId, out var nextControls))
+                ApplyShortcutTileSelectionVisual(nextControls, selected: true);
+            _renderedShortcutSelectedTileId = selectedTileId;
         }
-        if (selectedTile is not null && _shortcutTiles.TryGetValue(selectedTile.TileId, out var selectedBorder))
+        if (bringIntoView && OnShortcutPage()
+            && selectedTile is not null
+            && _shortcutTiles.TryGetValue(selectedTile.TileId, out var selectedControls))
         {
-            try { selectedBorder.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false }); }
+            try { selectedControls.Border.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false }); }
             catch (Exception exception) { OverlayLog.Warn("Shortcut", "Could not bring the selected tile into view.", exception); }
         }
+    }
+
+    private void ApplyShortcutTileSelectionVisual(ShortcutTileControls tile, bool selected)
+    {
+        if (tile.IsSelected == selected) return;
+        tile.Border.BorderBrush = _rowSelectedBrush;
+        tile.Border.Background = OverlayQamResources.Brush(selected ? "QamTileSelectedBrush" : "QamTileBrush");
+        tile.IsSelected = selected;
     }
 
     private FrontendShortcutTile? GetSelectedShortcutTile()
@@ -146,13 +161,10 @@ public sealed partial class OverlayWindow
         var columns = snapshot.Available && snapshot.Tiles.Count > 0
             ? Math.Min(ShortcutVisualColumnCount, snapshot.Tiles.Count)
             : 0;
-        var preferredIndex = selectedTileId is { } id
-            ? snapshot.Tiles.ToList().FindIndex(tile => tile.TileId == id)
-            : -1;
+        var preferredIndex = OverlayShortcutSelection.FindTileIndex(selectedTileId, snapshot.Tiles);
         _shortcutSelection.Configure(snapshot.Available ? snapshot.Tiles.Count : 0, columns,
             preferredIndex >= 0 ? preferredIndex : 0);
         RenderShortcutSnapshot();
-        ApplyShortcutSelectionVisual();
     }
 
     private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(AddonQuickSettingsTabId tab) =>

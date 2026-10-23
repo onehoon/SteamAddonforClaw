@@ -18,12 +18,20 @@ public sealed class OverlayShortcutRendererTests
         Assert.DoesNotContain("Slot 4", shell + renderer, StringComparison.Ordinal);
         Assert.Contains("FrontendShortcutDashboardSnapshot", renderer, StringComparison.Ordinal);
         Assert.Contains("_shortcutSnapshot.Tiles", renderer, StringComparison.Ordinal);
+        Assert.Contains("OverlayShortcutTileReconciliation.Between(_renderedShortcutTiles, tiles)", renderer, StringComparison.Ordinal);
+        Assert.Contains("Reconciliation", renderer, StringComparison.Ordinal);
         Assert.Contains("private const int ShortcutVisualColumnCount = 3;", renderer, StringComparison.Ordinal);
         Assert.Contains("column < ShortcutVisualColumnCount", renderer, StringComparison.Ordinal);
         Assert.Contains("index / ShortcutVisualColumnCount", renderer, StringComparison.Ordinal);
         Assert.Contains("index % ShortcutVisualColumnCount", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("_shortcutGrid.Children.Clear()", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("_shortcutTiles.Clear()", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("_shortcutGrid.RowDefinitions.Clear()", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("_shortcutGrid.ColumnDefinitions.Clear()", renderer, StringComparison.Ordinal);
+        Assert.Contains("if (updated.Contains(tile.TileId))", renderer, StringComparison.Ordinal);
+        Assert.Contains("if (repositioned.Contains(tile.TileId))", renderer, StringComparison.Ordinal);
         Assert.DoesNotContain("Math.Min(2", renderer, StringComparison.Ordinal);
-        Assert.Contains("for (var index = 0; index < _shortcutSnapshot.Tiles.Count; index++)", renderer, StringComparison.Ordinal);
+        Assert.Contains("for (var index = 0; index < tiles.Count; index++)", renderer, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -33,7 +41,7 @@ public sealed class OverlayShortcutRendererTests
         var resources = ReadSource("src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml");
 
         Assert.Contains("FrontendShortcutDashboardSnapshot.Unavailable()", renderer, StringComparison.Ordinal);
-        Assert.Contains("if (!_shortcutSnapshot.Available", renderer, StringComparison.Ordinal);
+        Assert.Contains("_shortcutSnapshot.Available", renderer, StringComparison.Ordinal);
         Assert.Contains("tile.Enabled", renderer, StringComparison.Ordinal);
         Assert.Contains("Text = tile.Title", renderer, StringComparison.Ordinal);
         Assert.Contains("new FontIcon", renderer, StringComparison.Ordinal);
@@ -41,10 +49,10 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("FontSize = 24", renderer, StringComparison.Ordinal);
         Assert.Contains("FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(\"Segoe Fluent Icons\")", renderer, StringComparison.Ordinal);
         Assert.Contains("Orientation = Orientation.Vertical", renderer, StringComparison.Ordinal);
-        Assert.Contains("header.Children.Add(new FontIcon", renderer, StringComparison.Ordinal);
+        Assert.Contains("header.Children.Add(icon)", renderer, StringComparison.Ordinal);
         Assert.Contains("header.Children.Add(title)", renderer, StringComparison.Ordinal);
         Assert.True(
-            renderer.IndexOf("header.Children.Add(new FontIcon", StringComparison.Ordinal)
+            renderer.IndexOf("header.Children.Add(icon)", StringComparison.Ordinal)
             < renderer.IndexOf("header.Children.Add(title)", StringComparison.Ordinal));
         Assert.Contains("MaxWidth = contentWidth", renderer, StringComparison.Ordinal);
         Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", renderer, StringComparison.Ordinal);
@@ -52,9 +60,11 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("MaxLines = hasStatus ? 1 : 2", renderer, StringComparison.Ordinal);
         Assert.Contains("Spacing = hasStatus ? 4 : 6", renderer, StringComparison.Ordinal);
         Assert.Contains("Spacing = hasStatus ? 4 : 0", renderer, StringComparison.Ordinal);
-        Assert.Contains("if (hasStatus)", renderer, StringComparison.Ordinal);
-        Assert.Contains("tile.StatusText", renderer, StringComparison.Ordinal);
-        Assert.Contains("Text = tile.StatusText", renderer, StringComparison.Ordinal);
+        Assert.Contains("Visibility = hasStatus ? Visibility.Visible : Visibility.Collapsed", renderer, StringComparison.Ordinal);
+        Assert.Contains("tile.StatusText ?? string.Empty", renderer, StringComparison.Ordinal);
+        Assert.Contains("controls.Status.Text != statusText", renderer, StringComparison.Ordinal);
+        Assert.Contains("controls.Icon.Glyph != tile.IconGlyph", renderer, StringComparison.Ordinal);
+        Assert.Contains("controls.Border.Opacity != opacity", renderer, StringComparison.Ordinal);
         var statusStart = renderer.IndexOf("var status = new TextBlock", StringComparison.Ordinal);
         var statusEnd = renderer.IndexOf("OverlayQamResources.ApplyTextStyle(status", statusStart, StringComparison.Ordinal);
         var statusBuilder = renderer[statusStart..statusEnd];
@@ -135,6 +145,37 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("selectedTileId", navigation, StringComparison.Ordinal);
         Assert.Contains("FirstOrDefault", renderer, StringComparison.Ordinal);
         Assert.Contains("FrontendShortcutDashboardSnapshot.Unavailable()", renderer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shortcut_refresh_reuses_tile_controls_by_identity_and_only_navigation_requests_scroll()
+    {
+        var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+
+        Assert.Contains("_shortcutTiles.TryGetValue(tile.TileId, out var existing)", renderer, StringComparison.Ordinal);
+        Assert.Contains("CreateShortcutTile(tile, index", renderer, StringComparison.Ordinal);
+        Assert.Contains("_shortcutGrid.Children.Remove(controls.Border)", renderer, StringComparison.Ordinal);
+        Assert.Contains("if (bringIntoView && OnShortcutPage()", navigation, StringComparison.Ordinal);
+        Assert.Contains("ApplyShortcutSelectionVisual(bringIntoView: true)", navigation, StringComparison.Ordinal);
+        Assert.Contains("ApplyShortcutSelectionVisual();", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartBringIntoView", renderer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Hidden_shortcut_snapshot_refresh_does_not_request_scroll()
+    {
+        var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+        var refreshStart = navigation.IndexOf("private void RefreshShortcutSelection(", StringComparison.Ordinal);
+        var refreshEnd = navigation.IndexOf("private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor", refreshStart, StringComparison.Ordinal);
+        var refresh = navigation[refreshStart..refreshEnd];
+
+        Assert.Contains("RenderShortcutSnapshot();", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("bringIntoView", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartBringIntoView", refresh + renderer, StringComparison.Ordinal);
+        Assert.Contains("if (bringIntoView && OnShortcutPage()", navigation, StringComparison.Ordinal);
+        Assert.Contains("ApplyShortcutSelectionVisual(bringIntoView: true)", navigation, StringComparison.Ordinal);
     }
 
     [Fact]

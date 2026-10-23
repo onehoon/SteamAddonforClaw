@@ -283,7 +283,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("rows[i].Container.Background", selectionVisual);
         Assert.DoesNotContain("rows[i].Container.BorderBrush", selectionVisual);
 
-        Assert.Contains("tile.BorderBrush = _rowSelectedBrush", navigation);
+        Assert.Contains("tile.Border.BorderBrush = _rowSelectedBrush", navigation);
         Assert.DoesNotContain("_profileCatalogCards", profile);
     }
 
@@ -476,7 +476,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Equal("#0DFFFFFF", Resource(resources, "QamTileBrush").Attribute("Color")?.Value);
         Assert.Equal("#26FFFFFF", Resource(resources, "QamTileSelectedBrush").Attribute("Color")?.Value);
         Assert.Contains(
-            "tile.Background = OverlayQamResources.Brush(selected ? \"QamTileSelectedBrush\" : \"QamTileBrush\");",
+            "tile.Border.Background = OverlayQamResources.Brush(selected ? \"QamTileSelectedBrush\" : \"QamTileBrush\");",
             navigation,
             StringComparison.Ordinal);
         AssertResourceValue(resources, "QamSelectionBorderThickness", "0");

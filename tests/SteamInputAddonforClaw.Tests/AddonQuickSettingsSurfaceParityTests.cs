@@ -121,7 +121,7 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.Contains("AddonQuickSettingsTabOrderContract", overlay);
         Assert.Contains("ShortcutVisualColumnCount = 3", shortcutRenderer);
         Assert.Contains("index / ShortcutVisualColumnCount", shortcutRenderer);
-        Assert.Contains("SelectShortcutTile(tile.TileId, \"Pointer\")", shortcutRenderer + overlay);
+        Assert.Contains("SelectShortcutTile(tileId, \"Pointer\")", shortcutRenderer + overlay);
         Assert.Contains("SelectedIndex", overlay);
         Assert.DoesNotContain("AddonQuickSettingsShortcutSlotId", overlay);
         Assert.DoesNotContain("setInterval", overlay);
