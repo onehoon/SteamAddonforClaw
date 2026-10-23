@@ -94,6 +94,44 @@ public sealed class HardwareCompatibilityTests
         Assert.Equal(DeviceProbeCaptureStatus.Indeterminate, factory.Capture().Status);
     }
 
+    [Fact]
+    public void HardwareProbe_UsesScopedMsiSnapshotWithoutCallingGlobalInventory()
+    {
+        var controller = new ControllerDeviceInfo(
+            @"HID\VID_0DB0&PID_1902&MI_00&COL01\CLAW_A", Guid.NewGuid(), @"USB\PARENT", [@"USB\VID_0DB0&PID_1902\CLAW_A"],
+            "HID", [@"HID\VID_0DB0&PID_1902&MI_00&COL01\CLAW_A"], [], "HIDClass", null, null,
+            0x0DB0, 0x1902, true);
+        var enumerator = new ScopedOnlyEnumerator([controller]);
+        var factory = new WindowsDeviceProbeContextFactory(
+            new FakeIdentitySource(new("MSI", "Claw", "MS-1T91", true)), enumerator);
+
+        var capture = factory.Capture();
+        var result = Evaluate(capture);
+
+        Assert.Equal(DeviceProbeCaptureStatus.Success, capture.Status);
+        Assert.Equal(HardwareCompatibilityStatus.Supported, result.Status);
+        Assert.Equal(0, enumerator.GlobalCalls);
+        Assert.Equal(1, enumerator.ScopedCalls);
+        Assert.Single(capture.Context.PresentPnpDevices);
+    }
+
+    [Fact]
+    public void HardwareProbe_PreservesTypedPnpReadFailureForExistingStabilization()
+    {
+        var failure = new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+            "SPDRP_HARDWAREID", 128, @"HID\VID_0DB0&PID_1902&MI_00&COL01\CLAW_A", 17);
+        var factory = new WindowsDeviceProbeContextFactory(
+            new FakeIdentitySource(new("MSI", "Claw", "MS-1T91", true)), new ScopedOnlyEnumerator([], failure));
+
+        var capture = factory.Capture();
+        var assessment = Evaluate(capture);
+
+        Assert.Equal(DeviceProbeCaptureStatus.Indeterminate, capture.Status);
+        Assert.Same(failure, capture.PnpReadFailure);
+        Assert.Equal(HardwareCompatibilityStatus.Indeterminate, assessment.Status);
+        Assert.Same(failure, assessment.PnpReadFailure);
+    }
+
     [Theory]
     [InlineData((int)HardwareCompatibilityStatus.Unsupported)]
     [InlineData((int)HardwareCompatibilityStatus.Indeterminate)]
@@ -161,6 +199,24 @@ public sealed class HardwareCompatibilityTests
     private sealed class FakeIdentitySource(WindowsDeviceIdentity identity) : IWindowsDeviceIdentitySource { public WindowsDeviceIdentity Capture() => identity; }
     private sealed class FakeControllerEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices; }
     private sealed class ThrowingControllerEnumerator : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new InvalidOperationException(); }
+    private sealed class ScopedOnlyEnumerator(IReadOnlyList<ControllerDeviceInfo> scopedDevices, PnpDeviceReadException? failure = null) : IControllerDeviceEnumerator
+    {
+        internal int GlobalCalls { get; private set; }
+        internal int ScopedCalls { get; private set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            GlobalCalls++;
+            throw new InvalidOperationException("Global detailed PnP enumeration must not be used by startup admission.");
+        }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds)
+        {
+            ScopedCalls++;
+            Assert.Equal((ushort)0x0DB0, vendorId);
+            Assert.Equal(new ushort[] { 0x1901, 0x1902, 0x1903 }, productIds.Order().ToArray());
+            if (failure is not null) throw failure;
+            return scopedDevices;
+        }
+    }
     private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(baseBoardProduct: "MS-1T91"), "test"); }
     private sealed class FakeHardwareEvaluator(HardwareCompatibilityAssessment assessment) : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture capture) => assessment; }
 }

@@ -1520,6 +1520,106 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
+    public async Task Persistent_native_pnp_read_failure_logs_once_and_stops_before_ownership_mutation()
+    {
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousMinimumLevel = AppLog.MinimumLevelOverride;
+        var logDirectory = Path.Combine(Path.GetTempPath(), $"NativePnpOwnershipTests-{Guid.NewGuid():N}");
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = logDirectory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+
+        try
+        {
+            var h = new Harness();
+            long timestamp = 0;
+            var enumerator = new PersistentScopedPnpFailureEnumerator();
+            var nativeState = new MsiClawNativeStateManager(enumerator,
+                restoreSettleTimeout: TimeSpan.FromSeconds(2),
+                restoreSettlePollInterval: TimeSpan.FromMilliseconds(500),
+                settleDelay: (duration, token) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    timestamp += (long)(duration.TotalSeconds * Stopwatch.Frequency);
+                    return Task.CompletedTask;
+                },
+                timestamp: () => timestamp);
+            h.InitialCaptureAsyncOverride = token => nativeState.CaptureStableCurrentSnapshotAsync(
+                token, allowTransientDeviceNotFound: true);
+
+            var result = await h.Build().AcquireAsync(default);
+            AppLog.DrainForTests();
+            var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+
+            Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+            Assert.Equal(1, h.NativeCaptureCalls);
+            Assert.Equal(4, enumerator.Calls);
+            Assert.Equal(0, h.SwitchCalls);
+            Assert.Empty(h.SwitchTargets);
+            Assert.Empty(h.FastWriteTargets);
+            Assert.Empty(h.GamepadMode.SwitchTargets);
+            Assert.Equal(0, h.XInputCommandWriteCalls);
+            Assert.Empty(h.HidHideApplied);
+            Assert.False(h.InputSource.StartCalled);
+            Assert.Empty(h.Events);
+            Assert.Equal(1, log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+                .Count(line => line.Contains("Event=DisabledOwnershipPnpReadFailed", StringComparison.Ordinal)));
+            Assert.Equal(1, log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+                .Count(line => line.Contains("[ERROR]", StringComparison.Ordinal)));
+            Assert.Contains("Win32Error=5", log);
+            Assert.Contains("SPDRP_HARDWAREID=1", log);
+            Assert.Contains(PrimaryPnp, log);
+        }
+        finally
+        {
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousMinimumLevel;
+            if (Directory.Exists(logDirectory)) Directory.Delete(logDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Transient_native_pnp_read_recovers_before_mode_input_and_hidhide_mutations()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,
+            FinalModeAfterSwitch = MsiClawNativeMode.DirectInput,
+            RecordModeSwitchEvents = true,
+            RecordOwnershipEvents = true,
+            PnpDevices = [PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00")],
+        };
+        long timestamp = 0;
+        var enumerator = new PnpFailureOnceThenModeTransitionEnumerator(h.Events,
+            NativeModeDevice(0x1901, PhysKey), NativeModeDevice(0x1902, PhysKey));
+        var nativeState = new MsiClawNativeStateManager(enumerator,
+            restoreSettleTimeout: TimeSpan.FromSeconds(2),
+            restoreSettlePollInterval: TimeSpan.FromMilliseconds(500),
+            settleDelay: (duration, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                timestamp += (long)(duration.TotalSeconds * Stopwatch.Frequency);
+                return Task.CompletedTask;
+            },
+            timestamp: () => timestamp);
+        h.InitialCaptureAsyncOverride = token => nativeState.CaptureStableCurrentSnapshotAsync(
+            token, allowTransientDeviceNotFound: true);
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned, result.Reason);
+        Assert.Equal(3, enumerator.Calls);
+        Assert.Equal(1, h.SwitchCalls);
+        Assert.True(h.InputSource.IsRunning);
+        Assert.Equal([PrimaryPnp], h.HidHideApplied);
+        Assert.True(h.Events.IndexOf("PnpReadFailed") < h.Events.IndexOf("PnpReadRecovered"));
+        Assert.True(h.Events.IndexOf("PnpReadRecovered") < h.Events.IndexOf("ModeSwitch:DirectInput"));
+        Assert.True(h.Events.IndexOf("ModeSwitch:DirectInput") < h.Events.IndexOf("InputStart"));
+        Assert.True(h.Events.IndexOf("FirstValidState") < h.Events.IndexOf("HidHideApply"));
+    }
+
+    [Fact]
     public async Task Weak_native_identity_fails_before_mutation()
     {
         var h = new Harness { InitialMode = MsiClawNativeMode.XInput, InitialConfidence = MsiClawIdentityConfidence.Indeterminate };
@@ -2943,6 +3043,20 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             UsagePage: usagePage, Usage: usage);
     }
 
+    private static ControllerDeviceInfo NativeModeDevice(ushort productId, string physKey)
+    {
+        var serial = physKey[(physKey.LastIndexOf('\\') + 1)..];
+        return new ControllerDeviceInfo(
+            InstanceId: $@"HID\VID_0DB0&PID_{productId:X4}&MI_00&COL01\{serial}",
+            ContainerId: null,
+            ParentInstanceId: $@"USB\VID_0DB0&PID_{productId:X4}&MI_00\6&xyz&0&0000",
+            AncestorInstanceIds: [$@"USB\VID_0DB0&PID_{productId:X4}\{serial}"],
+            EnumeratorName: "HID", HardwareIds: [], CompatibleIds: [], ClassName: "HIDClass", ClassGuid: null, Service: "HidUsb",
+            VendorId: 0x0DB0, ProductId: productId, Present: true, FriendlyName: "MSI Claw",
+            UsagePage: productId == 0x1901 ? (ushort)0xFFA0 : (ushort)0xFFF0,
+            Usage: productId == 0x1901 ? (ushort)0x0001 : (ushort)0x0040);
+    }
+
     private static ControllerDeviceInfo Pid1901ControlDevice(string serial, ushort usagePage = 0xFFA0, ushort usage = 0x0001)
     {
         IReadOnlyList<string> ancestors = string.IsNullOrEmpty(serial) ? [] : [$@"USB\VID_0DB0&PID_1901\{serial}"];
@@ -2964,6 +3078,48 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         EnumeratorName: "USB", HardwareIds: [], CompatibleIds: [], ClassName: "USB", ClassGuid: null, Service: null,
         VendorId: 0x0DB0, ProductId: 0x1901, Present: true, FriendlyName: "MSI Claw");
 
+    private sealed class PnpFailureOnceThenModeTransitionEnumerator(
+        List<string> events,
+        ControllerDeviceInfo source,
+        ControllerDeviceInfo target) : IControllerDeviceEnumerator
+    {
+        internal int Calls { get; private set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
+            throw new Xunit.Sdk.XunitException("Native-state ownership must not use global detailed PnP enumeration.");
+
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds)
+        {
+            Assert.Equal((ushort)0x0DB0, vendorId);
+            Assert.Equal(new ushort[] { 0x1901, 0x1902, 0x1903 }, productIds.Order().ToArray());
+            var attempt = Calls++;
+            if (attempt == 0)
+            {
+                events.Add("PnpReadFailed");
+                throw new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+                    "SPDRP_HARDWAREID", 128, source.InstanceId, 17);
+            }
+
+            if (attempt == 1) events.Add("PnpReadRecovered");
+            return [attempt == 1 ? source : target];
+        }
+    }
+
+    private sealed class PersistentScopedPnpFailureEnumerator : IControllerDeviceEnumerator
+    {
+        internal int Calls { get; private set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
+            throw new Xunit.Sdk.XunitException("Native-state ownership must not use global detailed PnP enumeration.");
+
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds)
+        {
+            Assert.Equal((ushort)0x0DB0, vendorId);
+            Assert.Equal(new ushort[] { 0x1901, 0x1902, 0x1903 }, productIds.Order().ToArray());
+            Calls++;
+            throw new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+                "SPDRP_HARDWAREID", 256, PrimaryPnp, 42);
+        }
+    }
+
     // ---- harness ----
 
     private sealed class Harness
@@ -2975,6 +3131,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public bool EnableA2vmAutomaticRumbleLifecycle { get; set; } = true;
         public Func<BootSessionAttemptResult>? ClaimBootAttempt { get; set; }
         public NativeStateCaptureStatus InitialCaptureStatus { get; set; } = NativeStateCaptureStatus.Success;
+        public Func<CancellationToken, Task<NativeStateCaptureResult>>? InitialCaptureAsyncOverride { get; set; }
         public MsiClawIdentityConfidence InitialConfidence { get; set; } = MsiClawIdentityConfidence.Strong;
         public string FinalPhysKey { get; set; } = PhysKey;
         public string? SecondCapturePhysKey { get; set; }
@@ -2986,6 +3143,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public int FailTransitionOnCall { get; set; }
         public bool FailureTargetPidPresent { get; set; }
         public bool RecordModeSwitchEvents { get; set; }
+        public bool RecordOwnershipEvents { get; set; }
         public int DirectInputMissingAttempts { get; set; }
         public int DirectInputUnverifiedAttempts { get; set; }
         public bool DirectInputAmbiguous { get; set; }
@@ -3034,7 +3192,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public Func<MsiClawPhysicalIdentity, CancellationToken, Task<MsiClawModeCommandWriteResult>>? XInputCommandWriteOverride { get; set; }
         public int XInputCommandWriteCalls { get; private set; }
         public int XInputCommandResolutionCalls { get; private set; }
-        public List<string> Events { get; } = [];
+        public List<string> Events { get; set; } = [];
 
         private MsiClawNativeMode RecoveryCurrentMode => RecoverySwitchCalls > 0
             ? RecoveryModeAfterReclaim ?? MsiClawNativeMode.DirectInput
@@ -3072,9 +3230,11 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 if (AuthoritySnapshot is not null) return AuthoritySnapshot();
                 return Recovering && RecoveryAuthority is { } authority ? authority : Authority;
             },
-            _ =>
+            token =>
             {
                 NativeCaptureCalls++;
+                if (!Recovering && InitialCaptureAsyncOverride is { } initialCaptureAsyncOverride)
+                    return initialCaptureAsyncOverride(token);
                 if (Recovering)
                 {
                     Events.Add("NativeCapture");
@@ -3179,7 +3339,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             {
                 AdvanceTime(HidHideApplyElapsed);
                 HidHideApplied.AddRange(targets);
-                if (Recovering) Events.Add("HidHideApply");
+                if (Recovering || RecordOwnershipEvents) Events.Add("HidHideApply");
                 var outcome = Recovering && RecoveryHidHideOutcome is { } recoveryOutcome ? recoveryOutcome : HidHideOutcome;
                 return new AddonHidHideBaselineResult(outcome, outcome.ToString(), AddonHidHideBaselineSnapshot.Unknown);
             },

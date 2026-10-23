@@ -52,8 +52,9 @@ public sealed class MsiClawModeSwitchTests
         [
             Ack(0x05),
         ]);
+        var enumerator = new ScopedOnlyEnumerator([device]);
         var client = new MsiClawGamepadModeClient(
-            new StaticEnumerator([device]),
+            enumerator,
             new MsiClawControlHidResolver(),
             io,
             TimeSpan.FromMilliseconds(100),
@@ -66,6 +67,8 @@ public sealed class MsiClawModeSwitchTests
         Assert.Equal(MsiClawGamepadMode.Bios, result.Mode);
         Assert.Equal([MsiClawGamepadMode.Bios], io.Writes);
         Assert.Equal(1, io.ReadCalls);
+        Assert.Equal(2, enumerator.ScopedCalls);
+        Assert.Equal(0, enumerator.GlobalCalls);
     }
 
     [Fact]
@@ -388,6 +391,27 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Mode_transition_uses_scoped_source_and_target_pid_queries()
+    {
+        var identity = Guid.NewGuid();
+        var oldDevice = Device(identity, "USB\\ROOT", "HID\\MSI", 0x1901, 0xFFA0, 0x0001);
+        var newDevice = Device(identity, "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var enumerator = new ScopedTransitionEnumerator(oldDevice, newDevice);
+        var writer = new RecordingWriter();
+        var controller = new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer,
+            TimeSpan.FromSeconds(1), TimeSpan.Zero);
+
+        var result = await controller.SwitchModeAsync(MsiClawNativeMode.DirectInput,
+            MsiClawPhysicalIdentity.From(oldDevice), CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal(0, enumerator.GlobalCalls);
+        Assert.Equal(1, enumerator.AllMsiPidQueries);
+        Assert.Contains((ushort)0x1902, enumerator.SinglePidQueries);
+        Assert.Contains((ushort)0x1901, enumerator.SinglePidQueries);
+    }
+
+    [Fact]
     public async Task Session_end_write_only_mode_command_resolves_once_and_does_not_wait_for_pnp()
     {
         var source = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
@@ -409,6 +433,24 @@ public sealed class MsiClawModeSwitchTests
         Assert.Equal(1, writer.CallCount);
         Assert.Equal(MsiClawNativeMode.XInput, writer.Mode);
         Assert.Equal(0, delayCalls);
+    }
+
+    [Fact]
+    public async Task Session_end_mode_command_source_uses_scoped_msi_enumeration()
+    {
+        var source = Device(Guid.NewGuid(), @"USB\VID_0DB0&PID_1902\CLAW_A",
+            @"HID\VID_0DB0&PID_1902&MI_00&COL02\CLAW_A", 0x1902, 0xFFF0, 0x0040);
+        var enumerator = new ScopedOnlyEnumerator([source]);
+        var writer = new RecordingWriter();
+        var controller = new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer);
+
+        var result = await controller.WriteXInputCommandAsync(
+            MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.WriteSucceeded, result.Reason);
+        Assert.Equal(1, enumerator.ScopedCalls);
+        Assert.Equal(0, enumerator.GlobalCalls);
+        Assert.Equal(1, writer.CallCount);
     }
 
     [Fact]
@@ -753,6 +795,48 @@ public sealed class MsiClawModeSwitchTests
     }
     private sealed class StaticEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
     { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices; }
+    private sealed class ScopedOnlyEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
+    {
+        internal int GlobalCalls { get; private set; }
+        internal int ScopedCalls { get; private set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            GlobalCalls++;
+            throw new Xunit.Sdk.XunitException("Global detailed PnP enumeration is outside the MSI mode-command path.");
+        }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds)
+        {
+            ScopedCalls++;
+            Assert.Equal((ushort)0x0DB0, vendorId);
+            Assert.Equal(new ushort[] { 0x1901, 0x1902, 0x1903 }, productIds.Order().ToArray());
+            return devices;
+        }
+    }
+    private sealed class ScopedTransitionEnumerator(ControllerDeviceInfo source, ControllerDeviceInfo target) : IControllerDeviceEnumerator
+    {
+        internal int GlobalCalls { get; private set; }
+        internal int AllMsiPidQueries { get; private set; }
+        internal List<ushort> SinglePidQueries { get; } = [];
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            GlobalCalls++;
+            throw new Xunit.Sdk.XunitException("Mode transition must not use global detailed PnP enumeration.");
+        }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds)
+        {
+            Assert.Equal((ushort)0x0DB0, vendorId);
+            if (productIds.Count == 1)
+            {
+                var productId = productIds.Single();
+                SinglePidQueries.Add(productId);
+                return productId == target.ProductId ? [target] : [];
+            }
+
+            Assert.Equal(new ushort[] { 0x1901, 0x1902, 0x1903 }, productIds.Order().ToArray());
+            AllMsiPidQueries++;
+            return [source];
+        }
+    }
     private sealed class RecordingWriter : IMsiClawModeWriter
     {
         public int CallCount { get; private set; }

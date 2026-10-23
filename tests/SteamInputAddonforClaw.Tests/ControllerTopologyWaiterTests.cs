@@ -115,6 +115,55 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
     }
 
     [Fact]
+    public async Task WaitUntilStableAsync_RetriesTypedPnpReadAndStillRequiresThreeStableSamples()
+    {
+        var devices = new[] { GamepadInterface(), DirectInputControlHid() };
+        var enumerator = new PnpFailureOnceEnumerator(devices);
+        var waiter = new ControllerTopologyWaiter(enumerator,
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
+            requiredStableSnapshots: 3, sampleInterval: TimeSpan.Zero, timeout: TimeSpan.FromSeconds(1));
+
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+
+        Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
+        Assert.Equal(4, enumerator.Calls);
+        Assert.Equal(1, CountOccurrences(log, "Event=MsiPnpObservationRecovered"));
+        Assert.DoesNotContain("[ERROR]", log);
+    }
+
+    [Fact]
+    public async Task A2vmFirstControlHidReadiness_RetriesTypedPnpReadBeforeAcceptingFirstUniqueHid()
+    {
+        var enumerator = new PnpFailureOnceEnumerator([DirectInputControlHid()]);
+        var waiter = new ControllerTopologyWaiter(enumerator,
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
+            sampleInterval: TimeSpan.Zero, timeout: TimeSpan.FromSeconds(1));
+
+        var readiness = await waiter.WaitForFirstUnambiguousControlHidAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
+        Assert.Equal(2, enumerator.Calls);
+    }
+
+    [Fact]
+    public async Task WaitUntilStableAsync_PersistentTypedPnpReadRemainsPassiveAndLogsNativeDetails()
+    {
+        var waiter = CreateWaiter(new PersistentPnpFailureEnumerator(), new MsiClawInternalControllerMatcher());
+
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
+        Assert.Contains("FailureClass=PnpReadFailed", log);
+        Assert.Contains("NativeWin32Error=5", log);
+        Assert.Contains("SPDRP_HARDWAREID=1", log);
+        Assert.DoesNotContain("[ERROR]", log);
+    }
+
+    [Fact]
     public async Task A2vmFirstControlHidReadiness_WaitsForMissingEndpointButRejectsAmbiguity()
     {
         var first = DirectInputControlHid();
@@ -457,6 +506,53 @@ public sealed class ControllerTopologyWaiterTests : IDisposable
     private sealed class ThrowingEnumerator : IControllerDeviceEnumerator
     {
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new InvalidOperationException("enumeration failed");
+    }
+
+    private sealed class PnpFailureOnceEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
+    {
+        internal int Calls { get; private set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
+            throw new Xunit.Sdk.XunitException("Topology readiness must not use global detailed PnP enumeration.");
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds)
+        {
+            AssertKnownControllerQuery(vendorId, productIds);
+            if (Calls++ == 0) throw new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+                "SPDRP_HARDWAREID", 32, @"HID\VID_0DB0&PID_1902&MI_00&COL01\CLAW_A", 11);
+            return devices;
+        }
+    }
+
+    private sealed class PersistentPnpFailureEnumerator : IControllerDeviceEnumerator
+    {
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
+            throw new Xunit.Sdk.XunitException("Topology readiness must not use global detailed PnP enumeration.");
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds) =>
+            FailPnpRead(vendorId, productIds);
+    }
+
+    private static IReadOnlyList<ControllerDeviceInfo> FailPnpRead(ushort vendorId, IReadOnlyCollection<ushort> productIds)
+    {
+        AssertKnownControllerQuery(vendorId, productIds);
+        throw new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1, "SPDRP_HARDWAREID", 32,
+            @"HID\VID_0DB0&PID_1902&MI_00&COL01\CLAW_A", 11);
+    }
+
+    private static void AssertKnownControllerQuery(ushort vendorId, IReadOnlyCollection<ushort> productIds)
+    {
+        Assert.Equal((ushort)0x0DB0, vendorId);
+        Assert.Equal(new ushort[] { 0x1901, 0x1902, 0x1903 }, productIds.Order().ToArray());
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var offset = 0;
+        while ((offset = text.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += value.Length;
+        }
+        return count;
     }
 
     /// <summary>

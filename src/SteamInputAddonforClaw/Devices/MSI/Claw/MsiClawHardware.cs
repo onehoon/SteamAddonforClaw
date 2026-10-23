@@ -31,6 +31,9 @@ internal static class MsiClawHardware
     public static bool IsKnownController(ushort? vendorId, ushort? productId) =>
         vendorId == VendorId && IsKnownControllerProductId(productId);
 
+    internal static IReadOnlyList<ControllerDeviceInfo> EnumeratePresentKnownControllerDevices(IControllerDeviceEnumerator enumerator) =>
+        enumerator.EnumeratePresentDevices(VendorId, [XInputProductId, DirectInputProductId, TestingProductId]);
+
     public static bool IsDirectInputController(ushort vendorId, ushort productId) =>
         vendorId == VendorId && productId == DirectInputProductId;
 

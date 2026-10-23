@@ -16,6 +16,8 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
     private const uint SpdrpEnumeratorName = 0x00000016;
     private const int CrSuccess = 0;
     private const uint DevpropTypeGuid = 0x0000000D;
+    private const int ErrorNoMoreItems = 259;
+    private const int ErrorInsufficientBuffer = 122;
 
     private static readonly IntPtr InvalidDeviceInfoSet = new(-1);
     private static readonly DevPropKey DevpkeyDeviceContainerId = new(new Guid("8C7ED206-3F8A-4827-B3AB-AE9E1FAEFC6C"), 2);
@@ -25,7 +27,7 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         var deviceInfoSet = SetupDiGetClassDevsW(IntPtr.Zero, null, IntPtr.Zero, DigcfPresent | DigcfAllClasses);
         if (deviceInfoSet == InvalidDeviceInfoSet)
         {
-            throw new InvalidOperationException("Unable to enumerate present PnP devices.");
+            throw new PnpDeviceReadException("SetupDiGetClassDevsW", Marshal.GetLastWin32Error());
         }
 
         try
@@ -42,13 +44,14 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
                         break;
                     }
 
-                    throw new InvalidOperationException($"Unable to enumerate PnP device at index {index}.");
+                    throw new PnpDeviceReadException("SetupDiEnumDeviceInfo", error,
+                        devInst: deviceInfo.DevInst == 0 ? null : deviceInfo.DevInst, operationContext: $"Index={index}");
                 }
 
                 var instanceId = GetDeviceInstanceId(deviceInfoSet, ref deviceInfo);
-                var hardwareIds = GetRegistryMultiString(deviceInfoSet, ref deviceInfo, SpdrpHardwareId);
-                var compatibleIds = GetRegistryMultiString(deviceInfoSet, ref deviceInfo, SpdrpCompatibleIds);
-                var enumeratorName = GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpEnumeratorName);
+                var hardwareIds = GetRegistryMultiString(deviceInfoSet, ref deviceInfo, SpdrpHardwareId, instanceId);
+                var compatibleIds = GetRegistryMultiString(deviceInfoSet, ref deviceInfo, SpdrpCompatibleIds, instanceId);
+                var enumeratorName = GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpEnumeratorName, instanceId);
                 var vendorProductId = ParseVendorProductId(hardwareIds.Concat(compatibleIds));
                 var ancestorInstanceIds = GetAncestorInstanceIds(deviceInfo.DevInst);
 
@@ -60,13 +63,13 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
                     enumeratorName,
                     hardwareIds,
                     compatibleIds,
-                    GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpClass),
-                    GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpClassGuid),
-                    GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpService),
+                    GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpClass, instanceId),
+                    GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpClassGuid, instanceId),
+                    GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpService, instanceId),
                     vendorProductId.VendorId,
                     vendorProductId.ProductId,
                     Present: true,
-                    FriendlyName: GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpFriendlyName),
+                    FriendlyName: GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpFriendlyName, instanceId),
                     UsagePage: ParseUsage(hardwareIds.Concat(compatibleIds)).Page,
                     Usage: ParseUsage(hardwareIds.Concat(compatibleIds)).Usage));
             }
@@ -93,22 +96,33 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
     public IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId)
     {
         using var set = OpenPresentSet();
-        var light = ReadLightweightDevices(set.Handle, vendorId, productId);
+        var light = ReadLightweightDevices(set.Handle);
+        var productIds = new HashSet<ushort> { productId };
         return light.Values
-            .Where(d => ParseVendorProductId([d.InstanceId]).VendorId == vendorId
-                && ParseVendorProductId([d.InstanceId]).ProductId == productId)
+            .Where(d => IsMatchingInstanceId(d.InstanceId, vendorId, productIds))
             .Select(d => d.InstanceId)
             .ToArray();
     }
 
-    public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
+    public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId) =>
+        EnumeratePresentDevices(vendorId, [productId]);
+
+    public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds)
     {
+        ArgumentNullException.ThrowIfNull(productIds);
+        var wantedProductIds = productIds.ToHashSet();
         using var set = OpenPresentSet();
-        var light = ReadLightweightDevices(set.Handle, vendorId, productId);
-        var target = light.Values.Where(d => ParseVendorProductId(d.HardwareIds).VendorId == vendorId && ParseVendorProductId(d.HardwareIds).ProductId == productId).ToArray();
-        var selected = target.SelectMany(d => AncestorIds(d.DevInst)).Concat(target.Select(d => d.InstanceId))
-            .Where(id => id.Length != 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return selected.Select(id => light.TryGetValue(id, out var node) ? Hydrate(set.Handle, node) : null)
+        var light = ReadLightweightDevices(set.Handle);
+        var candidates = light.Values.Where(node => IsMatchingInstanceId(node.InstanceId, vendorId, wantedProductIds)).ToArray();
+        var candidateIds = candidates.Select(node => node.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selected = SelectScopedInstanceIds(light.Values.Select(node => (node.InstanceId, node.DevInst)),
+            vendorId, wantedProductIds, AncestorIds);
+
+        return selected.Select(id =>
+            {
+                if (!light.TryGetValue(id, out var node)) return null;
+                return Hydrate(set.Handle, node, isScopedCandidate: candidateIds.Contains(id));
+            })
             .Where(device => device is not null).Cast<ControllerDeviceInfo>().ToArray();
     }
 
@@ -119,11 +133,15 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
     {
         using var set = OpenPresentSet();
         var data = new SpDevinfoData { CbSize = (uint)Marshal.SizeOf<SpDevinfoData>() };
-        if (!SetupDiOpenDeviceInfoW(set.Handle, instanceId, IntPtr.Zero, 0, ref data)) return null;
+        if (!SetupDiOpenDeviceInfoW(set.Handle, instanceId, IntPtr.Zero, 0, ref data))
+        {
+            var error = Marshal.GetLastWin32Error();
+            if (error is 2 or 433 or 1168) return null;
+            throw new PnpDeviceReadException("SetupDiOpenDeviceInfoW", error, instanceId: instanceId);
+        }
         if (CM_Locate_DevNodeW(out var devInst, instanceId, 0) != CrSuccess) return null;
         data.DevInst = devInst;
-        var hardwareIds = GetRegistryMultiString(set.Handle, ref data, SpdrpHardwareId);
-        return Hydrate(set.Handle, new LightDevice(instanceId, devInst, hardwareIds, data));
+        return Hydrate(set.Handle, new LightDevice(instanceId, devInst, data));
     }
 
     private static IEnumerable<string> AncestorIds(uint devInst)
@@ -140,33 +158,29 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         }
     }
 
-    private static ControllerDeviceInfo Hydrate(IntPtr set, LightDevice node)
+    private static ControllerDeviceInfo Hydrate(IntPtr set, LightDevice node, bool? isScopedCandidate = null)
     {
         var data = node.Data;
-        var hardwareIds = GetRegistryMultiString(set, ref data, SpdrpHardwareId);
-        var compatibleIds = GetRegistryMultiString(set, ref data, SpdrpCompatibleIds);
+        var hardwareIds = GetRegistryMultiString(set, ref data, SpdrpHardwareId, node.InstanceId);
+        var compatibleIds = GetRegistryMultiString(set, ref data, SpdrpCompatibleIds, node.InstanceId);
         var ancestors = AncestorIds(node.DevInst).ToArray();
         var usage = ParseUsage(hardwareIds.Concat(compatibleIds));
+        var identity = GetHydratedIdentity(node.InstanceId, hardwareIds, compatibleIds, isScopedCandidate);
         return new ControllerDeviceInfo(node.InstanceId, GetContainerId(set, ref data), ancestors.FirstOrDefault(), ancestors,
-            GetRegistryString(set, ref data, SpdrpEnumeratorName), hardwareIds, compatibleIds,
-            GetRegistryString(set, ref data, SpdrpClass), GetRegistryString(set, ref data, SpdrpClassGuid),
-            GetRegistryString(set, ref data, SpdrpService), ParseVendorProductId(hardwareIds.Concat(compatibleIds)).VendorId,
-            ParseVendorProductId(hardwareIds.Concat(compatibleIds)).ProductId, true,
-            GetRegistryString(set, ref data, SpdrpFriendlyName), usage.Page, usage.Usage);
+            GetRegistryString(set, ref data, SpdrpEnumeratorName, node.InstanceId), hardwareIds, compatibleIds,
+            GetRegistryString(set, ref data, SpdrpClass, node.InstanceId), GetRegistryString(set, ref data, SpdrpClassGuid, node.InstanceId),
+            GetRegistryString(set, ref data, SpdrpService, node.InstanceId),
+            identity.VendorId, identity.ProductId, true,
+            GetRegistryString(set, ref data, SpdrpFriendlyName, node.InstanceId), usage.Page, usage.Usage);
     }
 
-    private static Dictionary<string, LightDevice> ReadLightweightDevices(IntPtr set, ushort vendorId, ushort productId)
+    private static Dictionary<string, LightDevice> ReadLightweightDevices(IntPtr set)
     {
         var result = new Dictionary<string, LightDevice>(StringComparer.OrdinalIgnoreCase);
         for (uint index = 0; TryGetDevice(set, index, out var data); index++)
         {
             var instanceId = GetDeviceInstanceId(set, ref data);
-            // InstanceId is the cheap first discriminator for the common USB/HID case.
-            var instanceIdentity = ParseVendorProductId([instanceId]);
-            var ids = instanceIdentity.VendorId == vendorId && instanceIdentity.ProductId == productId
-                ? (IReadOnlyList<string>)[instanceId]
-                : [];
-            result[instanceId] = new LightDevice(instanceId, data.DevInst, ids, data);
+            result[instanceId] = new LightDevice(instanceId, data.DevInst, data);
         }
         return result;
     }
@@ -174,7 +188,11 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
     private static DeviceInfoSet OpenPresentSet()
     {
         var handle = SetupDiGetClassDevsW(IntPtr.Zero, null, IntPtr.Zero, DigcfPresent | DigcfAllClasses);
-        if (handle == InvalidDeviceInfoSet) throw new InvalidOperationException("Unable to enumerate present PnP devices.");
+        if (handle == InvalidDeviceInfoSet)
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new PnpDeviceReadException("SetupDiGetClassDevsW", error);
+        }
         return new DeviceInfoSet(handle);
     }
 
@@ -183,11 +201,12 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         data = new SpDevinfoData { CbSize = (uint)Marshal.SizeOf<SpDevinfoData>() };
         if (SetupDiEnumDeviceInfo(set, index, ref data)) return true;
         var error = Marshal.GetLastWin32Error();
-        if (error == 259) return false;
-        throw new InvalidOperationException($"Unable to enumerate PnP device at index {index}.");
+        if (error == ErrorNoMoreItems) return false;
+        throw new PnpDeviceReadException("SetupDiEnumDeviceInfo", error,
+            devInst: data.DevInst == 0 ? null : data.DevInst, operationContext: $"Index={index}");
     }
 
-    private sealed record LightDevice(string InstanceId, uint DevInst, IReadOnlyList<string> HardwareIds, SpDevinfoData Data);
+    private sealed record LightDevice(string InstanceId, uint DevInst, SpDevinfoData Data);
     private sealed class DeviceInfoSet(IntPtr handle) : IDisposable
     {
         public IntPtr Handle { get; } = handle;
@@ -212,45 +231,120 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
 
     private static string GetDeviceInstanceId(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo)
     {
-        var buffer = new StringBuilder(1024);
-        if (!SetupDiGetDeviceInstanceIdW(deviceInfoSet, ref deviceInfo, buffer, buffer.Capacity, out _))
+        var capacity = 1024;
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            throw new InvalidOperationException("Unable to read a PnP device instance ID.");
+            var buffer = new StringBuilder(capacity);
+            if (SetupDiGetDeviceInstanceIdW(deviceInfoSet, ref deviceInfo, buffer, buffer.Capacity, out var requiredSize))
+                return buffer.ToString();
+
+            var error = Marshal.GetLastWin32Error();
+            if (error == ErrorInsufficientBuffer && requiredSize > capacity && requiredSize > 0 && attempt == 0)
+            {
+                capacity = requiredSize;
+                continue;
+            }
+
+            throw new PnpDeviceReadException("SetupDiGetDeviceInstanceIdW", error,
+                requiredSize: requiredSize > 0 ? (uint)requiredSize : null,
+                devInst: deviceInfo.DevInst == 0 ? null : deviceInfo.DevInst);
         }
 
-        return buffer.ToString();
+        throw new InvalidOperationException("Unreachable PnP instance ID buffer state.");
     }
 
-    private static IReadOnlyList<string> GetRegistryMultiString(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo, uint property)
+    private static IReadOnlyList<string> GetRegistryMultiString(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo, uint property, string instanceId)
     {
-        var bytes = GetRegistryProperty(deviceInfoSet, ref deviceInfo, property);
+        var bytes = GetRegistryProperty(deviceInfoSet, ref deviceInfo, property, instanceId);
         return bytes.Length == 0
             ? []
             : Encoding.Unicode.GetString(bytes).Split('\0', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
-    private static string? GetRegistryString(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo, uint property)
+    private static string? GetRegistryString(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo, uint property, string instanceId)
     {
-        var bytes = GetRegistryProperty(deviceInfoSet, ref deviceInfo, property);
+        var bytes = GetRegistryProperty(deviceInfoSet, ref deviceInfo, property, instanceId);
         return bytes.Length == 0 ? null : Encoding.Unicode.GetString(bytes).TrimEnd('\0');
     }
 
-    private static byte[] GetRegistryProperty(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo, uint property)
+    private static byte[] GetRegistryProperty(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo, uint property, string instanceId)
     {
-        var buffer = new byte[16384];
-        if (!SetupDiGetDeviceRegistryPropertyW(deviceInfoSet, ref deviceInfo, property, out _, buffer, (uint)buffer.Length, out var requiredSize))
+        var bufferSize = 16384;
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            var error = Marshal.GetLastWin32Error();
-            if (error == 13 || error == 1168)
+            var buffer = new byte[bufferSize];
+            if (SetupDiGetDeviceRegistryPropertyW(deviceInfoSet, ref deviceInfo, property, out _, buffer, (uint)buffer.Length, out var requiredSize))
             {
-                return [];
+                return buffer[..(int)requiredSize];
             }
 
-            throw new InvalidOperationException($"Unable to read PnP property {property}.");
+            var error = Marshal.GetLastWin32Error();
+            if (error is 13 or 1168) return [];
+            if (error == ErrorInsufficientBuffer && requiredSize > buffer.Length && requiredSize <= int.MaxValue && attempt == 0)
+            {
+                bufferSize = (int)requiredSize;
+                continue;
+            }
+
+            var (propertyName, _) = GetPropertyName(property);
+            throw new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", error, property,
+                propertyName, requiredSize == 0 ? null : requiredSize, instanceId,
+                deviceInfo.DevInst == 0 ? null : deviceInfo.DevInst);
         }
 
-        return buffer[..(int)requiredSize];
+        throw new InvalidOperationException("Unreachable PnP property buffer state.");
     }
+
+    private static bool IsMatchingInstanceId(string instanceId, ushort vendorId, IReadOnlySet<ushort> productIds)
+    {
+        var identity = ParseVendorProductId([instanceId]);
+        return identity.VendorId == vendorId && identity.ProductId is { } productId && productIds.Contains(productId);
+    }
+
+    internal static IReadOnlySet<string> SelectScopedInstanceIds(
+        IEnumerable<(string InstanceId, uint DevInst)> presentDevices,
+        ushort vendorId,
+        IReadOnlySet<ushort> productIds,
+        Func<uint, IEnumerable<string>> getAncestors)
+    {
+        ArgumentNullException.ThrowIfNull(presentDevices);
+        ArgumentNullException.ThrowIfNull(productIds);
+        ArgumentNullException.ThrowIfNull(getAncestors);
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var device in presentDevices)
+        {
+            if (!IsMatchingInstanceId(device.InstanceId, vendorId, productIds)) continue;
+            selected.Add(device.InstanceId);
+            foreach (var ancestorId in getAncestors(device.DevInst))
+            {
+                if (!string.IsNullOrWhiteSpace(ancestorId)) selected.Add(ancestorId);
+            }
+        }
+        return selected;
+    }
+
+    internal static (ushort? VendorId, ushort? ProductId) GetHydratedIdentity(
+        string instanceId,
+        IReadOnlyList<string> hardwareIds,
+        IReadOnlyList<string> compatibleIds,
+        bool? isScopedCandidate)
+    {
+        if (isScopedCandidate == true) return ParseVendorProductId([instanceId]);
+        if (isScopedCandidate == false) return (null, null);
+        return ParseVendorProductId(hardwareIds.Concat(compatibleIds));
+    }
+
+    private static (string Name, uint Id) GetPropertyName(uint property) => property switch
+    {
+        SpdrpHardwareId => ("SPDRP_HARDWAREID", property),
+        SpdrpCompatibleIds => ("SPDRP_COMPATIBLEIDS", property),
+        SpdrpService => ("SPDRP_SERVICE", property),
+        SpdrpClass => ("SPDRP_CLASS", property),
+        SpdrpClassGuid => ("SPDRP_CLASSGUID", property),
+        SpdrpFriendlyName => ("SPDRP_FRIENDLYNAME", property),
+        SpdrpEnumeratorName => ("SPDRP_ENUMERATOR_NAME", property),
+        _ => ($"SPDRP_{property}", property),
+    };
 
     private static Guid? GetContainerId(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo)
     {

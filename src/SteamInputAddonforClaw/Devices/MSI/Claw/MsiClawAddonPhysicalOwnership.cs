@@ -297,8 +297,19 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         //      during which the user could run Enable and Restart.
         var initialCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
         if (!TryReadIdentity(initialCapture, out var initialMode, out var initialIdentity, out var reason))
+        {
+            if (initialCapture.PnpReadFailure is { } pnpReadFailure)
+            {
+                var failureFields = new (string Key, object? Value)[]
+                {
+                    ("Event", "DisabledOwnershipPnpReadFailed"), ("ModeWriteIssued", false), ("Action", "Passive"),
+                }.Concat(pnpReadFailure.ToLogFields()).ToArray();
+                AppLog.Error("ControllerOwnership", "Disabled-mode physical ownership stopped after bounded MSI PnP read retries.",
+                    pnpReadFailure, failureFields);
+            }
             return Fail("InitialNativeState:" + reason, false,
                 nativeDeviceAbsentAtInitialCapture: initialCapture.Status == NativeStateCaptureStatus.DeviceNotFound);
+        }
         if (initialMode is not (MsiClawNativeMode.XInput or MsiClawNativeMode.DirectInput))
             return Fail("UnsupportedInitialMode:" + initialMode, false);
         AppLog.Info("ControllerOwnership", "Native state captured.", ("Event", "NativeStateCaptured"),

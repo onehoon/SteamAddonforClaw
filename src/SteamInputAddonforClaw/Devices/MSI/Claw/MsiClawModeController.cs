@@ -87,7 +87,7 @@ internal sealed class MsiClawModeController(
         IReadOnlyList<ControllerDeviceInfo> devices;
         try
         {
-            devices = deviceEnumerator.EnumeratePresentDevices();
+            devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator);
         }
         catch (Exception exception)
         {
@@ -206,7 +206,7 @@ internal sealed class MsiClawModeController(
         if (!MsiClawModeTopology.TryGet(target, out var targetTopology))
             return Complete(MsiClawModeTransitionStatus.UnsupportedDevice, sourceMode, "Unsupported target native mode.");
 
-        var devices = deviceEnumerator.EnumeratePresentDevices();
+        var devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator);
         var source = ResolveSource(devices, expectedIdentity);
         if (source.Status is not MsiClawModeTransitionStatus.Succeeded)
         {
@@ -250,7 +250,7 @@ internal sealed class MsiClawModeController(
             if (_now() >= writeDeadline)
                 return Complete(MsiClawModeTransitionStatus.WriteFailed, source.Mode, "Control HID write failed.", true);
             await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
-            devices = deviceEnumerator.EnumeratePresentDevices();
+            devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator);
             source = ResolveSource(devices, expectedIdentity);
             if (source.Status is not MsiClawModeTransitionStatus.Succeeded)
             {

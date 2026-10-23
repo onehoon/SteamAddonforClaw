@@ -205,6 +205,8 @@ internal sealed class StartupCoordinator
 
         var stopwatch = Stopwatch.StartNew();
         var attempts = 1;
+        var pnpReadFailureCount = assessment.PnpReadFailure is null ? 0 : 1;
+        var lastPnpReadFailure = assessment.PnpReadFailure;
         AppLog.Info("Hardware", "Startup hardware probe stabilization wait started.",
             ("PollIntervalMs", _hardwareProbePollInterval.TotalMilliseconds), ("TimeoutMs", _hardwareProbeTimeout.TotalMilliseconds),
             ("Status", assessment.Status), ("Reason", assessment.Reason));
@@ -213,18 +215,32 @@ internal sealed class StartupCoordinator
         {
             if (stopwatch.Elapsed >= _hardwareProbeTimeout)
             {
-                AppLog.Warn("Hardware", "Startup hardware probe stabilization timed out.", null,
-                    ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status), ("Reason", assessment.Reason), ("Action", "Passive"));
+                var failure = assessment.PnpReadFailure ?? lastPnpReadFailure;
+                AppLog.Warn("Hardware", "Startup hardware probe stabilization timed out.", failure,
+                    ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status), ("Reason", assessment.Reason),
+                    ("NativeOperation", failure?.Operation), ("NativeWin32Error", failure?.Win32Error), ("Action", "Passive"));
                 return assessment;
             }
 
             await _hardwareProbeDelay(_hardwareProbePollInterval, cancellationToken).ConfigureAwait(false);
             attempts++;
             assessment = EvaluateHardwareCompatibility();
-            AppLog.Debug("Hardware", "Startup hardware probe stabilization poll.", ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status));
+            if (assessment.PnpReadFailure is { } readFailure)
+            {
+                pnpReadFailureCount++;
+                lastPnpReadFailure = readFailure;
+            }
+            AppLog.Debug("Hardware", "Startup hardware probe stabilization poll.", ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                ("Status", assessment.Status), ("NativeOperation", assessment.PnpReadFailure?.Operation),
+                ("NativeWin32Error", assessment.PnpReadFailure?.Win32Error));
         }
 
-        AppLog.Info("Hardware", "Startup hardware probe stabilization satisfied.", ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status), ("Reason", assessment.Reason));
+        AppLog.Info("Hardware", "Startup hardware probe stabilization satisfied.", ("Event", pnpReadFailureCount > 0
+                ? "HardwareProbePnpReadRecovered"
+                : "HardwareProbeStabilizationSatisfied"),
+            ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status), ("Reason", assessment.Reason),
+            ("PnpReadFailures", pnpReadFailureCount), ("NativeOperation", lastPnpReadFailure?.Operation),
+            ("NativeWin32Error", lastPnpReadFailure?.Win32Error));
         return assessment;
     }
 

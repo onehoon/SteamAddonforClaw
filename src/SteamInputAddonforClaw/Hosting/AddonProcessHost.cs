@@ -1464,9 +1464,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 using var enumerator = new Input.DirectInput.VorticeDirectInputDeviceEnumerator(IntPtr.Zero);
                 return enumerator.EnumerateGameControllers();
             },
-            instanceId => controllerDevices.EnumeratePresentDevices().FirstOrDefault(device =>
-                string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase)),
-            () => controllerDevices.EnumeratePresentDevices(),
+            instanceId => controllerDevices.FindPresentDevice(instanceId),
+            () => controllerDevices.EnumeratePresentDevices(
+                Devices.MSI.Claw.MsiClawHardware.VendorId,
+                Devices.MSI.Claw.MsiClawHardware.DirectInputProductId),
             (vendorId, productId) => controllerDevices.EnumeratePresentDevices(vendorId, productId),
             (vendorId, productId) => controllerDevices.IsPresent(vendorId, productId),
             directInputInputSource,

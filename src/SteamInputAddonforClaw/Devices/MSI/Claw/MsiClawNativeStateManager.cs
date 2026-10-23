@@ -8,11 +8,19 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal enum MsiClawNativeMode { XInput, DirectInput, Other }
 
-internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator deviceEnumerator, IMsiClawModeController? modeController = null, TimeSpan? restoreSettleTimeout = null, TimeSpan? restoreSettlePollInterval = null) : INativeControllerStateManager
+internal sealed class MsiClawNativeStateManager(
+    IControllerDeviceEnumerator deviceEnumerator,
+    IMsiClawModeController? modeController = null,
+    TimeSpan? restoreSettleTimeout = null,
+    TimeSpan? restoreSettlePollInterval = null,
+    Func<TimeSpan, CancellationToken, Task>? settleDelay = null,
+    Func<long>? timestamp = null) : INativeControllerStateManager
 {
     internal const int SnapshotFormatVersion = 1;
     private readonly TimeSpan _restoreSettleTimeout = restoreSettleTimeout ?? TimeSpan.FromSeconds(5);
     private readonly TimeSpan _restoreSettlePollInterval = restoreSettlePollInterval ?? TimeSpan.FromMilliseconds(500);
+    private readonly Func<TimeSpan, CancellationToken, Task> _settleDelay = settleDelay ?? Task.Delay;
+    private readonly Func<long> _timestamp = timestamp ?? Stopwatch.GetTimestamp;
     public HandheldDeviceId DeviceId { get; } = new("msi.claw");
     internal Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity identity, CancellationToken cancellationToken) =>
         modeController is null
@@ -30,7 +38,14 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
     {
         var stopwatch = Stopwatch.StartNew();
         IReadOnlyList<ControllerDeviceInfo> devices;
-        try { devices = deviceEnumerator.EnumeratePresentDevices(); }
+        try { devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator); }
+        catch (PnpDeviceReadException exception)
+        {
+            return new NativeStateCaptureResult(NativeStateCaptureStatus.Failed, null, exception.Message)
+            {
+                PnpReadFailure = exception,
+            };
+        }
         catch (Exception exception)
         {
             AppLog.Error("NativeState", "MSI Claw PnP enumeration failed.", exception, ("Action", "Passive"));
@@ -76,40 +91,87 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
 
     internal async Task<NativeStateCaptureResult> CaptureStableCurrentSnapshotAsync(CancellationToken cancellationToken, bool allowTransientDeviceNotFound = false)
     {
-        var deadline = Stopwatch.GetTimestamp() + (long)(_restoreSettleTimeout.TotalSeconds * Stopwatch.Frequency);
-        var startedAt = Stopwatch.GetTimestamp();
+        var deadline = _timestamp() + (long)(_restoreSettleTimeout.TotalSeconds * Stopwatch.Frequency);
+        var startedAt = _timestamp();
         NativeStateCaptureResult current;
         var poll = 0;
         string? waitCause = null;
+        var pnpReadFailures = 0;
+        var recoveryLogged = false;
+        PnpDeviceReadException? lastPnpReadFailure = null;
         do
         {
             cancellationToken.ThrowIfCancellationRequested();
             current = CaptureSnapshot();
             var missingDevice = current.Status == NativeStateCaptureStatus.DeviceNotFound && allowTransientDeviceNotFound;
-            var mixedTopology = current.Status == NativeStateCaptureStatus.Indeterminate && HasMixedNativeModeTopology();
+            var mixedTopology = false;
+            if (current.Status == NativeStateCaptureStatus.Indeterminate)
+            {
+                try { mixedTopology = HasMixedNativeModeTopology(); }
+                catch (PnpDeviceReadException exception) { current = PnpReadFailed(exception); }
+            }
             if (current.Status == NativeStateCaptureStatus.Indeterminate && !mixedTopology)
             {
                 // The topology may have settled between the capture and the probe. Take one
                 // authoritative follow-up capture instead of returning the stale Indeterminate result.
                 current = CaptureSnapshot();
                 missingDevice = current.Status == NativeStateCaptureStatus.DeviceNotFound && allowTransientDeviceNotFound;
-                mixedTopology = current.Status == NativeStateCaptureStatus.Indeterminate && HasMixedNativeModeTopology();
+                mixedTopology = false;
+                if (current.Status == NativeStateCaptureStatus.Indeterminate)
+                {
+                    try { mixedTopology = HasMixedNativeModeTopology(); }
+                    catch (PnpDeviceReadException exception) { current = PnpReadFailed(exception); }
+                }
             }
+
+            if (current.PnpReadFailure is { } readFailure)
+            {
+                pnpReadFailures++;
+                lastPnpReadFailure = readFailure;
+                waitCause = "PnpReadFailure";
+                var failureFields = new (string Key, object? Value)[]
+                {
+                    ("Event", "NativeStatePnpReadRetry"), ("Attempt", pnpReadFailures),
+                    ("ElapsedMs", (long)((_timestamp() - startedAt) * 1000.0 / Stopwatch.Frequency)),
+                }.Concat(readFailure.ToLogFields()).ToArray();
+                AppLog.Debug("NativeState", "MSI Claw PnP observation will be retried within the existing settle window.", failureFields);
+                if (_timestamp() >= deadline)
+                {
+                    return current;
+                }
+                await _settleDelay(_restoreSettlePollInterval, cancellationToken).ConfigureAwait(false);
+                if (_timestamp() >= deadline)
+                {
+                    return current;
+                }
+                continue;
+            }
+
+            if (pnpReadFailures > 0 && !recoveryLogged && current.Status != NativeStateCaptureStatus.Failed && lastPnpReadFailure is not null)
+            {
+                recoveryLogged = true;
+                var elapsedMs = (long)((_timestamp() - startedAt) * 1000.0 / Stopwatch.Frequency);
+                AppLog.Info("NativeState", "MSI Claw PnP observation recovered after a read failure.",
+                    ("Event", "NativeStatePnpReadRecovered"), ("Attempts", pnpReadFailures), ("ElapsedMs", elapsedMs),
+                    ("Win32Error", lastPnpReadFailure.Win32Error), ("Operation", lastPnpReadFailure.Operation),
+                    ("ObservedStatus", current.Status));
+            }
+
             if (!missingDevice && !mixedTopology)
                 return current;
             waitCause = missingDevice ? "DeviceReenumeration" : "MixedNativeModeTopology";
             poll++;
-            var elapsedMs = (long)((Stopwatch.GetTimestamp() - startedAt) * 1000.0 / Stopwatch.Frequency);
+            var pollElapsedMs = (long)((_timestamp() - startedAt) * 1000.0 / Stopwatch.Frequency);
             AppLog.Debug("NativeMode", missingDevice ? "NativeModeRestoreWaitingForTopologySettle" : "NativeModeCurrentStateWaitingForTopologySettle",
-                ("CaptureStatus", current.Status), ("WaitCause", waitCause), ("Reason", current.Reason), ("Poll", poll), ("ElapsedMs", elapsedMs));
-            if (Stopwatch.GetTimestamp() >= deadline)
+                ("CaptureStatus", current.Status), ("WaitCause", waitCause), ("Reason", current.Reason), ("Poll", poll), ("ElapsedMs", pollElapsedMs));
+            if (_timestamp() >= deadline)
             {
                 AppLog.Debug("NativeMode", "NativeModeRestoreTopologySettleEnded",
-                    ("CaptureStatus", current.Status), ("WaitCause", waitCause), ("Reason", current.Reason), ("ElapsedMs", elapsedMs));
+                    ("CaptureStatus", current.Status), ("WaitCause", waitCause), ("Reason", current.Reason), ("ElapsedMs", pollElapsedMs));
                 return current;
             }
-            await Task.Delay(_restoreSettlePollInterval, cancellationToken).ConfigureAwait(false);
-        } while (Stopwatch.GetTimestamp() < deadline);
+            await _settleDelay(_restoreSettlePollInterval, cancellationToken).ConfigureAwait(false);
+        } while (_timestamp() < deadline);
         AppLog.Debug("NativeMode", "NativeModeRestoreTopologySettleEnded",
             ("CaptureStatus", current.Status), ("WaitCause", waitCause), ("Reason", current.Reason), ("ElapsedMs", (long)(_restoreSettleTimeout.TotalMilliseconds)));
         return current;
@@ -171,7 +233,7 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
     {
         try
         {
-            var modes = deviceEnumerator.EnumeratePresentDevices()
+            var modes = MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator)
                 .Where(device => device.Present && device.VendorId == MsiClawHardware.VendorId)
                 .Select(device => ModeFor(device.ProductId))
                 .Where(mode => mode is MsiClawNativeMode.XInput or MsiClawNativeMode.DirectInput)
@@ -179,10 +241,20 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
                 .ToArray();
             return modes.Length == 2;
         }
+        catch (PnpDeviceReadException)
+        {
+            throw;
+        }
         catch (Exception exception)
         {
             AppLog.Debug("NativeMode", "NativeModeRestoreTopologyProbeFailed", ("Exception", exception.GetType().Name));
             return false;
         }
     }
+
+    private static NativeStateCaptureResult PnpReadFailed(PnpDeviceReadException exception) =>
+        new NativeStateCaptureResult(NativeStateCaptureStatus.Failed, null, exception.Message)
+        {
+            PnpReadFailure = exception,
+        };
 }
