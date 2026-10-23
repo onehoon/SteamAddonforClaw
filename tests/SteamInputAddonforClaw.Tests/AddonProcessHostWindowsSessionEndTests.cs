@@ -30,6 +30,9 @@ public sealed class AddonProcessHostWindowsSessionEndTests
 
         Assert.Contains("private const bool EnableA2vmAutomaticRumbleLifecycle = false;", host, StringComparison.Ordinal);
         Assert.Contains("enableA2vmAutomaticRumbleLifecycle: EnableA2vmAutomaticRumbleLifecycle", ownerFactory, StringComparison.Ordinal);
+        Assert.Contains("instanceId => controllerDevices.FindPresentDevice(instanceId)", ownerFactory, StringComparison.Ordinal);
+        Assert.Contains("controllerDevices.EnumeratePresentDevices(\n                Devices.MSI.Claw.MsiClawHardware.VendorId,\n                Devices.MSI.Claw.MsiClawHardware.DirectInputProductId)", ownerFactory, StringComparison.Ordinal);
+        Assert.DoesNotContain("() => controllerDevices.EnumeratePresentDevices()", ownerFactory, StringComparison.Ordinal);
         Assert.Contains("new NativeTrayHostWindow(", tray, StringComparison.Ordinal);
         Assert.Contains("EnableA2vmAutomaticRumbleLifecycle ? HandleWindowsSessionEnd : null", tray, StringComparison.Ordinal);
     }

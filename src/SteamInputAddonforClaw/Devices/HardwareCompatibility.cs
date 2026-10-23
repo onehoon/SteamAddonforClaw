@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Controllers.Detection;
 
 namespace SteamInputAddonforClaw.Devices;
 
@@ -10,6 +11,7 @@ internal sealed record HardwareCompatibilityAssessment(
     HandheldDeviceModelId? DeviceModel,
     string Reason)
 {
+    internal PnpDeviceReadException? PnpReadFailure { get; init; }
     public bool AllowsMutation => Status == HardwareCompatibilityStatus.Supported;
 }
 
@@ -23,7 +25,10 @@ internal sealed class HardwareCompatibilityEvaluator(HandheldDeviceRegistry regi
     public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture capture)
     {
         if (capture.Status != DeviceProbeCaptureStatus.Success)
-            return new(HardwareCompatibilityStatus.Indeterminate, null, null, capture.Reason);
+            return new(HardwareCompatibilityStatus.Indeterminate, null, null, capture.Reason)
+            {
+                PnpReadFailure = capture.PnpReadFailure,
+            };
 
         var family = registry.Resolve(capture.Context);
         if (family.Status is HandheldDeviceResolutionStatus.Indeterminate or HandheldDeviceResolutionStatus.Ambiguous)

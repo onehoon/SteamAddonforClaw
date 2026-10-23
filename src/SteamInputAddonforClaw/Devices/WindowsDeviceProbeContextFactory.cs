@@ -2,12 +2,16 @@ using Microsoft.Win32;
 using System.Management;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 
 namespace SteamInputAddonforClaw.Devices;
 
 internal enum DeviceProbeCaptureStatus { Success, Indeterminate }
 
-internal sealed record DeviceProbeContextCapture(DeviceProbeCaptureStatus Status, DeviceProbeContext Context, string Reason);
+internal sealed record DeviceProbeContextCapture(DeviceProbeCaptureStatus Status, DeviceProbeContext Context, string Reason)
+{
+    internal PnpDeviceReadException? PnpReadFailure { get; init; }
+}
 
 internal interface IWindowsDeviceProbeContextFactory
 {
@@ -59,7 +63,13 @@ internal sealed class WindowsDeviceProbeContextFactory(
         catch { identity = new(null, null, null, false); }
 
         IReadOnlyList<ControllerDeviceInfo> controllers;
-        try { controllers = _controllerEnumerator.EnumeratePresentDevices(); }
+        try { controllers = MsiClawHardware.EnumeratePresentKnownControllerDevices(_controllerEnumerator); }
+        catch (PnpDeviceReadException exception)
+        {
+            return new(DeviceProbeCaptureStatus.Indeterminate,
+                new([], identity.Manufacturer, identity.SystemProductName, identity.BaseBoardProduct),
+                "ControllerPnpEnumerationFailed") { PnpReadFailure = exception };
+        }
         catch
         {
             return new(DeviceProbeCaptureStatus.Indeterminate,
@@ -68,7 +78,8 @@ internal sealed class WindowsDeviceProbeContextFactory(
         }
 
         var context = new DeviceProbeContext(
-            controllers.Select(device => new DeviceProbePnpDevice(device.InstanceId, device.HardwareIds, device.VendorId, device.ProductId)),
+            controllers.Where(device => MsiClawHardware.IsKnownController(device.VendorId, device.ProductId))
+                .Select(device => new DeviceProbePnpDevice(device.InstanceId, device.HardwareIds, device.VendorId, device.ProductId)),
             identity.Manufacturer,
             identity.SystemProductName,
             identity.BaseBoardProduct);

@@ -297,8 +297,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         //      during which the user could run Enable and Restart.
         var initialCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
         if (!TryReadIdentity(initialCapture, out var initialMode, out var initialIdentity, out var reason))
+        {
+            if (initialCapture.PnpReadFailure is { } pnpReadFailure)
+                LogDisabledModePnpReadFailure(pnpReadFailure, "InitialNativeState", modeWriteIssued: false);
             return Fail("InitialNativeState:" + reason, false,
                 nativeDeviceAbsentAtInitialCapture: initialCapture.Status == NativeStateCaptureStatus.DeviceNotFound);
+        }
         if (initialMode is not (MsiClawNativeMode.XInput or MsiClawNativeMode.DirectInput))
             return Fail("UnsupportedInitialMode:" + initialMode, false);
         AppLog.Info("ControllerOwnership", "Native state captured.", ("Event", "NativeStateCaptured"),
@@ -420,7 +424,11 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         //      Never auto-roll PID1902 back to PID1901 on a later failure.
         var finalCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
         if (!TryReadIdentity(finalCapture, out var finalMode, out var finalIdentity, out var finalReason))
+        {
+            if (finalCapture.PnpReadFailure is { } pnpReadFailure)
+                LogDisabledModePnpReadFailure(pnpReadFailure, "FinalNativeState", pidTransitionWriteIssued);
             return Fail("FinalNativeState:" + finalReason, pidTransitionWriteIssued);
+        }
         if (finalMode != MsiClawNativeMode.DirectInput)
             return Fail("FinalModeNotPid1902:" + finalMode, pidTransitionWriteIssued);
         // Strong physical-identity equality is a SAME-MODE predicate only. Apply it only on an
@@ -1860,6 +1868,17 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             ("InitialAcquisitionRetryReason", retryReason));
         return new(MsiClawPhysicalOwnershipOutcome.Failed, reason, modeWriteIssued, _ownedHiddenTargets,
             retryReason, nativeDeviceAbsentAtInitialCapture);
+    }
+
+    private static void LogDisabledModePnpReadFailure(PnpDeviceReadException exception, string phase, bool modeWriteIssued)
+    {
+        var failureFields = new (string Key, object? Value)[]
+        {
+            ("Event", "DisabledOwnershipPnpReadFailed"), ("Phase", phase),
+            ("ModeWriteIssued", modeWriteIssued), ("Action", "Passive"),
+        }.Concat(exception.ToLogFields()).ToArray();
+        AppLog.Error("ControllerOwnership", "Disabled-mode physical ownership stopped after bounded MSI PnP read retries.",
+            exception, failureFields);
     }
 
     public async ValueTask DisposeAsync()

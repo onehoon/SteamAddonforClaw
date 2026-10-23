@@ -11,9 +11,14 @@ public interface IControllerDeviceEnumerator
             .ToArray();
 
     IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
+        => EnumeratePresentDevices(vendorId, [productId]);
+
+    IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, IReadOnlyCollection<ushort> productIds)
     {
+        ArgumentNullException.ThrowIfNull(productIds);
+        var wantedProductIds = productIds.ToHashSet();
         var devices = EnumeratePresentDevices();
-        var wanted = devices.Where(d => d.Present && d.VendorId == vendorId && d.ProductId == productId).ToArray();
+        var wanted = devices.Where(d => d.Present && d.VendorId == vendorId && d.ProductId is { } productId && wantedProductIds.Contains(productId)).ToArray();
         var ids = wanted.SelectMany(d => d.AncestorInstanceIds.Append(d.ParentInstanceId ?? string.Empty)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return devices.Where(d => wanted.Contains(d) || ids.Contains(d.InstanceId)).ToArray();
     }

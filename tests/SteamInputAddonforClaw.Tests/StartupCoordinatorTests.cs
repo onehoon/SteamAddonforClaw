@@ -2,13 +2,35 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Status;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-public sealed class StartupCoordinatorTests
+[Collection("AppLog")]
+public sealed class StartupCoordinatorTests : IDisposable
 {
+    private readonly string _logDirectory = Path.Combine(Path.GetTempPath(), $"StartupCoordinatorTests.{Guid.NewGuid():N}");
+    private readonly AppLogLevel _previousLogLevel = AppLog.MinimumLevelOverride;
+    private readonly string? _previousLogDirectory = AppLog.DirectoryOverride;
+
+    public StartupCoordinatorTests()
+    {
+        AppLog.DrainForTests();
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        AppLog.DirectoryOverride = _logDirectory;
+    }
+
+    public void Dispose()
+    {
+        AppLog.DrainForTests();
+        AppLog.MinimumLevelOverride = _previousLogLevel;
+        AppLog.DirectoryOverride = _previousLogDirectory;
+        if (Directory.Exists(_logDirectory)) Directory.Delete(_logDirectory, recursive: true);
+    }
+
     [Fact]
     public async Task VerifiedStockBaselineAfterStableTopology_IsRecoverySafe()
     {
@@ -273,6 +295,98 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(2, evaluator.CallCount);
         Assert.Equal([TimeSpan.FromMilliseconds(500)], delay.Delays);
         Assert.True(result.RecoverySafe);
+        AppLog.DrainForTests();
+        Assert.DoesNotContain("[ERROR]", File.ReadAllText(AppLog.CurrentLogFilePath));
+    }
+
+    [Fact]
+    public async Task HardwarePnpReadFailure_ThenSupported_LogsRecoveryWithoutError()
+    {
+        var events = new List<string>();
+        var pnpFailure = new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+            "SPDRP_HARDWAREID", 32, @"HID\VID_0DB0&PID_1902\CLAW_A", 11);
+        var evaluator = new SequencedHardwareEvaluator([
+            new HardwareCompatibilityAssessment(HardwareCompatibilityStatus.Indeterminate, null, null, "PnpReadFailed")
+            {
+                PnpReadFailure = pnpFailure,
+            },
+            new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"),
+        ]);
+        var coordinator = new StartupCoordinator(new FakeTopologyWaiter(events),
+            new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events),
+            hardwareProbeDelay: (_, _) => Task.CompletedTask);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+
+        Assert.True(result.RecoverySafe);
+        Assert.Contains("Event=HardwareProbePnpReadRecovered", log);
+        Assert.DoesNotContain("[ERROR]", log);
+    }
+
+    [Fact]
+    public async Task PersistentHardwarePnpReadFailure_ExhaustingAdmissionWindowLogsOneTerminalError()
+    {
+        var events = new List<string>();
+        var pnpFailure = new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+            "SPDRP_HARDWAREID", 32, @"HID\VID_0DB0&PID_1902\CLAW_A", 11);
+        var assessment = new HardwareCompatibilityAssessment(HardwareCompatibilityStatus.Indeterminate, null, null, "PnpReadFailed")
+        {
+            PnpReadFailure = pnpFailure,
+        };
+        var evaluator = new SequencedHardwareEvaluator([assessment], repeatLast: true);
+        var coordinator = new StartupCoordinator(new ThrowingTopologyWaiter(),
+            new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events),
+            hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        var errorLines = log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.Contains("[ERROR]", StringComparison.Ordinal)).ToArray();
+
+        Assert.False(result.ShouldStartRuntime);
+        Assert.Equal(HardwareCompatibilityStatus.Indeterminate, result.HardwareStatus);
+        Assert.True(evaluator.CallCount > 1);
+        Assert.Single(errorLines);
+        Assert.Contains("Event=HardwareProbeStabilizationTimedOut", errorLines[0]);
+        Assert.Contains("Operation=SetupDiGetDeviceRegistryPropertyW", errorLines[0]);
+        Assert.Contains("Win32Error=5", errorLines[0]);
+        Assert.Contains("Action=Passive", errorLines[0]);
+    }
+
+    [Fact]
+    public async Task HardwareProbeTimeoutAfterPnpReadRecovery_UsesWarnForFinalNonPnpUnknownAssessment()
+    {
+        var events = new List<string>();
+        var pnpFailure = new PnpDeviceReadException("SetupDiGetDeviceRegistryPropertyW", 5, 1,
+            "SPDRP_HARDWAREID", 32, @"HID\VID_0DB0&PID_1902\CLAW_A", 11);
+        var evaluator = new SequencedHardwareEvaluator([
+            new HardwareCompatibilityAssessment(HardwareCompatibilityStatus.Indeterminate, null, null, "PnpReadFailed")
+            {
+                PnpReadFailure = pnpFailure,
+            },
+            new(HardwareCompatibilityStatus.Indeterminate, null, null, "UnknownHardware"),
+        ], repeatLast: true);
+        var coordinator = new StartupCoordinator(new ThrowingTopologyWaiter(),
+            new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events),
+            hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        var errorLines = log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.Contains("[ERROR]", StringComparison.Ordinal)).ToArray();
+        var timeoutLine = log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Single(line => line.Contains("Startup hardware probe stabilization timed out.", StringComparison.Ordinal));
+
+        Assert.False(result.ShouldStartRuntime);
+        Assert.Equal(HardwareCompatibilityStatus.Indeterminate, result.HardwareStatus);
+        Assert.True(evaluator.CallCount > 1);
+        Assert.Empty(errorLines);
+        Assert.Contains("[WARN]", timeoutLine);
+        Assert.DoesNotContain("SetupDiGetDeviceRegistryPropertyW", timeoutLine);
     }
 
     [Fact]
@@ -324,11 +438,13 @@ public sealed class StartupCoordinatorTests
         Assert.True(result.RecoverySafe);
     }
 
-    [Fact]
-    public async Task HardwareTransientNeverResolves_TimesOutPassive()
+    [Theory]
+    [InlineData((int)HardwareCompatibilityStatus.Indeterminate, "UnknownHardware")]
+    [InlineData((int)HardwareCompatibilityStatus.Unsupported, "No handheld-device adapter matched.")]
+    public async Task HardwareTransientNeverResolves_TimesOutPassive(int statusValue, string reason)
     {
         var events = new List<string>();
-        var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Indeterminate, null, null, "test")], repeatLast: true);
+        var evaluator = new SequencedHardwareEvaluator([new((HardwareCompatibilityStatus)statusValue, null, null, reason)], repeatLast: true);
         var coordinator = new StartupCoordinator(new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events),
             hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
@@ -338,6 +454,10 @@ public sealed class StartupCoordinatorTests
         Assert.True(evaluator.CallCount > 1);
         Assert.False(result.RecoverySafe);
         Assert.False(result.StockTopologyUnreadyBeforeBaseline);
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.DoesNotContain("[ERROR]", log);
+        Assert.Contains("[WARN]", log);
     }
 
     [Fact]

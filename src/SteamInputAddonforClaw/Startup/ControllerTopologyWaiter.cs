@@ -62,6 +62,10 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
         var attempt = 0;
         var lastObservation = new TopologyObservation(string.Empty, false, 0, 0, 0, 0, 0, false, false, 0);
         Exception? enumerationFailure = null;
+        PnpDeviceReadException? terminalPnpReadFailure = null;
+        PnpDeviceReadException? recoveredPnpReadFailure = null;
+        var pnpReadFailureCount = 0;
+        var pnpRecoveryLogged = false;
         AppLog.Info("ControllerTopology", "Topology readiness wait started.", ("TimeoutMs", _timeout.TotalMilliseconds), ("PollIntervalMs", _sampleInterval.TotalMilliseconds));
 
         try
@@ -70,7 +74,34 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 attempt++;
-                lastObservation = CreateRelevantTopologySnapshot();
+                try
+                {
+                    lastObservation = CreateRelevantTopologySnapshot();
+                    terminalPnpReadFailure = null;
+                    if (pnpReadFailureCount > 0 && !pnpRecoveryLogged && recoveredPnpReadFailure is not null)
+                    {
+                        pnpRecoveryLogged = true;
+                        AppLog.Info("ControllerTopology", "MSI controller PnP observation recovered.",
+                            ("Event", "MsiPnpObservationRecovered"), ("Attempts", pnpReadFailureCount),
+                            ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Win32Error", recoveredPnpReadFailure.Win32Error),
+                            ("Operation", recoveredPnpReadFailure.Operation));
+                    }
+                }
+                catch (PnpDeviceReadException exception)
+                {
+                    pnpReadFailureCount++;
+                    recoveredPnpReadFailure = exception;
+                    terminalPnpReadFailure = exception;
+                    stableSnapshotCount = 0;
+                    previousSnapshot = null;
+                    var failureFields = new (string Key, object? Value)[]
+                    {
+                        ("Event", "MsiPnpObservationRetry"), ("Attempt", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                    }.Concat(exception.ToLogFields()).ToArray();
+                    AppLog.Debug("ControllerTopology", "MSI controller PnP observation will be retried.", failureFields);
+                    await Task.Delay(_sampleInterval, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
                 AppLog.Debug("ControllerTopology", "Topology readiness poll.", ("Attempt", attempt), ("Ready", lastObservation.Ready), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
                 if (!lastObservation.Ready)
                 {
@@ -100,11 +131,17 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             enumerationFailure = exception;
         }
 
+        var terminalFailure = enumerationFailure ?? terminalPnpReadFailure;
         var failureClass = enumerationFailure is not null
             ? "EnumerationFailed"
+            : terminalPnpReadFailure is not null
+                ? "PnpReadFailed"
             : GetFailureClass(lastObservation);
-        AppLog.Warn("ControllerTopology", "Topology readiness ended without a stable controller topology.", enumerationFailure,
+        var terminalFields = new (string Key, object? Value)[]
+        {
             ("FailureClass", failureClass),
+            ("NativeOperation", terminalPnpReadFailure?.Operation),
+            ("NativeWin32Error", terminalPnpReadFailure?.Win32Error),
             ("PresentMsiCandidateCount", lastObservation.PresentMsiCandidateCount),
             ("PresentPid1901CandidateCount", lastObservation.PresentPid1901CandidateCount),
             ("PresentPid1902CandidateCount", lastObservation.PresentPid1902CandidateCount),
@@ -115,7 +152,22 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             ("A2vm230ControlEndpointCandidateCount", lastObservation.A2vm230ControlEndpointCandidateCount),
             ("ConsecutiveStableSnapshots", stableSnapshotCount),
             ("RequiredStableSnapshots", _requiredStableSnapshots),
-            ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Action", "Passive"));
+            ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Action", "Passive"),
+        };
+        if (enumerationFailure is null && terminalPnpReadFailure is { } pnpFailure)
+        {
+            AppLog.Error("ControllerTopology", "MSI PnP observation failed after the bounded startup topology wait.",
+                pnpFailure,
+                new[]
+                {
+                    ("Event", (object?)"MsiPnpObservationTimedOut"),
+                }.Concat(terminalFields).Concat(pnpFailure.ToLogFields()).ToArray());
+        }
+        else
+        {
+            AppLog.Warn("ControllerTopology", "Topology readiness ended without a stable controller topology.", terminalFailure,
+                terminalFields);
+        }
         return ControllerTopologyReadiness.Indeterminate;
     }
 
@@ -125,13 +177,43 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
         var deadline = DateTimeOffset.UtcNow + _timeout;
         var attempt = 0;
         var lastCandidateCount = 0;
+        PnpDeviceReadException? terminalPnpReadFailure = null;
+        PnpDeviceReadException? recoveredPnpReadFailure = null;
+        var pnpReadFailureCount = 0;
+        var pnpRecoveryLogged = false;
         try
         {
             while (DateTimeOffset.UtcNow <= deadline)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 attempt++;
-                var devices = _deviceEnumerator.EnumeratePresentDevices();
+                IReadOnlyList<ControllerDeviceInfo> devices;
+                try
+                {
+                    devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(_deviceEnumerator);
+                    terminalPnpReadFailure = null;
+                    if (pnpReadFailureCount > 0 && !pnpRecoveryLogged && recoveredPnpReadFailure is not null)
+                    {
+                        pnpRecoveryLogged = true;
+                        AppLog.Info("ControllerTopology", "MSI control-HID PnP observation recovered.",
+                            ("Event", "MsiPnpObservationRecovered"), ("Attempts", pnpReadFailureCount),
+                            ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Win32Error", recoveredPnpReadFailure.Win32Error),
+                            ("Operation", recoveredPnpReadFailure.Operation));
+                    }
+                }
+                catch (PnpDeviceReadException exception)
+                {
+                    pnpReadFailureCount++;
+                    recoveredPnpReadFailure = terminalPnpReadFailure = exception;
+                    lastCandidateCount = 0;
+                    var failureFields = new (string Key, object? Value)[]
+                    {
+                        ("Event", "MsiPnpObservationRetry"), ("Attempt", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                    }.Concat(exception.ToLogFields()).ToArray();
+                    AppLog.Debug("ControllerTopology", "MSI control-HID PnP observation will be retried.", failureFields);
+                    await Task.Delay(_sampleInterval, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
                 var candidates = devices.Where(IsSupportedModeCommandEndpoint).ToArray();
                 lastCandidateCount = candidates.Length;
                 if (candidates.Length == 1)
@@ -159,10 +241,29 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
             return ControllerTopologyReadiness.Indeterminate;
         }
 
-        AppLog.Warn("ControllerTopology", "No single supported MSI control HID became available within the bounded wait.", null,
-            ("Event", "A2vmInitialControlHidUnavailable"), ("Attempts", attempt),
-            ("CandidateCount", lastCandidateCount), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
-            ("Action", "Passive"));
+        if (terminalPnpReadFailure is { } pnpFailure)
+        {
+            AppLog.Error("ControllerTopology", "MSI PnP observation failed before a supported control HID became available.",
+                pnpFailure,
+                new[]
+                {
+                    ("Event", (object?)"A2vmInitialControlHidUnavailable"),
+                    ("FailureClass", (object?)"PnpReadFailed"),
+                    ("Attempts", attempt),
+                    ("CandidateCount", lastCandidateCount),
+                    ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                    ("NativeOperation", pnpFailure.Operation),
+                    ("NativeWin32Error", pnpFailure.Win32Error),
+                    ("Action", "Passive"),
+                }.Concat(pnpFailure.ToLogFields()).ToArray());
+        }
+        else
+        {
+            AppLog.Warn("ControllerTopology", "No single supported MSI control HID became available within the bounded wait.", null,
+                ("Event", "A2vmInitialControlHidUnavailable"), ("Attempts", attempt),
+                ("CandidateCount", lastCandidateCount), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                ("Action", "Passive"));
+        }
         return ControllerTopologyReadiness.Indeterminate;
     }
 
@@ -182,7 +283,7 @@ internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
 
     private TopologyObservation CreateRelevantTopologySnapshot()
     {
-        var devices = _deviceEnumerator.EnumeratePresentDevices();
+        var devices = MsiClawHardware.EnumeratePresentKnownControllerDevices(_deviceEnumerator);
         var topology = new ControllerTopologySnapshot(devices);
         var msiCandidates = devices.Where(device => device.Present
             && device.VendorId == MsiClawHardware.VendorId

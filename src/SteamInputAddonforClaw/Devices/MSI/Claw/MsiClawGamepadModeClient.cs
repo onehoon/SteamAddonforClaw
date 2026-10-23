@@ -90,7 +90,7 @@ internal sealed class MsiClawGamepadModeClient(
     {
         try
         {
-            return resolver.ResolveCommand(deviceEnumerator.EnumeratePresentDevices(), expectedIdentity);
+            return resolver.ResolveCommand(MsiClawHardware.EnumeratePresentKnownControllerDevices(deviceEnumerator), expectedIdentity);
         }
         catch (Exception exception)
         {
