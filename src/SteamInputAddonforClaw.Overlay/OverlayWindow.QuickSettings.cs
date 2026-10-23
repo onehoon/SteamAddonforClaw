@@ -172,7 +172,7 @@ public sealed partial class OverlayWindow
 
     // Render the binder's current effective page. Stable sections update their existing controls;
     // only sections whose renderer shape changed replace their own card and rows.
-    private void RenderQuickSettingsPage(QuickSettingsSurface surface)
+    private void RenderQuickSettingsPage(QuickSettingsSurface surface, QuickSettingsRowId? forceRowId = null)
     {
         if (surface.Binding is null) return;
         var page = surface.Binding.BuildEffectivePage();
@@ -180,9 +180,9 @@ public sealed partial class OverlayWindow
         if (surface.RenderedPage is { } previousPage &&
             QuickSettingsRowRendering.IsValueOnlyPageUpdate(previousPage, page))
         {
-            var changedRowIds = QuickSettingsRowRendering.FindChangedValueRowIds(previousPage, page);
-            if (changedRowIds.Count > 0)
-                ApplyQuickSettingsRowValues(surface, page, changedRowIds);
+            var rowIdsToApply = QuickSettingsRowRendering.FindValueRowsToApply(previousPage, page, forceRowId);
+            if (rowIdsToApply.Count > 0)
+                ApplyQuickSettingsRowValues(surface, page, rowIdsToApply);
             surface.RenderedPage = page;
             return;
         }
@@ -570,7 +570,7 @@ public sealed partial class OverlayWindow
     {
         if (surface.Binding is null) return;
         await surface.Binding.SubmitImmediateToggleAsync(rowId, desired);
-        RenderQuickSettingsPage(surface);
+        RenderQuickSettingsPage(surface, forceRowId: rowId);
     }
 
     private OverlayRow CreateQuickSettingsValueRow(QuickSettingsSurface surface, QuickSettingsRow row)

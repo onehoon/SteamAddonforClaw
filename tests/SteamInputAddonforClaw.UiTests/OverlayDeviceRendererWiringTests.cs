@@ -385,7 +385,8 @@ public sealed class OverlayDeviceRendererWiringTests
         var fastPath = render[fastPathStart..fastPathEnd];
 
         Assert.Contains("QuickSettingsRowRendering.IsValueOnlyPageUpdate", fastPath);
-        Assert.Contains("FindChangedValueRowIds", fastPath);
+        Assert.Contains("FindValueRowsToApply(previousPage, page, forceRowId)", fastPath);
+        Assert.Contains("forceRowId", fastPath);
         Assert.Contains("ApplyQuickSettingsRowValues", fastPath);
         Assert.DoesNotContain("ReconcileQuickSettingsSections", fastPath);
         Assert.DoesNotContain("RebuildQuickSettingsContent", fastPath);
@@ -414,6 +415,24 @@ public sealed class OverlayDeviceRendererWiringTests
         var targetedUpdate = schedule[schedule.IndexOf("changedRowIds = changedRowIds.Append", StringComparison.Ordinal)..];
         Assert.DoesNotContain("RenderQuickSettingsPage", targetedUpdate);
         Assert.DoesNotContain("ReconcileQuickSettingsSections", schedule);
+    }
+
+    [Fact]
+    public void Immediate_native_toggle_forces_its_row_through_value_only_readback()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var renderStart = source.IndexOf("private void RenderQuickSettingsPage(", StringComparison.Ordinal);
+        var render = source[renderStart..
+            source.IndexOf("private static void UpdateQuickSettingsRowValues", renderStart, StringComparison.Ordinal)];
+        var submitStart = source.IndexOf("private async Task SubmitQuickSettingsToggleAsync", StringComparison.Ordinal);
+        var submit = source[submitStart..
+            source.IndexOf("private void ScheduleQuickSettingsSlider", submitStart, StringComparison.Ordinal)];
+
+        Assert.Contains("QuickSettingsRowId? forceRowId = null", render);
+        Assert.Contains("FindValueRowsToApply(previousPage, page, forceRowId)", render);
+        Assert.Contains("RenderQuickSettingsPage(surface, forceRowId: rowId)", submit);
+        Assert.Contains("ReconcileQuickSettingsSections(surface, page);", render);
+        Assert.Contains("RebuildQuickSettingsContent(surface, page);", render);
     }
 
     [Fact]

@@ -798,6 +798,58 @@ public sealed class OverlayQuickSettingsPageBindingTests
     }
 
     [Fact]
+    public async Task Failed_pointer_toggle_with_unchanged_authority_is_included_in_value_refresh()
+    {
+        const QuickSettingsRowId rowId = QuickSettingsRowId.DeviceTdpEnabled;
+        var before = TdpPage(tdpEnabled: false);
+        var mutate = new GatedMutate();
+        using var binding = NewBinding(before, mutate.Func);
+
+        // ToggleSwitch changes its native IsOn before raising Toggled.
+        var nativeSwitchIsOn = true;
+        var task = binding.SubmitImmediateToggleAsync(rowId, desired: true);
+        mutate.CompleteNext(Failure("TDP toggle failed", TdpPage(tdpEnabled: false)));
+        Assert.True(await task);
+
+        var after = binding.BuildEffectivePage();
+        Assert.True(QuickSettingsRowRendering.IsValueOnlyPageUpdate(before, after));
+        Assert.Empty(QuickSettingsRowRendering.FindChangedValueRowIds(before, after));
+
+        var rowsToApply = QuickSettingsRowRendering.FindValueRowsToApply(before, after, rowId);
+        Assert.Contains(rowId, rowsToApply);
+        if (rowsToApply.Contains(rowId))
+            nativeSwitchIsOn = after.Sections.SelectMany(section => section.Rows)
+                .Single(row => row.RowId == rowId).Value!.BooleanValue!.Value;
+
+        Assert.False(nativeSwitchIsOn);
+    }
+
+    [Fact]
+    public async Task Successful_pointer_toggle_applies_authoritative_value_and_shape_changes_use_full_path()
+    {
+        const QuickSettingsRowId rowId = QuickSettingsRowId.DeviceTdpEnabled;
+        var before = TdpPage(tdpEnabled: false);
+        var mutate = new GatedMutate();
+        using var binding = NewBinding(before, mutate.Func);
+
+        var nativeSwitchIsOn = true;
+        var task = binding.SubmitImmediateToggleAsync(rowId, desired: true);
+        mutate.CompleteNext(Success(TdpPage(tdpEnabled: true)));
+        Assert.True(await task);
+
+        var after = binding.BuildEffectivePage();
+        var rowsToApply = QuickSettingsRowRendering.FindValueRowsToApply(before, after, rowId);
+        Assert.Contains(rowId, rowsToApply);
+        if (rowsToApply.Contains(rowId))
+            nativeSwitchIsOn = after.Sections.SelectMany(section => section.Rows)
+                .Single(row => row.RowId == rowId).Value!.BooleanValue!.Value;
+        Assert.True(nativeSwitchIsOn);
+
+        var structuralPage = TdpPage(tdpEnabled: true, hideDcRows: true);
+        Assert.False(QuickSettingsRowRendering.IsValueOnlyPageUpdate(after, structuralPage));
+    }
+
+    [Fact]
     public async Task Unavailable_or_non_writable_toggle_emits_no_mutation()
     {
         var mutate = new GatedMutate();

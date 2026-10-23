@@ -93,6 +93,20 @@ internal static class QuickSettingsRowRendering
                 changed.Add(row.RowId);
         return changed;
     }
+
+    internal static HashSet<QuickSettingsRowId> FindValueRowsToApply(
+        QuickSettingsPageSnapshot previous,
+        QuickSettingsPageSnapshot current,
+        QuickSettingsRowId? forceRowId = null)
+    {
+        var rowsToApply = FindChangedValueRowIds(previous, current);
+        // A native ToggleSwitch changes its IsOn value before its Toggled callback runs. Reapply
+        // the submitted row after immediate mutation settlement even if authoritative readback is
+        // unchanged (rejection/failure), so the native control returns to the Runtime value.
+        if (forceRowId is { } rowId)
+            rowsToApply.Add(rowId);
+        return rowsToApply;
+    }
 }
 
 // Section 20: a small typed discriminated pending-draft identity -- row-keyed when a slider has no
