@@ -81,6 +81,10 @@ MSI Center M의 컨트롤러 관리가 비활성화되어 Addon이 컨트롤러�
 
 전역 **Steam Deck** 또는 **DualSense Edge**는 **Controller → Controller for Steam Game**에서 선택합니다. 기본 선택은 Steam Deck입니다. Steam 게임 프로필에서 별도 컨트롤러를 지정할 수도 있고, **Use default**는 전역 선택을 따릅니다. Steam 게임 또는 Big Picture가 활성화되면 컨트롤러 선택만 잠기며, 게임별 재정의가 있으면 실제 적용된 컨트롤러를 표시합니다. Steam과 Big Picture가 모두 비활성인 일반 Windows나 Xbox 게임 중에는 컨트롤러 선택을 변경할 수 있습니다. **Gyroscope** 토글은 모든 상태에서 변경할 수 있습니다. Steam 게임 시작/종료 시 활성 게임의 선택과 전역 선택 사이를 자동 전환하고, Steam 게임과 Big Picture가 모두 비활성인 일반 Windows에서는 Xbox 360을 사용합니다. 한 번에 하나의 가상 컨트롤러만 연결됩니다. **Normal** 또는 **Steam Game / Big Picture**에서 설정한 버튼 동작은 실제 활성화된 컨트롤러 표현에 맞춰 사용됩니다.
 
+**Steam Input 필수 사용 설정:** Addon의 **Steam Deck** 또는 **DualSense Edge** 가상 컨트롤러로 Steam 게임을 플레이할 때는 게임별 **Steam Input을 켜세요**. Steam 라이브러리에서 게임을 우클릭하고 **속성 → 컨트롤러 → 해당 게임에 대한 재정의 → Steam Input 사용(Enable Steam Input)**을 선택합니다. 게임이 DualSense를 자체 지원하더라도 Addon의 공식 지원 설정은 **Steam Input ON**입니다. Steam Input OFF에서 일부 게임이 작동할 수는 있지만, 동일한 입력·진동 동작을 보장하는 지원 설정은 아닙니다.
+
+**DualSense Edge 진동 지원 범위:** Addon은 일반 좌우 모터 **Rumble**만 MSI Claw의 물리 진동 모터로 전달합니다. Sony의 **L2/R2 어댑티브 트리거 저항·진동**과 **USB Audio 기반 고급 햅틱**은 물리 Claw 모터로 변환하지 않습니다. 게임에서 R2를 누를 때 느껴지는 진동은 별도로 전송된 일반 Rumble일 수 있으며, 고급 햅틱까지 재현한다는 의미는 아닙니다.
+
 ## 자이로스코프 / IMU — Steam Input 설정
 
 **Controller → Controller for Steam Game**의 전역 **Gyroscope** 토글은 기본적으로 켜져 있습니다. 켜져 있고 Steam용 가상 컨트롤러가 적용되면 지원되는 물리 자이로스코프·가속도 값을 Steam Input에 전달합니다. 끄면 센서 수집과 모션 입력을 중단하지만 일반 컨트롤러 입력과 가상 장치 연결은 유지됩니다. Addon 자체에서는 자이로를 마우스나 조이스틱으로 변환하지 않습니다. **Xbox 360 모드에서는 자이로 입력을 제공하지 않습니다.**
