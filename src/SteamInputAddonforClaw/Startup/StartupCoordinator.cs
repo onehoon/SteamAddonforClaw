@@ -215,10 +215,24 @@ internal sealed class StartupCoordinator
         {
             if (stopwatch.Elapsed >= _hardwareProbeTimeout)
             {
-                var failure = assessment.PnpReadFailure ?? lastPnpReadFailure;
-                AppLog.Warn("Hardware", "Startup hardware probe stabilization timed out.", failure,
-                    ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status), ("Reason", assessment.Reason),
-                    ("NativeOperation", failure?.Operation), ("NativeWin32Error", failure?.Win32Error), ("Action", "Passive"));
+                var timeoutFields = new (string Key, object? Value)[]
+                {
+                    ("Event", "HardwareProbeStabilizationTimedOut"),
+                    ("Attempts", attempts),
+                    ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                    ("Status", assessment.Status),
+                    ("Reason", assessment.Reason),
+                    ("Action", "Passive"),
+                };
+                if (assessment.PnpReadFailure is { } pnpFailure)
+                {
+                    AppLog.Error("Hardware", "MSI hardware PnP observation failed after bounded startup admission.",
+                        pnpFailure, timeoutFields.Concat(pnpFailure.ToLogFields()).ToArray());
+                }
+                else
+                {
+                    AppLog.Warn("Hardware", "Startup hardware probe stabilization timed out.", null, timeoutFields);
+                }
                 return assessment;
             }
 
