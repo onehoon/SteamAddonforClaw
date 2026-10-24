@@ -21,8 +21,8 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("CreateControllerSection(\"Vibration Strength\")", controller);
         Assert.DoesNotContain("CreateControllerSection(\"Joystick LED\")", controller);
         Assert.Contains("var steamDetails = CreateOverlayDetailStack();", controller);
-        Assert.Contains("AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities)", controller);
-        Assert.Contains("AddControllerRow(steamDetails, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities)", controller);
+        Assert.Contains("AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities,", controller);
+        Assert.Contains("AddControllerRow(steamDetails, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities,", controller);
         Assert.Contains("steamSection.Children.Add(steamDetails)", controller);
         Assert.Contains("new OverlayValueRow(\"Controller\", FormatSteamController", controller);
         Assert.Contains("new OverlayToggleRow(\"Gyroscope\", RequestGyroscopeChange);", controller);
@@ -40,7 +40,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m2Row)", controller);
         Assert.Contains("CreateOverlayDetailStack()", controller);
         Assert.Contains("RegisterRowPointerSelection(row.Container)", controller);
-        Assert.Contains("rows.Add(new(row.Container, row.Capabilities))", controller);
+        Assert.Contains("PreserveControllerPendingSelection(row.Capabilities,", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
     }
 
@@ -54,6 +54,8 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("private bool _gyroscopeMutationInFlight", controller);
         Assert.Contains("_pendingSteamControllerPreference = preference", controller);
         Assert.Contains("_pendingGyroscopeEnabled = enabled", controller);
+        Assert.Contains("_pendingBackButtonMappingPreview = new(isM1, target)", controller);
+        Assert.Contains("_pendingControllerLedEdit = new(_controllerLed, settings)", controller);
         Assert.Contains("? (int)pendingPreference", controller);
         Assert.Contains("? pendingGyroscope", controller);
         Assert.Contains("ControllerForSteamMutationKind? controllerForSteamMutation", controller);
@@ -62,6 +64,12 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("controllerForSteamMutation: mutationKind", app);
         Assert.Contains("ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation)", app);
         Assert.Contains("ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation)", app);
+
+        var mutationResultStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationResult(", StringComparison.Ordinal);
+        var mutationFailureStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", mutationResultStart, StringComparison.Ordinal);
+        var ledRequestStart = controller.IndexOf("private void RequestControllerLedEnabled(", mutationFailureStart, StringComparison.Ordinal);
+        Assert.Contains("_pendingControllerLedEdit = null", controller[mutationResultStart..mutationFailureStart]);
+        Assert.Contains("_pendingControllerLedEdit = null", controller[mutationFailureStart..ledRequestStart]);
 
         var gyroRequestStart = controller.IndexOf("private void RequestGyroscopeChange", StringComparison.Ordinal);
         var gyroRequestEnd = controller.IndexOf("private void RenderControllerForSteamRows", gyroRequestStart, StringComparison.Ordinal);
@@ -101,12 +109,8 @@ public sealed class OverlayControllerRendererTests
         var restoreStart = controller.IndexOf("private void RestoreControllerRowSelection(", StringComparison.Ordinal);
         var restoreEnd = controller.IndexOf("private void RequestControllerLedEnabled(", restoreStart, StringComparison.Ordinal);
         var restore = controller[restoreStart..restoreEnd];
-        Assert.Contains("_steamControllerMutationInFlight", restore);
-        Assert.Contains("_gyroscopeMutationInFlight", restore);
-        Assert.Contains("_backButtonMutationInFlight", restore);
-        Assert.Contains("_controllerLedMutationInFlight", restore);
-        Assert.Contains("_controllerVibrationMutationInFlight", restore);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", restore);
+        Assert.DoesNotContain("BringSelectedRowIntoView", restore);
     }
 
     [Fact]
@@ -122,10 +126,12 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("_backButtonMutationInFlight = false", controller);
         Assert.Contains("var minimum = (double)Xbox360BackButtonTarget.Disabled", controller);
         Assert.Contains("var maximum = (double)Xbox360BackButtonTarget.XboxGuide", controller);
-        Assert.Contains("_m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M1)", controller);
-        Assert.Contains("_m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M2)", controller);
+        Assert.Contains("_pendingBackButtonMappingPreview = new(isM1, target)", controller);
+        Assert.Contains("var displayMapping = ProjectBackButtonMappingPreview(_backButtonMapping, _pendingBackButtonMappingPreview)", controller);
+        Assert.Contains("_m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)displayMapping.M1)", controller);
+        Assert.Contains("_m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)displayMapping.M2)", controller);
         Assert.Contains("var preferredIndex = _rowSelection.SelectedIndex;", controller);
-        Assert.Contains("if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)", controller);
+        Assert.Contains("IsSelectable = () => capabilities.IsSelectable() || selectableDuringPendingMutation()", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
         Assert.Contains("HandleBackButtonMappingStateAsync", app);
         Assert.Contains("BackButtonMappingEditRequested", app);
@@ -230,9 +236,10 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("Red = (byte)(red ?? _controllerLed.Red)", controller);
         Assert.Contains("Green = (byte)(green ?? _controllerLed.Green)", controller);
         Assert.Contains("Blue = (byte)(blue ?? _controllerLed.Blue)", controller);
-        Assert.Contains("_controllerLedRedRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Red)", controller);
-        Assert.Contains("_controllerLedGreenRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Green)", controller);
-        Assert.Contains("_controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Blue)", controller);
+        Assert.Contains("var displaySettings = ProjectControllerLedPendingEdit(_controllerLed, _pendingControllerLedEdit)", controller);
+        Assert.Contains("_controllerLedRedRow?.ApplyState(colorAvailable, 0, 255, 1, displaySettings.Red)", controller);
+        Assert.Contains("_controllerLedGreenRow?.ApplyState(colorAvailable, 0, 255, 1, displaySettings.Green)", controller);
+        Assert.Contains("_controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, displaySettings.Blue)", controller);
         Assert.Contains("_controllerLedBrightnessRow?.ApplyState(available && _controllerLed.Enabled", controller);
         Assert.Contains("private void BuildControllerVibrationRows", controller);
         Assert.Contains("new OverlayValueRow(\"Left Motor\"", controller);
