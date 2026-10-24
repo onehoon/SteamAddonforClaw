@@ -162,6 +162,16 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void Quick_overlay_navigation_tag_opens_its_own_top_level_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.QuickOverlay, navigation.SelectNavigationItem(false, "QuickOverlay"));
+        Assert.Equal(MainNavigationPage.QuickOverlay, navigation.CurrentPage);
+        Assert.Null(navigation.GetMouseBackDestination());
+    }
+
+    [Fact]
     public void Shortcut_navigation_tag_opens_its_own_top_level_page()
     {
         var navigation = new MainNavigationState();

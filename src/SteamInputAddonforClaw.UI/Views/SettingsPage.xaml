@@ -58,17 +58,6 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
-            <ctcontrols:SettingsCard
-                x:Name="QuickSettingsPowerSourceCard"
-                x:Uid="Settings_QuickSettingsPowerSourceCard"
-                Description="Show only the controls for the currently connected power source in Quick Settings Overlay."
-                Header="Show only current power source">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="View" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch x:Name="QuickSettingsPowerSourceToggleSwitch" OffContent="" OnContent="" Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
-            </ctcontrols:SettingsCard>
-
             <ctcontrols:SettingsCard x:Uid="Settings_LoggingCard" Header="Logging" Description="Choose log detail.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="List" />

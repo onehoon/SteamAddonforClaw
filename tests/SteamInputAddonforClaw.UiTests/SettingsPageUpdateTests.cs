@@ -1,32 +1,9 @@
 using Xunit;
-using SteamInputAddonforClaw.Views;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class SettingsPageUpdateTests
 {
-    [Fact]
-    public void Quick_settings_toggle_failure_restores_last_known_value_when_refresh_also_fails()
-    {
-        var lastKnownValue = false;
-        bool? refreshedValue = null;
-
-        var restoredValue = SettingsPage.ResolveQuickSettingsPowerSourcePreference(lastKnownValue, refreshedValue);
-
-        Assert.False(restoredValue);
-    }
-
-    [Fact]
-    public void Quick_settings_toggle_failure_uses_successful_bootstrap_refresh_over_last_known_value()
-    {
-        var lastKnownValue = false;
-        bool? refreshedValue = true;
-
-        var restoredValue = SettingsPage.ResolveQuickSettingsPowerSourcePreference(lastKnownValue, refreshedValue);
-
-        Assert.True(restoredValue);
-    }
-
     [Fact]
     public void Update_action_refreshes_after_releasing_the_operation_guard()
     {
@@ -126,7 +103,7 @@ public sealed class SettingsPageUpdateTests
         Assert.DoesNotContain("SteamVirtualController", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SteamVirtualController", code, StringComparison.Ordinal);
         Assert.Contains("GamingHomeExpander", xaml, StringComparison.Ordinal);
-        Assert.Contains("QuickSettingsPowerSourceCard", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuickSettingsPowerSourceCard", xaml, StringComparison.Ordinal);
         Assert.Contains("DeveloperMenuCard", xaml, StringComparison.Ordinal);
     }
 

@@ -2,7 +2,7 @@
 
 Steam Addon for Claw는 지원되는 MSI Claw 핸드헬드의 내장 컨트롤러에 Steam 연동과 게임별 성능 설정을 제공합니다. Steam 게임 또는 Steam Big Picture가 활성화되면 내장 컨트롤러를 Steam Deck 또는 DualSense Edge로, 그 외에는 Xbox 360 컨트롤러로 표현할 수 있습니다. 전역 Steam 컨트롤러와 선택적인 Steam 게임별 컨트롤러도 지정할 수 있으며, 전면·후면 버튼, 성능 HUD, 바로가기, 별도의 Quick Settings Overlay, Windows 게임 홈 동작도 설정할 수 있습니다.
 
-이 안내서는 현재 앱에서 실제로 제공하는 기능을 설명합니다. 메인 앱에는 **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **Tweaks**, **How to Use**, **Settings**가 있습니다. **Quick Settings Overlay**는 컨트롤러로 조작하는 별도 창이며, Steam Quick Access나 ClawHUD와는 다릅니다.
+이 안내서는 현재 앱에서 실제로 제공하는 기능을 설명합니다. 메인 앱에는 **Device**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Quick Overlay**, **Shortcut**, **Tweaks**, **How to Use**, **Settings**가 있습니다. **Quick Settings Overlay**는 컨트롤러로 조작하는 별도 창이며, Steam Quick Access나 ClawHUD와는 다릅니다.
 
 ## 목차
 
@@ -18,6 +18,7 @@ Steam Addon for Claw는 지원되는 MSI Claw 핸드헬드의 내장 컨트롤�
   - [Steam](#steam)
   - [XBOX](#xbox)
   - [ClawHUD](#clawhud)
+  - [Quick Overlay](#quick-overlay)
   - [Shortcut](#shortcut)
   - [Tweaks](#tweaks)
   - [Settings](#settings)
@@ -182,6 +183,10 @@ Intel XeFG를 사용하는 경우 PresentMon이 드라이버에서 생성된 모
 
 **Size**(**-2**, **-1**, **Default**, **+1**, **+2**), **Font**(**Unispace**, **Segoe UI Variable**), **Alignment**(**Left**, **Center**, **Right**), **Background width**(**Full width**, **Content width**)를 설정할 수 있습니다. **Opacity**는 50%~100% 범위에서 5% 단위로 조절합니다. **Intel VRR Range Fix**는 해당 Intel 디스플레이의 가변 주사율 범위를 보정하기 위한 기기별 옵션이며 모든 디스플레이에 필요한 것은 아닙니다. 문제가 표시되면 사용할 수 있는 경우 페이지의 **Retry**를 선택하세요.
 
+### Quick Overlay
+
+**Quick Overlay**에서 별도의 Quick Settings Overlay 동작을 설정합니다. **현재 전원 소스만 표시 (Show only current power source)**를 켜면 Overlay에는 현재 연결된 전원 방식의 컨트롤만 표시됩니다. 메인 앱에서는 **Plugged in**과 **On battery** 설정을 계속 모두 볼 수 있습니다.
+
 ### Shortcut
 
 **Shortcut**에서 Quick Settings Overlay에 표시할 항목을 추가·편집·삭제하고 드래그하여 순서를 바꿀 수 있습니다. 지원하는 동작은 다음과 같습니다.
@@ -228,10 +233,6 @@ Windows 게임 전체 화면 환경에서 사용할 홈 앱을 **Off**, **XBOX**
 #### 앱 테마 (App theme)
 
 메인 앱의 표시 방식을 **System**, **Light**, **Dark** 중 선택합니다. **System**은 Windows의 테마 설정을 따릅니다.
-
-#### 현재 전원 소스만 표시 (Show only current power source)
-
-켜면 Quick Settings Overlay에서 현재 연결된 전원에 해당하는 컨트롤만 표시합니다. 메인 앱에서는 **Plugged in**과 **On battery** 설정을 계속 모두 볼 수 있습니다.
 
 #### 로깅 (Logging)
 

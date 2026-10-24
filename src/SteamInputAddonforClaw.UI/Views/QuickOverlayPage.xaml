@@ -1,0 +1,26 @@
+<UserControl
+    x:Class="SteamInputAddonforClaw.Views.QuickOverlayPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
+    <ScrollViewer Padding="32">
+        <StackPanel Spacing="16">
+            <TextBlock x:Uid="QuickOverlay_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Quick Overlay" />
+
+            <ctcontrols:SettingsCard
+                x:Name="QuickSettingsPowerSourceCard"
+                x:Uid="QuickOverlay_PowerSourceCard"
+                Description="Show only the controls for the currently connected power source in Quick Settings Overlay."
+                Header="Show only current power source">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE85E;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="QuickSettingsPowerSourceToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -18,8 +18,6 @@ public sealed partial class SettingsPage : UserControl
         MainUiStrings.Get("Settings_GamingHome_InitiallyUnavailable", "Windows Gaming Full Screen Experience is unavailable."));
     private int _gamingHomeMutationInProgress;
     private bool _applyingGamingHomeState;
-    private bool _applyingQuickSettingsPowerSourcePreference;
-    private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
     private bool _isInitializingLogLevel;
     private bool _isApplyingAppThemeSelection;
     private FrontendLogLevel _lastKnownLogLevel;
@@ -46,8 +44,6 @@ public sealed partial class SettingsPage : UserControl
         _logDirectoryPath = bootstrap.LogDirectoryPath;
         SetAppThemeSelection(appTheme);
         SetLogLevel(_lastKnownLogLevel);
-        _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
-        SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
         _ = RefreshAppUpdateAsync();
         _ = RefreshGamingHomeAsync();
     }
@@ -312,13 +308,6 @@ public sealed partial class SettingsPage : UserControl
         }
     }
 
-    private void SetQuickSettingsPowerSourceToggle(bool enabled)
-    {
-        _applyingQuickSettingsPowerSourcePreference = true;
-        try { QuickSettingsPowerSourceToggleSwitch.IsOn = enabled; }
-        finally { _applyingQuickSettingsPowerSourcePreference = false; }
-    }
-
     internal static int GetLogLevelSelectionIndex(FrontendLogLevel level) => level switch
     {
         FrontendLogLevel.Info => 1,
@@ -393,37 +382,6 @@ public sealed partial class SettingsPage : UserControl
         }
     }
 
-    private async void QuickSettingsPowerSourceToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_applyingQuickSettingsPowerSourcePreference || _frontend is null) return;
-
-        try
-        {
-            var settings = await _frontend.SetQuickSettingsCurrentPowerSourceOnlyAsync(QuickSettingsPowerSourceToggleSwitch.IsOn).ConfigureAwait(true);
-            _lastKnownQuickSettingsCurrentPowerSourceOnly = settings.QuickSettingsCurrentPowerSourceOnly;
-            SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("QuickSettings", "Current power-source preference update failed.", exception);
-            bool? refreshedValue = null;
-            try
-            {
-                var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
-                refreshedValue = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
-            }
-            catch (Exception refreshException)
-            {
-                AppLog.Warn("QuickSettings", "Current power-source preference rollback failed.", refreshException);
-            }
-
-            _lastKnownQuickSettingsCurrentPowerSourceOnly = ResolveQuickSettingsPowerSourcePreference(
-                _lastKnownQuickSettingsCurrentPowerSourceOnly,
-                refreshedValue);
-            SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
-        }
-    }
-
     /// <summary>Renders the read-only Required Components list (moved here from the Status page) from
     /// the same authoritative frontend status snapshot MainWindow already captures. Diagnostic only --
     /// no repair/install controls: Runtime lifecycle/reconciliation stays the authority for setup.</summary>
@@ -462,9 +420,6 @@ public sealed partial class SettingsPage : UserControl
 
     internal static Visibility GetDeveloperMenuCardVisibility(bool developerMenuEnabled) =>
         developerMenuEnabled ? Visibility.Visible : Visibility.Collapsed;
-
-    internal static bool ResolveQuickSettingsPowerSourcePreference(bool lastKnownValue, bool? refreshedValue) =>
-        refreshedValue ?? lastKnownValue;
 
     private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)
     {

@@ -413,6 +413,10 @@
   <data name="ClawHud_VrrStatus_Applied" xml:space="preserve"><value>Applied</value></data>
   <data name="ClawHud_VrrStatus_ApplyFailed" xml:space="preserve"><value>ApplyFailed</value></data>
   <data name="ClawHud_VrrStatus_VerificationFailed" xml:space="preserve"><value>VerificationFailed</value></data>
+  <data name="MainNav_QuickOverlay.Content" xml:space="preserve"><value>Quick Overlay</value></data>
+  <data name="QuickOverlay_PageTitle.Text" xml:space="preserve"><value>Quick Overlay</value></data>
+  <data name="QuickOverlay_PowerSourceCard.Header" xml:space="preserve"><value>Show only current power source</value></data>
+  <data name="QuickOverlay_PowerSourceCard.Description" xml:space="preserve"><value>Show only the controls for the currently connected power source in Quick Settings Overlay.</value></data>
   <data name="MainNav_Shortcut.Content" xml:space="preserve"><value>Shortcut</value></data>
   <data name="MainNav_HowToUse.Content" xml:space="preserve"><value>How to Use</value></data>
   <data name="HowToUse_Failure.Text" xml:space="preserve"><value>How to Use could not be loaded.</value></data>
@@ -690,12 +694,6 @@ These settings are reversible where Windows and policy permit. Windows policy or
   </data>
   <data name="Settings_GamingHomeStartupCard.Description" xml:space="preserve">
     <value>Start Windows directly in the selected gaming home.</value>
-  </data>
-  <data name="Settings_QuickSettingsPowerSourceCard.Header" xml:space="preserve">
-    <value>Show only current power source</value>
-  </data>
-  <data name="Settings_QuickSettingsPowerSourceCard.Description" xml:space="preserve">
-    <value>Show only the controls for the currently connected power source in Quick Settings Overlay.</value>
   </data>
   <data name="Settings_LoggingCard.Header" xml:space="preserve">
     <value>Logging</value>

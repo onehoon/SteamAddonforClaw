@@ -19,7 +19,7 @@ public sealed class WindowsTweaksUiContractTests
         var tags = menu.Elements().Where(element => element.Name.LocalName == "NavigationViewItem")
             .Select(element => (string?)element.Attribute("Tag")).ToArray();
 
-        Assert.Equal(new[] { "Device", "MsiUpdates", "Controller", "Profile", "Xbox", "Overlay", "Shortcut", "Tweaks", "HowToUse" }, tags);
+        Assert.Equal(new[] { "Device", "MsiUpdates", "Controller", "Profile", "Xbox", "Overlay", "QuickOverlay", "Shortcut", "Tweaks", "HowToUse" }, tags);
         Assert.Equal("Device", (string?)menu.Elements().First().Attribute("Tag"));
         Assert.Equal(MainNavigationPage.Device, new MainNavigationState().CurrentPage);
     }

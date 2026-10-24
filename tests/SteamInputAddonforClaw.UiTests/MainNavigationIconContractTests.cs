@@ -22,12 +22,17 @@ public sealed class MainNavigationIconContractTests
             (Tag: "Profile", Content: "Steam", Icon: "FontIcon:E8F1"),
             (Tag: "Xbox", Content: "XBOX", Icon: "FontIcon:E990"),
             (Tag: "Overlay", Content: "ClawHUD", Icon: "FontIcon:E7F4"),
+            (Tag: "QuickOverlay", Content: "Quick Overlay", Icon: "FontIcon:E8A0"),
             (Tag: "Shortcut", Content: "Shortcut", Icon: "FontIcon:E71B"),
             (Tag: "Tweaks", Content: "Tweaks", Icon: "SymbolIcon:Repair"),
             (Tag: "HowToUse", Content: "How to Use", Icon: "SymbolIcon:Help"),
         };
 
         Assert.Equal(expectedNavigationIcons.Length, navigationItems.Length);
+        var quickOverlayIndex = Array.FindIndex(navigationItems, element => (string?)element.Attribute("Tag") == "QuickOverlay");
+        Assert.True(quickOverlayIndex > 0 && quickOverlayIndex < navigationItems.Length - 1);
+        Assert.Equal("Overlay", (string?)navigationItems[quickOverlayIndex - 1].Attribute("Tag"));
+        Assert.Equal("Shortcut", (string?)navigationItems[quickOverlayIndex + 1].Attribute("Tag"));
         foreach (var expected in expectedNavigationIcons)
         {
             var item = Assert.Single(navigationItems, element =>
