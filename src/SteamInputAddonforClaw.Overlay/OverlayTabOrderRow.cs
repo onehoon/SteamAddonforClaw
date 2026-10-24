@@ -101,11 +101,11 @@ internal sealed class AddonQuickSettingsTabOrderRow
             {
                 FontFamily = new FontFamily("Segoe Fluent Icons"),
                 Glyph = glyph,
-                FontSize = 20,
+                FontSize = 16,
             },
             Style = OverlayQamResources.Style("QamValueButtonStyle"),
             MinWidth = OverlayQamResources.Get("QamValueButtonWidth", 40.0),
-            MinHeight = 32,
+            MinHeight = 28,
             Padding = new Thickness(0),
         };
         AutomationProperties.SetName(button, accessibleName);
