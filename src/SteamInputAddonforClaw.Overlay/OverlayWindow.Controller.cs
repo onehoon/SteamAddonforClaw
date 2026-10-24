@@ -16,11 +16,16 @@ internal enum ControllerForSteamMutationKind
     Gyroscope,
 }
 
+internal readonly record struct OverlayBackButtonMappingPreview(bool IsM1, Xbox360BackButtonTarget Target);
+
+internal sealed record OverlayControllerLedPendingEdit(ControllerLedSettings Baseline, ControllerLedSettings Desired);
+
 public sealed partial class OverlayWindow
 {
     private BackButtonMappingSettings _backButtonMapping = BackButtonMappingSettings.Default;
     private bool _backButtonMappingAvailable;
     private bool _backButtonMutationInFlight;
+    private OverlayBackButtonMappingPreview? _pendingBackButtonMappingPreview;
     private OverlayValueRow? _m1MappingRow;
     private OverlayValueRow? _m2MappingRow;
     private OverlayValueRow? _steamControllerRow;
@@ -34,6 +39,7 @@ public sealed partial class OverlayWindow
     private bool? _pendingGyroscopeEnabled;
     private bool _controllerLedAvailable;
     private bool _controllerLedMutationInFlight;
+    private OverlayControllerLedPendingEdit? _pendingControllerLedEdit;
     private bool _controllerVibrationMutationInFlight;
     private ControllerLedSettings _controllerLed = ControllerLedSettings.Default;
     private OverlayToggleRow? _controllerLedEnabledRow;
@@ -70,9 +76,13 @@ public sealed partial class OverlayWindow
 
         _steamControllerRow = new OverlayValueRow("Controller", FormatSteamController,
             RequestSteamControllerChange, OverlayValueButtonKind.DiscreteChoice);
-        AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities);
+        AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities,
+            () => _steamControllerMutationInFlight && _frontendSettingsAvailable
+                && _controllerForSteam.Available && _controllerForSteam.CanChangeController);
         _gyroscopeRow = new OverlayToggleRow("Gyroscope", RequestGyroscopeChange);
-        AddControllerRow(steamDetails, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities);
+        AddControllerRow(steamDetails, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities,
+            () => _gyroscopeMutationInFlight && _frontendSettingsAvailable
+                && _frontendSettingsSnapshot is not null);
         steamSection.Children.Add(steamDetails);
 
         var m1Row = new OverlayValueRow("M1", FormatBackButtonTarget,
@@ -159,8 +169,7 @@ public sealed partial class OverlayWindow
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)
-                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
+            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }
     }
@@ -175,14 +184,16 @@ public sealed partial class OverlayWindow
     private void BuildControllerLedRows(StackPanel section, List<OverlayRow> rows)
     {
         _controllerLedEnabledRow = new OverlayToggleRow("Joystick LED", RequestControllerLedEnabled, strongLabel: true);
-        AddControllerRow(section, rows, _controllerLedEnabledRow.Container, _controllerLedEnabledRow.Capabilities);
+        AddControllerRow(section, rows, _controllerLedEnabledRow.Container, _controllerLedEnabledRow.Capabilities,
+            () => _controllerLedMutationInFlight && _controllerLedAvailable);
 
         var details = CreateOverlayDetailStack();
         _controllerLedDetailStack = details;
 
         _controllerLedBrightnessRow = new OverlayValueRow("Brightness", OverlayValueRow.FormatInteger,
             value => RequestControllerLedBrightness((int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
-        AddControllerRow(details, rows, _controllerLedBrightnessRow.Container, _controllerLedBrightnessRow.Capabilities);
+        AddControllerRow(details, rows, _controllerLedBrightnessRow.Container, _controllerLedBrightnessRow.Capabilities,
+            () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
 
         var colorPreview = new StackPanel
         {
@@ -211,9 +222,12 @@ public sealed partial class OverlayWindow
             value => RequestControllerLedRgb(red: null, green: (int)Math.Round(value), blue: null), OverlayValueButtonKind.NumericStepper);
         _controllerLedBlueRow = new OverlayValueRow("Blue", OverlayValueRow.FormatInteger,
             value => RequestControllerLedRgb(red: null, green: null, blue: (int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
-        AddControllerRow(details, rows, _controllerLedRedRow.Container, _controllerLedRedRow.Capabilities);
-        AddControllerRow(details, rows, _controllerLedGreenRow.Container, _controllerLedGreenRow.Capabilities);
-        AddControllerRow(details, rows, _controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities);
+        AddControllerRow(details, rows, _controllerLedRedRow.Container, _controllerLedRedRow.Capabilities,
+            () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
+        AddControllerRow(details, rows, _controllerLedGreenRow.Container, _controllerLedGreenRow.Capabilities,
+            () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
+        AddControllerRow(details, rows, _controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities,
+            () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
         section.Children.Add(details);
         RenderControllerLedRows();
     }
@@ -225,25 +239,44 @@ public sealed partial class OverlayWindow
             value => RequestVibrationEdit(left: (int)Math.Round(value), right: null), OverlayValueButtonKind.NumericStepper);
         _rightVibrationRow = new OverlayValueRow("Right Motor", FormatPercent,
             value => RequestVibrationEdit(left: null, right: (int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
-        AddControllerRow(details, rows, _leftVibrationRow.Container, _leftVibrationRow.Capabilities);
-        AddControllerRow(details, rows, _rightVibrationRow.Container, _rightVibrationRow.Capabilities);
+        AddControllerRow(details, rows, _leftVibrationRow.Container, _leftVibrationRow.Capabilities,
+            () => _controllerVibrationMutationInFlight && _vibrationSnapshot.Available
+                && _vibrationSnapshot.Writable && _vibrationSnapshot.LeftPercent is not null);
+        AddControllerRow(details, rows, _rightVibrationRow.Container, _rightVibrationRow.Capabilities,
+            () => _controllerVibrationMutationInFlight && _vibrationSnapshot.Available
+                && _vibrationSnapshot.Writable && _vibrationSnapshot.RightPercent is not null);
         section.Children.Add(details);
         RenderControllerVibrationRows();
     }
 
-    private void AddControllerRow(StackPanel section, List<OverlayRow> rows, Border container, OverlayRowCapabilities capabilities)
+    private void AddControllerRow(
+        StackPanel section,
+        List<OverlayRow> rows,
+        Border container,
+        OverlayRowCapabilities capabilities,
+        Func<bool> selectableDuringPendingMutation)
     {
         section.Children.Add(container);
-        rows.Add(new(container, capabilities));
+        rows.Add(new(container, PreserveControllerPendingSelection(capabilities, selectableDuringPendingMutation)));
         RegisterRowPointerSelection(container);
     }
 
     private void AddBackButtonMappingRow(StackPanel section, List<OverlayRow> rows, OverlayValueRow row)
     {
         section.Children.Add(row.Container);
-        rows.Add(new(row.Container, row.Capabilities));
+        rows.Add(new(row.Container, PreserveControllerPendingSelection(row.Capabilities,
+            () => _backButtonMutationInFlight && _backButtonMappingAvailable)));
         RegisterRowPointerSelection(row.Container);
     }
+
+    internal static OverlayRowCapabilities PreserveControllerPendingSelection(
+        OverlayRowCapabilities capabilities,
+        Func<bool> selectableDuringPendingMutation) => capabilities with
+    {
+        // Keep navigation stable only while the same row remains genuinely available. The
+        // underlying row model still rejects activation/adjustment while its control is disabled.
+        IsSelectable = () => capabilities.IsSelectable() || selectableDuringPendingMutation(),
+    };
 
     private void RequestBackButtonMappingChange(bool isM1, double selected)
     {
@@ -259,6 +292,7 @@ public sealed partial class OverlayWindow
 
         var candidate = CreateBackButtonMappingCandidate(_backButtonMapping, isM1, target);
         _backButtonMutationInFlight = true;
+        _pendingBackButtonMappingPreview = new(isM1, target);
         RenderBackButtonMappingRows();
         BackButtonMappingEditRequested?.Invoke(candidate);
     }
@@ -275,6 +309,7 @@ public sealed partial class OverlayWindow
     internal void ApplyBackButtonMappingMutationResult(OverlayBackButtonMappingMutationResponse response)
     {
         _backButtonMutationInFlight = false;
+        _pendingBackButtonMappingPreview = null;
         ApplyBackButtonMappingState(response.State with
         {
             FailureMessage = response.Succeeded
@@ -286,6 +321,7 @@ public sealed partial class OverlayWindow
     internal void ApplyBackButtonMappingFailure(string message)
     {
         _backButtonMutationInFlight = false;
+        _pendingBackButtonMappingPreview = null;
         RenderBackButtonMappingRows();
     }
 
@@ -294,14 +330,14 @@ public sealed partial class OverlayWindow
         var enabled = _backButtonMappingAvailable && !_backButtonMutationInFlight;
         var minimum = (double)Xbox360BackButtonTarget.Disabled;
         var maximum = (double)Xbox360BackButtonTarget.XboxGuide;
-        _m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M1);
-        _m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M2);
+        var displayMapping = ProjectBackButtonMappingPreview(_backButtonMapping, _pendingBackButtonMappingPreview);
+        _m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)displayMapping.M1);
+        _m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)displayMapping.M2);
 
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)
-                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
+            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }
     }
@@ -327,7 +363,11 @@ public sealed partial class OverlayWindow
         bool led,
         ControllerForSteamMutationKind? controllerForSteamMutation = null)
     {
-        if (led) _controllerLedMutationInFlight = false;
+        if (led)
+        {
+            _controllerLedMutationInFlight = false;
+            _pendingControllerLedEdit = null;
+        }
         else if (controllerForSteamMutation == ControllerForSteamMutationKind.Controller)
         {
             _steamControllerMutationInFlight = false;
@@ -351,7 +391,11 @@ public sealed partial class OverlayWindow
         var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller
             ? _rowSelection.SelectedIndex
             : null;
-        if (led) _controllerLedMutationInFlight = false;
+        if (led)
+        {
+            _controllerLedMutationInFlight = false;
+            _pendingControllerLedEdit = null;
+        }
         else if (controllerForSteamMutation == ControllerForSteamMutationKind.Controller)
         {
             _steamControllerMutationInFlight = false;
@@ -371,15 +415,11 @@ public sealed partial class OverlayWindow
 
     private void RestoreControllerRowSelection(int? preferredIndex)
     {
-        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Controller ||
-            _steamControllerMutationInFlight ||
-            _gyroscopeMutationInFlight ||
-            _backButtonMutationInFlight ||
-            _controllerLedMutationInFlight ||
-            _controllerVibrationMutationInFlight)
+        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Controller)
             return;
 
-        // Reconcile only after every Controller renderer has applied its current availability.
+        // Pending-row capabilities preserve legitimate in-flight selections while this pass still
+        // applies genuine availability and visibility changes from the completed snapshot.
         _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
         ApplyRowSelectionVisual();
     }
@@ -411,30 +451,31 @@ public sealed partial class OverlayWindow
     private void RequestControllerLedMutation(ControllerLedSettings settings)
     {
         _controllerLedMutationInFlight = true;
+        _pendingControllerLedEdit = new(_controllerLed, settings);
         RenderControllerLedRows();
         ControllerLedEditRequested?.Invoke(settings);
     }
 
     private void RenderControllerLedRows()
     {
+        var displaySettings = ProjectControllerLedPendingEdit(_controllerLed, _pendingControllerLedEdit);
         if (_controllerLedSectionCard is not null)
             _controllerLedSectionCard.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
         if (_controllerLedDetailStack is not null)
             _controllerLedDetailStack.Visibility = _controllerLed.Enabled ? Visibility.Visible : Visibility.Collapsed;
         var available = _controllerLedAvailable && !_controllerLedMutationInFlight;
-        _controllerLedEnabledRow?.ApplyState(available, _controllerLed.Enabled);
-        _controllerLedBrightnessRow?.ApplyState(available && _controllerLed.Enabled, 0, 100, 1, _controllerLed.Brightness);
+        _controllerLedEnabledRow?.ApplyState(available, displaySettings.Enabled);
+        _controllerLedBrightnessRow?.ApplyState(available && _controllerLed.Enabled, 0, 100, 1, displaySettings.Brightness);
         var colorAvailable = available && _controllerLed.Enabled;
-        _controllerLedRedRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Red);
-        _controllerLedGreenRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Green);
-        _controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Blue);
+        _controllerLedRedRow?.ApplyState(colorAvailable, 0, 255, 1, displaySettings.Red);
+        _controllerLedGreenRow?.ApplyState(colorAvailable, 0, 255, 1, displaySettings.Green);
+        _controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, displaySettings.Blue);
         if (_controllerLedColorSwatch is not null)
-            RenderControllerLedColor(Color.FromArgb(255, _controllerLed.Red, _controllerLed.Green, _controllerLed.Blue));
+            RenderControllerLedColor(Color.FromArgb(255, displaySettings.Red, displaySettings.Green, displaySettings.Blue));
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_controllerLedMutationInFlight && !_backButtonMutationInFlight && !_controllerVibrationMutationInFlight)
-                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
+            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }
     }
@@ -566,8 +607,7 @@ public sealed partial class OverlayWindow
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_steamControllerMutationInFlight && !_gyroscopeMutationInFlight && !_controllerVibrationMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight)
-                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
+            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }
     }
@@ -578,6 +618,27 @@ public sealed partial class OverlayWindow
         Xbox360BackButtonTarget target) => isM1
             ? current with { M1 = target }
             : current with { M2 = target };
+
+    internal static BackButtonMappingSettings ProjectBackButtonMappingPreview(
+        BackButtonMappingSettings current,
+        OverlayBackButtonMappingPreview? preview) => preview is not { } pending
+            ? current
+            : pending.IsM1
+                ? current with { M1 = pending.Target }
+                : current with { M2 = pending.Target };
+
+    internal static ControllerLedSettings ProjectControllerLedPendingEdit(
+        ControllerLedSettings current,
+        OverlayControllerLedPendingEdit? pending)
+    {
+        if (pending is not { } edit) return current;
+        return new ControllerLedSettings(
+            edit.Desired.Enabled != edit.Baseline.Enabled ? edit.Desired.Enabled : current.Enabled,
+            edit.Desired.Brightness != edit.Baseline.Brightness ? edit.Desired.Brightness : current.Brightness,
+            edit.Desired.Red != edit.Baseline.Red ? edit.Desired.Red : current.Red,
+            edit.Desired.Green != edit.Baseline.Green ? edit.Desired.Green : current.Green,
+            edit.Desired.Blue != edit.Baseline.Blue ? edit.Desired.Blue : current.Blue);
+    }
 
     internal static string FormatBackButtonTarget(double value)
     {
