@@ -100,6 +100,11 @@ public sealed class QuickOverlayPageTests
                     move.IndexOf("ApplyAuthoritativeTabOrder(result.State)", StringComparison.Ordinal));
         Assert.Contains("Tag = tabId", button, StringComparison.Ordinal);
         Assert.Contains("MoveTabOrderAsync(tabId, delta)", button, StringComparison.Ordinal);
+        Assert.Contains("FontSize = 16", button, StringComparison.Ordinal);
+        Assert.Contains("Width = 40", button, StringComparison.Ordinal);
+        Assert.Contains("Height = 28", button, StringComparison.Ordinal);
+        Assert.DoesNotContain("FontSize = 20", button, StringComparison.Ordinal);
+        Assert.DoesNotContain("Height = 32", button, StringComparison.Ordinal);
         Assert.Contains("_tabOrderMoveInProgress", buttonStates, StringComparison.Ordinal);
         Assert.Contains("controls.MoveEarlier.IsEnabled = available && row!.CanMoveEarlier", buttonStates, StringComparison.Ordinal);
         Assert.Contains("controls.MoveLater.IsEnabled = available && row!.CanMoveLater", buttonStates, StringComparison.Ordinal);
