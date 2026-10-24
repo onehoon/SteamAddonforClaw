@@ -34,11 +34,11 @@ public sealed partial class OverlayWindow
     private SettingCardView? _quickSettingsCard;
     private OverlayToggleRow? _quickSettingsCurrentPowerSourceOnlyRow;
     private bool _quickSettingsCurrentPowerSourceOnly;
+    private bool? _pendingQuickSettingsCurrentPowerSourceOnly;
     private bool _quickSettingsSettingsAvailable;
     private bool _quickSettingsMutationInFlight;
     private SettingCardId? _expandedSettingCard;
-    private FrontendClawHudSnapshot? _clawHudSnapshot;
-    private bool _clawHudMutationInFlight;
+    private readonly OverlayClawHudMutationState _clawHudMutation = new();
 
     internal event Action<bool>? ClawHudEnabledRequested;
     internal event Action<FrontendClawHudMutationIntent>? ClawHudSettingMutationRequested;
@@ -158,9 +158,36 @@ public sealed partial class OverlayWindow
     {
         var capabilities = row.Capabilities;
         return new OverlayRow(row.Container, new OverlayRowCapabilities(
-            IsSelectable: () => _expandedSettingCard == card && capabilities.IsSelectable(),
+            IsSelectable: () => _expandedSettingCard == card &&
+                (capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(card, row.Container)),
             Activate: capabilities.Activate,
             Adjust: capabilities.Adjust));
+    }
+
+    private bool IsNavigableDuringPendingSettingMutation(SettingCardId card, Border container)
+    {
+        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Setting)
+            return false;
+
+        if (card == SettingCardId.ClawHud && _clawHudMutation.IsInFlight)
+        {
+            var snapshot = _clawHudMutation.Snapshot;
+            return ReferenceEquals(container, _clawHudEnabledRow?.Container)
+                ? snapshot is not null
+                : snapshot?.RuntimeState == FrontendClawHudRuntimeState.Ready &&
+                    snapshot.Settings is not null &&
+                    _clawHudRows.Any(row => ReferenceEquals(row.Container, container));
+        }
+
+        if (!_pageRows.TryGetValue(AddonQuickSettingsTabId.Setting, out var rows) ||
+            _rowSelection.SelectedIndex is not { } selectedIndex ||
+            selectedIndex < 0 || selectedIndex >= rows.Count ||
+            !ReferenceEquals(rows[selectedIndex].Container, container))
+            return false;
+
+        return card == SettingCardId.QuickSettings && _quickSettingsMutationInFlight &&
+            _quickSettingsSettingsAvailable &&
+            ReferenceEquals(container, _quickSettingsCurrentPowerSourceOnlyRow?.Container);
     }
 
     private void ToggleSettingCard(SettingCardId id)
@@ -257,8 +284,13 @@ public sealed partial class OverlayWindow
 
     private void RequestQuickSettingsCurrentPowerSourceOnly(bool enabled)
     {
-        if (!_quickSettingsSettingsAvailable || _quickSettingsMutationInFlight) return;
+        if (!_quickSettingsSettingsAvailable || _quickSettingsMutationInFlight)
+        {
+            RenderQuickSettingsCurrentPowerSourceRow();
+            return;
+        }
         _quickSettingsMutationInFlight = true;
+        _pendingQuickSettingsCurrentPowerSourceOnly = enabled;
         RenderQuickSettingsCurrentPowerSourceRow();
         QuickSettingsCurrentPowerSourceOnlyRequested?.Invoke(enabled);
     }
@@ -266,6 +298,8 @@ public sealed partial class OverlayWindow
     private void SetQuickSettingsCurrentPowerSourceMutationInFlight(bool inFlight)
     {
         _quickSettingsMutationInFlight = inFlight;
+        if (!inFlight)
+            _pendingQuickSettingsCurrentPowerSourceOnly = null;
         RenderQuickSettingsCurrentPowerSourceRow();
     }
 
@@ -273,7 +307,7 @@ public sealed partial class OverlayWindow
     {
         _quickSettingsCurrentPowerSourceOnlyRow?.ApplyState(
             _quickSettingsSettingsAvailable && !_quickSettingsMutationInFlight,
-            _quickSettingsCurrentPowerSourceOnly);
+            _pendingQuickSettingsCurrentPowerSourceOnly ?? _quickSettingsCurrentPowerSourceOnly);
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Setting)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
@@ -350,48 +384,54 @@ public sealed partial class OverlayWindow
         }, request, OverlayValueButtonKind.DiscreteChoice);
     }
 
-    internal void ApplyClawHudSnapshot(FrontendClawHudSnapshot snapshot)
+    internal void ApplyClawHudState(FrontendClawHudSnapshot snapshot)
     {
-        _clawHudSnapshot = snapshot;
-        _clawHudMutationInFlight = false;
-        RenderClawHud();
+        _clawHudMutation.ApplyState(snapshot);
+        RenderClawHudControls();
+    }
+
+    internal void CompleteClawHudMutation(FrontendClawHudMutationResult result)
+    {
+        _clawHudMutation.Complete(result);
+        RenderClawHudControls();
     }
 
     internal void ApplyClawHudFailure(string message)
     {
-        _clawHudMutationInFlight = false;
+        _clawHudMutation.Fail();
         RenderClawHudControls();
     }
 
     private void RequestClawHudEnabled(bool enabled)
     {
-        if (_clawHudMutationInFlight) return;
-        _clawHudMutationInFlight = true;
+        if (!_clawHudMutation.TryBeginEnabled(enabled))
+        {
+            RenderClawHudControls();
+            return;
+        }
         RenderClawHudControls();
         ClawHudEnabledRequested?.Invoke(enabled);
     }
 
     private void RequestClawHudSetting(FrontendClawHudMutationIntent intent)
     {
-        if (_clawHudMutationInFlight) return;
-        _clawHudMutationInFlight = true;
+        if (!_clawHudMutation.TryBeginSetting(intent))
+        {
+            RenderClawHudControls();
+            return;
+        }
         RenderClawHudControls();
         ClawHudSettingMutationRequested?.Invoke(intent);
     }
 
-    private void RenderClawHud()
-    {
-        RenderClawHudControls();
-    }
-
     private void RenderClawHudControls()
     {
-        var snapshot = _clawHudSnapshot;
-        var settings = snapshot?.Settings;
-        var available = snapshot is not null && !_clawHudMutationInFlight;
+        var snapshot = _clawHudMutation.Snapshot;
+        var settings = _clawHudMutation.DisplaySettings;
+        var available = snapshot is not null && !_clawHudMutation.IsInFlight;
         var nestedAvailable = available && snapshot!.RuntimeState == FrontendClawHudRuntimeState.Ready && settings is not null;
 
-        _clawHudEnabledRow?.ApplyState(available, snapshot?.DesiredEnabled == true);
+        _clawHudEnabledRow?.ApplyState(available, _clawHudMutation.DisplayEnabled);
         _clawHudDisplayModeRow?.ApplyState(nestedAvailable, 0, 1, 1, settings?.DisplayMode is { } display ? (int)display : 0);
         _clawHudSizeRow?.ApplyState(nestedAvailable, -2, 2, 1, settings?.HudSizeOffset ?? 0);
         _clawHudFontRow?.ApplyState(nestedAvailable, 0, 1, 1, settings?.Font is { } font ? (int)font : 0);

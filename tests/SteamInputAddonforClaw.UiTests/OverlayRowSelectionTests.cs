@@ -65,6 +65,70 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
+    public void ClawHud_siblings_remain_navigable_during_single_flight_but_not_when_runtime_is_not_ready()
+    {
+        var mutationPending = false;
+        var runtimeReady = true;
+        var cardExpanded = true;
+        var blockedRequests = 0;
+        OverlayRowCapabilities ClawHudDetailRow()
+        {
+            var model = new OverlayValueModel(_ => blockedRequests++);
+            void ApplyNativeAvailability() => model.ApplyState(runtimeReady && !mutationPending, 0, 2, 1, 0);
+            var nativeCapabilities = new OverlayRowCapabilities(
+                () =>
+                {
+                    ApplyNativeAvailability();
+                    return model.IsAvailable;
+                },
+                Adjust: delta =>
+                {
+                    ApplyNativeAvailability();
+                    model.RequestAdjust(delta);
+                });
+            return new OverlayRowCapabilities(
+                () => cardExpanded && (nativeCapabilities.IsSelectable() ||
+                    mutationPending && runtimeReady),
+                Adjust: nativeCapabilities.Adjust);
+        }
+
+        // Setting order: ClawHUD header, Enable HUD, Display Mode, HUD Size, Font,
+        // Alignment, then the next card header.
+        var rows = new[]
+        {
+            Row(),
+            ClawHudDetailRow(),
+            ClawHudDetailRow(),
+            ClawHudDetailRow(),
+            ClawHudDetailRow(),
+            ClawHudDetailRow(),
+            Row(),
+        };
+        var selection = new OverlayRowSelection();
+        selection.SetRows(rows);
+        Assert.True(selection.TrySelect(3)); // HUD Size.
+
+        mutationPending = true;
+        Assert.True(selection.MoveNext());
+        Assert.Equal(4, selection.SelectedIndex); // Font, not the next card header.
+        Assert.True(selection.MoveNext());
+        Assert.Equal(5, selection.SelectedIndex); // Alignment remains a logical sibling too.
+        Assert.False(selection.AdjustSelected(+1));
+        Assert.Equal(0, blockedRequests); // The underlying disabled control model rejects edits.
+
+        runtimeReady = false;
+        selection.SetRows(rows, preferredIndex: 5);
+        Assert.Equal(0, selection.SelectedIndex);
+        Assert.False(selection.TrySelect(4));
+
+        runtimeReady = true;
+        cardExpanded = false;
+        selection.SetRows(rows, preferredIndex: 4);
+        Assert.Equal(0, selection.SelectedIndex);
+        Assert.False(selection.TrySelect(4));
+    }
+
+    [Fact]
     public void SelectedControllerRowCanBeRestoredAfterAnIntermediateFallbackDuringRefresh()
     {
         var ledAvailable = true;

@@ -420,7 +420,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("Text = tile.Title", shortcuts, StringComparison.Ordinal);
         Assert.Contains("tile.Enabled ? 1.0", shortcuts, StringComparison.Ordinal);
         Assert.Contains("_shortcutExecutionInFlight", shortcuts, StringComparison.Ordinal);
-        Assert.Contains("_clawHudSnapshot = snapshot", clawHud, StringComparison.Ordinal);
+        Assert.Contains("_clawHudMutation.ApplyState(snapshot)", clawHud, StringComparison.Ordinal);
         Assert.Contains("RenderClawHudControls();", clawHud, StringComparison.Ordinal);
         Assert.DoesNotContain("state.Error", profile, StringComparison.Ordinal);
         Assert.Contains("FailureMessage = response.Succeeded", controller, StringComparison.Ordinal);
