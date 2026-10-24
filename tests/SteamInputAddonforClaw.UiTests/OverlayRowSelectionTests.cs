@@ -17,6 +17,8 @@ public sealed class OverlayRowSelectionTests
         selection.SetRows([]);
 
         Assert.Null(selection.SelectedIndex);
+        Assert.False(selection.MovePrevious());
+        Assert.False(selection.MoveNext());
     }
 
     [Fact]
@@ -234,17 +236,44 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
-    public void SelectionIsBoundedAndDoesNotWrap()
+    public void Vertical_movement_wraps_between_first_and_last_selectable_rows()
     {
         var selection = new OverlayRowSelection();
-        selection.SetRows([Row(), Row()]);
+        selection.SetRows(
+            [Row(selectable: false), Row(), Row(selectable: false), Row(), Row(selectable: false)],
+            preferredIndex: 1);
 
-        Assert.False(selection.MovePrevious());
-        Assert.Equal(0, selection.SelectedIndex);
+        Assert.True(selection.MovePrevious());
+        Assert.Equal(3, selection.SelectedIndex);
 
         Assert.True(selection.MoveNext());
+        Assert.Equal(1, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Vertical_movement_with_one_selectable_row_does_not_report_a_change()
+    {
+        var selection = new OverlayRowSelection();
+        selection.SetRows([Row(selectable: false), Row(), Row(selectable: false)]);
+
+        Assert.False(selection.MovePrevious());
+        Assert.Equal(1, selection.SelectedIndex);
         Assert.False(selection.MoveNext());
         Assert.Equal(1, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Normalizing_a_stale_selection_does_not_wrap_on_the_same_input()
+    {
+        var middleSelectable = true;
+        var selection = new OverlayRowSelection();
+        selection.SetRows([Row(), new OverlayRowCapabilities(() => middleSelectable), Row()]);
+        Assert.True(selection.TrySelect(1));
+
+        middleSelectable = false;
+
+        Assert.True(selection.MovePrevious());
+        Assert.Equal(0, selection.SelectedIndex);
     }
 
     [Fact]

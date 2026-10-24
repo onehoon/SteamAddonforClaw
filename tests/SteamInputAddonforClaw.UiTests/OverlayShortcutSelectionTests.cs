@@ -47,7 +47,8 @@ public sealed class OverlayShortcutSelectionTests
         selection.Select(2);
         Assert.True(selection.MoveDown());
         Assert.Equal(5, selection.SelectedIndex);
-        Assert.False(selection.MoveDown());
+        Assert.True(selection.MoveDown());
+        Assert.Equal(2, selection.SelectedIndex);
     }
 
     [Theory]
@@ -68,7 +69,7 @@ public sealed class OverlayShortcutSelectionTests
     }
 
     [Fact]
-    public void Vertical_moves_follow_three_column_geometry_and_clamp_a_short_final_row()
+    public void Vertical_moves_wrap_and_clamp_a_short_final_row()
     {
         var selection = At(tileCount: 5, columnCount: 3, index: 2);
 
@@ -76,11 +77,41 @@ public sealed class OverlayShortcutSelectionTests
         Assert.Equal(4, selection.SelectedIndex);
         Assert.True(selection.MoveUp());
         Assert.Equal(1, selection.SelectedIndex);
+        Assert.True(selection.MoveUp());
+        Assert.Equal(4, selection.SelectedIndex); // Wrap to the short final row and clamp.
 
         selection.Select(3);
-        Assert.False(selection.MoveDown());
-        Assert.True(selection.MoveUp());
+        Assert.True(selection.MoveDown());
         Assert.Equal(0, selection.SelectedIndex);
+
+        selection.Select(4);
+        Assert.True(selection.MoveDown());
+        Assert.Equal(1, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Four_tiles_wrap_and_clamp_a_short_final_row()
+    {
+        var selection = At(tileCount: 4, columnCount: 3, index: 2);
+
+        Assert.True(selection.MoveUp());
+        Assert.Equal(3, selection.SelectedIndex);
+        Assert.True(selection.MoveDown());
+        Assert.Equal(0, selection.SelectedIndex);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void A_single_populated_row_does_not_wrap_sideways(int tileCount)
+    {
+        var selection = At(tileCount, columnCount: tileCount, index: tileCount - 1);
+
+        Assert.False(selection.MoveUp());
+        Assert.Equal(tileCount - 1, selection.SelectedIndex);
+        Assert.False(selection.MoveDown());
+        Assert.Equal(tileCount - 1, selection.SelectedIndex);
     }
 
     [Fact]
@@ -100,14 +131,15 @@ public sealed class OverlayShortcutSelectionTests
     }
 
     [Fact]
-    public void First_and_last_row_edges_are_bounded()
+    public void Vertical_edges_wrap_between_populated_rows()
     {
         var selection = At(tileCount: 5, columnCount: 3, index: 0);
-        Assert.False(selection.MoveUp());
+        Assert.True(selection.MoveUp());
+        Assert.Equal(3, selection.SelectedIndex);
 
         selection.Select(4);
-        Assert.False(selection.MoveDown());
-        Assert.Equal(4, selection.SelectedIndex);
+        Assert.True(selection.MoveDown());
+        Assert.Equal(1, selection.SelectedIndex);
     }
 
     [Fact]
