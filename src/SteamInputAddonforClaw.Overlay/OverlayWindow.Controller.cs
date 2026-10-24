@@ -355,13 +355,15 @@ public sealed partial class OverlayWindow
         RenderControllerForSteamRows();
         RenderControllerLedRows();
         ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
+        ApplyQuickSettingsYButtonQuickJumpTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
         RestoreControllerRowSelection(preferredControllerIndex);
     }
 
     internal void ApplyFrontendSettingsMutationResult(
         OverlayFrontendSettingsMutationResponse response,
         bool led,
-        ControllerForSteamMutationKind? controllerForSteamMutation = null)
+        ControllerForSteamMutationKind? controllerForSteamMutation = null,
+        bool yButtonQuickJumpMutation = false)
     {
         if (led)
         {
@@ -378,7 +380,9 @@ public sealed partial class OverlayWindow
             _gyroscopeMutationInFlight = false;
             _pendingGyroscopeEnabled = null;
         }
-        var quickSettingsMutation = !led && controllerForSteamMutation is null;
+        if (yButtonQuickJumpMutation)
+            SetYButtonQuickJumpMutationInFlight(false);
+        var quickSettingsMutation = !led && controllerForSteamMutation is null && !yButtonQuickJumpMutation;
         ApplyFrontendSettingsState(response.Settings, response.ControllerLedAvailable, response.SettingsAvailable);
         if (quickSettingsMutation)
             SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
@@ -386,7 +390,8 @@ public sealed partial class OverlayWindow
 
     internal void ApplyFrontendSettingsMutationFailure(
         bool led,
-        ControllerForSteamMutationKind? controllerForSteamMutation = null)
+        ControllerForSteamMutationKind? controllerForSteamMutation = null,
+        bool yButtonQuickJumpMutation = false)
     {
         var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller
             ? _rowSelection.SelectedIndex
@@ -406,10 +411,16 @@ public sealed partial class OverlayWindow
             _gyroscopeMutationInFlight = false;
             _pendingGyroscopeEnabled = null;
         }
+        else if (yButtonQuickJumpMutation)
+        {
+            SetYButtonQuickJumpMutationInFlight(false);
+            return;
+        }
         else SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
         RenderControllerForSteamRows();
         RenderControllerLedRows();
         RenderQuickSettingsCurrentPowerSourceRow();
+        RenderQuickSettingsYButtonQuickJumpRow();
         RestoreControllerRowSelection(preferredControllerIndex);
     }
 

@@ -302,6 +302,17 @@ public sealed record FrontendControllerForSteamSnapshot(
         new(false, savedPreference, null, false);
 }
 
+/// <summary>One persisted destination for the physical Y button while the Quick Settings Overlay is captured.</summary>
+public enum QuickOverlayYButtonTarget
+{
+    Profile = 0,
+    Shortcut = 1,
+    Device = 2,
+    Controller = 3,
+    Setting = 4,
+    Off = 5,
+}
+
 /// <remarks><see cref="FrontButtonMapping"/> is the settings-layer projection of the one persisted
 /// front-button mapping. The frontend deliberately carries the SAME
 /// <see cref="FrontButtonMappingSettings"/> the runtime persists and the dispatcher validates
@@ -316,6 +327,7 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
     public bool DeveloperMenuEnabled { get; init; }
     public bool ExperimentalVirtualTouchpadEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
+    public QuickOverlayYButtonTarget YButtonQuickJumpTarget { get; init; } = QuickOverlayYButtonTarget.Profile;
     public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
     public ControllerLedSettings ControllerLed { get; init; } = ControllerLedSettings.Default;
 }
@@ -591,6 +603,9 @@ public interface IAddonFrontendControl
         throw new NotSupportedException("Experimental virtual touchpad settings are not supported by this frontend.");
     async Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken cancellationToken = default) =>
         (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
+    Task<FrontendSettingsSnapshot> SetQuickOverlayYButtonTargetAsync(
+        QuickOverlayYButtonTarget target, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Quick Overlay Y Button settings are not supported by this frontend.");
     Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendUpdateSnapshot.Unavailable);
     Task<FrontendUpdateSnapshot> CheckAndDownloadAppUpdateAsync(CancellationToken cancellationToken = default) =>

@@ -588,7 +588,7 @@ public sealed class MainUiLocalizationResourceTests
         var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
         var pagePath = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml");
         var page = XDocument.Load(pagePath);
-        Assert.Single(page.Descendants(), element => element.Name.LocalName == "SettingsCard");
+        Assert.Equal(2, page.Descendants().Count(element => element.Name.LocalName == "SettingsCard"));
         var tabOrderExpander = Assert.Single(page.Descendants(), element => element.Name.LocalName == "SettingsExpander");
         Assert.Single(page.Descendants(), element => element.Name.LocalName == "ToggleSwitch");
         var uidElements = page.Descendants()
@@ -601,6 +601,14 @@ public sealed class MainUiLocalizationResourceTests
                 "QuickOverlay_PowerSourceCard",
                 "QuickOverlay_TabOrderExpander",
                 "QuickOverlay_TabOrderStatusText",
+                "QuickOverlay_YButtonQuickJumpCard",
+                "QuickOverlay_YButtonQuickJumpComboBox",
+                "QuickOverlay_YButtonQuickJump_Controller",
+                "QuickOverlay_YButtonQuickJump_Device",
+                "QuickOverlay_YButtonQuickJump_Off",
+                "QuickOverlay_YButtonQuickJump_Profile",
+                "QuickOverlay_YButtonQuickJump_Setting",
+                "QuickOverlay_YButtonQuickJump_Shortcut",
             },
             actualUids.OrderBy(uid => uid, StringComparer.Ordinal));
         Assert.Equal(actualUids.Length, actualUids.Distinct(StringComparer.Ordinal).Count());
@@ -608,7 +616,7 @@ public sealed class MainUiLocalizationResourceTests
         foreach (var element in uidElements)
         {
             var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
-            foreach (var property in new[] { "Text", "Header", "Description" })
+            foreach (var property in new[] { "Text", "Header", "Description", "Content", "AutomationProperties.Name" })
             {
                 var sourceValue = (string?)element.Attribute(property);
                 if (sourceValue is null) continue;
@@ -622,6 +630,16 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Equal("Quick Overlay", english["MainNav_QuickOverlay.Content"]);
         Assert.Equal("퀵 오버레이", korean["MainNav_QuickOverlay.Content"]);
         Assert.Equal("퀵 오버레이", korean["QuickOverlay_PageTitle.Text"]);
+        Assert.Equal("Y Button Quick Jump", english["QuickOverlay_YButtonQuickJumpCard.Header"]);
+        Assert.Equal("Y 버튼 빠른 탭 이동", korean["QuickOverlay_YButtonQuickJumpCard.Header"]);
+        Assert.Equal("Press Y to jump to the selected tab while Quick Overlay is open.", english["QuickOverlay_YButtonQuickJumpCard.Description"]);
+        Assert.Equal("퀵 오버레이를 연 상태에서 Y 버튼을 누르면 선택한 탭으로 바로 이동합니다.", korean["QuickOverlay_YButtonQuickJumpCard.Description"]);
+        Assert.Equal(new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" },
+            new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" }.Select(name => english[$"QuickOverlay_YButtonQuickJump_{name}.Content"]));
+        Assert.Equal(new[] { "프로필", "바로 가기", "디바이스", "컨트롤러", "설정", "사용 안 함" },
+            new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" }.Select(name => korean[$"QuickOverlay_YButtonQuickJump_{name}.Content"]));
+        Assert.Equal("Y Button Quick Jump destination", english["QuickOverlay_YButtonQuickJumpComboBox.AutomationProperties.Name"]);
+        Assert.Equal("Y 버튼 빠른 탭 이동 대상", korean["QuickOverlay_YButtonQuickJumpComboBox.AutomationProperties.Name"]);
         Assert.Equal("Show only current power source", english["QuickOverlay_PowerSourceCard.Header"]);
         Assert.Equal("현재 전원 방식 옵션만 보기", korean["QuickOverlay_PowerSourceCard.Header"]);
         Assert.Equal("퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.",
@@ -666,9 +684,10 @@ public sealed class MainUiLocalizationResourceTests
             Assert.True(clawHud >= 0 && quickOverlay > clawHud && shortcut > quickOverlay);
             var quickOverlaySection = readme[quickOverlay..shortcut];
             Assert.Contains("current power source", quickOverlaySection, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Y Button Quick Jump", quickOverlaySection, StringComparison.Ordinal);
         }
-        Assert.Contains("The first tab in the saved order opens the next time the Overlay is shown", englishReadme, StringComparison.Ordinal);
-        Assert.Contains("저장된 순서의 첫 번째 탭은 다음에 Overlay를 열 때 선택", koreanReadme, StringComparison.Ordinal);
+        Assert.Contains("controls which tab opens first on the next Overlay Show", englishReadme, StringComparison.Ordinal);
+        Assert.Contains("의 첫 번째 탭은 다음에 Overlay를 열 때 처음 표시", koreanReadme, StringComparison.Ordinal);
 
         var englishSettingsStart = englishReadme.IndexOf("### Settings", StringComparison.Ordinal);
         var englishSettingsEnd = englishReadme.IndexOf("## Game profiles", englishSettingsStart, StringComparison.Ordinal);

@@ -194,7 +194,7 @@ The page lets you adjust **Size** (**-2**, **-1**, **Default**, **+1**, **+2**),
 
 ### Quick Overlay
 
-Use **Quick Overlay** to configure the separate Quick Settings Overlay. **Show only current power source** limits that Overlay to controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values. Expand **Quick Overlay Tab Order** to move tabs one position at a time with the Up and Down buttons. The first tab in the saved order opens the next time the Overlay is shown; the in-game **Setting** page provides the same tab-order controls.
+Use **Quick Overlay** to configure the separate Quick Settings Overlay. **Y Button Quick Jump** chooses the tab selected by pressing Y while the Overlay is open; it defaults to **Profile** and can be set to **Off**. This destination is independent of tab order: **Quick Overlay Tab Order** controls which tab opens first on the next Overlay Show, while Y always jumps to its configured destination. The in-game **Setting → Quick Settings** page provides the same Y choice and tab-order controls. **Show only current power source** limits the Overlay to controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values. Expand **Quick Overlay Tab Order** to move tabs one position at a time with the Up and Down buttons.
 
 ### Shortcut
 

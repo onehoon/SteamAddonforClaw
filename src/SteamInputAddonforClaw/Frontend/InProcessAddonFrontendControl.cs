@@ -1057,6 +1057,22 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
+    public Task<FrontendSettingsSnapshot> SetQuickOverlayYButtonTargetAsync(
+        QuickOverlayYButtonTarget target, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Enum.IsDefined(target))
+            throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Quick Overlay Y Button target.");
+        var previous = _settings.YButtonQuickJumpTarget;
+        if (previous == target)
+            return Task.FromResult(MapSettings());
+
+        _settings.ChangeYButtonQuickJumpTarget(target);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(MapSettings());
+    }
+
     public async Task<FrontendSettingsSnapshot> SetExperimentalVirtualTouchpadEnabledAsync(
         bool enabled, CancellationToken cancellationToken = default)
     {
@@ -1724,7 +1740,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, YButtonQuickJumpTarget = _settings.YButtonQuickJumpTarget, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1

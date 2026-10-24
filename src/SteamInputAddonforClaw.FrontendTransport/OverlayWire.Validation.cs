@@ -66,6 +66,7 @@ internal static class OverlayProductionControlsWireValidation
         && message.Kind == OverlayWireMessageKind.FrontendSettingsState
         && message.FrontendSettingsState is not null && message.ControllerLedAvailable is not null && message.FrontendSettingsAvailable is not null
         && IsStructurallyValid(message.FrontendSettingsState.ControllerForSteam)
+        && Enum.IsDefined(message.FrontendSettingsState.YButtonQuickJumpTarget)
         && message.FrontendSettingsMutationRequest is null && message.FrontendSettingsMutationResponse is null
         && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
         && HasNoLegacyPayload(message);
@@ -75,8 +76,8 @@ internal static class OverlayProductionControlsWireValidation
         && message.Kind == (led ? OverlayWireMessageKind.ControllerLedMutationRequest : OverlayWireMessageKind.CurrentPowerSourceMutationRequest)
         && message.FrontendSettingsMutationRequest is { RequestId: > 0 } request
         && (led
-            ? request.ControllerLed is not null && request.CurrentPowerSourceOnly is null && request.SteamVirtualController is null && request.GyroscopeEnabled is null && ControllerLedSettingsValidation.Validate(request.ControllerLed) is null
-            : request.ControllerLed is null && request.CurrentPowerSourceOnly is not null && request.SteamVirtualController is null && request.GyroscopeEnabled is null)
+            ? request.ControllerLed is not null && request.CurrentPowerSourceOnly is null && request.SteamVirtualController is null && request.GyroscopeEnabled is null && request.YButtonQuickJumpTarget is null && ControllerLedSettingsValidation.Validate(request.ControllerLed) is null
+            : request.ControllerLed is null && request.CurrentPowerSourceOnly is not null && request.SteamVirtualController is null && request.GyroscopeEnabled is null && request.YButtonQuickJumpTarget is null)
         && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationResponse is null
         && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
         && HasNoLegacyPayload(message);
@@ -85,7 +86,7 @@ internal static class OverlayProductionControlsWireValidation
         message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
         && message.Kind == OverlayWireMessageKind.ControllerForSteamMutationRequest
         && message.FrontendSettingsMutationRequest is { RequestId: > 0 } request
-        && request.ControllerLed is null && request.CurrentPowerSourceOnly is null
+        && request.ControllerLed is null && request.CurrentPowerSourceOnly is null && request.YButtonQuickJumpTarget is null
         && ((request.SteamVirtualController is { } preference && Enum.IsDefined(preference) && request.GyroscopeEnabled is null)
             || (request.SteamVirtualController is null && request.GyroscopeEnabled is not null))
         && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationResponse is null
@@ -98,6 +99,7 @@ internal static class OverlayProductionControlsWireValidation
         && message.FrontendSettingsMutationResponse is { RequestId: > 0, Settings: not null } response
         && ControllerLedSettingsValidation.Validate(response.Settings.ControllerLed) is null
         && IsStructurallyValid(response.Settings.ControllerForSteam)
+        && Enum.IsDefined(response.Settings.YButtonQuickJumpTarget)
         && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null
         && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
         && HasNoLegacyPayload(message);
@@ -106,6 +108,29 @@ internal static class OverlayProductionControlsWireValidation
         message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
         && message.Kind == (led ? OverlayWireMessageKind.ControllerLedMutationResult : OverlayWireMessageKind.CurrentPowerSourceMutationResult)
         && message.FrontendSettingsMutationResponse is { RequestId: > 0, Settings: not null } response
+        && ControllerLedSettingsValidation.Validate(response.Settings.ControllerLed) is null
+        && IsStructurallyValid(response.Settings.ControllerForSteam)
+        && Enum.IsDefined(response.Settings.YButtonQuickJumpTarget)
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidYButtonQuickJumpMutationRequest(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.YButtonQuickJumpMutationRequest
+        && message.FrontendSettingsMutationRequest is { RequestId: > 0, YButtonQuickJumpTarget: { } target } request
+        && Enum.IsDefined(target)
+        && request.ControllerLed is null && request.CurrentPowerSourceOnly is null
+        && request.SteamVirtualController is null && request.GyroscopeEnabled is null
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationResponse is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidYButtonQuickJumpMutationResult(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.YButtonQuickJumpMutationResult
+        && message.FrontendSettingsMutationResponse is { RequestId: > 0, Settings: not null } response
+        && Enum.IsDefined(response.Settings.YButtonQuickJumpTarget)
         && ControllerLedSettingsValidation.Validate(response.Settings.ControllerLed) is null
         && IsStructurallyValid(response.Settings.ControllerForSteam)
         && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null

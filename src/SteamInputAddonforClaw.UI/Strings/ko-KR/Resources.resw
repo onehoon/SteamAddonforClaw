@@ -415,6 +415,21 @@
   <data name="ClawHud_VrrStatus_VerificationFailed" xml:space="preserve"><value>VerificationFailed</value></data>
   <data name="MainNav_QuickOverlay.Content" xml:space="preserve"><value>퀵 오버레이</value></data>
   <data name="QuickOverlay_PageTitle.Text" xml:space="preserve"><value>퀵 오버레이</value></data>
+  <data name="QuickOverlay_YButtonQuickJumpCard.Header" xml:space="preserve"><value>Y 버튼 빠른 탭 이동</value></data>
+  <data name="QuickOverlay_YButtonQuickJumpCard.Description" xml:space="preserve"><value>퀵 오버레이를 연 상태에서 Y 버튼을 누르면 선택한 탭으로 바로 이동합니다.</value></data>
+  <data name="QuickOverlay_YButtonQuickJumpComboBox.AutomationProperties.Name" xml:space="preserve"><value>Y 버튼 빠른 탭 이동 대상</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Profile.Content" xml:space="preserve"><value>프로필</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Profile.AutomationProperties.Name" xml:space="preserve"><value>프로필</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Shortcut.Content" xml:space="preserve"><value>바로 가기</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Shortcut.AutomationProperties.Name" xml:space="preserve"><value>바로 가기</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Device.Content" xml:space="preserve"><value>디바이스</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Device.AutomationProperties.Name" xml:space="preserve"><value>디바이스</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Controller.Content" xml:space="preserve"><value>컨트롤러</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Controller.AutomationProperties.Name" xml:space="preserve"><value>컨트롤러</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Setting.Content" xml:space="preserve"><value>설정</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Setting.AutomationProperties.Name" xml:space="preserve"><value>설정</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Off.Content" xml:space="preserve"><value>사용 안 함</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Off.AutomationProperties.Name" xml:space="preserve"><value>사용 안 함</value></data>
   <data name="QuickOverlay_PowerSourceCard.Header" xml:space="preserve"><value>현재 전원 방식 옵션만 보기</value></data>
   <data name="QuickOverlay_PowerSourceCard.Description" xml:space="preserve"><value>퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.</value></data>
   <data name="QuickOverlay_TabOrderExpander.Header" xml:space="preserve"><value>퀵 오버레이 탭 순서</value></data>

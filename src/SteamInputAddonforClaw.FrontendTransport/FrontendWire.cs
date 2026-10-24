@@ -192,7 +192,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 86 adds the typed mandatory-startup-task status and user-initiated repair RPC.
 // Version 87 adds the user-initiated, read-only MSI Live Update catalog query RPC.
 // Version 88 extends the read-only MSI Update snapshot with installed-version, Intel DSA source and provenance fields.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 88; }
+// Version 89 adds the Runtime-owned Quick Overlay Y Button Quick Jump preference and typed mutation RPC.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 89; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -246,7 +247,7 @@ internal enum FrontendRpcMethod
     SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled, SetGyroscopeEnabled,
     CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning,
     CaptureMaximumProcessorState, SetDeviceMaximumProcessorStateEnabled, SetDeviceMaximumProcessorStateAc, SetDeviceMaximumProcessorStateDc,
-    RepairStartupTask, RequestMsiLiveUpdateCatalog
+    RepairStartupTask, RequestMsiLiveUpdateCatalog, SetQuickOverlayYButtonTarget
 }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
@@ -254,6 +255,7 @@ internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Me
 internal sealed record FrontendWireEnvelope(int ProtocolVersion, FrontendWireMessageKind Kind, long? RequestId = null, FrontendRpcMethod? Method = null, FrontendNotificationKind? Notification = null, JsonElement? Payload = null, FrontendWireError? Error = null);
 internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetQuickSettingsCurrentPowerSourceOnlyRequest(bool Enabled);
+internal sealed record SetQuickOverlayYButtonTargetRequest(QuickOverlayYButtonTarget Target);
 internal sealed record SetSteamVirtualControllerRequest(SteamVirtualControllerPreference Preference);
 internal sealed record SetExperimentalVirtualTouchpadEnabledRequest(bool Enabled);
 internal sealed record SetGyroscopeEnabledRequest(bool Enabled);

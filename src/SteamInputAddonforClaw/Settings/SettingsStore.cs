@@ -81,6 +81,7 @@ public sealed class SettingsStore
                 DeveloperMenuEnabled = developerMenuEnabled,
                 ExperimentalVirtualTouchpadEnabled = experimentalVirtualTouchpadEnabled,
                 QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
+                YButtonQuickJumpTarget = ReadYButtonQuickJumpTarget(root),
                 SteamVirtualController = ReadSteamVirtualController(root),
                 GyroscopeEnabled = ReadGyroscopeEnabled(root),
                 FrontButtonMapping = ReadFrontButtonMapping(root, selectedFrontButtonMappingDefault),
@@ -155,6 +156,23 @@ public sealed class SettingsStore
         AppLog.Warn("Settings", "Gyroscope preference is malformed; using Enabled for this setting only.", null,
             ("Reason", "InvalidGyroscopeEnabled"));
         return true;
+    }
+
+    private static QuickOverlayYButtonTarget ReadYButtonQuickJumpTarget(JsonElement root)
+    {
+        if (!root.TryGetProperty("YButtonQuickJumpTarget", out var property))
+            return QuickOverlayYButtonTarget.Profile;
+
+        if (property.ValueKind == JsonValueKind.String
+            && property.GetString() is { Length: > 0 } name
+            && char.IsLetter(name[0])
+            && Enum.TryParse<QuickOverlayYButtonTarget>(name, ignoreCase: false, out var target)
+            && Enum.IsDefined(target))
+            return target;
+
+        AppLog.Warn("Settings", "Quick Overlay Y Button target is malformed; using Profile for this setting only.", null,
+            ("Reason", "InvalidYButtonQuickJumpTarget"));
+        return QuickOverlayYButtonTarget.Profile;
     }
 
     /// <summary>Reads this optional feature in isolation; absent or malformed LED data uses Off defaults.</summary>
@@ -343,7 +361,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SteamVirtualController, settings.GyroscopeEnabled, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, WindowsTweaksWarningAcknowledgedLocalDate = settings.WindowsTweaksWarningAcknowledgedLocalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.YButtonQuickJumpTarget, settings.SteamVirtualController, settings.GyroscopeEnabled, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, WindowsTweaksWarningAcknowledgedLocalDate = settings.WindowsTweaksWarningAcknowledgedLocalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

@@ -872,6 +872,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 settings = await control.SetGyroscopeEnabledAsync(gyroscopeEnabled, token).ConfigureAwait(false);
                 succeeded = settings.GyroscopeEnabled == gyroscopeEnabled;
             }
+            else if (request.YButtonQuickJumpTarget is { } target)
+            {
+                settings = await control.SetQuickOverlayYButtonTargetAsync(target, token).ConfigureAwait(false);
+                succeeded = settings.YButtonQuickJumpTarget == target;
+            }
             else
             {
                 settings = await control.SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value, token).ConfigureAwait(false);
