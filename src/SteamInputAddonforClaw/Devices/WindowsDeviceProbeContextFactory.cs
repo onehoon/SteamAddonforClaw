@@ -11,6 +11,7 @@ internal enum DeviceProbeCaptureStatus { Success, Indeterminate }
 internal sealed record DeviceProbeContextCapture(DeviceProbeCaptureStatus Status, DeviceProbeContext Context, string Reason)
 {
     internal PnpDeviceReadException? PnpReadFailure { get; init; }
+    internal WindowsDeviceIdentity? Identity { get; init; }
 }
 
 internal interface IWindowsDeviceProbeContextFactory
@@ -68,13 +69,13 @@ internal sealed class WindowsDeviceProbeContextFactory(
         {
             return new(DeviceProbeCaptureStatus.Indeterminate,
                 new([], identity.Manufacturer, identity.SystemProductName, identity.BaseBoardProduct),
-                "ControllerPnpEnumerationFailed") { PnpReadFailure = exception };
+                "ControllerPnpEnumerationFailed") { PnpReadFailure = exception, Identity = identity };
         }
         catch
         {
             return new(DeviceProbeCaptureStatus.Indeterminate,
                 new([], identity.Manufacturer, identity.SystemProductName, identity.BaseBoardProduct),
-                "ControllerPnpEnumerationFailed");
+                "ControllerPnpEnumerationFailed") { Identity = identity };
         }
 
         var context = new DeviceProbeContext(
@@ -84,7 +85,7 @@ internal sealed class WindowsDeviceProbeContextFactory(
             identity.SystemProductName,
             identity.BaseBoardProduct);
         if (!identity.BaseBoardCaptureSucceeded || string.IsNullOrWhiteSpace(identity.BaseBoardProduct))
-            return new(DeviceProbeCaptureStatus.Indeterminate, context, "BaseBoardProductUnavailable");
-        return new(DeviceProbeCaptureStatus.Success, context, "DeviceProbeCaptured");
+            return new(DeviceProbeCaptureStatus.Indeterminate, context, "BaseBoardProductUnavailable") { Identity = identity };
+        return new(DeviceProbeCaptureStatus.Success, context, "DeviceProbeCaptured") { Identity = identity };
     }
 }

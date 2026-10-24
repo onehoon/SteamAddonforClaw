@@ -68,7 +68,12 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
     {
         var devices = new WindowsControllerDeviceEnumerator();
         var deviceProbe = new WindowsDeviceProbeContextFactory().Capture();
-        var deviceInfo = new WindowsDeviceInformationProvider().Capture(deviceProbe.Context);
+        var deviceIdentity = deviceProbe.Identity ?? new WindowsDeviceIdentity(
+            deviceProbe.Context.SystemManufacturer,
+            deviceProbe.Context.SystemProductName,
+            deviceProbe.Context.BaseBoardProduct,
+            !string.IsNullOrWhiteSpace(deviceProbe.Context.BaseBoardProduct));
+        var deviceInfo = new WindowsDeviceInformationProvider().Capture(deviceIdentity);
         var controllerBackends = new ControllerBackendDiscoverySnapshot(
             Section(CaptureDirectInput),
             Section(WindowsControllerBackendDiscovery.CaptureRawInput),

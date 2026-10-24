@@ -24,5 +24,5 @@ internal sealed record SystemStatusSnapshot(
     public FrontendControllerBadgeState ControllerBadge { get; init; } = FrontendControllerBadgeState.Unavailable;
 }
 
-internal interface IDeviceInformationProvider { DeviceStatusSnapshot Capture(DeviceProbeContext context); }
+internal interface IDeviceInformationProvider { DeviceStatusSnapshot Capture(WindowsDeviceIdentity identity); }
 internal interface ISystemStatusProvider { Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default); }

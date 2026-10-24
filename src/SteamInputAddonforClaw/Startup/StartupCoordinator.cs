@@ -8,6 +8,8 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 
 internal sealed class StartupCoordinator
 {
+    private sealed record HardwareQualification(HardwareCompatibilityAssessment Assessment, WindowsDeviceIdentity? Identity);
+
     private readonly IControllerTopologyWaiter _topologyWaiter;
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IDisabledBootControllerAdmission? _disabledBootAdmission;
@@ -44,7 +46,8 @@ internal sealed class StartupCoordinator
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var hardware = await EvaluateHardwareCompatibilityWithStabilizationAsync(cancellationToken).ConfigureAwait(false);
+        var qualification = await EvaluateHardwareCompatibilityWithStabilizationAsync(cancellationToken).ConfigureAwait(false);
+        var hardware = qualification.Assessment;
         // The ONE decision of "is this a supported MSI Claw" for the whole process lifetime. It is
         // carried on StartupResult so every downstream consumer -- routing, and the OEM1 mapping
         // hardware-availability gate -- reads the same result instead of re-evaluating hardware.
@@ -54,7 +57,8 @@ internal sealed class StartupCoordinator
             ("Status", hardware.Status), ("DeviceFamily", hardware.DeviceFamily), ("DeviceModel", hardware.DeviceModel), ("Reason", hardware.Reason),
             ("Action", hardwareSupported ? "Continue" : "Passive"));
         if (hardware.Status is HardwareCompatibilityStatus.Unsupported or HardwareCompatibilityStatus.Indeterminate)
-            return new StartupResult(false, HardwareStatus: hardware.Status, HardwareDeviceModel: hardware.DeviceModel);
+            return WithHardwareQualification(
+                new StartupResult(false, HardwareStatus: hardware.Status, HardwareDeviceModel: hardware.DeviceModel), qualification);
 
         // PR4: make startup authority-aware. The actual Center M startup roots decide whether the
         // legacy stock baseline path or the new read-only Addon Disabled-boot admission runs. A
@@ -74,15 +78,16 @@ internal sealed class StartupCoordinator
             }));
 
         if (centerMStartupState == FrontendCenterMStartupState.Disabled)
-            return await RunDisabledBootAdmissionAsync(hardwareSupported, hardware, cancellationToken).ConfigureAwait(false);
+            return WithHardwareQualification(
+                await RunDisabledBootAdmissionAsync(hardwareSupported, hardware, cancellationToken).ConfigureAwait(false), qualification);
 
         if (centerMStartupState is FrontendCenterMStartupState.Partial or FrontendCenterMStartupState.Unavailable)
         {
             AppLog.Warn("CenterM.StartupAuthority", "Center M startup roots are neither exactly Enabled nor Disabled; no controller owner is selected.", null,
                 ("State", centerMStartupState), ("Action", "Passive"));
-            return new StartupResult(true,
+            return WithHardwareQualification(new StartupResult(true,
                 RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
-                CenterMStartupState: centerMStartupState);
+                CenterMStartupState: centerMStartupState), qualification);
         }
 
         var readinessStopwatch = Stopwatch.StartNew();
@@ -90,29 +95,29 @@ internal sealed class StartupCoordinator
         var readiness = await _topologyWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("ControllerTopology", "Controller topology readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
         if (readiness != ControllerTopologyReadiness.Stable)
-            return new StartupResult(true, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+            return WithHardwareQualification(new StartupResult(true, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
                 CenterMStartupState: FrontendCenterMStartupState.Enabled,
                 StockTopologyUnreadyBeforeBaseline: centerMStartupWasCaptured
                     && centerMStartupState == FrontendCenterMStartupState.Enabled
-                    && hardwareSupported);
+                    && hardwareSupported), qualification);
 
         if (_stockCenterMBaseline is null)
         {
             AppLog.Warn("Startup", "Stock MSI Center M baseline service is unavailable; routing remains passive.", null, ("Action", "Passive"));
-            return new StartupResult(true, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
-                CenterMStartupState: FrontendCenterMStartupState.Enabled);
+            return WithHardwareQualification(new StartupResult(true, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+                CenterMStartupState: FrontendCenterMStartupState.Enabled), qualification);
         }
 
         var baseline = await _stockCenterMBaseline.EstablishAsync(cancellationToken).ConfigureAwait(false);
         if (!baseline.Succeeded)
-            return new StartupResult(true, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
-                CenterMStartupState: FrontendCenterMStartupState.Enabled);
+            return WithHardwareQualification(new StartupResult(true, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+                CenterMStartupState: FrontendCenterMStartupState.Enabled), qualification);
 
         // Full1902 Cleanup H: the verified stock PID1901 baseline is the whole Enabled-authority
         // safety fact. Current production cannot create a controller recovery.json, so there is no
         // stale mutation journal to load, clean, or retire here.
-        return new StartupResult(true, RecoverySafe: true, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
-            CenterMStartupState: FrontendCenterMStartupState.Enabled);
+        return WithHardwareQualification(new StartupResult(true, RecoverySafe: true, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+            CenterMStartupState: FrontendCenterMStartupState.Enabled), qualification);
     }
 
     /// <summary>Re-proves current stock readiness for one explicit Center M onboarding transition.
@@ -179,13 +184,17 @@ internal sealed class StartupCoordinator
     private static bool IsA2vmModel(HandheldDeviceModelId? model) =>
         model?.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8";
 
-    private HardwareCompatibilityAssessment EvaluateHardwareCompatibility()
+    private HardwareQualification EvaluateHardwareCompatibility()
     {
-        try { return _hardwareCompatibilityEvaluator.Evaluate(_probeContextFactory.Capture()); }
+        try
+        {
+            var capture = _probeContextFactory.Capture();
+            return new(_hardwareCompatibilityEvaluator.Evaluate(capture), capture.Identity);
+        }
         catch (Exception exception)
         {
             AppLog.Warn("Hardware", "Startup hardware compatibility assessment failed.", exception, ("Status", HardwareCompatibilityStatus.Indeterminate), ("Action", "Passive"));
-            return new(HardwareCompatibilityStatus.Indeterminate, null, null, "HardwareCompatibilityEvaluationFailed:" + exception.GetType().Name);
+            return new(new(HardwareCompatibilityStatus.Indeterminate, null, null, "HardwareCompatibilityEvaluationFailed:" + exception.GetType().Name), null);
         }
     }
 
@@ -198,10 +207,11 @@ internal sealed class StartupCoordinator
     /// other process/service; it only re-probes the same PnP/WMI-backed hardware compatibility
     /// evaluation already used everywhere else.
     /// </summary>
-    private async Task<HardwareCompatibilityAssessment> EvaluateHardwareCompatibilityWithStabilizationAsync(CancellationToken cancellationToken)
+    private async Task<HardwareQualification> EvaluateHardwareCompatibilityWithStabilizationAsync(CancellationToken cancellationToken)
     {
-        var assessment = EvaluateHardwareCompatibility();
-        if (!IsTransientHardwareProbeResult(assessment)) return assessment;
+        var qualification = EvaluateHardwareCompatibility();
+        var assessment = qualification.Assessment;
+        if (!IsTransientHardwareProbeResult(assessment)) return qualification;
 
         var stopwatch = Stopwatch.StartNew();
         var attempts = 1;
@@ -233,12 +243,13 @@ internal sealed class StartupCoordinator
                 {
                     AppLog.Warn("Hardware", "Startup hardware probe stabilization timed out.", null, timeoutFields);
                 }
-                return assessment;
+                return qualification;
             }
 
             await _hardwareProbeDelay(_hardwareProbePollInterval, cancellationToken).ConfigureAwait(false);
             attempts++;
-            assessment = EvaluateHardwareCompatibility();
+            qualification = EvaluateHardwareCompatibility();
+            assessment = qualification.Assessment;
             if (assessment.PnpReadFailure is { } readFailure)
             {
                 pnpReadFailureCount++;
@@ -255,8 +266,18 @@ internal sealed class StartupCoordinator
             ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status), ("Reason", assessment.Reason),
             ("PnpReadFailures", pnpReadFailureCount), ("NativeOperation", lastPnpReadFailure?.Operation),
             ("NativeWin32Error", lastPnpReadFailure?.Win32Error));
-        return assessment;
+        return qualification;
     }
+
+    private static StartupResult WithHardwareQualification(StartupResult result, HardwareQualification qualification) => result with
+    {
+        HardwareDeviceFamily = qualification.Assessment.DeviceFamily,
+        HardwareDeviceModel = qualification.Assessment.DeviceModel,
+        HardwareStatus = qualification.Assessment.Status,
+        HardwareReason = qualification.Assessment.Reason,
+        HardwareIdentity = qualification.Identity,
+        HardwareSupported = qualification.Assessment.Status == HardwareCompatibilityStatus.Supported,
+    };
 
     private static bool IsTransientHardwareProbeResult(HardwareCompatibilityAssessment assessment) =>
         assessment.Status == HardwareCompatibilityStatus.Indeterminate
@@ -286,4 +307,7 @@ internal sealed record StartupResult(
     HardwareCompatibilityStatus? HardwareStatus = null,
     Contracts.Frontend.FrontendCenterMStartupState CenterMStartupState = Contracts.Frontend.FrontendCenterMStartupState.Unavailable,
     DisabledBootControllerAdmissionResult? DisabledBootAdmission = null,
-    bool StockTopologyUnreadyBeforeBaseline = false);
+    bool StockTopologyUnreadyBeforeBaseline = false,
+    HandheldDeviceId? HardwareDeviceFamily = null,
+    string? HardwareReason = null,
+    WindowsDeviceIdentity? HardwareIdentity = null);

@@ -82,16 +82,21 @@ public sealed class HardwareCompatibilityTests
 
         Assert.Equal(DeviceProbeCaptureStatus.Indeterminate, capture.Status);
         Assert.Equal("BaseBoardProductUnavailable", capture.Reason);
+        Assert.Equal(new WindowsDeviceIdentity("MSI", "Claw", null, false), capture.Identity);
     }
 
     [Fact]
     public void PnpEnumerationFailure_IsIndeterminate()
     {
+        var identity = new WindowsDeviceIdentity("MSI", "Claw", "MS-1T91", true);
         var factory = new WindowsDeviceProbeContextFactory(
-            new FakeIdentitySource(new("MSI", "Claw", "MS-1T91", true)),
+            new FakeIdentitySource(identity),
             new ThrowingControllerEnumerator());
 
-        Assert.Equal(DeviceProbeCaptureStatus.Indeterminate, factory.Capture().Status);
+        var capture = factory.Capture();
+
+        Assert.Equal(DeviceProbeCaptureStatus.Indeterminate, capture.Status);
+        Assert.Equal(identity, capture.Identity);
     }
 
     [Fact]
@@ -109,6 +114,7 @@ public sealed class HardwareCompatibilityTests
         var result = Evaluate(capture);
 
         Assert.Equal(DeviceProbeCaptureStatus.Success, capture.Status);
+        Assert.Equal(new WindowsDeviceIdentity("MSI", "Claw", "MS-1T91", true), capture.Identity);
         Assert.Equal(HardwareCompatibilityStatus.Supported, result.Status);
         Assert.Equal(0, enumerator.GlobalCalls);
         Assert.Equal(1, enumerator.ScopedCalls);

@@ -464,9 +464,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         var composition = _runtimeCompositionFactory?.Invoke(startupComposition, startupResult)
             ?? AddonRuntimeCompositionFactory.Create(
-                startupComposition.DeviceRegistry,
                 startupComposition.StockCenterMBaseline,
-                startupResult.RecoverySafe,
+                startupResult,
                 // Full1902 A2 section 11: Center M Enabled (stock authority) gates ONLY the stock
                 // PID1901 resume baseline. Derived directly from the sole startup authority fact --
                 // Disabled / Partial / Unavailable all resolve to false.
@@ -483,8 +482,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 // tolerates the legitimate state where this host exists but Full1902 controller
                 // ownership has not committed (or is unavailable).
                 full1902SuspendParticipant: new Full1902SuspendParticipant(QuiesceFull1902PresentationForSuspendAsync),
-                uninstallPreparationOnly: _headlessUninstallPreparation,
-                hardwareDeviceModel: startupResult.HardwareDeviceModel);
+                uninstallPreparationOnly: _headlessUninstallPreparation);
 
         _runtimeHost = composition.RuntimeHost;
         _cpuBoostRuntime.SetActiveProfileResolver(_activeProfileResolver);

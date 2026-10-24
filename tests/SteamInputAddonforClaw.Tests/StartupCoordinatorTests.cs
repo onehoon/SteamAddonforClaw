@@ -300,6 +300,33 @@ public sealed class StartupCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task StartupResult_RetainsIdentityFromFinalStabilizedHardwareQualification()
+    {
+        var events = new List<string>();
+        var initialIdentity = new WindowsDeviceIdentity("MSI", "Claw 7", "InitialBoard", true);
+        var finalIdentity = new WindowsDeviceIdentity("MSI", "Claw 8 AI+", "MS-1T91", true);
+        var probeFactory = new SequencedProbeFactory([
+            CaptureWithIdentity(initialIdentity),
+            CaptureWithIdentity(finalIdentity),
+        ]);
+        var evaluator = new SequencedHardwareEvaluator([
+            new(HardwareCompatibilityStatus.Indeterminate, null, null, "StartupProbeTransient"),
+            new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "FinalQualification"),
+        ]);
+        var coordinator = new StartupCoordinator(new FakeTopologyWaiter(events), probeFactory, evaluator,
+            stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: (_, _) => Task.CompletedTask);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(2, probeFactory.CallCount);
+        Assert.Equal(finalIdentity, result.HardwareIdentity);
+        Assert.Equal(HardwareCompatibilityStatus.Supported, result.HardwareStatus);
+        Assert.Equal(new HandheldDeviceId("msi.claw"), result.HardwareDeviceFamily);
+        Assert.Equal(new HandheldDeviceModelId("msi.claw.cg3em"), result.HardwareDeviceModel);
+        Assert.Equal("FinalQualification", result.HardwareReason);
+    }
+
+    [Fact]
     public async Task HardwarePnpReadFailure_ThenSupported_LogsRecoveryWithoutError()
     {
         var events = new List<string>();
@@ -720,6 +747,18 @@ public sealed class StartupCoordinatorTests : IDisposable
     }
 
     private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
+    private static DeviceProbeContextCapture CaptureWithIdentity(WindowsDeviceIdentity identity) =>
+        new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test") { Identity = identity };
+    private sealed class SequencedProbeFactory(IEnumerable<DeviceProbeContextCapture> captures) : IWindowsDeviceProbeContextFactory
+    {
+        private readonly Queue<DeviceProbeContextCapture> _captures = new(captures);
+        public int CallCount { get; private set; }
+        public DeviceProbeContextCapture Capture()
+        {
+            CallCount++;
+            return _captures.Dequeue();
+        }
+    }
     private sealed class FakeHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"); }
     private sealed class FixedHardwareAssessmentEvaluator(HardwareCompatibilityAssessment assessment) : IHardwareCompatibilityEvaluator
     {

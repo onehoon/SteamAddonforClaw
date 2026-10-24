@@ -1,21 +1,40 @@
 using System.Management;
+using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 
 namespace SteamInputAddonforClaw.Status;
 
 internal sealed class WindowsDeviceInformationProvider : IDeviceInformationProvider
 {
-    public DeviceStatusSnapshot Capture(DeviceProbeContext context)
+    private readonly Func<IReadOnlyList<string>> _captureGpuModels;
+    private readonly object _gpuModelsGate = new();
+    private IReadOnlyList<string>? _cachedGpuModels;
+
+    internal WindowsDeviceInformationProvider(Func<IReadOnlyList<string>>? captureGpuModels = null) =>
+        _captureGpuModels = captureGpuModels ?? CaptureGpuModels;
+
+    public DeviceStatusSnapshot Capture(WindowsDeviceIdentity identity)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(identity);
         IReadOnlyList<string> gpus;
-        try { gpus = CaptureGpuModels(); }
+        try { gpus = CaptureGpuModelsOnce(); }
         catch { gpus = ["Unknown"]; }
         return new(
-            string.IsNullOrWhiteSpace(context.SystemManufacturer) ? "Unknown" : context.SystemManufacturer,
-            string.IsNullOrWhiteSpace(context.SystemProductName) ? "Unknown" : context.SystemProductName,
-            string.IsNullOrWhiteSpace(context.BaseBoardProduct) ? "Unknown" : context.BaseBoardProduct,
+            string.IsNullOrWhiteSpace(identity.Manufacturer) ? "Unknown" : identity.Manufacturer,
+            string.IsNullOrWhiteSpace(identity.SystemProductName) ? "Unknown" : identity.SystemProductName,
+            string.IsNullOrWhiteSpace(identity.BaseBoardProduct) ? "Unknown" : identity.BaseBoardProduct,
             gpus.Count == 0 ? ["Unknown"] : gpus);
+    }
+
+    private IReadOnlyList<string> CaptureGpuModelsOnce()
+    {
+        lock (_gpuModelsGate)
+        {
+            if (_cachedGpuModels is not null) return _cachedGpuModels;
+            var captured = _captureGpuModels() ?? throw new InvalidOperationException("GPU capture returned no result.");
+            _cachedGpuModels = captured.ToArray();
+            return _cachedGpuModels;
+        }
     }
 
     internal static bool IsSupportedGpuName(string name) => name.Contains("Intel", StringComparison.OrdinalIgnoreCase)
