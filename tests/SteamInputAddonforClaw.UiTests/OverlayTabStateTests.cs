@@ -83,7 +83,7 @@ public sealed class OverlayTabStateTests
     }
 
     [Fact]
-    public void ActiveProfileStartupSelectionPreservesConfiguredTabOrderAndTraversal()
+    public void ManuallySelectedProfileResetsToConfiguredFirstTabOnNextShow()
     {
         AddonQuickSettingsTabId[] configuredOrder =
         [
@@ -96,6 +96,9 @@ public sealed class OverlayTabStateTests
         var state = new OverlayTabState(configuredOrder);
 
         state.ResetForShow();
+        Assert.Equal(AddonQuickSettingsTabId.Controller, state.SelectedTab);
+
+        // Selecting Profile is an explicit user tab change; it does not mutate the configured order.
         state.Select(AddonQuickSettingsTabId.Profile);
 
         Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
@@ -107,6 +110,9 @@ public sealed class OverlayTabStateTests
         Assert.True(state.SelectPrevious());
         Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
         Assert.Equal(configuredOrder, state.Order);
+
+        state.ResetForShow();
+        Assert.Equal(AddonQuickSettingsTabId.Controller, state.SelectedTab);
     }
 
     [Fact]

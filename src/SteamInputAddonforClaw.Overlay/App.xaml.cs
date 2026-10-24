@@ -527,10 +527,8 @@ public partial class App : Application
                 switch (command)
                 {
                     case OverlayCommand.Show:
-                        await _window.ShowForPocAsync();
-                        break;
                     case OverlayCommand.ShowActiveProfile:
-                        await _window.ShowForPocAsync(preferActiveProfile: true);
+                        await _window.ShowForPocAsync();
                         break;
                     case OverlayCommand.Hide:
                         Interlocked.Exchange(ref _userDismissInProgress, 0);

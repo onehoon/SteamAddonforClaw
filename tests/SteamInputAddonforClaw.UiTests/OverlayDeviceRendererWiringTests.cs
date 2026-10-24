@@ -520,16 +520,26 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Active_profile_first_show_selects_profile_and_uses_the_exact_centered_empty_state()
+    public void Every_show_uses_the_configured_first_tab_and_preserves_profile_empty_state()
     {
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var reset = ExtractMethod(shell, "private void ResetUiForShow()");
+        var show = ExtractMethod(presentation, "internal async Task ShowForPocAsync()");
+        var dispatch = ExtractMethod(app, "private Task HandleCommandAsync(OverlayCommand command)");
 
-        Assert.Contains("PrepareActiveProfileFirstShow();", shell);
-        Assert.Contains("if (preferActiveProfile) _tabState.Select(AddonQuickSettingsTabId.Profile);", shell);
-        Assert.Contains("case OverlayCommand.ShowActiveProfile:", app);
-        Assert.Contains("ShowForPocAsync(preferActiveProfile: true)", app);
+        Assert.Contains("PrepareActiveProfileFirstShow();", reset);
+        Assert.Contains("_tabState.ResetForShow();", reset);
+        Assert.DoesNotContain("_tabState.Select(AddonQuickSettingsTabId.Profile)", reset);
+        Assert.Contains("case OverlayCommand.Show:", dispatch);
+        Assert.Contains("case OverlayCommand.ShowActiveProfile:", dispatch);
+        Assert.Contains("await _window.ShowForPocAsync();", dispatch);
+        Assert.Equal(1, CountOccurrences(dispatch, "await _window.ShowForPocAsync();"));
+        Assert.DoesNotContain("preferActiveProfile", reset + show + dispatch);
+        Assert.True(show.IndexOf("ResetUiForShow();", StringComparison.Ordinal)
+            < show.IndexOf("WindowInterop.ShowWithoutActivation(this);", StringComparison.Ordinal));
         Assert.Contains("No game is currently running.\\nStart a game to configure its profile.", profile);
         Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", profile);
         Assert.Contains("VerticalAlignment = VerticalAlignment.Center", profile);
@@ -549,7 +559,7 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Profile_first_show_stays_blank_until_an_authoritative_profile_page_is_applied()
+    public void Profile_initial_load_stays_blank_until_an_authoritative_profile_page_is_applied()
     {
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
         var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
@@ -644,7 +654,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var entry = ExtractMethod(profile, "private void OnProfileTabSelectionChanged(bool selected)");
         var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
         var apply = ExtractMethod(profile, "internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
-        var showReset = ExtractMethod(shell, "private void ResetUiForShow(bool preferActiveProfile = false)");
+        var showReset = ExtractMethod(shell, "private void ResetUiForShow()");
 
         Assert.Contains("_noGameRecheckRequestedForThisEntry = false;", entry);
         Assert.Contains("TryRequestNoRunningGameRecheck(surface.Binding?.AuthoritativePage);", entry);

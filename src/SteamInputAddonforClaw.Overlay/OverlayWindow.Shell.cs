@@ -142,11 +142,10 @@ public sealed partial class OverlayWindow
     }
 
     // Reset selection to the first tab in the current order before every visual reveal.
-    private void ResetUiForShow(bool preferActiveProfile = false)
+    private void ResetUiForShow()
     {
         PrepareActiveProfileFirstShow();
         _tabState.ResetForShow();
-        if (preferActiveProfile) _tabState.Select(AddonQuickSettingsTabId.Profile);
         ResetShortcutForShow();
         ResetSettingCardsForShow();
         ApplySelectedTabVisualState();
