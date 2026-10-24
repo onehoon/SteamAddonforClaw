@@ -8,8 +8,8 @@ namespace SteamInputAddonforClaw.Status;
 
 internal sealed class SystemStatusProvider(
     IDeviceInformationProvider deviceInformationProvider,
-    IWindowsDeviceProbeContextFactory deviceProbeContextFactory,
-    IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
+    WindowsDeviceIdentity deviceIdentity,
+    HardwareCompatibilityAssessment hardwareCompatibility,
     IRuntimePrerequisiteInspector prerequisiteInspector,
     // Full1902 Cleanup A: the raw Steam/BPM presentation facts (actual RunningAppID + Big Picture),
     // not the legacy effective-routing-session state. Steam/BPM selects the virtual presentation
@@ -29,9 +29,7 @@ internal sealed class SystemStatusProvider(
     private SystemStatusSnapshot CaptureCore(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var deviceProbe = deviceProbeContextFactory.Capture();
-        var device = deviceInformationProvider.Capture(deviceProbe.Context);
-        var hardwareCompatibility = hardwareCompatibilityEvaluator.Evaluate(deviceProbe);
+        var device = deviceInformationProvider.Capture(deviceIdentity);
         var prerequisites = prerequisiteInspector.Inspect();
         var presentation = TrySteamPresentation();
         var recoverySafe = TryRecoverySafety();

@@ -34,6 +34,49 @@ public sealed class SystemStatusTests
         Assert.Equal(expected, WindowsDeviceInformationProvider.IsPhysicalGpu(name, pnpDeviceId));
     }
 
+    [Fact]
+    public void DeviceInformation_ReusesStartupIdentityAndCachesGpuNamesAfterFirstSuccessfulLookup()
+    {
+        var gpuQueries = 0;
+        var provider = new WindowsDeviceInformationProvider(() =>
+        {
+            gpuQueries++;
+            return ["Intel Arc 140V"];
+        });
+        var identity = new WindowsDeviceIdentity("MSI", "Claw 8 AI+", "MS-1T91", true);
+
+        var first = provider.Capture(identity);
+        var second = provider.Capture(identity);
+
+        Assert.Equal(1, gpuQueries);
+        Assert.Equal("MSI", first.Manufacturer);
+        Assert.Equal("Claw 8 AI+", first.Model);
+        Assert.Equal("MS-1T91", first.BaseBoardProduct);
+        Assert.Equal(["Intel Arc 140V"], first.GpuModels);
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
+    public void DeviceInformation_RetriesGpuLookupUntilTheFirstSuccessfulQuery()
+    {
+        var gpuQueries = 0;
+        var provider = new WindowsDeviceInformationProvider(() =>
+        {
+            gpuQueries++;
+            if (gpuQueries == 1) throw new InvalidOperationException("transient WMI failure");
+            return ["Intel Arc 140V"];
+        });
+        var identity = new WindowsDeviceIdentity("MSI", "Claw", "MS-1T91", true);
+
+        Assert.Equal(["Unknown"], provider.Capture(identity).GpuModels);
+        var second = provider.Capture(identity);
+        var third = provider.Capture(identity);
+
+        Assert.Equal(2, gpuQueries);
+        Assert.Equal(["Intel Arc 140V"], second.GpuModels);
+        Assert.Equal(second.GpuModels, third.GpuModels);
+    }
+
     // ---- Full1902 Cleanup A/D: non-owned Addon status (Center M Enabled / startup still settling)
     //      derives from the safety/setup facts, not a Steam-session routing decision and not a
     //      third-party controller-manager compatibility scan. ----
@@ -59,8 +102,8 @@ public sealed class SystemStatusTests
     public async Task NonOwnedStatus_UnsupportedHardware_IsUnsupported()
     {
         var provider = new SystemStatusProvider(
-            new FakeDeviceProvider(), SupportedProbeFactory(),
-            new FakeHardwareEvaluator(new(HardwareCompatibilityStatus.Unsupported, null, null, "test")),
+            new FakeDeviceProvider(), SupportedIdentity(),
+            new(HardwareCompatibilityStatus.Unsupported, null, null, "test"),
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => new SteamPresentationSnapshot(0, false), () => true);
 
@@ -74,7 +117,7 @@ public sealed class SystemStatusTests
     public async Task SystemStatusProvider_ReusesPrerequisiteAssessmentAndBuildsOneSnapshot()
     {
         var prerequisites = Prerequisites(PrerequisiteStatus.Missing);
-        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), new FakePrerequisiteInspector(prerequisites), () => new SteamPresentationSnapshot(0, false), () => true);
+        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedIdentity(), SupportedHardware(), new FakePrerequisiteInspector(prerequisites), () => new SteamPresentationSnapshot(0, false), () => true);
 
         var snapshot = await provider.CaptureAsync();
 
@@ -88,7 +131,7 @@ public sealed class SystemStatusTests
     {
         var provider = new SystemStatusProvider(
             new FakeDeviceProvider(),
-            SupportedProbeFactory(),
+            SupportedIdentity(),
             SupportedHardware(),
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => new SteamPresentationSnapshot(1, false),
@@ -105,7 +148,7 @@ public sealed class SystemStatusTests
     {
         bool? badgeRecoverySafe = null;
         var provider = new SystemStatusProvider(
-            new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
+            new FakeDeviceProvider(), SupportedIdentity(), SupportedHardware(),
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => new SteamPresentationSnapshot(0, false), () => false,
             captureControllerBadge: recoverySafe =>
@@ -124,7 +167,7 @@ public sealed class SystemStatusTests
     public async Task SystemStatusProvider_BadgeProjectionFailureDefaultsToUnavailable()
     {
         var provider = new SystemStatusProvider(
-            new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
+            new FakeDeviceProvider(), SupportedIdentity(), SupportedHardware(),
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => new SteamPresentationSnapshot(0, false), () => true,
             captureControllerBadge: _ => throw new InvalidOperationException("badge projection failed"));
@@ -150,15 +193,53 @@ public sealed class SystemStatusTests
         Assert.False(idle.Steam.IsActive);
     }
 
+    [Fact]
+    public async Task SystemStatusProvider_RefreshesLivePrerequisitesAndControllerBadgeWhileKeepingStartupIdentity()
+    {
+        var prerequisites = new SequencePrerequisiteInspector([
+            Prerequisites(PrerequisiteStatus.Ready),
+            Prerequisites(PrerequisiteStatus.Missing),
+        ]);
+        var badgeCaptureCount = 0;
+        var recoverySafe = true;
+        var provider = new SystemStatusProvider(
+            new FakeDeviceProvider(),
+            SupportedIdentity(),
+            SupportedHardware(),
+            prerequisites,
+            () => new SteamPresentationSnapshot(0, false),
+            () => recoverySafe,
+            captureControllerBadge: _ => ++badgeCaptureCount == 1
+                ? FrontendControllerBadgeState.Xbox360Active
+                : FrontendControllerBadgeState.Reconnecting);
+
+        var first = await provider.CaptureAsync();
+        recoverySafe = false;
+        var second = await provider.CaptureAsync();
+
+        Assert.Equal(2, prerequisites.CallCount);
+        Assert.Equal(2, badgeCaptureCount);
+        Assert.Equal(PrerequisiteStatus.Ready, first.Prerequisites.HidHide.Status);
+        Assert.Equal(PrerequisiteStatus.Missing, second.Prerequisites.HidHide.Status);
+        Assert.Equal(FrontendControllerBadgeState.Xbox360Active, first.ControllerBadge);
+        Assert.Equal(FrontendControllerBadgeState.Reconnecting, second.ControllerBadge);
+        Assert.True(first.RecoverySafe);
+        Assert.False(second.RecoverySafe);
+        Assert.Equal("MSI", first.Device.Manufacturer);
+        Assert.Equal("MSI", second.Device.Manufacturer);
+        Assert.Equal(SupportedHardware(), first.HardwareCompatibility);
+        Assert.Equal(first.HardwareCompatibility, second.HardwareCompatibility);
+    }
+
     private static SystemStatusProvider NonOwnedProvider(RuntimePrerequisiteAssessment prerequisites, SteamPresentationSnapshot? presentation = null) =>
-        new(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
+        new(new FakeDeviceProvider(), SupportedIdentity(), SupportedHardware(),
             new FakePrerequisiteInspector(prerequisites),
             () => presentation ?? new SteamPresentationSnapshot(0, false), () => true);
 
     // ---- Full1902 0903 cleanup section 9.1: optional Full1902 Addon-status override ----
 
     private static SystemStatusProvider ProviderWithFull1902Override(Func<AddonStatusSnapshot?>? capture) =>
-        new(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
+        new(new FakeDeviceProvider(), SupportedIdentity(), SupportedHardware(),
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => new SteamPresentationSnapshot(0, false), () => true, capture);
 
@@ -191,10 +272,18 @@ public sealed class SystemStatusTests
     }
 
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteStatus status) => new(new(PrerequisiteKind.HidHide, status, "test"), new(PrerequisiteKind.UsbIpWin2, status, "test"), new(PrerequisiteKind.Viiper, status, "test"));
-    private static IWindowsDeviceProbeContextFactory SupportedProbeFactory() => new FakeProbeFactory(new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(baseBoardProduct: "MS-1T91"), "test"));
-    private static IHardwareCompatibilityEvaluator SupportedHardware() => new FakeHardwareEvaluator(new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test"));
-    private sealed class FakeDeviceProvider : IDeviceInformationProvider { public DeviceStatusSnapshot Capture(DeviceProbeContext context) => new("MSI", "Claw", context.BaseBoardProduct ?? "Unknown", ["Intel Arc"]); }
-    private sealed class FakeProbeFactory(DeviceProbeContextCapture capture) : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => capture; }
-    private sealed class FakeHardwareEvaluator(HardwareCompatibilityAssessment assessment) : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture capture) => assessment; }
+    private static WindowsDeviceIdentity SupportedIdentity() => new("MSI", "Claw", "MS-1T91", true);
+    private static HardwareCompatibilityAssessment SupportedHardware() => new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test");
+    private sealed class FakeDeviceProvider : IDeviceInformationProvider { public DeviceStatusSnapshot Capture(WindowsDeviceIdentity identity) => new(identity.Manufacturer ?? "Unknown", identity.SystemProductName ?? "Unknown", identity.BaseBoardProduct ?? "Unknown", ["Intel Arc"]); }
     private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }
+    private sealed class SequencePrerequisiteInspector(IEnumerable<RuntimePrerequisiteAssessment> assessments) : IRuntimePrerequisiteInspector
+    {
+        private readonly Queue<RuntimePrerequisiteAssessment> _assessments = new(assessments);
+        public int CallCount { get; private set; }
+        public RuntimePrerequisiteAssessment Inspect()
+        {
+            CallCount++;
+            return _assessments.Dequeue();
+        }
+    }
 }

@@ -25,9 +25,8 @@ internal sealed record AddonRuntimeComposition(
 internal static class AddonRuntimeCompositionFactory
 {
     internal static AddonRuntimeComposition Create(
-        HandheldDeviceRegistry deviceRegistry,
         IStockCenterMStartupBaseline? stockCenterMBaseline,
-        bool recoverySafe,
+        StartupResult startupResult,
         // Full1902 A2 section 11: true only when Center M startup roots are exactly Enabled/Automatic
         // (MSI / stock controller authority). It gates ONLY the stock PID1901 resume baseline.
         bool stockCenterMAuthority,
@@ -42,9 +41,11 @@ internal static class AddonRuntimeCompositionFactory
         // participant, created by AddonProcessHost and passed through unchanged. Its quiesce callback
         // reads AddonProcessHost's current presentation ownership with a null guard at execution time.
         IPowerSuspendParticipant? full1902SuspendParticipant = null,
-        bool uninstallPreparationOnly = false,
-        HandheldDeviceModelId? hardwareDeviceModel = null)
+        bool uninstallPreparationOnly = false)
     {
+        ArgumentNullException.ThrowIfNull(startupResult);
+        var recoverySafe = startupResult.RecoverySafe;
+        var hardwareDeviceModel = startupResult.HardwareDeviceModel;
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load(SelectFrontButtonMappingDefault(hardwareDeviceModel));
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
@@ -72,10 +73,15 @@ internal static class AddonRuntimeCompositionFactory
 
         var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
         var powerGate = new PowerMutationGate();
+        var hardwareCompatibility = new HardwareCompatibilityAssessment(
+            startupResult.HardwareStatus ?? HardwareCompatibilityStatus.Indeterminate,
+            startupResult.HardwareDeviceFamily,
+            startupResult.HardwareDeviceModel,
+            startupResult.HardwareReason ?? "StartupHardwareQualificationUnavailable");
         ISystemStatusProvider statusProvider = new SystemStatusProvider(
             new WindowsDeviceInformationProvider(),
-            new WindowsDeviceProbeContextFactory(),
-            new HardwareCompatibilityEvaluator(deviceRegistry),
+            startupResult.HardwareIdentity ?? new WindowsDeviceIdentity(null, null, null, false),
+            hardwareCompatibility,
             new RuntimePrerequisiteInspector(
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
