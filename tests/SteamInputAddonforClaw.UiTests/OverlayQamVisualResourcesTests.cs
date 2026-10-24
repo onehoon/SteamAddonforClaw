@@ -326,8 +326,10 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("CreateMoveButton(\"\\uE74A\", \"Move earlier\", -1)", tabOrder);
         Assert.Contains("CreateMoveButton(\"\\uE74B\", \"Move later\", +1)", tabOrder);
         Assert.Contains("FontFamily = new FontFamily(\"Segoe Fluent Icons\")", tabOrder);
-        Assert.Contains("FontSize = 20", tabOrder);
-        Assert.Contains("MinHeight = 32", tabOrder);
+        Assert.Contains("FontSize = 16", tabOrder);
+        Assert.Contains("MinHeight = 28", tabOrder);
+        Assert.DoesNotContain("FontSize = 20", tabOrder);
+        Assert.DoesNotContain("MinHeight = 32", tabOrder);
         Assert.Contains("MinWidth = OverlayQamResources.Get(\"QamValueButtonWidth\", 40.0)", tabOrder);
 
         Assert.DoesNotContain("_profileCatalog", profile);
