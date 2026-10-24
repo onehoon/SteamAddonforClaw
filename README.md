@@ -194,7 +194,7 @@ The page lets you adjust **Size** (**-2**, **-1**, **Default**, **+1**, **+2**),
 
 ### Quick Overlay
 
-Use **Quick Overlay** to configure the separate Quick Settings Overlay. **Show only current power source** limits that Overlay to controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values.
+Use **Quick Overlay** to configure the separate Quick Settings Overlay. **Show only current power source** limits that Overlay to controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values. Expand **Quick Overlay Tab Order** to move tabs one position at a time with the Up and Down buttons. The first tab in the saved order opens the next time the Overlay is shown; the in-game **Setting** page provides the same tab-order controls.
 
 ### Shortcut
 

@@ -30,13 +30,64 @@ public sealed class QuickOverlayPageTests
         Assert.Contains("SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly)", initialize, StringComparison.Ordinal);
         Assert.DoesNotContain("GetBootstrapAsync", initialize, StringComparison.Ordinal);
         Assert.Contains("internal void Activate() => RequestRefresh()", page, StringComparison.Ordinal);
-        Assert.Contains("internal void RequestRefresh() => _ = RefreshQuickSettingsPowerSourcePreferenceAsync()", page, StringComparison.Ordinal);
+        var requestRefresh = ExtractMethod(page, "internal void RequestRefresh()");
+        Assert.Contains("_ = RefreshQuickSettingsPowerSourcePreferenceAsync()", requestRefresh, StringComparison.Ordinal);
+        Assert.Contains("_ = RefreshTabOrderAsync()", requestRefresh, StringComparison.Ordinal);
         Assert.Contains("await _frontend.GetBootstrapAsync()", refresh, StringComparison.Ordinal);
         Assert.Contains("_powerSourceMutationInProgress || _discardInFlightPowerSourceRefresh", refresh, StringComparison.Ordinal);
         Assert.Contains("_discardInFlightPowerSourceRefresh = false", refresh, StringComparison.Ordinal);
         Assert.Contains("_lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly", refresh, StringComparison.Ordinal);
         Assert.Contains("catch (Exception exception)", refresh, StringComparison.Ordinal);
         Assert.Contains("finally", refresh, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tab_order_rows_follow_only_runtime_snapshots_and_keep_tab_identity_for_moves()
+    {
+        var page = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
+            "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
+        var refresh = ExtractMethod(page, "private async Task RefreshTabOrderAsync()");
+        var apply = ExtractMethod(page, "private void ApplyAuthoritativeTabOrder(");
+        var move = ExtractMethod(page, "private async Task MoveTabOrderAsync(");
+        var button = ExtractMethod(page, "private Button CreateTabOrderButton(");
+        var buttonStates = ExtractMethod(page, "private void UpdateTabOrderButtonStates()");
+
+        Assert.Contains("await _frontend.CaptureAddonQuickSettingsTabOrderAsync()", refresh, StringComparison.Ordinal);
+        Assert.Contains("_frontend is null || _tabOrderMoveInProgress || _tabOrderRefreshInProgress", refresh, StringComparison.Ordinal);
+        Assert.Contains("foreach (var row in snapshot.Rows)", apply, StringComparison.Ordinal);
+        Assert.Contains("QuickOverlayTabOrderExpander.Items.Add(controls.Card)", apply, StringComparison.Ordinal);
+        Assert.Contains("row.CanMoveEarlier", apply, StringComparison.Ordinal);
+        Assert.Contains("row.CanMoveLater", apply, StringComparison.Ordinal);
+        Assert.Contains("!_tabOrderStateAvailable", move, StringComparison.Ordinal);
+        Assert.Contains("!CanMoveTab(tabId, delta)", move, StringComparison.Ordinal);
+        Assert.Contains("new AddonQuickSettingsTabOrderMoveIntent(tabId, delta)", move, StringComparison.Ordinal);
+        Assert.Contains("ApplyAuthoritativeTabOrder(result.State)", move, StringComparison.Ordinal);
+        Assert.True(move.IndexOf("await _frontend.MoveAddonQuickSettingsTabAsync(", StringComparison.Ordinal) <
+                    move.IndexOf("ApplyAuthoritativeTabOrder(result.State)", StringComparison.Ordinal));
+        Assert.Contains("Tag = tabId", button, StringComparison.Ordinal);
+        Assert.Contains("MoveTabOrderAsync(tabId, delta)", button, StringComparison.Ordinal);
+        Assert.Contains("_tabOrderMoveInProgress", buttonStates, StringComparison.Ordinal);
+        Assert.Contains("controls.MoveEarlier.IsEnabled = available && row!.CanMoveEarlier", buttonStates, StringComparison.Ordinal);
+        Assert.Contains("controls.MoveLater.IsEnabled = available && row!.CanMoveLater", buttonStates, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuickOverlayTabOrderExpander.IsExpanded =", apply, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tab_order_move_exception_reads_runtime_directly_while_mutation_is_in_flight()
+    {
+        var page = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
+            "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
+        var move = ExtractMethod(page, "private async Task MoveTabOrderAsync(");
+        var catchStart = move.IndexOf("catch (Exception exception)", StringComparison.Ordinal);
+        var readbackStart = move.IndexOf("await _frontend.CaptureAddonQuickSettingsTabOrderAsync()", catchStart, StringComparison.Ordinal);
+        var fallbackStart = move.IndexOf("catch (Exception readbackException)", readbackStart, StringComparison.Ordinal);
+
+        Assert.True(catchStart >= 0 && readbackStart > catchStart && fallbackStart > readbackStart);
+        Assert.Contains("_tabOrderMoveInProgress = true", move[..catchStart], StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshTabOrderAsync()", move[catchStart..fallbackStart], StringComparison.Ordinal);
+        Assert.Contains("ApplyAuthoritativeTabOrder(snapshot)", move[catchStart..fallbackStart], StringComparison.Ordinal);
+        Assert.Contains("MarkTabOrderUnavailable()", move[fallbackStart..], StringComparison.Ordinal);
+        Assert.Contains("keeping the last confirmed order", move[fallbackStart..], StringComparison.Ordinal);
     }
 
     [Fact]

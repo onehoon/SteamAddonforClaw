@@ -417,6 +417,12 @@
   <data name="QuickOverlay_PageTitle.Text" xml:space="preserve"><value>퀵 오버레이</value></data>
   <data name="QuickOverlay_PowerSourceCard.Header" xml:space="preserve"><value>현재 전원 방식 옵션만 보기</value></data>
   <data name="QuickOverlay_PowerSourceCard.Description" xml:space="preserve"><value>퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.</value></data>
+  <data name="QuickOverlay_TabOrderExpander.Header" xml:space="preserve"><value>퀵 오버레이 탭 순서</value></data>
+  <data name="QuickOverlay_TabOrderExpander.Description" xml:space="preserve"><value>퀵 오버레이 탭 순서와 처음 열리는 탭을 설정합니다.</value></data>
+  <data name="QuickOverlay_TabOrderStatusText.Text" xml:space="preserve"><value>탭 순서를 불러오는 중…</value></data>
+  <data name="QuickOverlay_TabOrder_MoveUp_A11y" xml:space="preserve"><value>{0} 위로 이동</value></data>
+  <data name="QuickOverlay_TabOrder_MoveDown_A11y" xml:space="preserve"><value>{0} 아래로 이동</value></data>
+  <data name="QuickOverlay_TabOrder_Unavailable" xml:space="preserve"><value>현재 탭 순서를 사용할 수 없습니다.</value></data>
   <data name="MainNav_Shortcut.Content" xml:space="preserve"><value>바로가기</value></data>
   <data name="MainNav_HowToUse.Content" xml:space="preserve"><value>사용안내</value></data>
   <data name="HowToUse_Failure.Text" xml:space="preserve"><value>How to Use could not be loaded.</value></data>

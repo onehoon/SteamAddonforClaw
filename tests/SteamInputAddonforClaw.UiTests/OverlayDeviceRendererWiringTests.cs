@@ -935,7 +935,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("QamSectionBrush", quickSettings);
         Assert.Contains("CreateSettingCard(SettingCardId.ClawHud", clawHud);
         Assert.Contains("CreateSettingCard(SettingCardId.QuickSettings", clawHud);
-        Assert.Contains("CreateSettingCard(SettingCardId.TabOrder", clawHud);
+        Assert.Contains("CreateSettingCard(SettingCardId.TabOrder, \"Quick Overlay Tab Order\", tabOrderDetails)", clawHud);
         Assert.Contains("Quick Settings", clawHud);
         Assert.Contains("Show only current power source", clawHud);
         Assert.Contains("ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable)",

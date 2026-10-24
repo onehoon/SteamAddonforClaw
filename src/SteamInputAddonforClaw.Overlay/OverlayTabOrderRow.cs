@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Overlay;
@@ -37,8 +38,8 @@ internal sealed class AddonQuickSettingsTabOrderRow
         OverlayQamResources.ApplyTextStyle(_label, "QamBodyTextStyle");
         Grid.SetColumn(_label, 0);
 
-        _moveEarlier = CreateMoveButton("◂", "Move earlier", -1);
-        _moveLater = CreateMoveButton("▸", "Move later", +1);
+        _moveEarlier = CreateMoveButton("\uE74A", "Move earlier", -1);
+        _moveLater = CreateMoveButton("\uE74B", "Move later", +1);
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -96,8 +97,16 @@ internal sealed class AddonQuickSettingsTabOrderRow
     {
         var button = new Button
         {
-            Content = glyph,
+            Content = new FontIcon
+            {
+                FontFamily = new FontFamily("Segoe Fluent Icons"),
+                Glyph = glyph,
+                FontSize = 20,
+            },
             Style = OverlayQamResources.Style("QamValueButtonStyle"),
+            MinWidth = OverlayQamResources.Get("QamValueButtonWidth", 40.0),
+            MinHeight = 32,
+            Padding = new Thickness(0),
         };
         AutomationProperties.SetName(button, accessibleName);
         ToolTipService.SetToolTip(button, accessibleName);
