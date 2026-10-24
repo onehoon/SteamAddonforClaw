@@ -189,7 +189,7 @@ public partial class App : Application
         {
             try
             {
-                _window?.ApplyClawHudSnapshot(snapshot);
+                _window?.ApplyClawHudState(snapshot);
                 completion.TrySetResult();
             }
             catch (Exception exception)
@@ -418,9 +418,7 @@ public partial class App : Application
     {
         if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
         {
-            _window?.ApplyClawHudSnapshot(result.Snapshot);
-            if (!result.Succeeded)
-                _window?.ApplyClawHudFailure(result.FailureMessage ?? "ClawHUD update failed.");
+            _window?.CompleteClawHudMutation(result);
         }))
             OverlayLog.Warn("ClawHUD", "Could not enqueue authoritative ClawHUD mutation result.");
     }

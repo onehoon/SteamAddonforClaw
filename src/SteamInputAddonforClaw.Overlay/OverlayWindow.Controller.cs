@@ -338,8 +338,10 @@ public sealed partial class OverlayWindow
             _gyroscopeMutationInFlight = false;
             _pendingGyroscopeEnabled = null;
         }
-        else SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
+        var quickSettingsMutation = !led && controllerForSteamMutation is null;
         ApplyFrontendSettingsState(response.Settings, response.ControllerLedAvailable, response.SettingsAvailable);
+        if (quickSettingsMutation)
+            SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
     }
 
     internal void ApplyFrontendSettingsMutationFailure(

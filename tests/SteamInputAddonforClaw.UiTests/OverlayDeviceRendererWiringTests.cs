@@ -1007,6 +1007,58 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void ClawHud_independent_state_and_correlated_mutation_result_have_separate_completion_paths()
+    {
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var state = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayClawHudMutationState.cs");
+
+        Assert.Contains("_window?.ApplyClawHudState(snapshot)", app);
+        Assert.Contains("_window?.CompleteClawHudMutation(result)", app);
+        Assert.Contains("_clawHudMutation.ApplyState(snapshot)", clawHud);
+        Assert.Contains("_clawHudMutation.Complete(result)", clawHud);
+        Assert.Contains("_clawHudMutation.Fail()", clawHud);
+        Assert.Contains("PendingIntent = intent", state);
+        Assert.Contains("PendingEnabled = desired", state);
+        Assert.Contains("Snapshot = result.Snapshot", state);
+    }
+
+    [Fact]
+    public void Settings_pending_preview_and_selection_exception_remain_local_and_availability_bounded()
+    {
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var requestStart = clawHud.IndexOf("private void RequestQuickSettingsCurrentPowerSourceOnly", StringComparison.Ordinal);
+        var requestEnd = clawHud.IndexOf("private void SetQuickSettingsCurrentPowerSourceMutationInFlight", requestStart, StringComparison.Ordinal);
+        var request = clawHud[requestStart..requestEnd];
+        var renderStart = clawHud.IndexOf("internal void RenderQuickSettingsCurrentPowerSourceRow", StringComparison.Ordinal);
+        var renderEnd = clawHud.IndexOf("private StackPanel BuildClawHudPage", renderStart, StringComparison.Ordinal);
+        var render = clawHud[renderStart..renderEnd];
+        var completionStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationResult(", StringComparison.Ordinal);
+        var completionEnd = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", completionStart, StringComparison.Ordinal);
+        var completion = controller[completionStart..completionEnd];
+
+        var pendingPreviewIndex = request.IndexOf("_pendingQuickSettingsCurrentPowerSourceOnly = enabled", StringComparison.Ordinal);
+        Assert.True(pendingPreviewIndex >= 0);
+        Assert.True(pendingPreviewIndex < request.IndexOf("RenderQuickSettingsCurrentPowerSourceRow();", pendingPreviewIndex, StringComparison.Ordinal));
+        Assert.Contains("_pendingQuickSettingsCurrentPowerSourceOnly ?? _quickSettingsCurrentPowerSourceOnly", render);
+        Assert.Contains("_quickSettingsSettingsAvailable && !_quickSettingsMutationInFlight", render);
+        Assert.True(completion.IndexOf("ApplyFrontendSettingsState(response.Settings", StringComparison.Ordinal)
+            < completion.IndexOf("SetQuickSettingsCurrentPowerSourceMutationInFlight(false)", StringComparison.Ordinal));
+
+        Assert.Contains("capabilities.IsSelectable() || IsCurrentPendingSettingRow(card, row.Container)", clawHud);
+        Assert.Contains("ReferenceEquals(rows[selectedIndex].Container, container)", clawHud);
+        Assert.Contains("snapshot?.RuntimeState == FrontendClawHudRuntimeState.Ready && snapshot.Settings is not null", clawHud);
+        Assert.Contains("_quickSettingsSettingsAvailable &&", clawHud);
+        Assert.Contains("_expandedSettingCard == card &&", clawHud);
+
+        var clawHudRenderStart = clawHud.IndexOf("private void RenderClawHudControls()", StringComparison.Ordinal);
+        var clawHudRender = clawHud[clawHudRenderStart..];
+        Assert.DoesNotContain("BringSelectedRowIntoView", clawHudRender);
+        Assert.DoesNotContain("BringSelectedRowIntoView", render);
+    }
+
+    [Fact]
     public void ClawHud_detail_rows_use_the_existing_logical_selection_capabilities()
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
@@ -1014,7 +1066,8 @@ public sealed class OverlayDeviceRendererWiringTests
         var wrapperEnd = clawHud.IndexOf("private void ToggleSettingCard(", wrapperStart, StringComparison.Ordinal);
         var wrapper = clawHud[wrapperStart..wrapperEnd];
 
-        Assert.Contains("IsSelectable: () => _expandedSettingCard == card && capabilities.IsSelectable()", wrapper);
+        Assert.Contains("IsSelectable: () => _expandedSettingCard == card &&", wrapper);
+        Assert.Contains("capabilities.IsSelectable() || IsCurrentPendingSettingRow(card, row.Container)", wrapper);
         Assert.Contains("Activate: capabilities.Activate", wrapper);
         Assert.Contains("Adjust: capabilities.Adjust", wrapper);
         Assert.DoesNotContain("rowIndex", clawHud);

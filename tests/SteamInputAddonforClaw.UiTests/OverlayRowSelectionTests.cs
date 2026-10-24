@@ -65,6 +65,28 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
+    public void Selected_setting_mutation_row_can_navigate_away_without_temporary_busy_fallback()
+    {
+        var mutationPending = false;
+        var actuallyAvailable = true;
+        OverlayRowSelection? selection = null;
+        var pendingRow = new OverlayRowCapabilities(
+            () => actuallyAvailable && (!mutationPending || selection?.SelectedIndex == 1));
+        var rows = new[] { Row(), pendingRow, Row() };
+        selection = new OverlayRowSelection();
+        selection.SetRows(rows);
+        Assert.True(selection.TrySelect(1));
+
+        mutationPending = true;
+        Assert.True(selection.MoveNext());
+        Assert.Equal(2, selection.SelectedIndex);
+
+        actuallyAvailable = false;
+        selection.SetRows(rows, preferredIndex: 1);
+        Assert.Equal(0, selection.SelectedIndex);
+    }
+
+    [Fact]
     public void SelectedControllerRowCanBeRestoredAfterAnIntermediateFallbackDuringRefresh()
     {
         var ledAvailable = true;
