@@ -11,8 +11,8 @@ public sealed class OverlayControllerInputRouterTests
 {
     private static GamepadButtons Buttons(
         bool up = false, bool down = false, bool left = false, bool right = false,
-        bool a = false, bool b = false, bool lb = false, bool rb = false) =>
-        new(a, b, false, false, up, right, down, left, lb, rb, false, false, false, false, false, false);
+        bool a = false, bool b = false, bool lb = false, bool rb = false, bool y = false) =>
+        new(a, b, false, y, up, right, down, left, lb, rb, false, false, false, false, false, false);
 
     private static ControllerState State(GamepadButtons buttons) => new(buttons, default, default, default, default);
 
@@ -361,6 +361,43 @@ public sealed class OverlayControllerInputRouterTests
     }
 
     [Fact]
+    public async Task Y_rising_edge_emits_one_quick_jump_and_requires_release_before_repress()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(y: true));
+        await delivery.WaitForAsync(1);
+        source.Raise(Buttons(y: true));
+        await Task.Delay(100);
+        Assert.Single(delivery.Snapshot());
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(y: true));
+        Assert.Equal(new[] { OverlayNavigationAction.QuickJump, OverlayNavigationAction.QuickJump },
+            await delivery.WaitForAsync(2));
+    }
+
+    [Fact]
+    public async Task Y_held_when_capture_starts_is_ignored_until_release_and_repress()
+    {
+        var source = new FakeSource { LatestState = State(Buttons(y: true)) };
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(y: true));
+        await Task.Delay(100);
+        Assert.Empty(delivery.Snapshot());
+
+        source.Raise(Buttons());
+        source.Raise(Buttons(y: true));
+        Assert.Equal(OverlayNavigationAction.QuickJump, (await delivery.WaitForAsync(1))[0]);
+    }
+
+    [Fact]
     public async Task Release_edges_emit_no_navigation()
     {
         var source = new FakeSource();
@@ -383,9 +420,9 @@ public sealed class OverlayControllerInputRouterTests
         using var router = new OverlayControllerInputRouter(source, delivery.Callback);
         router.Start();
 
-        // X/Y, Back/Start, stick clicks and LT/RT-full are all unmapped; LB/RB are excluded here
+        // X, Back/Start, stick clicks and LT/RT-full are all unmapped; Y and LB/RB are excluded here
         // (they now map to PreviousTab/NextTab and are covered by dedicated bumper tests).
-        var noisy = new GamepadButtons(false, false, X: true, Y: true, false, false, false, false, false, false, Back: true, Start: true, true, true, true, true);
+        var noisy = new GamepadButtons(false, false, X: true, Y: false, false, false, false, false, false, false, Back: true, Start: true, true, true, true, true);
         source.Raise(noisy);
         await Task.Delay(100);
         Assert.Empty(delivery.Snapshot());
@@ -497,6 +534,21 @@ public sealed class OverlayControllerInputRouterTests
         Assert.False(wait.IsCompleted);
 
         source.Raise(Buttons()); // release
+        Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Release_waiter_includes_held_Y_even_when_preference_is_off()
+    {
+        var source = new FakeSource();
+        using var router = new OverlayControllerInputRouter(source, _ => Task.CompletedTask);
+        router.Start();
+        source.Raise(Buttons(y: true));
+
+        var wait = router.WaitForConsumedControlsReleaseAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        source.Raise(Buttons());
         Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 

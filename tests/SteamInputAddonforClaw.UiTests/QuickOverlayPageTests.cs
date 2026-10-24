@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using SteamInputAddonforClaw.Views;
 using Xunit;
 
@@ -34,11 +35,44 @@ public sealed class QuickOverlayPageTests
         Assert.Contains("_ = RefreshQuickSettingsPowerSourcePreferenceAsync()", requestRefresh, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshTabOrderAsync()", requestRefresh, StringComparison.Ordinal);
         Assert.Contains("await _frontend.GetBootstrapAsync()", refresh, StringComparison.Ordinal);
-        Assert.Contains("_powerSourceMutationInProgress || _discardInFlightPowerSourceRefresh", refresh, StringComparison.Ordinal);
+        Assert.Contains("_powerSourceMutationInProgress && _yButtonQuickJumpMutationInProgress", refresh, StringComparison.Ordinal);
         Assert.Contains("_discardInFlightPowerSourceRefresh = false", refresh, StringComparison.Ordinal);
         Assert.Contains("_lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly", refresh, StringComparison.Ordinal);
+        Assert.Contains("bootstrap.Settings.YButtonQuickJumpTarget", refresh, StringComparison.Ordinal);
         Assert.Contains("catch (Exception exception)", refresh, StringComparison.Ordinal);
         Assert.Contains("finally", refresh, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Y_button_quick_jump_is_first_card_uses_fixed_choices_and_runtime_readback()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml"));
+        var cards = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
+        Assert.Equal(2, cards.Length);
+        Assert.Equal("YButtonQuickJumpCard", (string?)cards[0].Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")));
+        Assert.Equal("QuickSettingsPowerSourceCard", (string?)cards[1].Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")));
+        var expander = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "SettingsExpander");
+        Assert.Equal("False", (string?)expander.Attribute("IsExpanded"));
+
+        var combo = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "ComboBox");
+        Assert.Equal(new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" },
+            combo.Elements().Select(element => (string?)element.Attribute("Tag")));
+        Assert.All(combo.Elements(), item =>
+        {
+            Assert.NotNull(item.Attribute("Content"));
+            Assert.NotNull(item.Attribute("Tag"));
+        });
+
+        var code = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
+        var initialize = ExtractMethod(code, "internal void Initialize(");
+        var mutation = ExtractMethod(code, "private async void YButtonQuickJumpComboBox_SelectionChanged(");
+        Assert.Contains("bootstrap.Settings.YButtonQuickJumpTarget", initialize, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetBootstrapAsync", initialize, StringComparison.Ordinal);
+        Assert.Contains("await _frontend.SetQuickOverlayYButtonTargetAsync(target)", mutation, StringComparison.Ordinal);
+        Assert.Contains("settings.YButtonQuickJumpTarget", mutation, StringComparison.Ordinal);
+        Assert.Contains("SetYButtonQuickJumpTarget(_lastKnownYButtonQuickJumpTarget)", mutation, StringComparison.Ordinal);
+        Assert.Contains("_discardInFlightYButtonQuickJumpRefresh = _powerSourceRefreshInProgress", mutation, StringComparison.Ordinal);
     }
 
     [Fact]

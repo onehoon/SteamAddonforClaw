@@ -104,6 +104,7 @@ internal sealed class OverlayValueRow
     private readonly ButtonBase _previousButton;
     private readonly TextBlock _valueText;
     private readonly ButtonBase _nextButton;
+    private bool _canInteract = true;
 
     internal Border Container { get; }
     internal OverlayRowCapabilities Capabilities { get; }
@@ -170,8 +171,9 @@ internal sealed class OverlayValueRow
             Adjust: OnControllerAdjust);
     }
 
-    internal void ApplyState(bool isAvailable, double minimum, double maximum, double step, double value)
+    internal void ApplyState(bool isAvailable, double minimum, double maximum, double step, double value, bool canInteract = true)
     {
+        _canInteract = canInteract;
         _model.ApplyState(isAvailable, minimum, maximum, step, value);
         Render();
     }
@@ -215,18 +217,21 @@ internal sealed class OverlayValueRow
 
     private void OnControllerAdjust(int delta)
     {
+        if (!_canInteract) return;
         _model.RequestAdjust(delta);
         Render();
     }
 
     private void OnPreviousClicked(object sender, RoutedEventArgs args)
     {
+        if (!_canInteract) return;
         _model.RequestAdjust(-1);
         Render();
     }
 
     private void OnNextClicked(object sender, RoutedEventArgs args)
     {
+        if (!_canInteract) return;
         _model.RequestAdjust(+1);
         Render();
     }
@@ -239,11 +244,11 @@ internal sealed class OverlayValueRow
         if (_valueText.Text != valueText)
             _valueText.Text = valueText;
 
-        var canDecrease = _model.CanDecrease;
+        var canDecrease = _canInteract && _model.CanDecrease;
         if (_previousButton.IsEnabled != canDecrease)
             _previousButton.IsEnabled = canDecrease;
 
-        var canIncrease = _model.CanIncrease;
+        var canIncrease = _canInteract && _model.CanIncrease;
         if (_nextButton.IsEnabled != canIncrease)
             _nextButton.IsEnabled = canIncrease;
     }

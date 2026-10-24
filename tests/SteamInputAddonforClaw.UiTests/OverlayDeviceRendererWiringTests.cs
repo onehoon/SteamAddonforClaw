@@ -999,6 +999,7 @@ public sealed class OverlayDeviceRendererWiringTests
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
         var overlayApp = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
         var host = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
 
@@ -1007,8 +1008,26 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.True(clawHud.IndexOf("CreateSettingCard(SettingCardId.QuickSettings", StringComparison.Ordinal)
             < clawHud.IndexOf("CreateSettingCard(SettingCardId.TabOrder", StringComparison.Ordinal));
         Assert.Contains("SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value", host);
+        Assert.Contains("SetQuickOverlayYButtonTargetAsync(target", host);
         Assert.Contains("SendCurrentPowerSourceMutationAsync", overlayApp);
+        Assert.Contains("SendYButtonQuickJumpMutationAsync(target)", overlayApp);
         Assert.Contains("QuickSettingsCurrentPowerSourceOnlyRequested", clawHud);
+        Assert.Contains("YButtonQuickJumpTargetRequested", clawHud);
+        Assert.True(clawHud.IndexOf("section.Children.Add(_quickSettingsYButtonQuickJumpRow.Container)", StringComparison.Ordinal)
+            < clawHud.IndexOf("section.Children.Add(_quickSettingsCurrentPowerSourceOnlyRow.Container)", StringComparison.Ordinal));
+        Assert.Contains("OverlayValueButtonKind.DiscreteChoice", clawHud);
+        Assert.Contains("canInteract: _quickSettingsYButtonQuickJumpAvailable && !_yButtonQuickJumpMutationInFlight", clawHud);
+        Assert.Contains("var quickSettingsMutation = !led && controllerForSteamMutation is null && !yButtonQuickJumpMutation", controller);
+        Assert.Contains("if (quickSettingsMutation)", controller);
+        var failureStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", StringComparison.Ordinal);
+        var failureEnd = controller.IndexOf("private void RestoreControllerRowSelection", failureStart, StringComparison.Ordinal);
+        var failure = controller[failureStart..failureEnd];
+        var yFailureStart = failure.IndexOf("else if (yButtonQuickJumpMutation)", StringComparison.Ordinal);
+        var yFailureEnd = failure.IndexOf("else SetQuickSettingsCurrentPowerSourceMutationInFlight(false)", yFailureStart, StringComparison.Ordinal);
+        var yFailure = failure[yFailureStart..yFailureEnd];
+        Assert.Contains("SetYButtonQuickJumpMutationInFlight(false);", yFailure);
+        Assert.Contains("return;", yFailure);
+        Assert.DoesNotContain("SetQuickSettingsCurrentPowerSourceMutationInFlight(false)", yFailure);
         Assert.Contains("request.CurrentPowerSourceOnly!.Value", host);
         Assert.Contains("FindSettingRowIndex(previousSettingRows, firstPreviousEditor.Container)", shell);
         Assert.DoesNotContain("_clawHudRows.Count + 2", shell);

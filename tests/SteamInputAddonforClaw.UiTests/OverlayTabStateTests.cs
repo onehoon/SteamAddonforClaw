@@ -45,6 +45,48 @@ public sealed class OverlayTabStateTests
         }
     }
 
+    [Theory]
+    [InlineData(QuickOverlayYButtonTarget.Profile, AddonQuickSettingsTabId.Profile)]
+    [InlineData(QuickOverlayYButtonTarget.Shortcut, AddonQuickSettingsTabId.Shortcut)]
+    [InlineData(QuickOverlayYButtonTarget.Device, AddonQuickSettingsTabId.Device)]
+    [InlineData(QuickOverlayYButtonTarget.Controller, AddonQuickSettingsTabId.Controller)]
+    [InlineData(QuickOverlayYButtonTarget.Setting, AddonQuickSettingsTabId.Setting)]
+    public void Quick_jump_resolves_target_by_tab_identity(QuickOverlayYButtonTarget target, AddonQuickSettingsTabId expected)
+    {
+        Assert.Equal(expected, OverlayWindow.ResolveQuickJumpTabId(target));
+    }
+
+    [Theory]
+    [InlineData(QuickOverlayYButtonTarget.Off)]
+    [InlineData((QuickOverlayYButtonTarget)99)]
+    public void Quick_jump_off_or_unknown_target_fails_closed(QuickOverlayYButtonTarget target)
+    {
+        Assert.Null(OverlayWindow.ResolveQuickJumpTabId(target));
+    }
+
+    [Fact]
+    public void Quick_jump_identity_does_not_change_configured_first_tab()
+    {
+        AddonQuickSettingsTabId[] order =
+        [
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Setting,
+        ];
+        var state = new OverlayTabState(order);
+        var jumpTarget = OverlayWindow.ResolveQuickJumpTabId(QuickOverlayYButtonTarget.Profile);
+
+        state.Select(jumpTarget!.Value);
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
+        Assert.Equal(order, state.Order);
+
+        state.ResetForShow();
+        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
+        Assert.Equal(order, state.Order);
+    }
+
     [Fact]
     public void SelectingAnUnknownTabThrows()
     {

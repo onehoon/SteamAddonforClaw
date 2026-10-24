@@ -25,6 +25,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public bool ClawHudEnabled => Settings.ClawHudEnabled;
     public bool QuickSettingsCurrentPowerSourceOnly => Settings.QuickSettingsCurrentPowerSourceOnly;
+    public QuickOverlayYButtonTarget YButtonQuickJumpTarget => Settings.YButtonQuickJumpTarget;
     public bool ExperimentalVirtualTouchpadEnabled => Settings.ExperimentalVirtualTouchpadEnabled;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
     public BackButtonMappingSettings BackButtonMapping => Settings.BackButtonMapping;
@@ -252,6 +253,16 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     {
         if (Settings.QuickSettingsCurrentPowerSourceOnly == enabled) return;
         var next = Settings with { QuickSettingsCurrentPowerSourceOnly = enabled };
+        _settingsStore.Save(next);
+        Settings = next;
+    }
+
+    public void ChangeYButtonQuickJumpTarget(QuickOverlayYButtonTarget target)
+    {
+        if (!Enum.IsDefined(target))
+            throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Quick Overlay Y Button target.");
+        if (Settings.YButtonQuickJumpTarget == target) return;
+        var next = Settings with { YButtonQuickJumpTarget = target };
         _settingsStore.Save(next);
         Settings = next;
     }

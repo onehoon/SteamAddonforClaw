@@ -32,6 +32,11 @@ public sealed partial class OverlayWindow
     private SettingCardView? _clawHudCard;
     private SettingCardView? _tabOrderCard;
     private SettingCardView? _quickSettingsCard;
+    private OverlayValueRow? _quickSettingsYButtonQuickJumpRow;
+    private QuickOverlayYButtonTarget _quickSettingsYButtonQuickJumpTarget;
+    private QuickOverlayYButtonTarget? _pendingYButtonQuickJumpTarget;
+    private bool _quickSettingsYButtonQuickJumpAvailable;
+    private bool _yButtonQuickJumpMutationInFlight;
     private OverlayToggleRow? _quickSettingsCurrentPowerSourceOnlyRow;
     private bool _quickSettingsCurrentPowerSourceOnly;
     private bool? _pendingQuickSettingsCurrentPowerSourceOnly;
@@ -43,6 +48,7 @@ public sealed partial class OverlayWindow
     internal event Action<bool>? ClawHudEnabledRequested;
     internal event Action<FrontendClawHudMutationIntent>? ClawHudSettingMutationRequested;
     internal event Action<bool>? QuickSettingsCurrentPowerSourceOnlyRequested;
+    internal event Action<QuickOverlayYButtonTarget>? YButtonQuickJumpTargetRequested;
 
     private FrameworkElement BuildSettingPage(List<OverlayRow> rows)
     {
@@ -265,6 +271,17 @@ public sealed partial class OverlayWindow
     private StackPanel BuildQuickSettingsPage()
     {
         var section = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
+        _quickSettingsYButtonQuickJumpRow = new OverlayValueRow(
+            "Y Button Quick Jump",
+            FormatYButtonQuickJumpChoice,
+            value => RequestYButtonQuickJumpChange((QuickOverlayYButtonTarget)(int)Math.Round(value)),
+            OverlayValueButtonKind.DiscreteChoice);
+        section.Children.Add(_quickSettingsYButtonQuickJumpRow.Container);
+        _quickSettingsRows.Add(CreateSettingDetailRow(
+            new OverlayRow(_quickSettingsYButtonQuickJumpRow.Container, _quickSettingsYButtonQuickJumpRow.Capabilities),
+            SettingCardId.QuickSettings));
+        RegisterRowPointerSelection(_quickSettingsYButtonQuickJumpRow.Container);
+
         _quickSettingsCurrentPowerSourceOnlyRow = new OverlayToggleRow(
             "Show only current power source", RequestQuickSettingsCurrentPowerSourceOnly);
         section.Children.Add(_quickSettingsCurrentPowerSourceOnlyRow.Container);
@@ -280,6 +297,79 @@ public sealed partial class OverlayWindow
         _quickSettingsCurrentPowerSourceOnly = enabled;
         _quickSettingsSettingsAvailable = available;
         RenderQuickSettingsCurrentPowerSourceRow();
+    }
+
+    internal void ApplyQuickSettingsYButtonQuickJumpTarget(QuickOverlayYButtonTarget target, bool available)
+    {
+        if (!Enum.IsDefined(target))
+            available = false;
+        else
+            _quickSettingsYButtonQuickJumpTarget = target;
+        _quickSettingsYButtonQuickJumpAvailable = available;
+        RenderQuickSettingsYButtonQuickJumpRow();
+    }
+
+    private static string FormatYButtonQuickJumpChoice(double value) => (int)value switch
+    {
+        (int)QuickOverlayYButtonTarget.Profile => "Profile",
+        (int)QuickOverlayYButtonTarget.Shortcut => "Shortcut",
+        (int)QuickOverlayYButtonTarget.Device => "Device",
+        (int)QuickOverlayYButtonTarget.Controller => "Controller",
+        (int)QuickOverlayYButtonTarget.Setting => "Setting",
+        (int)QuickOverlayYButtonTarget.Off => "Off",
+        _ => "--",
+    };
+
+    private void RequestYButtonQuickJumpChange(QuickOverlayYButtonTarget target)
+    {
+        if (!_quickSettingsYButtonQuickJumpAvailable || _yButtonQuickJumpMutationInFlight || !Enum.IsDefined(target))
+        {
+            RenderQuickSettingsYButtonQuickJumpRow();
+            return;
+        }
+        if (target == _quickSettingsYButtonQuickJumpTarget)
+            return;
+
+        _yButtonQuickJumpMutationInFlight = true;
+        _pendingYButtonQuickJumpTarget = target;
+        RenderQuickSettingsYButtonQuickJumpRow();
+        YButtonQuickJumpTargetRequested?.Invoke(target);
+    }
+
+    private void SetYButtonQuickJumpMutationInFlight(bool inFlight)
+    {
+        _yButtonQuickJumpMutationInFlight = inFlight;
+        if (!inFlight)
+            _pendingYButtonQuickJumpTarget = null;
+        RenderQuickSettingsYButtonQuickJumpRow();
+    }
+
+    internal void RenderQuickSettingsYButtonQuickJumpRow()
+    {
+        if (_quickSettingsYButtonQuickJumpRow is null)
+            return;
+
+        if (_frontendSettingsSnapshot is not { } settings)
+        {
+            // No independent UI default: keep the row unavailable until Runtime has supplied state.
+            _quickSettingsYButtonQuickJumpRow.ApplyState(false, 0, 5, 1, double.NaN, canInteract: false);
+            return;
+        }
+
+        var displayedTarget = _pendingYButtonQuickJumpTarget ?? settings.YButtonQuickJumpTarget;
+        _quickSettingsYButtonQuickJumpRow.ApplyState(
+            _quickSettingsYButtonQuickJumpAvailable,
+            0,
+            5,
+            1,
+            (double)displayedTarget,
+            canInteract: _quickSettingsYButtonQuickJumpAvailable && !_yButtonQuickJumpMutationInFlight);
+        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Setting && !_yButtonQuickJumpMutationInFlight)
+        {
+            var preferredIndex = _rowSelection.SelectedIndex;
+            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
+            ApplyRowSelectionVisual();
+        }
     }
 
     private void RequestQuickSettingsCurrentPowerSourceOnly(bool enabled)

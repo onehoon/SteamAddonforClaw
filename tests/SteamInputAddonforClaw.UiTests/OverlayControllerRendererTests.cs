@@ -62,8 +62,8 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("_pendingSteamControllerPreference = null", controller);
         Assert.Contains("_pendingGyroscopeEnabled = null", controller);
         Assert.Contains("controllerForSteamMutation: mutationKind", app);
-        Assert.Contains("ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation)", app);
-        Assert.Contains("ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation)", app);
+        Assert.Contains("ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation, yButtonQuickJumpMutation)", app);
+        Assert.Contains("ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation, yButtonQuickJumpMutation)", app);
 
         var mutationResultStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationResult(", StringComparison.Ordinal);
         var mutationFailureStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", mutationResultStart, StringComparison.Ordinal);

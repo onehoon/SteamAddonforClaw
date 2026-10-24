@@ -73,6 +73,36 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Y_button_quick_jump_preference_persists_projects_and_invalidates_only_on_change()
+    {
+        var control = CreateControl(cpuBoostRuntime: null);
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        var changed = await control.SetQuickOverlayYButtonTargetAsync(QuickOverlayYButtonTarget.Controller);
+        var repeated = await control.SetQuickOverlayYButtonTargetAsync(QuickOverlayYButtonTarget.Controller);
+
+        Assert.Equal(QuickOverlayYButtonTarget.Controller, changed.YButtonQuickJumpTarget);
+        Assert.Equal(QuickOverlayYButtonTarget.Controller, repeated.YButtonQuickJumpTarget);
+        Assert.Equal(QuickOverlayYButtonTarget.Controller, (await control.GetBootstrapAsync()).Settings.YButtonQuickJumpTarget);
+        Assert.Equal(1, invalidations);
+    }
+
+    [Fact]
+    public async Task Y_button_quick_jump_rejects_undefined_target_without_invalidation()
+    {
+        var control = CreateControl(cpuBoostRuntime: null);
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            control.SetQuickOverlayYButtonTargetAsync((QuickOverlayYButtonTarget)99));
+
+        Assert.Equal(QuickOverlayYButtonTarget.Profile, (await control.GetBootstrapAsync()).Settings.YButtonQuickJumpTarget);
+        Assert.Equal(0, invalidations);
+    }
+
+    [Fact]
     public async Task Hidden_power_source_row_is_rejected_before_the_typed_mutation()
     {
         var cpuPolicy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Disabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Aggressive) };

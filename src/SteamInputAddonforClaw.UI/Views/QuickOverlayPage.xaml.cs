@@ -21,6 +21,10 @@ public sealed partial class QuickOverlayPage : UserControl
     private bool _powerSourceRefreshInProgress;
     private bool _discardInFlightPowerSourceRefresh;
     private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
+    private bool _applyingYButtonQuickJumpTarget;
+    private bool _yButtonQuickJumpMutationInProgress;
+    private bool _discardInFlightYButtonQuickJumpRefresh;
+    private QuickOverlayYButtonTarget _lastKnownYButtonQuickJumpTarget = QuickOverlayYButtonTarget.Profile;
     private readonly Dictionary<AddonQuickSettingsTabId, TabOrderRowControls> _tabOrderRows = new();
     private AddonQuickSettingsTabOrderSnapshot? _lastConfirmedTabOrder;
     private bool _tabOrderStateAvailable;
@@ -30,6 +34,11 @@ public sealed partial class QuickOverlayPage : UserControl
     public QuickOverlayPage()
     {
         InitializeComponent();
+        AutomationProperties.SetName(
+            YButtonQuickJumpComboBox,
+            MainUiStrings.Get(
+                "QuickOverlay_YButtonQuickJumpComboBox_A11y",
+                "Y Button Quick Jump destination"));
         foreach (var tabId in TabOrderTabIds)
             _tabOrderRows.Add(tabId, CreateTabOrderRow(tabId));
     }
@@ -38,7 +47,10 @@ public sealed partial class QuickOverlayPage : UserControl
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
+        _lastKnownYButtonQuickJumpTarget = NormalizeYButtonQuickJumpTarget(
+            bootstrap.Settings.YButtonQuickJumpTarget, QuickOverlayYButtonTarget.Profile);
         SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
+        SetYButtonQuickJumpTarget(_lastKnownYButtonQuickJumpTarget);
     }
 
     internal void Activate() => RequestRefresh();
@@ -237,17 +249,24 @@ public sealed partial class QuickOverlayPage : UserControl
 
     private async Task RefreshQuickSettingsPowerSourcePreferenceAsync()
     {
-        if (_frontend is null || _powerSourceMutationInProgress || _powerSourceRefreshInProgress) return;
+        if (_frontend is null || _powerSourceRefreshInProgress ||
+            (_powerSourceMutationInProgress && _yButtonQuickJumpMutationInProgress)) return;
 
         _powerSourceRefreshInProgress = true;
         try
         {
             var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
-            if (_powerSourceMutationInProgress || _discardInFlightPowerSourceRefresh)
-                return;
-
-            _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
-            SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
+            if (!_powerSourceMutationInProgress && !_discardInFlightPowerSourceRefresh)
+            {
+                _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
+                SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
+            }
+            if (!_yButtonQuickJumpMutationInProgress && !_discardInFlightYButtonQuickJumpRefresh)
+            {
+                _lastKnownYButtonQuickJumpTarget = NormalizeYButtonQuickJumpTarget(
+                    bootstrap.Settings.YButtonQuickJumpTarget, _lastKnownYButtonQuickJumpTarget);
+                SetYButtonQuickJumpTarget(_lastKnownYButtonQuickJumpTarget);
+            }
         }
         catch (Exception exception)
         {
@@ -257,8 +276,70 @@ public sealed partial class QuickOverlayPage : UserControl
         {
             _powerSourceRefreshInProgress = false;
             _discardInFlightPowerSourceRefresh = false;
+            _discardInFlightYButtonQuickJumpRefresh = false;
         }
     }
+
+    private async void YButtonQuickJumpComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_applyingYButtonQuickJumpTarget || _frontend is null || _yButtonQuickJumpMutationInProgress ||
+            YButtonQuickJumpComboBox.SelectedItem is not ComboBoxItem { Tag: string targetName } ||
+            !Enum.TryParse<QuickOverlayYButtonTarget>(targetName, ignoreCase: false, out var target) ||
+            !Enum.IsDefined(target))
+            return;
+
+        if (target == _lastKnownYButtonQuickJumpTarget)
+            return;
+
+        // A bootstrap read that started before this choice must not overwrite its mutation result.
+        _discardInFlightYButtonQuickJumpRefresh = _powerSourceRefreshInProgress;
+        _yButtonQuickJumpMutationInProgress = true;
+        YButtonQuickJumpComboBox.IsEnabled = false;
+        try
+        {
+            var settings = await _frontend.SetQuickOverlayYButtonTargetAsync(target).ConfigureAwait(true);
+            _lastKnownYButtonQuickJumpTarget = NormalizeYButtonQuickJumpTarget(
+                settings.YButtonQuickJumpTarget, _lastKnownYButtonQuickJumpTarget);
+            SetYButtonQuickJumpTarget(_lastKnownYButtonQuickJumpTarget);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("QuickSettings", "Y Button Quick Jump preference update failed.", exception);
+            try
+            {
+                var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
+                _lastKnownYButtonQuickJumpTarget = NormalizeYButtonQuickJumpTarget(
+                    bootstrap.Settings.YButtonQuickJumpTarget, _lastKnownYButtonQuickJumpTarget);
+            }
+            catch (Exception readbackException)
+            {
+                AppLog.Warn("QuickSettings", "Y Button Quick Jump preference readback failed; keeping the last confirmed value.", readbackException);
+            }
+
+            SetYButtonQuickJumpTarget(_lastKnownYButtonQuickJumpTarget);
+        }
+        finally
+        {
+            _yButtonQuickJumpMutationInProgress = false;
+            YButtonQuickJumpComboBox.IsEnabled = true;
+        }
+    }
+
+    private void SetYButtonQuickJumpTarget(QuickOverlayYButtonTarget target)
+    {
+        _applyingYButtonQuickJumpTarget = true;
+        try
+        {
+            YButtonQuickJumpComboBox.SelectedItem = YButtonQuickJumpComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, target.ToString(), StringComparison.Ordinal));
+        }
+        finally { _applyingYButtonQuickJumpTarget = false; }
+    }
+
+    private static QuickOverlayYButtonTarget NormalizeYButtonQuickJumpTarget(
+        QuickOverlayYButtonTarget target, QuickOverlayYButtonTarget fallback) =>
+        Enum.IsDefined(target) ? target : fallback;
 
     private void SetQuickSettingsPowerSourceToggle(bool enabled)
     {

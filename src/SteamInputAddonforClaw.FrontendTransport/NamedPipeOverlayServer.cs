@@ -480,6 +480,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                     OverlayWireMessageKind.ControllerLedMutationRequest or OverlayWireMessageKind.ControllerLedMutationResult
                     or OverlayWireMessageKind.CurrentPowerSourceMutationRequest or OverlayWireMessageKind.CurrentPowerSourceMutationResult
                     or OverlayWireMessageKind.ControllerForSteamMutationRequest or OverlayWireMessageKind.ControllerForSteamMutationResult
+                    or OverlayWireMessageKind.YButtonQuickJumpMutationRequest or OverlayWireMessageKind.YButtonQuickJumpMutationResult
                     or OverlayWireMessageKind.ControllerVibrationMutationRequest or OverlayWireMessageKind.ControllerVibrationMutationResult
                     or OverlayWireMessageKind.FrontendSettingsState or OverlayWireMessageKind.ControllerVibrationState))
                 throw new FrontendProtocolException("Unexpected Overlay production-controls payload.");
@@ -558,15 +559,18 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 continue;
             }
 
-            if (message.Kind is OverlayWireMessageKind.ControllerLedMutationRequest or OverlayWireMessageKind.CurrentPowerSourceMutationRequest or OverlayWireMessageKind.ControllerForSteamMutationRequest)
+            if (message.Kind is OverlayWireMessageKind.ControllerLedMutationRequest or OverlayWireMessageKind.CurrentPowerSourceMutationRequest or OverlayWireMessageKind.ControllerForSteamMutationRequest or OverlayWireMessageKind.YButtonQuickJumpMutationRequest)
             {
                 var led = message.Kind == OverlayWireMessageKind.ControllerLedMutationRequest;
                 var controllerForSteam = message.Kind == OverlayWireMessageKind.ControllerForSteamMutationRequest;
+                var yButtonQuickJump = message.Kind == OverlayWireMessageKind.YButtonQuickJumpMutationRequest;
                 if (controllerForSteam
                     ? !OverlayProductionControlsWireValidation.IsValidControllerForSteamMutationRequest(message)
-                    : !OverlayProductionControlsWireValidation.IsValidSettingsMutationRequest(message, led))
+                    : yButtonQuickJump
+                        ? !OverlayProductionControlsWireValidation.IsValidYButtonQuickJumpMutationRequest(message)
+                        : !OverlayProductionControlsWireValidation.IsValidSettingsMutationRequest(message, led))
                     throw new FrontendProtocolException("Invalid Overlay frontend settings mutation request.");
-                _ = HandleFrontendSettingsMutationRequestAsync(pipe, message.FrontendSettingsMutationRequest!, led, connection.Token, controllerForSteam);
+                _ = HandleFrontendSettingsMutationRequestAsync(pipe, message.FrontendSettingsMutationRequest!, led, connection.Token, controllerForSteam, yButtonQuickJump);
                 continue;
             }
 
@@ -614,7 +618,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
-    private async Task HandleFrontendSettingsMutationRequestAsync(Stream pipe, OverlayFrontendSettingsMutationRequest request, bool led, CancellationToken token, bool controllerForSteam = false)
+    private async Task HandleFrontendSettingsMutationRequestAsync(Stream pipe, OverlayFrontendSettingsMutationRequest request, bool led, CancellationToken token, bool controllerForSteam = false, bool yButtonQuickJump = false)
     {
         try
         {
@@ -636,6 +640,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 (false, _) => OverlayWireMessageKind.CurrentPowerSourceMutationResult,
             };
             if (controllerForSteam) kind = OverlayWireMessageKind.ControllerForSteamMutationResult;
+            if (yButtonQuickJump) kind = OverlayWireMessageKind.YButtonQuickJumpMutationResult;
             await OverlayWireCodec.WriteAsync(pipe,
                 new(OverlayTransportProtocol.CurrentVersion, kind, FrontendSettingsMutationResponse: response), _writeGate, token).ConfigureAwait(false);
         }

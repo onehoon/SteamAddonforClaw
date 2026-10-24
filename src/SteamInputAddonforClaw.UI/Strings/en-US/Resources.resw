@@ -415,6 +415,15 @@
   <data name="ClawHud_VrrStatus_VerificationFailed" xml:space="preserve"><value>VerificationFailed</value></data>
   <data name="MainNav_QuickOverlay.Content" xml:space="preserve"><value>Quick Overlay</value></data>
   <data name="QuickOverlay_PageTitle.Text" xml:space="preserve"><value>Quick Overlay</value></data>
+  <data name="QuickOverlay_YButtonQuickJumpCard.Header" xml:space="preserve"><value>Y Button Quick Jump</value></data>
+  <data name="QuickOverlay_YButtonQuickJumpCard.Description" xml:space="preserve"><value>Press Y to jump to the selected tab while Quick Overlay is open.</value></data>
+  <data name="QuickOverlay_YButtonQuickJumpComboBox_A11y" xml:space="preserve"><value>Y Button Quick Jump destination</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Profile.Content" xml:space="preserve"><value>Profile</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Shortcut.Content" xml:space="preserve"><value>Shortcut</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Device.Content" xml:space="preserve"><value>Device</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Controller.Content" xml:space="preserve"><value>Controller</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Setting.Content" xml:space="preserve"><value>Setting</value></data>
+  <data name="QuickOverlay_YButtonQuickJump_Off.Content" xml:space="preserve"><value>Off</value></data>
   <data name="QuickOverlay_PowerSourceCard.Header" xml:space="preserve"><value>Show only current power source</value></data>
   <data name="QuickOverlay_PowerSourceCard.Description" xml:space="preserve"><value>Show only the controls for the currently connected power source in Quick Settings Overlay.</value></data>
   <data name="QuickOverlay_TabOrderExpander.Header" xml:space="preserve"><value>Quick Overlay Tab Order</value></data>

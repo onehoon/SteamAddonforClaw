@@ -163,6 +163,30 @@ public sealed partial class OverlayWindow
         if (_tabState.SelectNext()) ApplySelectedTabVisualState();
     }
 
+    internal void QuickJumpToConfiguredTab()
+    {
+        if (!_frontendSettingsAvailable || _frontendSettingsSnapshot is not { } settings)
+            return;
+
+        var target = ResolveQuickJumpTabId(settings.YButtonQuickJumpTarget);
+        if (target is not { } selected || selected == _tabState.SelectedTab)
+            return;
+
+        _tabState.Select(selected);
+        ApplySelectedTabVisualState();
+    }
+
+    internal static AddonQuickSettingsTabId? ResolveQuickJumpTabId(QuickOverlayYButtonTarget target) => target switch
+    {
+        QuickOverlayYButtonTarget.Profile => AddonQuickSettingsTabId.Profile,
+        QuickOverlayYButtonTarget.Shortcut => AddonQuickSettingsTabId.Shortcut,
+        QuickOverlayYButtonTarget.Device => AddonQuickSettingsTabId.Device,
+        QuickOverlayYButtonTarget.Controller => AddonQuickSettingsTabId.Controller,
+        QuickOverlayYButtonTarget.Setting => AddonQuickSettingsTabId.Setting,
+        QuickOverlayYButtonTarget.Off => null,
+        _ => null,
+    };
+
     // OQ5-UI-09: apply an authoritative tab order from the Runtime without disturbing the visible
     // session. The five page/button/row instances are preserved; only the tab-strip row order and
     // the selected-header accent change. Selected page/row/scroll position stay exactly as they are

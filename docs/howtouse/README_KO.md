@@ -185,7 +185,7 @@ Intel XeFG를 사용하는 경우 PresentMon이 드라이버에서 생성된 모
 
 ### Quick Overlay
 
-**Quick Overlay**에서 별도의 Quick Settings Overlay 동작을 설정합니다. **현재 전원 소스만 표시 (Show only current power source)**를 켜면 Overlay에는 현재 연결된 전원 방식의 컨트롤만 표시됩니다. 메인 앱에서는 **Plugged in**과 **On battery** 설정을 계속 모두 볼 수 있습니다. **Quick Overlay Tab Order**를 펼치면 위/아래 버튼으로 탭을 한 칸씩 이동할 수 있습니다. 저장된 순서의 첫 번째 탭은 다음에 Overlay를 열 때 선택되며, 게임 중 **Setting** 페이지에서도 같은 순서를 편집할 수 있습니다.
+**Quick Overlay**에서 별도의 Quick Settings Overlay 동작을 설정합니다. **Y Button Quick Jump**는 Overlay가 열린 동안 Y 버튼을 눌렀을 때 이동할 탭을 지정하며 기본값은 **Profile**입니다. **Off**를 선택하면 Y 버튼으로 탭을 이동하지 않습니다. 이 대상은 탭 순서와 별개입니다. **Quick Overlay Tab Order**의 첫 번째 탭은 다음에 Overlay를 열 때 처음 표시되고, Y 버튼은 언제나 별도로 지정한 탭으로 이동합니다. 게임 중 **Setting → Quick Settings**에서도 Y 대상과 탭 순서를 설정할 수 있습니다. **현재 전원 소스만 표시 (Show only current power source)**를 켜면 Overlay에는 현재 연결된 전원 방식의 컨트롤만 표시됩니다. 메인 앱에서는 **Plugged in**과 **On battery** 설정을 계속 모두 볼 수 있습니다. **Quick Overlay Tab Order**를 펼치면 위/아래 버튼으로 탭을 한 칸씩 이동할 수 있습니다.
 
 ### Shortcut
 

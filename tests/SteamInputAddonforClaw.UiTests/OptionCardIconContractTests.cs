@@ -49,6 +49,7 @@ public sealed class OptionCardIconContractTests
         ("SettingsPage.xaml", "Application updates", "FontIcon:E777"),
         ("SettingsPage.xaml", "App theme", "FontIcon:E7A1"),
         ("SettingsPage.xaml", "XBOX Mode (Full Screen Experience)", "SymbolIcon:FullScreen"),
+        ("QuickOverlayPage.xaml", "Y Button Quick Jump", "FontIcon:E7FC"),
         ("QuickOverlayPage.xaml", "Show only current power source", "FontIcon:E85E"),
         ("QuickOverlayPage.xaml", "Quick Overlay Tab Order", "SymbolIcon:List"),
         ("SettingsPage.xaml", "Logging", "SymbolIcon:List"),
@@ -58,7 +59,7 @@ public sealed class OptionCardIconContractTests
     [Fact]
     public void Main_app_option_card_icons_match_the_approved_cross_page_map()
     {
-        Assert.Equal(41, ExpectedIcons.Length);
+        Assert.Equal(42, ExpectedIcons.Length);
         var controllerIcons = ExpectedIcons
             .Where(expected => expected.Page == "ControllerPage.xaml")
             .Select(expected => expected.Icon)

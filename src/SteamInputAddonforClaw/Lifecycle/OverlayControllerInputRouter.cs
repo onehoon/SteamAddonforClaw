@@ -50,6 +50,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         (b => b.B, OverlayNavigationAction.Back),
         (b => b.LeftBumper, OverlayNavigationAction.PreviousTab),
         (b => b.RightBumper, OverlayNavigationAction.NextTab),
+        (b => b.Y, OverlayNavigationAction.QuickJump),
     ];
 
     private readonly IMsiClawPreparedInputSource _source;

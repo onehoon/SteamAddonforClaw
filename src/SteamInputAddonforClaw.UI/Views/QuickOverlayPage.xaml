@@ -8,6 +8,27 @@
             <TextBlock x:Uid="QuickOverlay_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Quick Overlay" />
 
             <ctcontrols:SettingsCard
+                x:Name="YButtonQuickJumpCard"
+                x:Uid="QuickOverlay_YButtonQuickJumpCard"
+                Description="Press Y to jump to the selected tab while Quick Overlay is open."
+                Header="Y Button Quick Jump">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ComboBox
+                    x:Name="YButtonQuickJumpComboBox"
+                    x:Uid="QuickOverlay_YButtonQuickJumpComboBox"
+                    SelectionChanged="YButtonQuickJumpComboBox_SelectionChanged">
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Profile" Content="Profile" Tag="Profile" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Shortcut" Content="Shortcut" Tag="Shortcut" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Device" Content="Device" Tag="Device" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Controller" Content="Controller" Tag="Controller" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Setting" Content="Setting" Tag="Setting" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Off" Content="Off" Tag="Off" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsCard
                 x:Name="QuickSettingsPowerSourceCard"
                 x:Uid="QuickOverlay_PowerSourceCard"
                 Description="Show only the controls for the currently connected power source in Quick Settings Overlay."

@@ -39,8 +39,8 @@ public sealed class OverlayTransportTests
     [Fact]
     public void Active_profile_show_remains_a_narrow_overlay_command()
     {
-        Assert.Equal(21, OverlayTransportProtocol.CurrentVersion);
-        Assert.Equal(88, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(22, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(89, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
             OverlayTransportProtocol.CurrentVersion,
@@ -56,8 +56,8 @@ public sealed class OverlayTransportTests
     [Fact]
     public async Task Repeat_only_navigation_actions_round_trip_and_unknown_navigation_is_rejected()
     {
-        Assert.Equal(21, OverlayTransportProtocol.CurrentVersion);
-        Assert.Equal(88, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(22, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(89, FrontendTransportProtocol.CurrentVersion);
 
         foreach (var action in new[]
         {
@@ -325,7 +325,7 @@ public sealed class OverlayTransportTests
         Assert.Equal(OverlayState.Ready, ready.State);
 
         var payload = System.Text.Encoding.UTF8.GetBytes(
-            "{\"ProtocolVersion\":21,\"Kind\":\"Navigation\",\"Navigation\":99}");
+            "{\"ProtocolVersion\":22,\"Kind\":\"Navigation\",\"Navigation\":99}");
         var prefix = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(prefix, payload.Length);
         await pipe.WriteAsync(prefix);

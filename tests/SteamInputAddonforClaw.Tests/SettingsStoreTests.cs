@@ -373,6 +373,75 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void YButtonQuickJumpTarget_DefaultsToProfile_WhenMissing()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.Equal(QuickOverlayYButtonTarget.Profile, settings.YButtonQuickJumpTarget);
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+        Assert.True(settings.DeveloperMenuEnabled);
+    }
+
+    [Theory]
+    [InlineData("\"Profile\"", QuickOverlayYButtonTarget.Profile)]
+    [InlineData("\"Shortcut\"", QuickOverlayYButtonTarget.Shortcut)]
+    [InlineData("\"Device\"", QuickOverlayYButtonTarget.Device)]
+    [InlineData("\"Controller\"", QuickOverlayYButtonTarget.Controller)]
+    [InlineData("\"Setting\"", QuickOverlayYButtonTarget.Setting)]
+    [InlineData("\"Off\"", QuickOverlayYButtonTarget.Off)]
+    public void YButtonQuickJumpTarget_RoundTripsAsAStringEnum(string jsonValue, QuickOverlayYButtonTarget expected)
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        var store = new SettingsStore(path);
+        File.WriteAllText(path, $"{{\"LogLevel\":\"Debug\",\"YButtonQuickJumpTarget\":{jsonValue}}}");
+
+        Assert.Equal(expected, store.Load().YButtonQuickJumpTarget);
+
+        store.Save(new AppSettings { YButtonQuickJumpTarget = expected });
+
+        Assert.Contains($"\"YButtonQuickJumpTarget\": \"{expected}\"", File.ReadAllText(path));
+        Assert.Equal(expected, store.Load().YButtonQuickJumpTarget);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("99")]
+    [InlineData("\"99\"")]
+    [InlineData("\"Unknown\"")]
+    [InlineData("true")]
+    public void YButtonQuickJumpTarget_MalformedValueFallsBackLocally(string jsonValue)
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, $"{{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true,\"YButtonQuickJumpTarget\":{jsonValue}}}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.Equal(QuickOverlayYButtonTarget.Profile, settings.YButtonQuickJumpTarget);
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+        Assert.True(settings.DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void YButtonQuickJumpTarget_CoordinatorPersistsChangedValuesAndRejectsUnknownValues()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        coordinator.ChangeYButtonQuickJumpTarget(QuickOverlayYButtonTarget.Off);
+        Assert.Equal(QuickOverlayYButtonTarget.Off, coordinator.YButtonQuickJumpTarget);
+        Assert.Equal(QuickOverlayYButtonTarget.Off, store.Load().YButtonQuickJumpTarget);
+        Assert.Throws<ArgumentOutOfRangeException>(() => coordinator.ChangeYButtonQuickJumpTarget((QuickOverlayYButtonTarget)99));
+        Assert.Equal(QuickOverlayYButtonTarget.Off, store.Load().YButtonQuickJumpTarget);
+    }
+
+    [Fact]
     public void Stale_global_screenshot_folder_is_ignored_and_not_written_again()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
