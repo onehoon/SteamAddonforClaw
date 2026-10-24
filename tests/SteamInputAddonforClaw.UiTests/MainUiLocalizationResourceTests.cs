@@ -31,6 +31,7 @@ public sealed class MainUiLocalizationResourceTests
             "MainNav_Device.Content",
             "MainNav_Steam.Content",
             "MainNav_Xbox.Content",
+            "MainNav_QuickOverlay.Content",
             "MainNav_Shortcut.Content",
             "MainNav_HowToUse.Content",
             "HowToUse_Loading.Text",
@@ -491,7 +492,7 @@ public sealed class MainUiLocalizationResourceTests
             "Settings_PageTitle", "Settings_UpdateCard", "Settings_UpdateButton", "Settings_AppThemeCard",
             "Settings_AppTheme_System", "Settings_AppTheme_Light", "Settings_AppTheme_Dark", "Settings_GamingHomeExpander",
             "Settings_GamingHome_Off", "Settings_GamingHome_Xbox", "Settings_GamingHome_SteamBigPicture",
-            "Settings_GamingHome_Other", "Settings_GamingHomeStartupCard", "Settings_QuickSettingsPowerSourceCard",
+            "Settings_GamingHome_Other", "Settings_GamingHomeStartupCard",
             "Settings_LoggingCard", "Settings_OpenLogFolderButton", "Settings_RequiredComponentsExpander"
         };
 
@@ -538,8 +539,6 @@ public sealed class MainUiLocalizationResourceTests
             ["Settings_GamingHome_Xbox.Content"] = "XBOX",
             ["Settings_GamingHome_SteamBigPicture.Content"] = "Steam 빅픽쳐 모드",
             ["Settings_GamingHomeStartupCard.Header"] = "시작 시 XBOX 모드로 전환",
-            ["Settings_QuickSettingsPowerSourceCard.Header"] = "현재 전원 방식 옵션만 보기",
-            ["Settings_QuickSettingsPowerSourceCard.Description"] = "퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.",
             ["Settings_LoggingCard.Header"] = "로그",
             ["Settings_LoggingCard.Description"] = "앱 로그 레벨을 선택하세요.",
             ["Settings_OpenLogFolderButton.Content"] = "폴더 열기",
@@ -578,6 +577,81 @@ public sealed class MainUiLocalizationResourceTests
             Assert.DoesNotContain(key, english.Keys);
             Assert.DoesNotContain(key, korean.Keys);
         }
+    }
+
+    [Fact]
+    public void Quick_overlay_page_owns_the_moved_power_source_option_and_localizes_its_shell()
+    {
+        var root = FindRepositoryRoot();
+        var stringsDirectory = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings");
+        var english = ReadResources(Path.Combine(stringsDirectory, "en-US", "Resources.resw"));
+        var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
+        var pagePath = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml");
+        var page = XDocument.Load(pagePath);
+        Assert.Single(page.Descendants(), element => element.Name.LocalName == "SettingsCard");
+        Assert.Single(page.Descendants(), element => element.Name.LocalName == "ToggleSwitch");
+        var uidElements = page.Descendants()
+            .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
+            .ToArray();
+        var actualUids = uidElements.Select(element => (string)element.Attribute(XamlNamespace + "Uid")!).ToArray();
+        Assert.Equal(new[] { "QuickOverlay_PageTitle", "QuickOverlay_PowerSourceCard" },
+            actualUids.OrderBy(uid => uid, StringComparer.Ordinal));
+        Assert.Equal(actualUids.Length, actualUids.Distinct(StringComparer.Ordinal).Count());
+
+        foreach (var element in uidElements)
+        {
+            var uid = (string)element.Attribute(XamlNamespace + "Uid")!;
+            foreach (var property in new[] { "Text", "Header", "Description" })
+            {
+                var sourceValue = (string?)element.Attribute(property);
+                if (sourceValue is null) continue;
+
+                var key = $"{uid}.{property}";
+                Assert.Equal(sourceValue, english[key]);
+                Assert.False(string.IsNullOrWhiteSpace(korean[key]));
+            }
+        }
+
+        Assert.Equal("Quick Overlay", english["MainNav_QuickOverlay.Content"]);
+        Assert.Equal("퀵 오버레이", korean["MainNav_QuickOverlay.Content"]);
+        Assert.Equal("퀵 오버레이", korean["QuickOverlay_PageTitle.Text"]);
+        Assert.Equal("Show only current power source", english["QuickOverlay_PowerSourceCard.Header"]);
+        Assert.Equal("현재 전원 방식 옵션만 보기", korean["QuickOverlay_PowerSourceCard.Header"]);
+        Assert.Equal("퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.",
+            korean["QuickOverlay_PowerSourceCard.Description"]);
+        Assert.DoesNotContain("Settings_QuickSettingsPowerSourceCard.Header", english.Keys);
+        Assert.DoesNotContain("Settings_QuickSettingsPowerSourceCard.Description", english.Keys);
+        Assert.DoesNotContain("Settings_QuickSettingsPowerSourceCard.Header", korean.Keys);
+        Assert.DoesNotContain("Settings_QuickSettingsPowerSourceCard.Description", korean.Keys);
+
+        var navigation = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var navItem = Assert.Single(navigation.Descendants(), element =>
+            element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == "QuickOverlay");
+        Assert.Equal("MainNav_QuickOverlay", (string?)navItem.Attribute(XamlNamespace + "Uid"));
+        Assert.Equal("Quick Overlay", (string?)navItem.Attribute("Content"));
+
+        var englishReadme = File.ReadAllText(Path.Combine(root, "README.md"));
+        var koreanReadme = File.ReadAllText(Path.Combine(root, "docs", "howtouse", "README_KO.md"));
+        foreach (var readme in new[] { englishReadme, koreanReadme })
+        {
+            var clawHud = readme.IndexOf("### ClawHUD", StringComparison.Ordinal);
+            var quickOverlay = readme.IndexOf("### Quick Overlay", StringComparison.Ordinal);
+            var shortcut = readme.IndexOf("### Shortcut", StringComparison.Ordinal);
+            Assert.True(clawHud >= 0 && quickOverlay > clawHud && shortcut > quickOverlay);
+            var quickOverlaySection = readme[quickOverlay..shortcut];
+            Assert.Contains("current power source", quickOverlaySection, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var englishSettingsStart = englishReadme.IndexOf("### Settings", StringComparison.Ordinal);
+        var englishSettingsEnd = englishReadme.IndexOf("## Game profiles", englishSettingsStart, StringComparison.Ordinal);
+        var koreanSettingsStart = koreanReadme.IndexOf("### Settings", StringComparison.Ordinal);
+        var koreanSettingsEnd = koreanReadme.IndexOf("## 게임 프로필", koreanSettingsStart, StringComparison.Ordinal);
+        Assert.True(englishSettingsStart >= 0 && englishSettingsEnd > englishSettingsStart);
+        Assert.True(koreanSettingsStart >= 0 && koreanSettingsEnd > koreanSettingsStart);
+        Assert.DoesNotContain("Show only current power source", englishReadme[englishSettingsStart..englishSettingsEnd], StringComparison.Ordinal);
+        Assert.DoesNotContain("현재 전원 방식 옵션만 보기", koreanReadme[koreanSettingsStart..koreanSettingsEnd], StringComparison.Ordinal);
+        Assert.Contains("**Setting** — rearrange the Overlay tabs and choose whether to show only the current power source.", englishReadme, StringComparison.Ordinal);
+        Assert.Contains("**Setting** — Overlay 탭 순서와 현재 전원 소스만 표시하는 옵션을 설정합니다.", koreanReadme, StringComparison.Ordinal);
     }
 
     [Fact]

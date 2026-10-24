@@ -49,7 +49,7 @@ public sealed class OptionCardIconContractTests
         ("SettingsPage.xaml", "Application updates", "FontIcon:E777"),
         ("SettingsPage.xaml", "App theme", "FontIcon:E7A1"),
         ("SettingsPage.xaml", "XBOX Mode (Full Screen Experience)", "SymbolIcon:FullScreen"),
-        ("SettingsPage.xaml", "Show only current power source", "SymbolIcon:View"),
+        ("QuickOverlayPage.xaml", "Show only current power source", "FontIcon:E85E"),
         ("SettingsPage.xaml", "Logging", "SymbolIcon:List"),
         ("SettingsPage.xaml", "Required Components", "SymbolIcon:Repair"),
     ];

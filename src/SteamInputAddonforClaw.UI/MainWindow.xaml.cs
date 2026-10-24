@@ -73,6 +73,7 @@ public sealed partial class MainWindow : Window
     private ProfilePage? _profileContent;
     private XboxPage? _xboxContent;
     private OverlayPage? _overlayContent;
+    private QuickOverlayPage? _quickOverlayContent;
     private ShortcutPage? _shortcutContent;
     private WindowsTweaksPage? _tweaksContent;
     private SettingsPage? _settingsContent;
@@ -182,6 +183,8 @@ public sealed partial class MainWindow : Window
         _settingsContent?.RequestGamingHomeRefresh();
         _overlayContent?.RequestClawHudRefresh();
         _shortcutContent?.RequestRefresh();
+        if (_navigationState.CurrentPage == MainNavigationPage.QuickOverlay)
+            _quickOverlayContent?.RequestRefresh();
         if (_navigationState.CurrentPage == MainNavigationPage.Tweaks)
             _tweaksContent?.RequestRefresh();
     }
@@ -285,6 +288,16 @@ public sealed partial class MainWindow : Window
         page.Initialize(_frontend);
         OverlayPageHost.Content = page;
         return _overlayContent = page;
+    }
+
+    private QuickOverlayPage GetOrCreateQuickOverlayPage()
+    {
+        if (_quickOverlayContent is not null) return _quickOverlayContent;
+
+        var page = new QuickOverlayPage();
+        page.Initialize(_bootstrap, _frontend);
+        QuickOverlayPageHost.Content = page;
+        return _quickOverlayContent = page;
     }
 
     private ShortcutPage GetOrCreateShortcutPage()
@@ -531,6 +544,7 @@ public sealed partial class MainWindow : Window
         MainNavigationPage.Controller => _controllerContent is not null,
         MainNavigationPage.Settings => _settingsContent is not null,
         MainNavigationPage.Overlay => _overlayContent is not null,
+        MainNavigationPage.QuickOverlay => _quickOverlayContent is not null,
         MainNavigationPage.Shortcut => _shortcutContent is not null,
         MainNavigationPage.Tweaks => _tweaksContent is not null,
         MainNavigationPage.Profile => _profileContent is not null,
@@ -549,6 +563,7 @@ public sealed partial class MainWindow : Window
                 case MainNavigationPage.MsiUpdates: _ = GetOrCreateMsiUpdatesPage(); break;
                 case MainNavigationPage.Settings: _ = GetOrCreateSettingsPage(); break;
                 case MainNavigationPage.Overlay: _ = GetOrCreateOverlayPage(); break;
+                case MainNavigationPage.QuickOverlay: _ = GetOrCreateQuickOverlayPage(); break;
                 case MainNavigationPage.Shortcut: _ = GetOrCreateShortcutPage(); break;
                 case MainNavigationPage.Tweaks: _ = GetOrCreateTweaksPage(); break;
                 case MainNavigationPage.Profile: _ = GetOrCreateProfilePage(); break;
@@ -709,6 +724,7 @@ public sealed partial class MainWindow : Window
         XboxPageHost.Visibility = page == MainNavigationPage.Xbox ? Visibility.Visible : Visibility.Collapsed;
         ControllerPageHost.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
         OverlayPageHost.Visibility = page == MainNavigationPage.Overlay ? Visibility.Visible : Visibility.Collapsed;
+        QuickOverlayPageHost.Visibility = page == MainNavigationPage.QuickOverlay ? Visibility.Visible : Visibility.Collapsed;
         ShortcutPageHost.Visibility = page == MainNavigationPage.Shortcut ? Visibility.Visible : Visibility.Collapsed;
         TweaksPageHost.Visibility = page == MainNavigationPage.Tweaks ? Visibility.Visible : Visibility.Collapsed;
         HowToUsePageHost.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
@@ -732,6 +748,7 @@ public sealed partial class MainWindow : Window
         if (page == MainNavigationPage.Xbox) _xboxContent!.Activate();
         else if (wasXbox) _xboxContent?.Deactivate();
         if (page == MainNavigationPage.Overlay) _overlayContent!.Activate();
+        if (page == MainNavigationPage.QuickOverlay) _quickOverlayContent!.Activate();
         if (page == MainNavigationPage.Shortcut) _shortcutContent!.Activate();
         else if (wasShortcut) _shortcutContent?.Deactivate();
         if (page == MainNavigationPage.Tweaks) _tweaksContent!.Activate();
@@ -767,6 +784,7 @@ public sealed partial class MainWindow : Window
         MainNavigationPage.Profile => "Profile",
         MainNavigationPage.Xbox => "Xbox",
         MainNavigationPage.Overlay => "Overlay",
+        MainNavigationPage.QuickOverlay => "QuickOverlay",
         MainNavigationPage.Shortcut => "Shortcut",
         MainNavigationPage.Tweaks => "Tweaks",
         MainNavigationPage.HowToUse => "HowToUse",

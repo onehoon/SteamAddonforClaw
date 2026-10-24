@@ -18,7 +18,7 @@ public sealed class XboxCatalogPageUiTests
             .Select(element => (string?)element.Attribute("Content"))
             .ToArray();
 
-        Assert.Equal(new[] { "Device", "MSI Update", "Controller", "Steam", "XBOX", "ClawHUD", "Shortcut", "Tweaks", "How to Use" }, labels);
+        Assert.Equal(new[] { "Device", "MSI Update", "Controller", "Steam", "XBOX", "ClawHUD", "Quick Overlay", "Shortcut", "Tweaks", "How to Use" }, labels);
         var steam = menu.Elements().Single(element => (string?)element.Attribute("Content") == "Steam");
         var xbox = menu.Elements().Single(element => (string?)element.Attribute("Content") == "XBOX");
         var clawHud = menu.Elements().Single(element => (string?)element.Attribute("Content") == "ClawHUD");

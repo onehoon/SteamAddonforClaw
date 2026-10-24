@@ -50,6 +50,11 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem x:Uid="MainNav_QuickOverlay" Content="Quick Overlay" Tag="QuickOverlay">
+                <NavigationViewItem.Icon>
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8A0;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem x:Uid="MainNav_Shortcut" Content="Shortcut" Tag="Shortcut">
                 <NavigationViewItem.Icon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71B;" />
@@ -75,6 +80,7 @@
             <ContentControl x:Name="ProfilePageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="XboxPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="OverlayPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="QuickOverlayPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="ShortcutPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="TweaksPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="SettingsPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />

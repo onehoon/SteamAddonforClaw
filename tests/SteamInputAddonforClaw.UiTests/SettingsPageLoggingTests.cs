@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class SettingsPageLoggingTests
 {
     [Fact]
-    public void Settings_page_owns_a_compact_logging_card_between_power_source_and_components()
+    public void Settings_page_owns_a_compact_logging_card_before_components()
     {
         var root = FindRepositoryRoot();
         var xamlPath = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
@@ -36,8 +36,7 @@ public sealed class SettingsPageLoggingTests
         Assert.Contains("Click=\"OpenLogFolderButton_Click\"", xaml, StringComparison.Ordinal);
 
         Assert.DoesNotContain("SelectedIndex=", xaml, StringComparison.Ordinal);
-        Assert.True(xaml.IndexOf("x:Name=\"QuickSettingsPowerSourceCard\"", StringComparison.Ordinal)
-            < xaml.IndexOf("Header=\"Logging\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("QuickSettingsPowerSourceCard", xaml, StringComparison.Ordinal);
         Assert.True(xaml.IndexOf("Header=\"Logging\"", StringComparison.Ordinal)
             < xaml.IndexOf("x:Name=\"RequiredComponentsExpander\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("x:Name=\"RequiredComponentsExpander\"", StringComparison.Ordinal)

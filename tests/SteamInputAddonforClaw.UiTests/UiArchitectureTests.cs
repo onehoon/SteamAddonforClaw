@@ -143,7 +143,7 @@ public sealed class UiArchitectureTests
         Assert.Equal(new[] { "DevicePage" }, eagerPages);
 
         var hosts = pageHostGrid.Elements().Where(element => element.Name.LocalName == "ContentControl").ToArray();
-        Assert.Equal(10, hosts.Length);
+        Assert.Equal(11, hosts.Length);
         Assert.All(hosts, host =>
         {
             Assert.Equal("Collapsed", (string?)host.Attribute("Visibility"));
@@ -177,6 +177,7 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("ScanXboxGamesAsync", materialize, StringComparison.Ordinal);
         Assert.DoesNotContain(".Activate()", materialize, StringComparison.Ordinal);
         Assert.Contains("case MainNavigationPage.HowToUse: _ = GetOrCreateHowToUsePage(); break;", materialize, StringComparison.Ordinal);
+        Assert.Contains("case MainNavigationPage.QuickOverlay: _ = GetOrCreateQuickOverlayPage(); break;", materialize, StringComparison.Ordinal);
         Assert.Contains("TryMaterializeMainPage(page)", showPage, StringComparison.Ordinal);
         Assert.True(showPage.IndexOf("TryMaterializeMainPage(page)", StringComparison.Ordinal)
             < showPage.IndexOf("ControllerPageHost.Visibility =", StringComparison.Ordinal));
@@ -190,12 +191,25 @@ public sealed class UiArchitectureTests
         foreach (var page in new[] { "Controller", "Settings", "Overlay", "Shortcut", "Tweaks", "Profile", "Xbox" })
             Assert.Contains($"MainNavigationPage.{page}", warmupOrder, StringComparison.Ordinal);
         Assert.DoesNotContain("MainNavigationPage.HowToUse", warmupOrder, StringComparison.Ordinal);
+        Assert.DoesNotContain("MainNavigationPage.QuickOverlay", warmupOrder, StringComparison.Ordinal);
         Assert.DoesNotContain("DeveloperMenu", warmupOrder, StringComparison.Ordinal);
 
         var settingsFactory = ExtractMethod(mainWindow, "private SettingsPage GetOrCreateSettingsPage()");
         Assert.True(settingsFactory.IndexOf("page.AppUpdateSnapshotRendered += OnAppUpdateSnapshotRendered", StringComparison.Ordinal)
             < settingsFactory.IndexOf("page.Initialize(_bootstrap, _frontend, _mainUiThemePreference)", StringComparison.Ordinal));
         Assert.Contains("if (_latestSystemStatus is { } status)", settingsFactory, StringComparison.Ordinal);
+
+        var quickOverlayFactory = ExtractMethod(mainWindow, "private QuickOverlayPage GetOrCreateQuickOverlayPage()");
+        Assert.Contains("page.Initialize(_bootstrap, _frontend)", quickOverlayFactory, StringComparison.Ordinal);
+        Assert.Contains("QuickOverlayPageHost.Content = page", quickOverlayFactory, StringComparison.Ordinal);
+        var quickOverlayPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/QuickOverlayPage.xaml.cs"));
+        var quickOverlayInitialize = ExtractMethod(quickOverlayPage, "internal void Initialize(");
+        var quickOverlayActivate = ExtractMethod(quickOverlayPage, "internal void Activate()");
+        Assert.DoesNotContain("GetBootstrapAsync", quickOverlayInitialize, StringComparison.Ordinal);
+        Assert.Contains("RequestRefresh()", quickOverlayActivate, StringComparison.Ordinal);
+        Assert.Contains("await _frontend.GetBootstrapAsync()", quickOverlayPage, StringComparison.Ordinal);
+        Assert.Contains("_navigationState.CurrentPage == MainNavigationPage.QuickOverlay", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (page == MainNavigationPage.QuickOverlay) _quickOverlayContent!.Activate();", mainWindow, StringComparison.Ordinal);
 
         var statusRender = ExtractMethod(mainWindow, "private void RenderSystemStatus(FrontendStatusSnapshot snapshot)");
         Assert.Contains("_latestSystemStatus = snapshot", statusRender, StringComparison.Ordinal);

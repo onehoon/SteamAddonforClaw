@@ -2,7 +2,7 @@
 
 Steam Addon for Claw adds controller integration and game-specific performance controls for supported MSI Claw handhelds. It can present the built-in controller as a Steam Deck or DualSense Edge while Steam gaming is active, and as an Xbox 360 controller otherwise. You can choose a global Steam controller and an optional per-game Steam override, configure the controller's front and rear buttons, set per-game performance options, and use a performance HUD, shortcuts, a separate Quick Settings Overlay, and Windows gaming-home behavior.
 
-This guide describes the features currently exposed by the app. The Main App includes **Device**, **MSI Update**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Shortcut**, **Tweaks**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
+This guide describes the features currently exposed by the app. The Main App includes **Device**, **MSI Update**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Quick Overlay**, **Shortcut**, **Tweaks**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
 
 ## Table of contents
 
@@ -19,6 +19,7 @@ This guide describes the features currently exposed by the app. The Main App inc
   - [Steam](#steam)
   - [XBOX](#xbox)
   - [ClawHUD](#clawhud)
+  - [Quick Overlay](#quick-overlay)
   - [Shortcut](#shortcut)
   - [Tweaks](#tweaks)
   - [Settings](#settings)
@@ -191,6 +192,10 @@ With Intel XeFG, the FPS value may not include every driver-generated output fra
 
 The page lets you adjust **Size** (**-2**, **-1**, **Default**, **+1**, **+2**), **Font** (**Unispace** or **Segoe UI Variable**), **Alignment** (**Left**, **Center**, **Right**), and **Background width** (**Full width** or **Content width**). **Opacity** ranges from 50% to 100% in 5% steps. **Intel VRR Range Fix** is a device/display-specific option for correcting a variable-refresh-rate range when applicable; it is not needed on every display. If the HUD reports a problem, use the page's **Retry** action when available.
 
+### Quick Overlay
+
+Use **Quick Overlay** to configure the separate Quick Settings Overlay. **Show only current power source** limits that Overlay to controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values.
+
 ### Shortcut
 
 Use **Shortcut** to add, edit, delete, and drag to reorder items shown in Quick Settings Overlay. Supported actions are:
@@ -237,10 +242,6 @@ Select **Off**, **XBOX**, or **Steam Big Picture** as the Windows gaming home. *
 #### App theme
 
 Choose **System**, **Light**, or **Dark** for the Main App's appearance.
-
-#### Show only current power source
-
-When enabled, Quick Settings Overlay shows controls for the currently connected power source. The Main App continues to show both **Plugged in** and **On battery** values.
 
 #### Logging
 
