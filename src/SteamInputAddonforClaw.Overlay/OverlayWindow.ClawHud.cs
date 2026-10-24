@@ -159,50 +159,35 @@ public sealed partial class OverlayWindow
         var capabilities = row.Capabilities;
         return new OverlayRow(row.Container, new OverlayRowCapabilities(
             IsSelectable: () => _expandedSettingCard == card &&
-                (capabilities.IsSelectable() || IsCurrentPendingSettingRow(card, row.Container)),
+                (capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(card, row.Container)),
             Activate: capabilities.Activate,
             Adjust: capabilities.Adjust));
     }
 
-    private bool IsCurrentPendingSettingRow(SettingCardId card, Border container)
+    private bool IsNavigableDuringPendingSettingMutation(SettingCardId card, Border container)
     {
-        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Setting ||
-            !_pageRows.TryGetValue(AddonQuickSettingsTabId.Setting, out var rows) ||
+        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Setting)
+            return false;
+
+        if (card == SettingCardId.ClawHud && _clawHudMutation.IsInFlight)
+        {
+            var snapshot = _clawHudMutation.Snapshot;
+            return ReferenceEquals(container, _clawHudEnabledRow?.Container)
+                ? snapshot is not null
+                : snapshot?.RuntimeState == FrontendClawHudRuntimeState.Ready &&
+                    snapshot.Settings is not null &&
+                    _clawHudRows.Any(row => ReferenceEquals(row.Container, container));
+        }
+
+        if (!_pageRows.TryGetValue(AddonQuickSettingsTabId.Setting, out var rows) ||
             _rowSelection.SelectedIndex is not { } selectedIndex ||
             selectedIndex < 0 || selectedIndex >= rows.Count ||
             !ReferenceEquals(rows[selectedIndex].Container, container))
             return false;
 
-        if (card == SettingCardId.ClawHud && _clawHudMutation.IsInFlight &&
-            ReferenceEquals(GetPendingClawHudRowContainer(), container))
-        {
-            var snapshot = _clawHudMutation.Snapshot;
-            return ReferenceEquals(container, _clawHudEnabledRow?.Container)
-                ? snapshot is not null
-                : snapshot?.RuntimeState == FrontendClawHudRuntimeState.Ready && snapshot.Settings is not null;
-        }
-
         return card == SettingCardId.QuickSettings && _quickSettingsMutationInFlight &&
             _quickSettingsSettingsAvailable &&
             ReferenceEquals(container, _quickSettingsCurrentPowerSourceOnlyRow?.Container);
-    }
-
-    private Border? GetPendingClawHudRowContainer()
-    {
-        if (_clawHudMutation.PendingEnabled is not null)
-            return _clawHudEnabledRow?.Container;
-
-        return _clawHudMutation.PendingIntent?.Kind switch
-        {
-            FrontendClawHudMutationKind.DisplayMode => _clawHudDisplayModeRow?.Container,
-            FrontendClawHudMutationKind.HudSizeOffset => _clawHudSizeRow?.Container,
-            FrontendClawHudMutationKind.Font => _clawHudFontRow?.Container,
-            FrontendClawHudMutationKind.Alignment => _clawHudAlignmentRow?.Container,
-            FrontendClawHudMutationKind.BackgroundMode => _clawHudBackgroundRow?.Container,
-            FrontendClawHudMutationKind.PreviewOpacity or FrontendClawHudMutationKind.CommitOpacity => _clawHudOpacityRow?.Container,
-            FrontendClawHudMutationKind.IntelVrrRangeFixEnabled => _clawHudVrrRow?.Container,
-            _ => null,
-        };
     }
 
     private void ToggleSettingCard(SettingCardId id)

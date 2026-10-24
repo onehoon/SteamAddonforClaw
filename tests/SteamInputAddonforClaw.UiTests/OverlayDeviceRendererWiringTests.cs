@@ -1046,9 +1046,12 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.True(completion.IndexOf("ApplyFrontendSettingsState(response.Settings", StringComparison.Ordinal)
             < completion.IndexOf("SetQuickSettingsCurrentPowerSourceMutationInFlight(false)", StringComparison.Ordinal));
 
-        Assert.Contains("capabilities.IsSelectable() || IsCurrentPendingSettingRow(card, row.Container)", clawHud);
+        Assert.Contains("capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(card, row.Container)", clawHud);
         Assert.Contains("ReferenceEquals(rows[selectedIndex].Container, container)", clawHud);
-        Assert.Contains("snapshot?.RuntimeState == FrontendClawHudRuntimeState.Ready && snapshot.Settings is not null", clawHud);
+        Assert.Contains("snapshot?.RuntimeState == FrontendClawHudRuntimeState.Ready &&", clawHud);
+        Assert.Contains("snapshot.Settings is not null &&", clawHud);
+        Assert.Contains("_clawHudRows.Any(row => ReferenceEquals(row.Container, container))", clawHud);
+        Assert.DoesNotContain("GetPendingClawHudRowContainer", clawHud);
         Assert.Contains("_quickSettingsSettingsAvailable &&", clawHud);
         Assert.Contains("_expandedSettingCard == card &&", clawHud);
 
@@ -1067,7 +1070,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var wrapper = clawHud[wrapperStart..wrapperEnd];
 
         Assert.Contains("IsSelectable: () => _expandedSettingCard == card &&", wrapper);
-        Assert.Contains("capabilities.IsSelectable() || IsCurrentPendingSettingRow(card, row.Container)", wrapper);
+        Assert.Contains("capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(card, row.Container)", wrapper);
         Assert.Contains("Activate: capabilities.Activate", wrapper);
         Assert.Contains("Adjust: capabilities.Adjust", wrapper);
         Assert.DoesNotContain("rowIndex", clawHud);
