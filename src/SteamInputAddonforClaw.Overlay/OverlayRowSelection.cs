@@ -12,8 +12,9 @@ internal sealed record OverlayRowCapabilities(
     bool AllowsDpadHoldRepeat = false);
 
 // One logical controller selection for the active Overlay page. Pure state: it knows nothing
-// about controller hardware, tabs, XAML, scrolling, settings, or feature mutation. Bounded /
-// no-wrap; unselectable rows are skipped; zero selectable rows is a valid (null) state.
+// about controller hardware, tabs, XAML, scrolling, settings, or feature mutation. Vertical movement
+// wraps between selectable rows; unselectable rows are skipped; zero selectable rows is a valid
+// (null) state.
 internal sealed class OverlayRowSelection
 {
     private IReadOnlyList<OverlayRowCapabilities> _rows = [];
@@ -84,6 +85,12 @@ internal sealed class OverlayRowSelection
         var changed = NormalizeSelection();
         var start = _selectedIndex is { } index ? index + direction : 0;
         var next = FirstSelectableFrom(start, direction);
+        if (next is null && !changed)
+        {
+            var wrapStart = direction < 0 ? _rows.Count - 1 : 0;
+            next = FirstSelectableFrom(wrapStart, direction);
+        }
+
         if (next is null || next == _selectedIndex)
             return changed;
         _selectedIndex = next;

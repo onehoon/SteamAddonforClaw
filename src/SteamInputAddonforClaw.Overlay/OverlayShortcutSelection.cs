@@ -71,7 +71,12 @@ internal sealed class OverlayShortcutSelection
         var targetRow = row + deltaRow;
         var rowCount = (TileCount + ColumnCount - 1) / ColumnCount;
         if (targetRow < 0 || targetRow >= rowCount)
-            return false;
+        {
+            if (rowCount <= 1)
+                return false;
+
+            targetRow = deltaRow < 0 ? rowCount - 1 : 0;
+        }
 
         var column = selected % ColumnCount;
         var targetIndex = targetRow * ColumnCount + column;
