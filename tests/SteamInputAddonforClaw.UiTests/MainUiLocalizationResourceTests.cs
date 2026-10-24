@@ -638,8 +638,15 @@ public sealed class MainUiLocalizationResourceTests
             new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" }.Select(name => english[$"QuickOverlay_YButtonQuickJump_{name}.Content"]));
         Assert.Equal(new[] { "프로필", "바로 가기", "디바이스", "컨트롤러", "설정", "사용 안 함" },
             new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" }.Select(name => korean[$"QuickOverlay_YButtonQuickJump_{name}.Content"]));
-        Assert.Equal("Y Button Quick Jump destination", english["QuickOverlay_YButtonQuickJumpComboBox.AutomationProperties.Name"]);
-        Assert.Equal("Y 버튼 빠른 탭 이동 대상", korean["QuickOverlay_YButtonQuickJumpComboBox.AutomationProperties.Name"]);
+        Assert.Equal("Y Button Quick Jump destination", english["QuickOverlay_YButtonQuickJumpComboBox_A11y"]);
+        Assert.Equal("Y 버튼 빠른 탭 이동 대상", korean["QuickOverlay_YButtonQuickJumpComboBox_A11y"]);
+
+        var quickOverlayPageSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
+        Assert.Contains("AutomationProperties.SetName(", quickOverlayPageSource, StringComparison.Ordinal);
+        Assert.Contains("YButtonQuickJumpComboBox,", quickOverlayPageSource, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(", quickOverlayPageSource, StringComparison.Ordinal);
+        Assert.Contains("\"QuickOverlay_YButtonQuickJumpComboBox_A11y\"", quickOverlayPageSource, StringComparison.Ordinal);
         Assert.Equal("Show only current power source", english["QuickOverlay_PowerSourceCard.Header"]);
         Assert.Equal("현재 전원 방식 옵션만 보기", korean["QuickOverlay_PowerSourceCard.Header"]);
         Assert.Equal("퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.",

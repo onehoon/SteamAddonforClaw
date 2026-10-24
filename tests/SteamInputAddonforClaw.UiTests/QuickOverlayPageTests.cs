@@ -58,7 +58,11 @@ public sealed class QuickOverlayPageTests
         var combo = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "ComboBox");
         Assert.Equal(new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" },
             combo.Elements().Select(element => (string?)element.Attribute("Tag")));
-        Assert.All(combo.Elements(), item => Assert.NotNull(item.Attribute("AutomationProperties.Name")));
+        Assert.All(combo.Elements(), item =>
+        {
+            Assert.NotNull(item.Attribute("Content"));
+            Assert.NotNull(item.Attribute("Tag"));
+        });
 
         var code = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
         var initialize = ExtractMethod(code, "internal void Initialize(");

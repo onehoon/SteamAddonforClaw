@@ -18,14 +18,13 @@
                 <ComboBox
                     x:Name="YButtonQuickJumpComboBox"
                     x:Uid="QuickOverlay_YButtonQuickJumpComboBox"
-                    AutomationProperties.Name="Y Button Quick Jump destination"
                     SelectionChanged="YButtonQuickJumpComboBox_SelectionChanged">
-                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Profile" AutomationProperties.Name="Profile" Content="Profile" Tag="Profile" />
-                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Shortcut" AutomationProperties.Name="Shortcut" Content="Shortcut" Tag="Shortcut" />
-                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Device" AutomationProperties.Name="Device" Content="Device" Tag="Device" />
-                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Controller" AutomationProperties.Name="Controller" Content="Controller" Tag="Controller" />
-                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Setting" AutomationProperties.Name="Setting" Content="Setting" Tag="Setting" />
-                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Off" AutomationProperties.Name="Off" Content="Off" Tag="Off" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Profile" Content="Profile" Tag="Profile" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Shortcut" Content="Shortcut" Tag="Shortcut" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Device" Content="Device" Tag="Device" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Controller" Content="Controller" Tag="Controller" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Setting" Content="Setting" Tag="Setting" />
+                    <ComboBoxItem x:Uid="QuickOverlay_YButtonQuickJump_Off" Content="Off" Tag="Off" />
                 </ComboBox>
             </ctcontrols:SettingsCard>
 

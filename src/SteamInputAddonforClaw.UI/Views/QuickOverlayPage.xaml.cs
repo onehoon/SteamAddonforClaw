@@ -34,6 +34,11 @@ public sealed partial class QuickOverlayPage : UserControl
     public QuickOverlayPage()
     {
         InitializeComponent();
+        AutomationProperties.SetName(
+            YButtonQuickJumpComboBox,
+            MainUiStrings.Get(
+                "QuickOverlay_YButtonQuickJumpComboBox_A11y",
+                "Y Button Quick Jump destination"));
         foreach (var tabId in TabOrderTabIds)
             _tabOrderRows.Add(tabId, CreateTabOrderRow(tabId));
     }
