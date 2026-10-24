@@ -160,10 +160,10 @@ public sealed partial class QuickOverlayPage : UserControl
             {
                 FontFamily = new FontFamily("Segoe Fluent Icons"),
                 Glyph = isEarlier ? "\uE74A" : "\uE74B",
-                FontSize = 20,
+                FontSize = 16,
             },
             Width = 40,
-            Height = 32,
+            Height = 28,
             Tag = tabId,
         };
         AutomationProperties.SetName(button, accessibleName);
