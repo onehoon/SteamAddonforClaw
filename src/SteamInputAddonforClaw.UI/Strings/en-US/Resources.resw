@@ -417,6 +417,12 @@
   <data name="QuickOverlay_PageTitle.Text" xml:space="preserve"><value>Quick Overlay</value></data>
   <data name="QuickOverlay_PowerSourceCard.Header" xml:space="preserve"><value>Show only current power source</value></data>
   <data name="QuickOverlay_PowerSourceCard.Description" xml:space="preserve"><value>Show only the controls for the currently connected power source in Quick Settings Overlay.</value></data>
+  <data name="QuickOverlay_TabOrderExpander.Header" xml:space="preserve"><value>Quick Overlay Tab Order</value></data>
+  <data name="QuickOverlay_TabOrderExpander.Description" xml:space="preserve"><value>Set the tab order and which tab opens first.</value></data>
+  <data name="QuickOverlay_TabOrderStatusText.Text" xml:space="preserve"><value>Loading tab order…</value></data>
+  <data name="QuickOverlay_TabOrder_MoveUp_A11y" xml:space="preserve"><value>Move {0} up</value></data>
+  <data name="QuickOverlay_TabOrder_MoveDown_A11y" xml:space="preserve"><value>Move {0} down</value></data>
+  <data name="QuickOverlay_TabOrder_Unavailable" xml:space="preserve"><value>Tab order is currently unavailable.</value></data>
   <data name="MainNav_Shortcut.Content" xml:space="preserve"><value>Shortcut</value></data>
   <data name="MainNav_HowToUse.Content" xml:space="preserve"><value>How to Use</value></data>
   <data name="HowToUse_Failure.Text" xml:space="preserve"><value>How to Use could not be loaded.</value></data>

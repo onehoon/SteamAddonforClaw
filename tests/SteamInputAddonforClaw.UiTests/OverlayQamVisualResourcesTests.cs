@@ -323,6 +323,12 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("x:Key=\"QamValueButtonStyle\" TargetType=\"primitives:ButtonBase\"", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml")));
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", valueRow);
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
+        Assert.Contains("CreateMoveButton(\"\\uE74A\", \"Move earlier\", -1)", tabOrder);
+        Assert.Contains("CreateMoveButton(\"\\uE74B\", \"Move later\", +1)", tabOrder);
+        Assert.Contains("FontFamily = new FontFamily(\"Segoe Fluent Icons\")", tabOrder);
+        Assert.Contains("FontSize = 20", tabOrder);
+        Assert.Contains("MinHeight = 32", tabOrder);
+        Assert.Contains("MinWidth = OverlayQamResources.Get(\"QamValueButtonWidth\", 40.0)", tabOrder);
 
         Assert.DoesNotContain("_profileCatalog", profile);
         Assert.Contains("ShortcutVisualColumnCount = 3", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs")));

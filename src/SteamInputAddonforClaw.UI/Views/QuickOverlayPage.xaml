@@ -21,6 +21,23 @@
                     OnContent=""
                     Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsExpander
+                x:Name="QuickOverlayTabOrderExpander"
+                x:Uid="QuickOverlay_TabOrderExpander"
+                Description="Set the tab order and which tab opens first."
+                Header="Quick Overlay Tab Order"
+                IsExpanded="False">
+                <ctcontrols:SettingsExpander.HeaderIcon>
+                    <SymbolIcon Symbol="List" />
+                </ctcontrols:SettingsExpander.HeaderIcon>
+                <ctcontrols:SettingsExpander.Items>
+                    <TextBlock
+                        x:Name="QuickOverlayTabOrderStatusText"
+                        x:Uid="QuickOverlay_TabOrderStatusText"
+                        Text="Loading tab order…" />
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
         </StackPanel>
     </ScrollViewer>
 </UserControl>
