@@ -356,6 +356,7 @@ public sealed partial class OverlayWindow
         RenderControllerLedRows();
         ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
         ApplyQuickSettingsYButtonQuickJumpTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
+        ApplyYButtonQuickJumpFooterTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
         RestoreControllerRowSelection(preferredControllerIndex);
     }
 

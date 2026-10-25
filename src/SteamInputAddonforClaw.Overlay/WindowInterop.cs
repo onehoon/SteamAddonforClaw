@@ -41,7 +41,7 @@ internal static class WindowInterop
     private const uint SwpHideWindow = 0x0080;
     private const uint SwpFrameChanged = 0x0020;
     private const uint DwmwaWindowCornerPreference = 33;
-    private const int DwmcpRound = 2;
+    private const int DwmcpDoNotRound = 1;
     private const uint WmNcCalcSize = 0x0083;
     private const uint WmSetCursor = 0x0020;
     private const uint WmMouseActivate = 0x0021;
@@ -71,7 +71,7 @@ internal static class WindowInterop
     private static nint _outsideClickHook;
     private static Action<OverlayOutsideClick>? _outsideClickCallback;
     private static int _dismissSignaled;
-    private static int _roundedCornerWarningLogged;
+    private static int _squareCornerWarningLogged;
 
     internal static nint GetWindowHandle(OverlayWindow window) => WindowNative.GetWindowHandle(window);
 
@@ -191,7 +191,7 @@ internal static class WindowInterop
             presenter.IsMinimizable = false;
         }
 
-        ApplyRoundedCorners(hwnd);
+        ApplySquareCorners(hwnd);
 
         if (!SetWindowPos(hwnd, HwndTopmost, rect.X, rect.Y, rect.Width, rect.Height,
                 SwpNoActivate | SwpNoOwnerZOrder | SwpFrameChanged))
@@ -270,17 +270,17 @@ internal static class WindowInterop
         return (exStyle & WsExTopmost) != 0;
     }
 
-    private static void ApplyRoundedCorners(nint hwnd)
+    private static void ApplySquareCorners(nint hwnd)
     {
-        var preference = DwmcpRound;
+        var preference = DwmcpDoNotRound;
         var result = DwmSetWindowAttribute(
             hwnd,
             DwmwaWindowCornerPreference,
             ref preference,
             (uint)Marshal.SizeOf<int>());
-        if (result == 0 || Interlocked.Exchange(ref _roundedCornerWarningLogged, 1) != 0) return;
+        if (result == 0 || Interlocked.Exchange(ref _squareCornerWarningLogged, 1) != 0) return;
 
-        OverlayLog.Warn("Window", "Could not apply rounded Overlay window corners; continuing with the usable square surface.",
+        OverlayLog.Warn("Window", "Could not disable rounded Overlay window corners; continuing without failing Overlay setup.",
             null,
             ("Operation", "DwmSetWindowAttribute"),
             ("Attribute", DwmwaWindowCornerPreference),

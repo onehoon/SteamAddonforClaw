@@ -16,9 +16,11 @@ public sealed partial class OverlayWindow : Window
         InitializeComponent();
         _rowSelectedBrush = OverlayQamResources.Brush("QamFocusBorderBrush");
         _rowSelectedFillBrush = OverlayQamResources.Brush("QamSelectedFillBrush");
+        TabRailCluster.RenderTransform = new TranslateTransform { Y = QuickJumpFooter.Height / 2.0 };
         BuildShell();
         Closed += (_, _) =>
         {
+            StopRailClockUpdates();
             CancelPendingControllerVibrationDraft();
             foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.Dispose();
         };

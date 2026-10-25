@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using Microsoft.UI.Composition;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Hosting;
 using Windows.UI.ViewManagement;
@@ -16,6 +18,8 @@ public sealed partial class OverlayWindow
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(140);
     private uint _lastConfiguredDpi;
+    private DispatcherQueueTimer? _railClockTimer;
+    private bool _railClockUpdateWarningLogged;
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
 
@@ -42,8 +46,10 @@ public sealed partial class OverlayWindow
             initialStatePrepared = false;
             OverlayLog.Error("Animation", "Show animation initial state failed; keeping Overlay visible.", exception);
         }
+        UpdateRailClockText();
         WindowInterop.ShowWithoutActivation(this);
         _isVisible = true;
+        StartRailClockUpdates();
         WindowInterop.ArmOutsideClickDismissal(this, outsideClick => OutsideClickDismissRequested?.Invoke(outsideClick));
         if (!initialStatePrepared || !AnimationsEnabled())
         {
@@ -76,6 +82,7 @@ public sealed partial class OverlayWindow
 
     internal async Task HideForPocAsync()
     {
+        StopRailClockUpdates();
         _isVisible = false;
         _numericSliderRepeatTarget.Clear();
         // Normal user Back/outside-click flushes valid drafts before sending DismissRequested.
@@ -131,6 +138,52 @@ public sealed partial class OverlayWindow
             ("OverlayWidthPx", rect.Width),
             ("OverlayHeightPx", rect.Height));
     }
+
+    private void UpdateRailClockText()
+    {
+        try
+        {
+            RailClockText.Text = DateTime.Now.ToString("HH:mm", CultureInfo.InvariantCulture);
+        }
+        catch (Exception exception)
+        {
+            if (_railClockUpdateWarningLogged) return;
+            _railClockUpdateWarningLogged = true;
+            OverlayLog.Warn("Window", "Overlay clock could not be refreshed; continuing without affecting Overlay setup.", exception);
+        }
+    }
+
+    private void StartRailClockUpdates()
+    {
+        try
+        {
+            if (_railClockTimer is null)
+            {
+                var dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+                if (dispatcherQueue is null)
+                {
+                    OverlayLog.Warn("Window", "Overlay clock dispatcher is unavailable; continuing without periodic clock updates.");
+                    return;
+                }
+
+                _railClockTimer = dispatcherQueue.CreateTimer();
+                _railClockTimer.Tick += OnRailClockTimerTick;
+            }
+
+            _railClockTimer.Interval = TimeSpan.FromSeconds(20);
+            _railClockTimer.IsRepeating = true;
+            _railClockTimer.Stop();
+            _railClockTimer.Start();
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Window", "Overlay clock timer could not be started; continuing without periodic clock updates.", exception);
+        }
+    }
+
+    private void StopRailClockUpdates() => _railClockTimer?.Stop();
+
+    private void OnRailClockTimerTick(DispatcherQueueTimer sender, object args) => UpdateRailClockText();
 
     private void LogSurfaceBounds(string reason)
     {
