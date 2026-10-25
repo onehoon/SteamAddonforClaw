@@ -123,7 +123,12 @@ internal static class WindowInterop
         }
     }
 
-    internal static void Configure(OverlayWindow window, out OverlayRect rect, out uint dpi, out string monitorText)
+    internal static void Configure(
+        OverlayWindow window,
+        int topInsetPx,
+        out OverlayRect rect,
+        out uint dpi,
+        out string monitorText)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
         EnsureWindowSubclass(hwnd);
@@ -175,7 +180,8 @@ internal static class WindowInterop
             info.rcMonitor.Top,
             info.rcMonitor.Right,
             info.rcMonitor.Bottom,
-            dpi);
+            dpi,
+            topInsetPx);
         monitorText = $"Monitor: {info.rcMonitor.Left},{info.rcMonitor.Top} - {info.rcMonitor.Right},{info.rcMonitor.Bottom}";
 
         var exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
@@ -207,7 +213,57 @@ internal static class WindowInterop
             ("MonitorRight", info.rcMonitor.Right), ("MonitorBottom", info.rcMonitor.Bottom),
             ("Dpi", dpi), ("Scale", dpi / 96.0),
             ("MonitorWidth", monitorWidth), ("MonitorHeight", monitorHeight),
+            ("ClawHudTopInsetPx", Math.Clamp(topInsetPx, 0, monitorHeight)),
             ("OverlayWidthPx", rect.Width), ("OverlayHeightPx", rect.Height));
+    }
+
+    internal static bool TryApplyVisibleClawHudTopInset(
+        OverlayWindow window,
+        int topInsetPx,
+        out OverlayRect rect)
+    {
+        rect = default;
+        nint hwnd = IntPtr.Zero;
+        try
+        {
+            hwnd = WindowNative.GetWindowHandle(window);
+            if (!GetWindowRect(hwnd, out var currentWindowRect))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read current Overlay bounds.");
+
+            var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+            if (monitor == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not select the Overlay's current monitor.");
+
+            var info = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
+            if (!GetMonitorInfo(monitor, ref info))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the Overlay's current monitor bounds.");
+
+            var monitorHeight = Math.Max(0, info.rcMonitor.Bottom - info.rcMonitor.Top);
+            var inset = Math.Clamp(topInsetPx, 0, monitorHeight);
+            var y = info.rcMonitor.Top + inset;
+            rect = new OverlayRect(
+                currentWindowRect.Left,
+                y,
+                Math.Max(0, currentWindowRect.Right - currentWindowRect.Left),
+                Math.Max(0, info.rcMonitor.Bottom - y));
+
+            if (!SetWindowPos(hwnd, HwndTopmost, rect.X, rect.Y, rect.Width, rect.Height,
+                    SwpNoActivate | SwpNoOwnerZOrder | SwpFrameChanged))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not update the visible Overlay top inset.");
+
+            OverlayLog.Debug("Geometry", "Visible Overlay ClawHUD top inset applied",
+                ("OverlayHwnd", hwnd), ("MonitorTop", info.rcMonitor.Top),
+                ("ClawHudTopInsetPx", inset),
+                ("OverlayX", rect.X), ("OverlayY", rect.Y),
+                ("OverlayWidthPx", rect.Width), ("OverlayHeightPx", rect.Height));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Geometry", "Visible Overlay top inset update failed; retaining the last successful geometry.", exception,
+                ("Operation", "SetWindowPos.ClawHudTopInset"), ("OverlayHwnd", hwnd));
+            return false;
+        }
     }
 
     internal static void ShowWithoutActivation(OverlayWindow window)

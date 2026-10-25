@@ -181,6 +181,60 @@ public sealed class OverlayClawHudMutationStateTests
     }
 
     [Fact]
+    public void Top_inset_follows_authoritative_and_previewed_enabled_font_and_size_then_rolls_back()
+    {
+        var state = new OverlayClawHudMutationState();
+        Assert.Equal(0, TopInset(state));
+
+        state.ApplyState(new FrontendClawHudSnapshot(
+            true, FrontendClawHudRuntimeState.Unavailable, "Unavailable", null, null, null));
+        Assert.Equal(23, TopInset(state));
+
+        var initialSettings = Settings();
+        state.ApplyState(Snapshot(initialSettings, desiredEnabled: true, runtimeState: FrontendClawHudRuntimeState.Starting));
+        Assert.Equal(23, TopInset(state));
+
+        var fontIntent = new FrontendClawHudMutationIntent(
+            FrontendClawHudMutationKind.Font, Font: FrontendClawHudFont.SegoeUiVariable);
+        Assert.True(state.TryBeginSetting(fontIntent));
+        Assert.Equal(25, TopInset(state));
+        var unrelatedUpdate = initialSettings with { Alignment = FrontendClawHudAlignment.Right };
+        state.ApplyState(Snapshot(unrelatedUpdate, desiredEnabled: true, runtimeState: FrontendClawHudRuntimeState.Unavailable));
+        Assert.Equal(25, TopInset(state));
+
+        state.Complete(FrontendClawHudMutationResult.Failed(
+            Snapshot(unrelatedUpdate with { Font = FrontendClawHudFont.Unispace }, desiredEnabled: true), "Rejected"));
+        Assert.Equal(23, TopInset(state));
+
+        Assert.True(state.TryBeginSetting(fontIntent));
+        Assert.Equal(25, TopInset(state));
+        var acceptedFont = unrelatedUpdate with { Font = FrontendClawHudFont.SegoeUiVariable };
+        state.Complete(new(true, null, Snapshot(acceptedFont, desiredEnabled: true)));
+        Assert.Equal(25, TopInset(state));
+
+        var sizeIntent = new FrontendClawHudMutationIntent(
+            FrontendClawHudMutationKind.HudSizeOffset, HudSizeOffset: 2);
+        Assert.True(state.TryBeginSetting(sizeIntent));
+        Assert.Equal(27, TopInset(state));
+        state.Fail();
+        Assert.Equal(25, TopInset(state));
+
+        Assert.True(state.TryBeginEnabled(false));
+        Assert.Equal(0, TopInset(state));
+        state.Fail();
+        Assert.Equal(25, TopInset(state));
+
+        state.ApplyState(Snapshot(acceptedFont with { HudSizeOffset = 2 }, desiredEnabled: false));
+        Assert.Equal(0, TopInset(state));
+    }
+
+    private static int TopInset(OverlayClawHudMutationState state) =>
+        OverlayWindowGeometry.ClawHudTopInsetPx(
+            state.DisplayEnabled,
+            state.DisplaySettings?.Font ?? FrontendClawHudFont.Unispace,
+            state.DisplaySettings?.HudSizeOffset ?? 0);
+
+    [Fact]
     public void Current_power_source_toggle_keeps_its_pending_value_across_independent_settings_state()
     {
         foreach (var usePointer in new[] { false, true })

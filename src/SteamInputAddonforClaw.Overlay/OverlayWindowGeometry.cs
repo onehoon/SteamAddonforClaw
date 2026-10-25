@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Contracts.Frontend;
+
 namespace SteamInputAddonforClaw.Overlay;
 
 internal readonly record struct OverlayRect(int X, int Y, int Width, int Height);
@@ -13,7 +15,8 @@ internal static class OverlayWindowGeometry
         int monitorTop,
         int monitorRight,
         int monitorBottom,
-        uint dpi)
+        uint dpi,
+        int topInsetPx = 0)
     {
         var monitorWidth = Math.Max(0, monitorRight - monitorLeft);
         var monitorHeight = Math.Max(0, monitorBottom - monitorTop);
@@ -30,8 +33,21 @@ internal static class OverlayWindowGeometry
         var legacyWidthPx = DipToPixels(LeftAnchorWidthDip, effectiveDpi);
         var legacyWidth = Math.Min(legacyAvailableWidth, legacyWidthPx);
         var x = legacyRight - legacyWidth;
+        var inset = Math.Clamp(topInsetPx, 0, monitorHeight);
 
-        return new OverlayRect(x, monitorTop, Math.Max(0, monitorRight - x), monitorHeight);
+        return new OverlayRect(x, monitorTop + inset, Math.Max(0, monitorRight - x), monitorHeight - inset);
+    }
+
+    internal static int ClawHudTopInsetPx(
+        bool desiredEnabled,
+        FrontendClawHudFont font,
+        int hudSizeOffset)
+    {
+        if (!desiredEnabled)
+            return 0;
+
+        var baseHeightPx = font == FrontendClawHudFont.SegoeUiVariable ? 25 : 23;
+        return baseHeightPx + Math.Clamp(hudSizeOffset, -2, 2);
     }
 
     private static int DipToPixels(double dip, uint dpi) =>

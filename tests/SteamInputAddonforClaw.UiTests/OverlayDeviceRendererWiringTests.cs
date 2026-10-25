@@ -77,7 +77,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("return MaNoActivate;", source);
 
         var configure = source[source.IndexOf("internal static void Configure", StringComparison.Ordinal)..
-            source.IndexOf("internal static void ShowWithoutActivation", StringComparison.Ordinal)];
+            source.IndexOf("internal static bool TryApplyVisibleClawHudTopInset", StringComparison.Ordinal)];
         Assert.Contains("presenter.SetBorderAndTitleBar(false, false);", configure);
         Assert.Contains("presenter.IsResizable = false;", configure);
         Assert.Contains("HwndTopmost", configure);
@@ -130,7 +130,7 @@ public sealed class OverlayDeviceRendererWiringTests
     {
         var windowInterop = ReadWindowInteropSource();
         var configure = windowInterop[windowInterop.IndexOf("internal static void Configure", StringComparison.Ordinal)..
-            windowInterop.IndexOf("internal static void ShowWithoutActivation", StringComparison.Ordinal)];
+            windowInterop.IndexOf("internal static bool TryApplyVisibleClawHudTopInset", StringComparison.Ordinal)];
         var geometry = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindowGeometry.cs");
 
         Assert.Contains("MonitorFromWindow(foreground, MonitorDefaultToNearest)", configure);
@@ -1053,6 +1053,65 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void ClawHud_top_inset_uses_effective_settings_and_one_final_only_live_placement()
+    {
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var interop = ReadWindowInteropSource();
+        var geometry = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindowGeometry.cs");
+
+        Assert.Contains("OverlayWindowGeometry.ClawHudTopInsetPx(", clawHud);
+        Assert.Contains("_clawHudMutation.DisplayEnabled", clawHud);
+        Assert.Contains("_clawHudMutation.DisplaySettings?.Font ?? FrontendClawHudFont.Unispace", clawHud);
+        Assert.Contains("_clawHudMutation.DisplaySettings?.HudSizeOffset ?? 0", clawHud);
+        Assert.Contains("Math.Clamp(hudSizeOffset, -2, 2)", geometry);
+        var stateReconcile = SliceMethod(clawHud,
+            "private void ReconcileClawHudTopInsetIfChanged(", "private void RenderClawHudControls()");
+        Assert.Contains("if (currentInsetPx != previousInsetPx)", stateReconcile);
+        Assert.DoesNotContain("SetWindowPos", stateReconcile);
+
+        var configureWindow = SliceMethod(presentation, "private void ConfigureWindow()", "private void ReconcileVisibleClawHudTopInset(");
+        Assert.Contains("WindowInterop.Configure(this, topInsetPx", configureWindow);
+        Assert.True(configureWindow.IndexOf("WindowInterop.Configure(this, topInsetPx", StringComparison.Ordinal)
+            < configureWindow.IndexOf("_lastAppliedClawHudTopInsetPx = topInsetPx", StringComparison.Ordinal));
+
+        var liveReconcile = SliceMethod(presentation, "private void ReconcileVisibleClawHudTopInset(", "private void UpdateRailClockText()");
+        Assert.Contains("if (!_isVisible || topInsetPx == _lastAppliedClawHudTopInsetPx)", liveReconcile);
+        Assert.Contains("if (WindowInterop.TryApplyVisibleClawHudTopInset(this, topInsetPx, out _))", liveReconcile);
+
+        var livePlacement = SliceMethod(interop,
+            "internal static bool TryApplyVisibleClawHudTopInset(", "internal static void ShowWithoutActivation(");
+        Assert.Equal(1, CountOccurrences(livePlacement, "SetWindowPos("));
+        Assert.Contains("GetWindowRect(hwnd, out var currentWindowRect)", livePlacement);
+        Assert.Contains("MonitorFromWindow(hwnd, MonitorDefaultToNearest)", livePlacement);
+        Assert.Contains("currentWindowRect.Left", livePlacement);
+        Assert.Contains("currentWindowRect.Right - currentWindowRect.Left", livePlacement);
+        Assert.DoesNotContain("SwpNoSendChanging", livePlacement);
+        Assert.DoesNotContain("SwpNoZOrder", livePlacement);
+        Assert.DoesNotContain("GetDpiForWindow", livePlacement);
+        Assert.DoesNotContain("Configure(", livePlacement);
+        Assert.Contains("retaining the last successful geometry", livePlacement);
+        Assert.Contains("OverlayLog.Warn", livePlacement);
+
+        foreach (var (start, end) in new[]
+        {
+            ("internal void ApplyClawHudState(", "internal void CompleteClawHudMutation("),
+            ("internal void CompleteClawHudMutation(", "internal void ApplyClawHudFailure("),
+            ("internal void ApplyClawHudFailure(", "private void RequestClawHudEnabled("),
+            ("private void RequestClawHudEnabled(", "private void RequestClawHudSetting("),
+            ("private void RequestClawHudSetting(", "private int CurrentClawHudTopInsetPx()"),
+        })
+        {
+            var statePath = SliceMethod(clawHud, start, end);
+            Assert.Contains("CurrentClawHudTopInsetPx()", statePath);
+            Assert.Contains("ReconcileClawHudTopInsetIfChanged(previousTopInsetPx)", statePath);
+        }
+
+        Assert.DoesNotContain("ClawHudHwnd", livePlacement);
+        Assert.DoesNotContain("GetWindowHandle(clawHud", livePlacement);
+    }
+
+    [Fact]
     public void Settings_pending_preview_and_selection_exception_remain_local_and_availability_bounded()
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
@@ -1268,6 +1327,10 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Equal("{StaticResource QamRailBrush}", (string?)footer.Attribute("Background"));
         Assert.Same(shellElement, footer.Parent);
         Assert.Same(shellElement, railElement.Parent);
+        var footerContent = Assert.Single(footer.Elements(), element => element.Name.LocalName == "StackPanel");
+        Assert.Equal("Left", (string?)footerContent.Attribute("HorizontalAlignment"));
+        Assert.Equal("16,0,0,0", (string?)footerContent.Attribute("Margin"));
+        Assert.Equal("Center", (string?)footerContent.Attribute("VerticalAlignment"));
         Assert.Single(footerIcons);
         Assert.Equal("\uF095", (string?)footerIcons[0].Attribute("Glyph"));
         Assert.Equal("Segoe Fluent Icons", (string?)footerIcons[0].Attribute("FontFamily"));
