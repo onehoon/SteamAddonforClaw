@@ -46,8 +46,27 @@ internal static class OverlayWindowGeometry
         if (!desiredEnabled)
             return 0;
 
-        var baseHeightPx = font == FrontendClawHudFont.SegoeUiVariable ? 25 : 23;
-        return baseHeightPx + Math.Clamp(hudSizeOffset, -2, 2);
+        var size = Math.Clamp(hudSizeOffset, -2, 2);
+
+        return font == FrontendClawHudFont.SegoeUiVariable
+            ? size switch
+            {
+                -2 => 34,
+                -1 => 36,
+                 0 => 37,
+                 1 => 38,
+                 2 => 40,
+                _ => 37
+            }
+            : size switch
+            {
+                -2 => 32,
+                -1 => 33,
+                 0 => 34,
+                 1 => 36,
+                 2 => 37,
+                _ => 34
+            };
     }
 
     private static int DipToPixels(double dip, uint dpi) =>

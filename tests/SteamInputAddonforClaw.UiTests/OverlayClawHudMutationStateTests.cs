@@ -188,41 +188,41 @@ public sealed class OverlayClawHudMutationStateTests
 
         state.ApplyState(new FrontendClawHudSnapshot(
             true, FrontendClawHudRuntimeState.Unavailable, "Unavailable", null, null, null));
-        Assert.Equal(23, TopInset(state));
+        Assert.Equal(34, TopInset(state));
 
         var initialSettings = Settings();
         state.ApplyState(Snapshot(initialSettings, desiredEnabled: true, runtimeState: FrontendClawHudRuntimeState.Starting));
-        Assert.Equal(23, TopInset(state));
+        Assert.Equal(34, TopInset(state));
 
         var fontIntent = new FrontendClawHudMutationIntent(
             FrontendClawHudMutationKind.Font, Font: FrontendClawHudFont.SegoeUiVariable);
         Assert.True(state.TryBeginSetting(fontIntent));
-        Assert.Equal(25, TopInset(state));
+        Assert.Equal(37, TopInset(state));
         var unrelatedUpdate = initialSettings with { Alignment = FrontendClawHudAlignment.Right };
         state.ApplyState(Snapshot(unrelatedUpdate, desiredEnabled: true, runtimeState: FrontendClawHudRuntimeState.Unavailable));
-        Assert.Equal(25, TopInset(state));
+        Assert.Equal(37, TopInset(state));
 
         state.Complete(FrontendClawHudMutationResult.Failed(
             Snapshot(unrelatedUpdate with { Font = FrontendClawHudFont.Unispace }, desiredEnabled: true), "Rejected"));
-        Assert.Equal(23, TopInset(state));
+        Assert.Equal(34, TopInset(state));
 
         Assert.True(state.TryBeginSetting(fontIntent));
-        Assert.Equal(25, TopInset(state));
+        Assert.Equal(37, TopInset(state));
         var acceptedFont = unrelatedUpdate with { Font = FrontendClawHudFont.SegoeUiVariable };
         state.Complete(new(true, null, Snapshot(acceptedFont, desiredEnabled: true)));
-        Assert.Equal(25, TopInset(state));
+        Assert.Equal(37, TopInset(state));
 
         var sizeIntent = new FrontendClawHudMutationIntent(
             FrontendClawHudMutationKind.HudSizeOffset, HudSizeOffset: 2);
         Assert.True(state.TryBeginSetting(sizeIntent));
-        Assert.Equal(27, TopInset(state));
+        Assert.Equal(40, TopInset(state));
         state.Fail();
-        Assert.Equal(25, TopInset(state));
+        Assert.Equal(37, TopInset(state));
 
         Assert.True(state.TryBeginEnabled(false));
         Assert.Equal(0, TopInset(state));
         state.Fail();
-        Assert.Equal(25, TopInset(state));
+        Assert.Equal(37, TopInset(state));
 
         state.ApplyState(Snapshot(acceptedFont with { HudSizeOffset = 2 }, desiredEnabled: false));
         Assert.Equal(0, TopInset(state));
