@@ -35,10 +35,13 @@ public sealed class OverlayShortcutRendererTests
     }
 
     [Fact]
-    public void Shortcut_renderer_centers_title_and_status_and_keeps_empty_unavailable_and_disabled_states()
+    public void Shortcut_renderer_stretches_tile_text_and_keeps_centered_text_and_other_states()
     {
         var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
         var resources = ReadSource("src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml");
+        var tileStart = renderer.IndexOf("private ShortcutTileControls CreateShortcutTile(", StringComparison.Ordinal);
+        var tileEnd = renderer.IndexOf("private static void UpdateShortcutTilePosition(", tileStart, StringComparison.Ordinal);
+        var tileBuilder = renderer[tileStart..tileEnd];
 
         Assert.Contains("FrontendShortcutDashboardSnapshot.Unavailable()", renderer, StringComparison.Ordinal);
         Assert.Contains("_shortcutSnapshot.Available", renderer, StringComparison.Ordinal);
@@ -54,7 +57,8 @@ public sealed class OverlayShortcutRendererTests
         Assert.True(
             renderer.IndexOf("header.Children.Add(icon)", StringComparison.Ordinal)
             < renderer.IndexOf("header.Children.Add(title)", StringComparison.Ordinal));
-        Assert.Contains("MaxWidth = contentWidth", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("contentWidth", tileBuilder, StringComparison.Ordinal);
+        Assert.DoesNotContain("MaxWidth =", tileBuilder, StringComparison.Ordinal);
         Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", renderer, StringComparison.Ordinal);
         Assert.Contains("var hasStatus = !string.IsNullOrWhiteSpace(tile.StatusText);", renderer, StringComparison.Ordinal);
         Assert.Contains("MaxLines = hasStatus ? 1 : 2", renderer, StringComparison.Ordinal);
@@ -65,33 +69,69 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("controls.Status.Text != statusText", renderer, StringComparison.Ordinal);
         Assert.Contains("controls.Icon.Glyph != tile.IconGlyph", renderer, StringComparison.Ordinal);
         Assert.Contains("controls.Border.Opacity != opacity", renderer, StringComparison.Ordinal);
-        var statusStart = renderer.IndexOf("var status = new TextBlock", StringComparison.Ordinal);
-        var statusEnd = renderer.IndexOf("OverlayQamResources.ApplyTextStyle(status", statusStart, StringComparison.Ordinal);
-        var statusBuilder = renderer[statusStart..statusEnd];
+
+        var titleStart = tileBuilder.IndexOf("var title = new TextBlock", StringComparison.Ordinal);
+        var titleEnd = tileBuilder.IndexOf("OverlayQamResources.ApplyTextStyle(title", titleStart, StringComparison.Ordinal);
+        var titleBuilder = tileBuilder[titleStart..titleEnd];
+        Assert.Contains("TextAlignment = TextAlignment.Center", titleBuilder, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", titleBuilder, StringComparison.Ordinal);
+        Assert.Contains("TextWrapping = TextWrapping.Wrap", titleBuilder, StringComparison.Ordinal);
+        Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", titleBuilder, StringComparison.Ordinal);
+        Assert.Contains("MaxLines = hasStatus ? 1 : 2", titleBuilder, StringComparison.Ordinal);
+
+        var headerStart = tileBuilder.IndexOf("var header = new StackPanel", StringComparison.Ordinal);
+        var headerEnd = tileBuilder.IndexOf("header.Children.Add(icon)", headerStart, StringComparison.Ordinal);
+        var headerBuilder = tileBuilder[headerStart..headerEnd];
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", headerBuilder, StringComparison.Ordinal);
+
+        var statusBuilder = tileBuilder[
+            tileBuilder.IndexOf("var status = new TextBlock", StringComparison.Ordinal)..
+            tileBuilder.IndexOf("OverlayQamResources.ApplyTextStyle(status", StringComparison.Ordinal)];
+        Assert.Contains("TextAlignment = TextAlignment.Center", statusBuilder, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", statusBuilder, StringComparison.Ordinal);
+        Assert.Contains("TextWrapping = TextWrapping.Wrap", statusBuilder, StringComparison.Ordinal);
         Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", statusBuilder, StringComparison.Ordinal);
         Assert.Contains("MaxLines = 2", statusBuilder, StringComparison.Ordinal);
+        Assert.Contains("Visibility = hasStatus ? Visibility.Visible : Visibility.Collapsed", statusBuilder, StringComparison.Ordinal);
+
+        var iconStart = tileBuilder.IndexOf("var icon = new FontIcon", StringComparison.Ordinal);
+        var iconEnd = tileBuilder.IndexOf("var header = new StackPanel", iconStart, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", tileBuilder[iconStart..iconEnd], StringComparison.Ordinal);
+
+        var contentStart = tileBuilder.IndexOf("var content = new StackPanel", StringComparison.Ordinal);
+        var contentEnd = tileBuilder.IndexOf("var border = new Border", contentStart, StringComparison.Ordinal);
+        var contentBuilder = tileBuilder[contentStart..contentEnd];
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", contentBuilder, StringComparison.Ordinal);
+        Assert.Contains("VerticalAlignment = VerticalAlignment.Center", contentBuilder, StringComparison.Ordinal);
+
+        var borderStart = tileBuilder.IndexOf("var border = new Border", StringComparison.Ordinal);
+        var borderEnd = tileBuilder.IndexOf("border.Tapped +=", borderStart, StringComparison.Ordinal);
+        var borderBuilder = tileBuilder[borderStart..borderEnd];
+        Assert.DoesNotContain("Width = tileSize", borderBuilder, StringComparison.Ordinal);
+        Assert.Contains("Height = tileSize", borderBuilder, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", borderBuilder, StringComparison.Ordinal);
+
         Assert.Contains("ApplyTextStyle(status, \"QamCaptionTextStyle\")", renderer, StringComparison.Ordinal);
-        Assert.Contains("TextAlignment = TextAlignment.Center", renderer, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", renderer, StringComparison.Ordinal);
+        Assert.Contains("TextAlignment = TextAlignment.Center", titleBuilder, StringComparison.Ordinal);
+        Assert.Contains("TextAlignment = TextAlignment.Center", statusBuilder, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment = VerticalAlignment.Center", renderer, StringComparison.Ordinal);
-        Assert.DoesNotContain("contentWidth - 22", renderer, StringComparison.Ordinal);
         Assert.Contains("<Style x:Key=\"QamTileTitleTextStyle\" TargetType=\"TextBlock\" BasedOn=\"{StaticResource QamBodyStrongTextStyle}\" />", resources, StringComparison.Ordinal);
         Assert.Contains("<Setter Property=\"FontSize\" Value=\"16\" />", resources, StringComparison.Ordinal);
         Assert.Contains("<x:Double x:Key=\"QamShortcutTileSize\">117.33333333333333</x:Double>", resources, StringComparison.Ordinal);
-        Assert.Contains("Width = tileSize", renderer, StringComparison.Ordinal);
-        Assert.Contains("Height = tileSize", renderer, StringComparison.Ordinal);
         Assert.DoesNotContain("_shortcutStatus", renderer, StringComparison.Ordinal);
         Assert.Contains("ResetShortcutForShow", renderer, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void One_through_six_tiles_keep_the_same_three_column_square_slot_geometry()
+    public void One_through_six_tiles_keep_three_column_rectangular_slot_geometry_and_spacing()
     {
         var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
         var resources = ReadSource("src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml");
 
         Assert.Contains("ColumnSpacing = OverlayQamResources.Get(\"QamTileSpacing\", 8.0)", renderer, StringComparison.Ordinal);
         Assert.Contains("RowSpacing = OverlayQamResources.Get(\"QamTileSpacing\", 8.0)", renderer, StringComparison.Ordinal);
+        Assert.Contains("new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }", renderer, StringComparison.Ordinal);
+        Assert.Contains("Height = tileSize", renderer, StringComparison.Ordinal);
         Assert.Contains("<x:Double x:Key=\"QamTileSpacing\">8</x:Double>", resources, StringComparison.Ordinal);
 
         for (var tileCount = 1; tileCount <= 6; tileCount++)
