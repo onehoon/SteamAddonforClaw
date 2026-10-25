@@ -211,16 +211,16 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void WindowInterop_requests_windows_11_round_corners_without_making_them_show_fatal()
+    public void WindowInterop_requests_square_corners_without_making_failure_fatal()
     {
         var source = ReadWindowInteropSource();
 
         Assert.Contains("private const uint DwmwaWindowCornerPreference = 33;", source);
-        Assert.Contains("private const int DwmcpRound = 2;", source);
-        Assert.Contains("ApplyRoundedCorners(hwnd);", source);
+        Assert.Contains("private const int DwmcpDoNotRound = 1;", source);
+        Assert.Contains("ApplySquareCorners(hwnd);", source);
         Assert.Contains("DwmSetWindowAttribute", source);
-        Assert.Contains("continuing with the usable square surface.", source);
-        Assert.Contains("Interlocked.Exchange(ref _roundedCornerWarningLogged, 1)", source);
+        Assert.Contains("continuing without failing Overlay setup.", source);
+        Assert.Contains("Interlocked.Exchange(ref _squareCornerWarningLogged, 1)", source);
     }
 
     [Fact]
@@ -1130,30 +1130,46 @@ public sealed class OverlayDeviceRendererWiringTests
         var tabRailStart = xaml.IndexOf("x:Name=\"TabRail\"", StringComparison.Ordinal);
         var tabRailEnd = xaml.IndexOf("</Border>", tabRailStart, StringComparison.Ordinal);
         var tabRail = xaml[tabRailStart..tabRailEnd];
+        var tabRailStartIndex = xaml.IndexOf("x:Name=\"TabRail\"", StringComparison.Ordinal);
         var bodyStart = xaml.IndexOf("<Grid Grid.Column=\"1\"", StringComparison.Ordinal);
         var bodyEnd = xaml.IndexOf("</Grid>", bodyStart, StringComparison.Ordinal);
         var bodyColumn = xaml[bodyStart..bodyEnd];
         var document = XDocument.Parse(xaml);
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var shellElement = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "QamShell");
         var railElement = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "TabRail");
-        var railCluster = Assert.Single(railElement.Elements(), element =>
+        var railGrid = Assert.Single(railElement.Elements(), element => element.Name.LocalName == "Grid");
+        var pageHost = document.Descendants().Single(element =>
+            element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1");
+        var railCluster = Assert.Single(railGrid.Elements(), element =>
             element.Name.LocalName == "StackPanel" && (string?)element.Attribute(x + "Name") == "TabRailCluster");
         var clusterChildren = railCluster.Elements().ToArray();
         var tabStrip = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "TabStrip");
         var previousHint = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "PreviousTabBumperHint");
         var nextHint = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "NextTabBumperHint");
+        var clock = railGrid.Elements().Single(element => (string?)element.Attribute(x + "Name") == "RailClockText");
+        var footer = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "QuickJumpFooter");
         var railFontIcons = railElement.Descendants().Where(element => element.Name.LocalName == "FontIcon").ToArray();
 
         Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
         Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
-        Assert.Contains("MaxWidth=\"452\"", xaml);
+        Assert.DoesNotContain("MaxWidth=\"452\"", xaml);
         Assert.Contains("x:Name=\"QamShell\"", xaml);
         Assert.Contains("<ColumnDefinition Width=\"52\" />", xaml);
         Assert.Contains("<ColumnDefinition Width=\"*\" />", xaml);
+        Assert.True(tabRailStartIndex > 0);
         Assert.Contains("x:Name=\"TabRail\"", tabRail);
         Assert.Contains("Grid.Column=\"0\"", tabRail);
+        Assert.Equal("0", (string?)railElement.Attribute("Grid.Row"));
+        Assert.Equal("0", (string?)pageHost.Attribute("Grid.Row"));
+        Assert.Same(shellElement, pageHost.Parent);
         Assert.Contains("x:Name=\"TabStrip\"", tabRail);
         Assert.Contains("x:Name=\"TabRailCluster\"", tabRail);
+        Assert.Equal("12", (string?)clock.Attribute("FontSize"));
+        Assert.Equal("Center", (string?)clock.Attribute("HorizontalTextAlignment"));
+        Assert.Equal("False", (string?)clock.Attribute("IsHitTestVisible"));
+        Assert.Equal("False", (string?)clock.Attribute("IsTabStop"));
+        Assert.Same(railGrid, clock.Parent);
         Assert.Equal("Center", (string?)railCluster.Attribute("VerticalAlignment"));
         Assert.Equal("Stretch", (string?)railCluster.Attribute("HorizontalAlignment"));
         Assert.Equal("{StaticResource QamRailHintGap}", (string?)railCluster.Attribute("Spacing"));
@@ -1195,6 +1211,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Same(railCluster, nextHint.Parent);
         Assert.DoesNotContain(tabStrip.DescendantsAndSelf(), element => ReferenceEquals(element, previousHint));
         Assert.DoesNotContain(tabStrip.DescendantsAndSelf(), element => ReferenceEquals(element, nextHint));
+        Assert.Contains("new TranslateTransform { Y = QuickJumpFooter.Height / 2.0 }", ReadOverlayWindowSource());
         Assert.Contains("Grid.SetRow(tabHost, position)", shell);
         Assert.DoesNotContain("position + 1", shell);
         Assert.DoesNotContain("Grid.SetColumn(tabHost, position)", shell);
@@ -1241,6 +1258,49 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("NavigateDown", navigation);
         Assert.Contains("AdjustSelectedRow", navigation);
         Assert.Contains("_numericSliderRepeatTarget.TryAdjust(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta)", navigation);
+
+        var footerChildren = footer.Descendants().ToArray();
+        var footerIcons = footerChildren.Where(element => element.Name.LocalName == "FontIcon").ToArray();
+        var footerLabels = footerChildren.Where(element => element.Name.LocalName == "TextBlock").ToArray();
+        Assert.Equal("1", (string?)footer.Attribute("Grid.Row"));
+        Assert.Equal("2", (string?)footer.Attribute("Grid.ColumnSpan"));
+        Assert.Equal("36", (string?)footer.Attribute("Height"));
+        Assert.Equal("{StaticResource QamRailBrush}", (string?)footer.Attribute("Background"));
+        Assert.Same(shellElement, footer.Parent);
+        Assert.Same(shellElement, railElement.Parent);
+        Assert.Single(footerIcons);
+        Assert.Equal("\uF095", (string?)footerIcons[0].Attribute("Glyph"));
+        Assert.Equal("Segoe Fluent Icons", (string?)footerIcons[0].Attribute("FontFamily"));
+        Assert.Equal("20", (string?)footerIcons[0].Attribute("FontSize"));
+        Assert.Equal("False", (string?)footerIcons[0].Attribute("IsHitTestVisible"));
+        Assert.Single(footerLabels);
+        Assert.Equal("—", (string?)footerLabels[0].Attribute("Text"));
+        Assert.Equal("14", (string?)footerLabels[0].Attribute("FontSize"));
+        Assert.Equal("False", (string?)footerLabels[0].Attribute("IsHitTestVisible"));
+        Assert.DoesNotContain(footerChildren, element => element.Attribute("Text")?.Value.Contains(':') == true);
+    }
+
+    [Fact]
+    public void Rail_clock_refreshes_on_show_and_stops_on_hide_or_close()
+    {
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var window = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+        var show = SliceMethod(presentation, "internal async Task ShowForPocAsync()", "internal async Task HideForPocAsync()");
+        var hide = SliceMethod(presentation, "internal async Task HideForPocAsync()", "private void ConfigureWindow()");
+        var clock = SliceMethod(presentation, "private void UpdateRailClockText()", "private void LogSurfaceBounds(");
+
+        Assert.Contains("UpdateRailClockText();", show);
+        Assert.Contains("StartRailClockUpdates();", show);
+        Assert.Contains("StopRailClockUpdates();", hide);
+        Assert.Contains("StopRailClockUpdates();", window);
+        Assert.Contains("DateTime.Now.ToString(\"HH:mm\", CultureInfo.InvariantCulture)", clock);
+        Assert.Contains("TimeSpan.FromSeconds(20)", clock);
+        Assert.Contains("_railClockTimer.Tick += OnRailClockTimerTick;", clock);
+        Assert.Contains("catch (Exception exception)", clock);
+        Assert.Contains("continuing without affecting Overlay setup", clock);
+        Assert.Contains("_railClockTimer?.Stop();", presentation);
+        Assert.Contains("&#xF095;", xaml);
     }
 
     [Fact]
@@ -1328,6 +1388,14 @@ public sealed class OverlayDeviceRendererWiringTests
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
 
     private static string ReadWindowInteropSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "WindowInterop.cs");
+
+    private static string SliceMethod(string source, string start, string end)
+    {
+        var startIndex = source.IndexOf(start, StringComparison.Ordinal);
+        var endIndex = source.IndexOf(end, startIndex, StringComparison.Ordinal);
+        Assert.True(startIndex >= 0 && endIndex > startIndex);
+        return source[startIndex..endIndex];
+    }
 
     private static int CountOccurrences(string haystack, string needle)
     {

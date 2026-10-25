@@ -7,79 +7,129 @@
             x:Name="SurfaceHost"
             Background="{StaticResource QamSurfaceBrush}"
             SizeChanged="OnSurfaceHostSizeChanged">
-        <Border
-            x:Name="OpaquePanel"
-            MaxWidth="452"
-            HorizontalAlignment="Stretch">
-            <Grid x:Name="AnimatedContent">
-                <Grid x:Name="QamShell">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="52" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-
-                    <Border
-                        x:Name="TabRail"
-                        Grid.Column="0"
-                        Background="{StaticResource QamRailBrush}"
-                        CornerRadius="{StaticResource QamRailCornerRadius}">
-                        <StackPanel
-                            x:Name="TabRailCluster"
-                            VerticalAlignment="Center"
-                            HorizontalAlignment="Stretch"
-                            Spacing="{StaticResource QamRailHintGap}">
-                            <FontIcon
-                                x:Name="PreviousTabBumperHint"
-                                Glyph="&#xF10C;"
-                                FontFamily="Segoe Fluent Icons"
-                                FontSize="{StaticResource QamRailHintIconSize}"
-                                Foreground="{StaticResource QamDisabledTextBrush}"
-                                HorizontalAlignment="Center"
-                                IsHitTestVisible="False"
-                                AutomationProperties.Name="LB, previous tab" />
-                            <Grid
-                                x:Name="TabStrip"
-                                RowSpacing="{StaticResource QamRailSpacing}" />
-                            <FontIcon
-                                x:Name="NextTabBumperHint"
-                                Glyph="&#xF10D;"
-                                FontFamily="Segoe Fluent Icons"
-                                FontSize="{StaticResource QamRailHintIconSize}"
-                                Foreground="{StaticResource QamDisabledTextBrush}"
-                                HorizontalAlignment="Center"
-                                IsHitTestVisible="False"
-                                AutomationProperties.Name="RB, next tab" />
-                        </StackPanel>
-                    </Border>
-
-                    <Grid Grid.Column="1">
+            <Border
+                x:Name="OpaquePanel"
+                HorizontalAlignment="Stretch">
+                <Grid x:Name="AnimatedContent">
+                    <Grid x:Name="QamShell">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <TextBlock
-                            x:Name="PageTitle"
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="52" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border
+                            x:Name="TabRail"
                             Grid.Row="0"
-                            Style="{StaticResource QamPageTitleTextStyle}"
-                            Margin="{StaticResource QamPageTitleMargin}" />
-                        <ScrollViewer
-                            x:Name="BodyScroll"
+                            Grid.Column="0"
+                            Background="{StaticResource QamRailBrush}"
+                            CornerRadius="{StaticResource QamRailCornerRadius}">
+                            <Grid>
+                                <TextBlock
+                                    x:Name="RailClockText"
+                                    Text="00:00"
+                                    Style="{StaticResource QamCaptionTextStyle}"
+                                    FontSize="12"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalTextAlignment="Center"
+                                    VerticalAlignment="Top"
+                                    Margin="0,12,0,0"
+                                    TextWrapping="NoWrap"
+                                    IsHitTestVisible="False"
+                                    IsTabStop="False" />
+                                <StackPanel
+                                    x:Name="TabRailCluster"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Stretch"
+                                    Spacing="{StaticResource QamRailHintGap}">
+                                    <FontIcon
+                                        x:Name="PreviousTabBumperHint"
+                                        Glyph="&#xF10C;"
+                                        FontFamily="Segoe Fluent Icons"
+                                        FontSize="{StaticResource QamRailHintIconSize}"
+                                        Foreground="{StaticResource QamDisabledTextBrush}"
+                                        HorizontalAlignment="Center"
+                                        IsHitTestVisible="False"
+                                        AutomationProperties.Name="LB, previous tab" />
+                                    <Grid
+                                        x:Name="TabStrip"
+                                        RowSpacing="{StaticResource QamRailSpacing}" />
+                                    <FontIcon
+                                        x:Name="NextTabBumperHint"
+                                        Glyph="&#xF10D;"
+                                        FontFamily="Segoe Fluent Icons"
+                                        FontSize="{StaticResource QamRailHintIconSize}"
+                                        Foreground="{StaticResource QamDisabledTextBrush}"
+                                        HorizontalAlignment="Center"
+                                        IsHitTestVisible="False"
+                                        AutomationProperties.Name="RB, next tab" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Column="1" Grid.Row="0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock
+                                x:Name="PageTitle"
+                                Grid.Row="0"
+                                Style="{StaticResource QamPageTitleTextStyle}"
+                                Margin="{StaticResource QamPageTitleMargin}" />
+                            <ScrollViewer
+                                x:Name="BodyScroll"
+                                Grid.Row="1"
+                                VerticalScrollBarVisibility="Hidden"
+                                HorizontalScrollBarVisibility="Disabled"
+                                HorizontalContentAlignment="Stretch">
+                                <Border
+                                    Padding="{StaticResource QamBodyContentPadding}"
+                                    HorizontalAlignment="Stretch">
+                                    <Grid
+                                        x:Name="TabBody"
+                                        HorizontalAlignment="Stretch" />
+                                </Border>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <Grid
+                            x:Name="QuickJumpFooter"
                             Grid.Row="1"
-                            VerticalScrollBarVisibility="Hidden"
-                            HorizontalScrollBarVisibility="Disabled"
-                            HorizontalContentAlignment="Stretch">
-                            <Border
-                                Padding="{StaticResource QamBodyContentPadding}"
-                                HorizontalAlignment="Stretch">
-                                <Grid
-                                    x:Name="TabBody"
-                                    HorizontalAlignment="Stretch" />
-                            </Border>
-                        </ScrollViewer>
+                            Grid.ColumnSpan="2"
+                            Height="36"
+                            Background="{StaticResource QamRailBrush}"
+                            IsHitTestVisible="False"
+                            IsTabStop="False">
+                            <StackPanel
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="6"
+                                IsHitTestVisible="False"
+                                IsTabStop="False">
+                                <FontIcon
+                                    x:Name="YButtonFooterIcon"
+                                    Glyph="&#xF095;"
+                                    FontFamily="Segoe Fluent Icons"
+                                    FontSize="20"
+                                    Foreground="{StaticResource QamPrimaryTextBrush}"
+                                    IsHitTestVisible="False" />
+                                <TextBlock
+                                    x:Name="YButtonFooterTargetText"
+                                    Text="—"
+                                    Style="{StaticResource QamBodyTextStyle}"
+                                    FontSize="14"
+                                    IsHitTestVisible="False"
+                                    IsTabStop="False" />
+                            </StackPanel>
+                        </Grid>
                     </Grid>
                 </Grid>
-            </Grid>
-        </Border>
+            </Border>
         </Grid>
     </Grid>
 </Window>

@@ -49,6 +49,17 @@ public sealed class OverlayQamVisualResourcesTests
     }
 
     [Fact]
+    public void Surface_rail_and_content_keep_the_same_existing_background_color()
+    {
+        var resources = XDocument.Load(Path.Combine(
+            RepoRoot(), "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+
+        Assert.Equal("#FF0E141B", Resource(resources, "QamSurfaceBrush").Attribute("Color")?.Value);
+        Assert.Equal("#FF0E141B", Resource(resources, "QamRailBrush").Attribute("Color")?.Value);
+        Assert.Equal("#FF0E141B", Resource(resources, "QamContentBrush").Attribute("Color")?.Value);
+    }
+
+    [Fact]
     public void Overlay_root_has_a_fixed_title_and_preserves_the_full_width_scroll_viewport()
     {
         var root = RepoRoot();
@@ -57,7 +68,11 @@ public sealed class OverlayQamVisualResourcesTests
         var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
         var panel = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "OpaquePanel");
         var shell = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "QamShell");
+        var shellRows = shell.Elements().Single(element => element.Name.LocalName == "Grid.RowDefinitions")
+            .Elements().Select(element => (string?)element.Attribute("Height")).ToArray();
         var columns = shell.Elements().Single(element => element.Name.LocalName == "Grid.ColumnDefinitions").Elements().ToArray();
+        var footer = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "QuickJumpFooter");
+        var tabRail = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "TabRail");
         var rightContentHost = xaml.Descendants().Single(element =>
             element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1");
         var pageTitle = xaml.Descendants().Single(element =>
@@ -77,9 +92,20 @@ public sealed class OverlayQamVisualResourcesTests
             .Elements().Select(element => (string?)element.Attribute("Height")).ToArray();
 
         Assert.Equal("Dark", (string?)viewport.Attribute("RequestedTheme"));
-        Assert.Equal("452", (string?)panel.Attribute("MaxWidth"));
+        Assert.Null(panel.Attribute("MaxWidth"));
+        Assert.Equal(new[] { "*", "Auto" }, shellRows);
         Assert.Equal("52", (string?)columns[0].Attribute("Width"));
         Assert.Equal("*", (string?)columns[1].Attribute("Width"));
+        Assert.Equal("0", (string?)tabRail.Attribute("Grid.Column"));
+        Assert.Equal("0", (string?)tabRail.Attribute("Grid.Row"));
+        Assert.Equal("1", (string?)footer.Attribute("Grid.Row"));
+        Assert.Equal("2", (string?)footer.Attribute("Grid.ColumnSpan"));
+        Assert.Equal("36", (string?)footer.Attribute("Height"));
+        Assert.Equal("{StaticResource QamRailBrush}", (string?)footer.Attribute("Background"));
+        Assert.Equal("0", (string?)rightContentHost.Attribute("Grid.Row"));
+        Assert.Same(shell, rightContentHost.Parent);
+        Assert.Same(shell, footer.Parent);
+        Assert.Same(shell, tabRail.Parent);
         Assert.Same(rightContentHost, pageTitle.Parent);
         Assert.Equal("0", (string?)pageTitle.Attribute("Grid.Row"));
         Assert.Equal("1", (string?)bodyScroll.Attribute("Grid.Row"));
@@ -142,7 +168,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Equal("Segoe UI Variable", Resource(resources, "QamFontFamily").Value.Trim());
         Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value is "QamContentPadding" or "QamPageContentSpacing");
         Assert.Equal("#26FFFFFF", Resource(resources, "QamSelectedFillBrush").Attribute("Color")?.Value);
-        Assert.DoesNotContain("Footer", xaml.ToString());
+        Assert.DoesNotContain("Y Button:", xaml.ToString());
     }
 
     [Fact]

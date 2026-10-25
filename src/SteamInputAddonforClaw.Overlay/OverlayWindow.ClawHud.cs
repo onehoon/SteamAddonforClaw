@@ -320,6 +320,14 @@ public sealed partial class OverlayWindow
         _ => "--",
     };
 
+    private void ApplyYButtonQuickJumpFooterTarget(QuickOverlayYButtonTarget target, bool available) =>
+        YButtonFooterTargetText.Text = FormatYButtonQuickJumpFooterTarget(target, available);
+
+    internal static string FormatYButtonQuickJumpFooterTarget(QuickOverlayYButtonTarget target, bool available) =>
+        available && Enum.IsDefined(target)
+            ? FormatYButtonQuickJumpChoice((double)target)
+            : "—";
+
     private void RequestYButtonQuickJumpChange(QuickOverlayYButtonTarget target)
     {
         if (!_quickSettingsYButtonQuickJumpAvailable || _yButtonQuickJumpMutationInFlight || !Enum.IsDefined(target))
