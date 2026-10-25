@@ -135,7 +135,6 @@ public sealed partial class OverlayWindow
     {
         var tilePadding = OverlayQamResources.Get("QamTilePadding", new Thickness(12));
         var tileSize = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333);
-        var contentWidth = Math.Max(1, tileSize - tilePadding.Left - tilePadding.Right);
         var hasStatus = !string.IsNullOrWhiteSpace(tile.StatusText);
         var title = new TextBlock
         {
@@ -143,8 +142,7 @@ public sealed partial class OverlayWindow
             TextWrapping = TextWrapping.Wrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextAlignment = TextAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            MaxWidth = contentWidth,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             MaxLines = hasStatus ? 1 : 2,
         };
         OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
@@ -159,9 +157,8 @@ public sealed partial class OverlayWindow
         var header = new StackPanel
         {
             Orientation = Orientation.Vertical,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
-            MaxWidth = contentWidth,
             Spacing = hasStatus ? 4 : 6,
         };
         header.Children.Add(icon);
@@ -173,8 +170,7 @@ public sealed partial class OverlayWindow
             TextWrapping = TextWrapping.Wrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextAlignment = TextAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            MaxWidth = contentWidth,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             MaxLines = 2,
             Visibility = hasStatus ? Visibility.Visible : Visibility.Collapsed,
         };
@@ -182,7 +178,7 @@ public sealed partial class OverlayWindow
 
         var content = new StackPanel
         {
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
             Spacing = hasStatus ? 4 : 0,
         };
@@ -193,7 +189,6 @@ public sealed partial class OverlayWindow
         {
             Child = content,
             Padding = tilePadding,
-            Width = tileSize,
             Height = tileSize,
             CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
             BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
