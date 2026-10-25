@@ -106,8 +106,9 @@
                             IsTabStop="False">
                             <StackPanel
                                 Orientation="Horizontal"
-                                HorizontalAlignment="Center"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
+                                Margin="16,0,0,0"
                                 Spacing="6"
                                 IsHitTestVisible="False"
                                 IsTabStop="False">

@@ -1268,6 +1268,10 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Equal("{StaticResource QamRailBrush}", (string?)footer.Attribute("Background"));
         Assert.Same(shellElement, footer.Parent);
         Assert.Same(shellElement, railElement.Parent);
+        var footerContent = Assert.Single(footer.Elements(), element => element.Name.LocalName == "StackPanel");
+        Assert.Equal("Left", (string?)footerContent.Attribute("HorizontalAlignment"));
+        Assert.Equal("16,0,0,0", (string?)footerContent.Attribute("Margin"));
+        Assert.Equal("Center", (string?)footerContent.Attribute("VerticalAlignment"));
         Assert.Single(footerIcons);
         Assert.Equal("\uF095", (string?)footerIcons[0].Attribute("Glyph"));
         Assert.Equal("Segoe Fluent Icons", (string?)footerIcons[0].Attribute("FontFamily"));
