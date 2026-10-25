@@ -18,6 +18,7 @@ public sealed partial class OverlayWindow
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(140);
     private uint _lastConfiguredDpi;
+    private int _lastAppliedClawHudTopInsetPx;
     private DispatcherQueueTimer? _railClockTimer;
     private bool _railClockUpdateWarningLogged;
 
@@ -129,14 +130,26 @@ public sealed partial class OverlayWindow
 
     private void ConfigureWindow()
     {
-        WindowInterop.Configure(this, out var rect, out _lastConfiguredDpi, out var monitorText);
+        var topInsetPx = CurrentClawHudTopInsetPx();
+        WindowInterop.Configure(this, topInsetPx, out var rect, out _lastConfiguredDpi, out var monitorText);
+        _lastAppliedClawHudTopInsetPx = topInsetPx;
         var scale = _lastConfiguredDpi / 96.0;
         OverlayLog.Debug("Geometry", "Overlay window configured",
             ("Monitor", monitorText),
             ("OverlayX", rect.X), ("OverlayY", rect.Y),
             ("Dpi", _lastConfiguredDpi), ("Scale", scale),
+            ("ClawHudTopInsetPx", topInsetPx),
             ("OverlayWidthPx", rect.Width),
             ("OverlayHeightPx", rect.Height));
+    }
+
+    private void ReconcileVisibleClawHudTopInset(int topInsetPx)
+    {
+        if (!_isVisible || topInsetPx == _lastAppliedClawHudTopInsetPx)
+            return;
+
+        if (WindowInterop.TryApplyVisibleClawHudTopInset(this, topInsetPx, out _))
+            _lastAppliedClawHudTopInsetPx = topInsetPx;
     }
 
     private void UpdateRailClockText()

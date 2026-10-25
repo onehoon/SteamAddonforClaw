@@ -484,42 +484,64 @@ public sealed partial class OverlayWindow
 
     internal void ApplyClawHudState(FrontendClawHudSnapshot snapshot)
     {
+        var previousTopInsetPx = CurrentClawHudTopInsetPx();
         _clawHudMutation.ApplyState(snapshot);
         RenderClawHudControls();
+        ReconcileClawHudTopInsetIfChanged(previousTopInsetPx);
     }
 
     internal void CompleteClawHudMutation(FrontendClawHudMutationResult result)
     {
+        var previousTopInsetPx = CurrentClawHudTopInsetPx();
         _clawHudMutation.Complete(result);
         RenderClawHudControls();
+        ReconcileClawHudTopInsetIfChanged(previousTopInsetPx);
     }
 
     internal void ApplyClawHudFailure(string message)
     {
+        var previousTopInsetPx = CurrentClawHudTopInsetPx();
         _clawHudMutation.Fail();
         RenderClawHudControls();
+        ReconcileClawHudTopInsetIfChanged(previousTopInsetPx);
     }
 
     private void RequestClawHudEnabled(bool enabled)
     {
+        var previousTopInsetPx = CurrentClawHudTopInsetPx();
         if (!_clawHudMutation.TryBeginEnabled(enabled))
         {
             RenderClawHudControls();
             return;
         }
         RenderClawHudControls();
+        ReconcileClawHudTopInsetIfChanged(previousTopInsetPx);
         ClawHudEnabledRequested?.Invoke(enabled);
     }
 
     private void RequestClawHudSetting(FrontendClawHudMutationIntent intent)
     {
+        var previousTopInsetPx = CurrentClawHudTopInsetPx();
         if (!_clawHudMutation.TryBeginSetting(intent))
         {
             RenderClawHudControls();
             return;
         }
         RenderClawHudControls();
+        ReconcileClawHudTopInsetIfChanged(previousTopInsetPx);
         ClawHudSettingMutationRequested?.Invoke(intent);
+    }
+
+    private int CurrentClawHudTopInsetPx() => OverlayWindowGeometry.ClawHudTopInsetPx(
+        _clawHudMutation.DisplayEnabled,
+        _clawHudMutation.DisplaySettings?.Font ?? FrontendClawHudFont.Unispace,
+        _clawHudMutation.DisplaySettings?.HudSizeOffset ?? 0);
+
+    private void ReconcileClawHudTopInsetIfChanged(int previousInsetPx)
+    {
+        var currentInsetPx = CurrentClawHudTopInsetPx();
+        if (currentInsetPx != previousInsetPx)
+            ReconcileVisibleClawHudTopInset(currentInsetPx);
     }
 
     private void RenderClawHudControls()
