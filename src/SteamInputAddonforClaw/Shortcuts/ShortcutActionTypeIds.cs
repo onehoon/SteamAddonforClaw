@@ -9,4 +9,8 @@ internal static class ShortcutActionTypeIds
     internal const string SteamBigPicture = "system.steam-big-picture";
     internal const string SteamClient = "system.steam-client";
     internal const string XboxApp = "system.xbox-app";
+    internal const string TouchKeyboard = "system.touch-keyboard";
+    internal const string ShowDesktop = "system.show-desktop";
+    internal const string SteamInput = "steam.input-settings";
+    internal const string ClawHudToggle = "addon.clawhud-toggle";
 }

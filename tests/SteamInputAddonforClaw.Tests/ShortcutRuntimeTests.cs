@@ -41,6 +41,10 @@ public sealed class ShortcutRuntimeTests : IDisposable
                 ("Steam", ShortcutActionTypeIds.SteamClient, true),
                 ("Steam Big Picture", ShortcutActionTypeIds.SteamBigPicture, true),
                 ("XBOX", ShortcutActionTypeIds.XboxApp, true),
+                ("Keyboard", ShortcutActionTypeIds.TouchKeyboard, true),
+                ("Show Desktop", ShortcutActionTypeIds.ShowDesktop, true),
+                ("Steam Input", ShortcutActionTypeIds.SteamInput, true),
+                ("ClawHUD", ShortcutActionTypeIds.ClawHudToggle, false),
             },
             tiles.Select(tile => (tile.Title, tile.Action.TypeId, tile.CloseOverlayAfterLaunch)));
         Assert.All(tiles, tile =>
@@ -59,11 +63,14 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.True(editor.Available);
         Assert.Equal(tiles.Select(tile => (tile.TileId, tile.Title)), dashboard.Tiles.Select(tile => (tile.TileId, tile.Title)));
         Assert.Equal(tiles.Select(tile => (tile.TileId, tile.Title)), editor.Tiles.Select(tile => (tile.TileId, tile.Title)));
-        Assert.Equal(["\uE722", "\uE7FC", "\uE7F4", "\uE990"], dashboard.Tiles.Select(tile => tile.IconGlyph));
+        Assert.Equal(["\uE722", "\uE7FC", "\uE7F4", "\uE990", "\uE765", "\uE7C4", "\uE713", "\uE770"],
+            dashboard.Tiles.Select(tile => tile.IconGlyph));
         Assert.Equal(dashboard.Tiles.Select(tile => tile.IconGlyph), editor.Tiles.Select(tile => tile.IconGlyph));
         Assert.Null(editor.Tiles[0].Action.ScreenshotFolder);
         Assert.False(editor.Tiles[0].CloseOverlayAfterLaunch);
-        Assert.All(editor.Tiles.Skip(1), tile => Assert.True(tile.CloseOverlayAfterLaunch));
+        Assert.All(editor.Tiles, tile => Assert.False(tile.Action.TypeEditable));
+        Assert.All(editor.Tiles.Skip(1).Take(6), tile => Assert.True(tile.CloseOverlayAfterLaunch));
+        Assert.False(editor.Tiles[7].CloseOverlayAfterLaunch);
 
         var persistedIds = tiles.Select(tile => tile.TileId).ToArray();
         var restartedRuntime = new ShortcutRuntime(store);
@@ -255,6 +262,230 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Equal("steam://open/bigpicture", started[0].ArgumentList.Single());
         Assert.Equal("steam://open/main", started[1].ArgumentList.Single());
         Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", started[2].ArgumentList.Single());
+    }
+
+    [Fact]
+    public async Task Keyboard_and_show_desktop_use_their_specific_command_seams()
+    {
+        var keyboard = Tile("Keyboard", ShortcutActionTypeIds.TouchKeyboard, Parameters("{}"));
+        var desktop = Tile("Desktop", ShortcutActionTypeIds.ShowDesktop, Parameters("{}"));
+        Save([keyboard, desktop]);
+        var invoked = new List<string>();
+        var runtime = CreateRuntime(
+            toggleTouchKeyboard: () => { invoked.Add("keyboard"); return true; },
+            showDesktop: () => { invoked.Add("desktop"); return true; });
+
+        var snapshot = runtime.Capture();
+        var keyboardResult = await runtime.ExecuteAsync(keyboard.TileId);
+        var desktopResult = await runtime.ExecuteAsync(desktop.TileId);
+
+        Assert.All(snapshot.Tiles, tile => Assert.True(tile.Enabled));
+        Assert.Equal(["keyboard", "desktop"], invoked);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, keyboardResult.Outcome);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, desktopResult.Outcome);
+        Assert.False(keyboardResult.RetireOverlayAfterExecution);
+        Assert.False(desktopResult.RetireOverlayAfterExecution);
+
+        var failedRuntime = CreateRuntime(toggleTouchKeyboard: () => false, showDesktop: () => false);
+        Assert.Equal(ShortcutExecutionOutcome.Failed, (await failedRuntime.ExecuteAsync(keyboard.TileId)).Outcome);
+        Assert.Equal(ShortcutExecutionOutcome.Failed, (await failedRuntime.ExecuteAsync(desktop.TileId)).Outcome);
+    }
+
+    [Fact]
+    public async Task Focus_sensitive_actions_retire_overlay_before_dispatch_when_close_is_enabled()
+    {
+        var keyboard = Tile("Keyboard", ShortcutActionTypeIds.TouchKeyboard, Parameters("{}"), closeOverlayAfterLaunch: true);
+        var desktop = Tile("Desktop", ShortcutActionTypeIds.ShowDesktop, Parameters("{}"), closeOverlayAfterLaunch: true);
+        var steamInput = Tile("Steam Input", ShortcutActionTypeIds.SteamInput, Parameters("{}"), closeOverlayAfterLaunch: true);
+        Save([keyboard, desktop, steamInput]);
+        var order = new List<string>();
+        var launcher = new UserProcessLauncher((info, _) =>
+        {
+            order.Add(info.ArgumentList.Single());
+            return true;
+        });
+        var runtime = CreateRuntime(
+            userProcessLauncher: launcher,
+            actualRunningAppIdSource: () => 730,
+            toggleTouchKeyboard: () => { order.Add("keyboard"); return true; },
+            showDesktop: () => { order.Add("desktop"); return true; },
+            retireOverlayBeforeFocusSensitiveAction: _ =>
+            {
+                order.Add("retire");
+                return Task.FromResult(true);
+            });
+
+        var results = new[]
+        {
+            await runtime.ExecuteAsync(keyboard.TileId),
+            await runtime.ExecuteAsync(desktop.TileId),
+            await runtime.ExecuteAsync(steamInput.TileId)
+        };
+
+        Assert.All(results, result => Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome));
+        Assert.All(results, result => Assert.False(result.RetireOverlayAfterExecution));
+        Assert.Equal(
+            ["retire", "keyboard", "retire", "desktop", "retire", "steam://controllerconfig/730"],
+            order);
+    }
+
+    [Fact]
+    public async Task Steam_input_is_disabled_without_an_actual_running_app_and_uses_a_fresh_app_id()
+    {
+        var tile = Tile("Steam Input", ShortcutActionTypeIds.SteamInput, Parameters("{}"), closeOverlayAfterLaunch: true);
+        Save([tile]);
+        uint appId = 0;
+        var launched = new List<string>();
+        var retireCount = 0;
+        var launcher = new UserProcessLauncher((info, _) =>
+        {
+            launched.Add(info.ArgumentList.Single());
+            return true;
+        });
+        var runtime = CreateRuntime(
+            userProcessLauncher: launcher,
+            actualRunningAppIdSource: () => appId,
+            retireOverlayBeforeFocusSensitiveAction: _ =>
+            {
+                retireCount++;
+                return Task.FromResult(true);
+            });
+
+        var noGameTile = Assert.Single(runtime.Capture().Tiles);
+        Assert.False(noGameTile.Enabled);
+        Assert.Equal("No game running", noGameTile.StatusText);
+        var noGameResult = await runtime.ExecuteAsync(tile.TileId);
+        Assert.Equal(ShortcutExecutionOutcome.Unavailable, noGameResult.Outcome);
+        Assert.Empty(launched);
+        Assert.Equal(0, retireCount);
+
+        appId = 1245620;
+        Assert.True(Assert.Single(runtime.Capture().Tiles).Enabled);
+        var runningGameResult = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, runningGameResult.Outcome);
+        Assert.Equal(["steam://controllerconfig/1245620"], launched);
+        Assert.Equal(1, retireCount);
+
+        var failedLauncher = new UserProcessLauncher((_, _) => false);
+        var failedLaunchRuntime = CreateRuntime(
+            userProcessLauncher: failedLauncher,
+            actualRunningAppIdSource: () => 730);
+        var failedLaunch = await failedLaunchRuntime.ExecuteAsync(tile.TileId);
+        Assert.Equal(ShortcutExecutionOutcome.Failed, failedLaunch.Outcome);
+        Assert.False(failedLaunch.RetireOverlayAfterExecution);
+    }
+
+    [Fact]
+    public async Task Clawhud_shortcut_toggles_the_canonical_desired_state_and_reports_runtime_state()
+    {
+        var tile = Tile("HUD", ShortcutActionTypeIds.ClawHudToggle, Parameters("{}"));
+        Save([tile]);
+        var current = new FrontendClawHudSnapshot(false, FrontendClawHudRuntimeState.Disabled, "Off", null, null, null);
+        var requestedStates = new List<bool>();
+        var runtime = CreateRuntime(
+            clawHudSnapshotSource: () => current,
+            setClawHudEnabled: (enabled, _) =>
+            {
+                requestedStates.Add(enabled);
+                current = new FrontendClawHudSnapshot(enabled,
+                    enabled ? FrontendClawHudRuntimeState.Ready : FrontendClawHudRuntimeState.Disabled,
+                    enabled ? "Ready" : "Off", null, null, null);
+                return Task.FromResult(current);
+            });
+
+        var initially = Assert.Single(runtime.Capture().Tiles);
+        Assert.Equal(FrontendShortcutTileState.Inactive, initially.State);
+        Assert.Equal("Off", initially.StatusText);
+        Assert.True(initially.Enabled);
+
+        var enabled = await runtime.ExecuteAsync(tile.TileId);
+        var onTile = Assert.Single(runtime.Capture().Tiles);
+        var disabled = await runtime.ExecuteAsync(tile.TileId);
+        var offTile = Assert.Single(runtime.Capture().Tiles);
+
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, enabled.Outcome);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, disabled.Outcome);
+        Assert.Equal([true, false], requestedStates);
+        Assert.Equal(FrontendShortcutTileState.Active, onTile.State);
+        Assert.Equal("On", onTile.StatusText);
+        Assert.Equal(FrontendShortcutTileState.Inactive, offTile.State);
+        Assert.Equal("Off", offTile.StatusText);
+        Assert.False(enabled.RetireOverlayAfterExecution);
+        Assert.False(disabled.RetireOverlayAfterExecution);
+    }
+
+    [Fact]
+    public async Task Failed_clawhud_enable_does_not_report_a_ready_success()
+    {
+        var tile = Tile("HUD", ShortcutActionTypeIds.ClawHudToggle, Parameters("{}"));
+        Save([tile]);
+        var requested = 0;
+        var runtime = CreateRuntime(
+            clawHudSnapshotSource: () => new(false, FrontendClawHudRuntimeState.Disabled, "Off", null, null, null),
+            setClawHudEnabled: (enabled, _) =>
+            {
+                requested++;
+                return Task.FromResult(new FrontendClawHudSnapshot(enabled,
+                    FrontendClawHudRuntimeState.Unavailable, "Unavailable", null, null, null));
+            });
+
+        var result = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.Equal(1, requested);
+        Assert.Equal(ShortcutExecutionOutcome.Failed, result.Outcome);
+        Assert.Contains("could not be changed", result.FailureMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(0, false, "")]
+    [InlineData(1, false, "0x5B:up")]
+    [InlineData(2, false, "0x44:up,0x5B:up")]
+    [InlineData(3, false, "0x5B:up")]
+    [InlineData(4, true, "")]
+    public void Show_desktop_sequence_is_symmetric_and_compensates_partial_send(
+        uint acceptedEvents,
+        bool expectedSuccess,
+        string expectedReleaseEvents)
+    {
+        var calls = new List<ShortcutKeyboardInput[]>();
+        var result = WindowsShortcutActionCommands.SendWinD(events =>
+        {
+            calls.Add(events);
+            return calls.Count == 1 ? acceptedEvents : (uint)events.Length;
+        });
+
+        Assert.Equal(expectedSuccess, result);
+        Assert.Equal(new ushort[] { 0x5B, 0x44, 0x44, 0x5B }, calls[0].Select(input => input.VirtualKey));
+        Assert.Equal(new[] { false, false, true, true }, calls[0].Select(input => input.KeyUp));
+        var releases = calls.Count > 1
+            ? string.Join(',', calls[1].Select(input => $"0x{input.VirtualKey:X2}:{(input.KeyUp ? "up" : "down")}"))
+            : string.Empty;
+        Assert.Equal(expectedReleaseEvents, releases);
+        Assert.Equal(acceptedEvents is >= 1 and <= 3 ? 2 : 1, calls.Count);
+    }
+
+    [Fact]
+    public void Show_desktop_retries_only_the_unaccepted_compensating_key_up_events()
+    {
+        var calls = new List<ShortcutKeyboardInput[]>();
+        var result = WindowsShortcutActionCommands.SendWinD(events =>
+        {
+            calls.Add(events);
+            return calls.Count switch
+            {
+                1 => 2,
+                2 => 0,
+                _ => (uint)events.Length,
+            };
+        });
+
+        Assert.False(result);
+        Assert.Equal(3, calls.Count);
+        Assert.Equal(new ushort[] { 0x44, 0x5B }, calls[1].Select(input => input.VirtualKey));
+        Assert.All(calls[1], input => Assert.True(input.KeyUp));
+        Assert.Equal(new ushort[] { 0x44, 0x5B }, calls[2].Select(input => input.VirtualKey));
+        Assert.All(calls[2], input => Assert.True(input.KeyUp));
     }
 
     [Fact]
@@ -668,6 +899,15 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Contains("launchXboxAppOverride: () => CenterM.FrontButtonXboxAppLauncher.Launch(_userProcessLauncher)", source, StringComparison.Ordinal);
         Assert.Contains("launchApplicationOverride: application => CenterM.Oem1ApplicationLauncher.Launch(application, _userProcessLauncher)", source, StringComparison.Ordinal);
         Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,", source, StringComparison.Ordinal);
+        Assert.Contains("retireOverlayBeforeFocusSensitiveAction: RetireOverlayBeforeFocusSensitiveShortcutAsync", source, StringComparison.Ordinal);
+        Assert.Contains("ClawHudSnapshotSource", source, StringComparison.OrdinalIgnoreCase);
+        var focusRetirementStart = source.IndexOf("private async Task<bool> RetireOverlayBeforeFocusSensitiveShortcutAsync", StringComparison.Ordinal);
+        var focusRetirementEnd = source.IndexOf("private async Task<QuickSettingsMutationResult> HandleOverlayQuickSettingsMutationAsync", focusRetirementStart, StringComparison.Ordinal);
+        Assert.True(focusRetirementStart >= 0 && focusRetirementEnd > focusRetirementStart);
+        var focusRetirement = source[focusRetirementStart..focusRetirementEnd];
+        Assert.Contains("_visibleSurfaceTransition.WaitAsync(token)", focusRetirement, StringComparison.Ordinal);
+        Assert.Contains("RetireOverlayCaptureUnderTransitionAsync", focusRetirement, StringComparison.Ordinal);
+        Assert.Contains("\"ShortcutFocusHandoff\"", focusRetirement, StringComparison.Ordinal);
         Assert.True(source.IndexOf("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,", StringComparison.Ordinal)
             < source.IndexOf("AddonRuntimeCompositionFactory.Create(", StringComparison.Ordinal));
     }
@@ -812,9 +1052,21 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Func<ProcessStartInfo, Process?>? startProcess = null,
         Func<string, bool>? fileExists = null,
         Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null,
-        UserProcessLauncher? userProcessLauncher = null) =>
+        UserProcessLauncher? userProcessLauncher = null,
+        Func<uint>? actualRunningAppIdSource = null,
+        Func<FrontendClawHudSnapshot>? clawHudSnapshotSource = null,
+        Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null,
+        Func<bool>? toggleTouchKeyboard = null,
+        Func<bool>? showDesktop = null,
+        Func<CancellationToken, Task<bool>>? retireOverlayBeforeFocusSensitiveAction = null) =>
         new(new ShortcutStore(ShortcutsPath), startProcess, fileExists, screenshotAction,
-            userProcessLauncher: userProcessLauncher);
+            userProcessLauncher: userProcessLauncher,
+            actualRunningAppIdSource: actualRunningAppIdSource,
+            clawHudSnapshotSource: clawHudSnapshotSource,
+            setClawHudEnabled: setClawHudEnabled,
+            toggleTouchKeyboard: toggleTouchKeyboard,
+            showDesktop: showDesktop,
+            retireOverlayBeforeFocusSensitiveAction: retireOverlayBeforeFocusSensitiveAction);
 
     private void Save(IReadOnlyList<ShortcutTileDefinition> tiles) =>
         new ShortcutStore(ShortcutsPath).Save(new ShortcutDocument

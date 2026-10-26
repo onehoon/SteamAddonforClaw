@@ -58,7 +58,10 @@ public sealed class ShortcutEditorFrontendTests : IDisposable
 
         Assert.Contains("SteamBigPicture or", defaultHelper, StringComparison.Ordinal);
         Assert.Contains("SteamClient or", defaultHelper, StringComparison.Ordinal);
-        Assert.Contains("XboxApp;", defaultHelper, StringComparison.Ordinal);
+        Assert.Contains("XboxApp or", defaultHelper, StringComparison.Ordinal);
+        Assert.Contains("TouchKeyboard or", defaultHelper, StringComparison.Ordinal);
+        Assert.Contains("ShowDesktop or", defaultHelper, StringComparison.Ordinal);
+        Assert.Contains("SteamInput;", defaultHelper, StringComparison.Ordinal);
         Assert.Contains("if (existing is null)", selectionHandler, StringComparison.Ordinal);
         Assert.Contains("DefaultCloseOverlayAfterLaunch(selectedKind)", selectionHandler, StringComparison.Ordinal);
         Assert.Contains("selectedKind != FrontendShortcutEditorActionKind.ScreenshotFullscreen && closeOverlayToggle.IsOn", saveSection, StringComparison.Ordinal);

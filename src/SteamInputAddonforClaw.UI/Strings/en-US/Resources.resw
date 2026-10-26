@@ -456,6 +456,10 @@
   <data name="Shortcut_Action_Steam" xml:space="preserve"><value>Steam</value></data>
   <data name="Shortcut_Action_XboxApp" xml:space="preserve"><value>XBOX</value></data>
   <data name="Shortcut_Action_Screenshot" xml:space="preserve"><value>Screenshot</value></data>
+  <data name="Shortcut_Action_TouchKeyboard" xml:space="preserve"><value>Keyboard</value></data>
+  <data name="Shortcut_Action_ShowDesktop" xml:space="preserve"><value>Show Desktop</value></data>
+  <data name="Shortcut_Action_SteamInput" xml:space="preserve"><value>Steam Input</value></data>
+  <data name="Shortcut_Action_ClawHud" xml:space="preserve"><value>ClawHUD</value></data>
   <data name="Shortcut_CloseOverlay_Header" xml:space="preserve"><value>Close Overlay after launch</value></data>
   <data name="Shortcut_CloseOverlay_Close" xml:space="preserve"><value>Close Overlay</value></data>
   <data name="Shortcut_CloseOverlay_KeepOpen" xml:space="preserve"><value>Keep Overlay open</value></data>
@@ -479,6 +483,10 @@
   <data name="Shortcut_Description_SteamBigPicture" xml:space="preserve"><value>Opens Steam Big Picture.</value></data>
   <data name="Shortcut_Description_Steam" xml:space="preserve"><value>Opens the Steam client.</value></data>
   <data name="Shortcut_Description_XboxApp" xml:space="preserve"><value>Opens the XBOX app.</value></data>
+  <data name="Shortcut_Description_TouchKeyboard" xml:space="preserve"><value>Show or hide the Windows touch keyboard.</value></data>
+  <data name="Shortcut_Description_ShowDesktop" xml:space="preserve"><value>Show the desktop or restore open windows (Win+D).</value></data>
+  <data name="Shortcut_Description_SteamInput" xml:space="preserve"><value>Open the controller layout settings for the currently running Steam game.</value></data>
+  <data name="Shortcut_Description_ClawHud" xml:space="preserve"><value>Turn the ClawHUD performance overlay on or off.</value></data>
   <data name="Shortcut_SettingsLoadFailed" xml:space="preserve"><value>Shortcut settings could not be loaded.</value></data>
   <data name="Shortcut_EditorUnavailable" xml:space="preserve"><value>Shortcut editing is unavailable.</value></data>
   <data name="Shortcut_TileNotFound" xml:space="preserve"><value>Shortcut tile was not found.</value></data>

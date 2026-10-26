@@ -43,9 +43,10 @@ public sealed class UserProcessLauncherTests
         Assert.True(launcher.LaunchUri("https://example.com/path?q=1"));
         Assert.True(launcher.LaunchUri("steam://open/bigpicture"));
         Assert.True(launcher.LaunchUri("steam://open/main"));
+        Assert.True(launcher.LaunchUri("steam://controllerconfig/730"));
         Assert.True(launcher.LaunchXboxApp());
 
-        Assert.Equal(4, requests.Count);
+        Assert.Equal(5, requests.Count);
         Assert.All(requests, request =>
         {
             Assert.False(request.RunAsAdministrator);
@@ -60,7 +61,8 @@ public sealed class UserProcessLauncherTests
                 request.StartInfo.FileName));
         Assert.Equal("steam://open/bigpicture", requests[1].StartInfo.ArgumentList.Single());
         Assert.Equal("steam://open/main", requests[2].StartInfo.ArgumentList.Single());
-        Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", requests[3].StartInfo.ArgumentList.Single());
+        Assert.Equal("steam://controllerconfig/730", requests[3].StartInfo.ArgumentList.Single());
+        Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", requests[4].StartInfo.ArgumentList.Single());
         Assert.All(requests.Skip(1), request =>
             Assert.True(UserProcessLauncher.IsWithinCreateProcessWithTokenCommandLineLimit(
                 UserProcessLauncher.BuildCommandLine(request.StartInfo))));
@@ -165,6 +167,10 @@ public sealed class UserProcessLauncherTests
     [Theory]
     [InlineData("file:///C:/private.txt")]
     [InlineData("steam://open/unsupported")]
+    [InlineData("steam://controllerconfig/0")]
+    [InlineData("steam://controllerconfig/730/extra")]
+    [InlineData("steam://controllerconfig/730?other=1")]
+    [InlineData("steam://controllerconfig/not-an-app-id")]
     [InlineData("javascript:alert(1)")]
     public void Unsupported_shell_target_is_rejected_without_launch(string target)
     {

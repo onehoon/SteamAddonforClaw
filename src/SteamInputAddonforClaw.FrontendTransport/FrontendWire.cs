@@ -192,8 +192,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 86 adds the typed mandatory-startup-task status and user-initiated repair RPC.
 // Version 87 adds the user-initiated, read-only MSI Live Update catalog query RPC.
 // Version 88 extends the read-only MSI Update snapshot with installed-version, Intel DSA source and provenance fields.
-// Version 89 adds the Runtime-owned Quick Overlay Y Button Quick Jump preference and typed mutation RPC.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 89; }
+// Version 90 adds Shortcut built-in actions and editor action-type lock metadata.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 90; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

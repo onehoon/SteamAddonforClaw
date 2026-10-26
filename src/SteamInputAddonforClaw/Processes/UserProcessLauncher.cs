@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
@@ -57,7 +58,7 @@ internal sealed class UserProcessLauncher
         return StartThroughDesktopShell(startInfo, currentToken);
     }
 
-    /// <summary>Dispatches a supported HTTP(S) or Steam URI for the interactive user.</summary>
+    /// <summary>Dispatches a supported HTTP(S) or built-in Steam URI for the interactive user.</summary>
     internal bool LaunchUri(string uri)
     {
         if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
@@ -65,14 +66,35 @@ internal sealed class UserProcessLauncher
             || !(parsed.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
                 || parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
                 || uri.Equals("steam://open/bigpicture", StringComparison.OrdinalIgnoreCase)
-                || uri.Equals("steam://open/main", StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException("Only HTTP, HTTPS, and Steam URIs can use shell activation.");
+                || uri.Equals("steam://open/main", StringComparison.OrdinalIgnoreCase)
+                || IsSteamControllerConfigUri(uri, parsed)))
+            throw new InvalidOperationException("Only HTTP, HTTPS, and supported built-in Steam URIs can use shell activation.");
 
         var isWebUrl = parsed.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
             || parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
         return isWebUrl
             ? LaunchWebUrl(parsed.AbsoluteUri)
             : LaunchShellTarget(uri);
+    }
+
+    private static bool IsSteamControllerConfigUri(string original, Uri parsed)
+    {
+        const string prefix = "steam://controllerconfig/";
+        if (!original.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || !parsed.Scheme.Equals("steam", StringComparison.OrdinalIgnoreCase)
+            || !parsed.Host.Equals("controllerconfig", StringComparison.OrdinalIgnoreCase)
+            || !parsed.IsDefaultPort
+            || !string.IsNullOrEmpty(parsed.UserInfo)
+            || !string.IsNullOrEmpty(parsed.Query)
+            || !string.IsNullOrEmpty(parsed.Fragment))
+        {
+            return false;
+        }
+
+        var appIdText = original[prefix.Length..];
+        return uint.TryParse(appIdText, NumberStyles.None, CultureInfo.InvariantCulture, out var appId)
+            && appId != 0
+            && parsed.AbsolutePath.Equals($"/{appId.ToString(CultureInfo.InvariantCulture)}", StringComparison.Ordinal);
     }
 
     /// <summary>Activates the product's fixed Xbox gaming-home package for the interactive user.</summary>

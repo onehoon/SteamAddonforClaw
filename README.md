@@ -205,6 +205,8 @@ Use **Shortcut** to add, edit, delete, and drag to reorder items shown in Quick 
 - Open a website URL.
 - Capture the primary display as a JPEG screenshot.
 - Open Steam Big Picture, the Steam client, or the Xbox app.
+- Show or hide the Windows touch keyboard, toggle Show Desktop, or open the controller layout for the currently running Steam game.
+- Turn the ClawHUD performance overlay on or off.
 
 For **Application (.exe)** and **PowerShell** shortcuts, **Run as administrator** is off by default. Turn it on only when the action needs administrator privileges. Other shortcut types have no administrator option.
 

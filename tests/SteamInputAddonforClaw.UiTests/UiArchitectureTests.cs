@@ -1087,25 +1087,25 @@ public sealed class UiArchitectureTests
         var panelHelperEnd = shortcutCode.IndexOf("internal static string? GetDefaultTitle", panelHelperStart, StringComparison.Ordinal);
         var builtInPanelHelper = shortcutCode[panelHelperStart..panelHelperEnd];
 
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_Application\", \"Application (.exe)\")", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_PowerShell\", \"PowerShell\")", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_Website\", \"Website (URL)\")", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_SteamBigPicture\", \"Steam Big Picture\")", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_Steam\", \"Steam\")", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_XboxApp\", \"XBOX\")", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Action_Screenshot\", \"Screenshot\")", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("CreateBuiltInActionPanel(MainUiStrings.Get(\"Shortcut_Description_XboxApp\", \"Opens the XBOX app.\"))", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("Text = existing?.Title ?? string.Empty", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Screenshot\", \"Screenshot\"), FrontendShortcutEditorActionKind.ScreenshotFullscreen)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("actionPicker.IsEnabled = existing.Action.TypeEditable", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("titleWasManuallyEdited = !string.IsNullOrWhiteSpace(titleBox.Text)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("=> GetLocalizedActionLabel(kind)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("GetDefaultTitle(selectedKind)", shortcutCode, StringComparison.Ordinal);
         var expectedActionChoiceCalls = new[]
         {
-            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Application\", \"Application (.exe)\"), FrontendShortcutEditorActionKind.Executable)",
-            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_PowerShell\", \"PowerShell\"), FrontendShortcutEditorActionKind.PowerShell)",
-            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Website\", \"Website (URL)\"), FrontendShortcutEditorActionKind.Url)",
-            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_SteamBigPicture\", \"Steam Big Picture\"), FrontendShortcutEditorActionKind.SteamBigPicture)",
-            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Steam\", \"Steam\"), FrontendShortcutEditorActionKind.SteamClient)",
-            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_XboxApp\", \"XBOX\"), FrontendShortcutEditorActionKind.XboxApp)",
-            "AddActionChoice(actionPicker, MainUiStrings.Get(\"Shortcut_Action_Screenshot\", \"Screenshot\"), FrontendShortcutEditorActionKind.ScreenshotFullscreen)"
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.Executable), FrontendShortcutEditorActionKind.Executable)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.PowerShell), FrontendShortcutEditorActionKind.PowerShell)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.Url), FrontendShortcutEditorActionKind.Url)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamBigPicture), FrontendShortcutEditorActionKind.SteamBigPicture)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamClient), FrontendShortcutEditorActionKind.SteamClient)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.XboxApp), FrontendShortcutEditorActionKind.XboxApp)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.TouchKeyboard), FrontendShortcutEditorActionKind.TouchKeyboard)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ShowDesktop), FrontendShortcutEditorActionKind.ShowDesktop)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamInput), FrontendShortcutEditorActionKind.SteamInput)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ClawHudToggle), FrontendShortcutEditorActionKind.ClawHudToggle)",
+            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ScreenshotFullscreen), FrontendShortcutEditorActionKind.ScreenshotFullscreen)"
         };
         var actionChoicePositions = expectedActionChoiceCalls.Select(call => shortcutCode.IndexOf(call, StringComparison.Ordinal)).ToArray();
         Assert.All(actionChoicePositions, position => Assert.True(position >= 0));
@@ -1113,23 +1113,68 @@ public sealed class UiArchitectureTests
         Assert.Contains("[FrontendShortcutEditorActionKind.SteamBigPicture] = steamBigPicturePanel", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("[FrontendShortcutEditorActionKind.SteamClient] = steamClientPanel", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("[FrontendShortcutEditorActionKind.XboxApp] = xboxAppPanel", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.TouchKeyboard] = touchKeyboardPanel", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.ShowDesktop] = showDesktopPanel", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.SteamInput] = steamInputPanel", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.ClawHudToggle] = clawHudPanel", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("panel.Visibility = Visibility.Collapsed", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("Executable path", builtInPanelHelper, StringComparison.Ordinal);
         Assert.DoesNotContain("Script", builtInPanelHelper, StringComparison.Ordinal);
         Assert.DoesNotContain("URL", builtInPanelHelper, StringComparison.Ordinal);
         Assert.Contains("new FrontendShortcutActionInput(selectedKind)", shortcutCode, StringComparison.Ordinal);
 
-        Assert.Equal("Steam Big Picture", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamBigPicture));
-        Assert.Equal("Steam", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamClient));
-        Assert.Equal("XBOX", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.XboxApp));
-        Assert.Equal("Screenshot", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ScreenshotFullscreen));
+        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamBigPicture));
+        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamClient));
+        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.XboxApp));
+        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ScreenshotFullscreen));
+        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.TouchKeyboard));
+        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ShowDesktop));
+        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamInput));
+        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ClawHudToggle));
         Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, string.Empty, null));
         Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, "Screenshot", "Screenshot"));
+        Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, string.Empty, "Keyboard", titleWasManuallyEdited: false));
+        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(true, "Screenshot", "Screenshot", titleWasManuallyEdited: true));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(true, "My Capture", "Screenshot"));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "Xbox", "XBOX"));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "My XbOx", "XBOX"));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "Persisted title", null));
     }
+
+    [Fact]
+    public void New_shortcut_action_labels_and_descriptions_have_exact_english_and_korean_resources()
+    {
+        var root = FindRepositoryRoot();
+        var english = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Strings/en-US/Resources.resw"));
+        var korean = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Strings/ko-KR/Resources.resw"));
+        var editorContract = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Contracts/Frontend/ShortcutEditorFrontendContracts.cs"));
+        var overlayContract = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Contracts/Frontend/ShortcutFrontendContracts.cs"));
+
+        AssertResource(english, "Shortcut_Action_TouchKeyboard", "Keyboard");
+        AssertResource(english, "Shortcut_Action_ShowDesktop", "Show Desktop");
+        AssertResource(english, "Shortcut_Action_SteamInput", "Steam Input");
+        AssertResource(english, "Shortcut_Action_ClawHud", "ClawHUD");
+        AssertResource(english, "Shortcut_Description_TouchKeyboard", "Show or hide the Windows touch keyboard.");
+        AssertResource(english, "Shortcut_Description_ShowDesktop", "Show the desktop or restore open windows (Win+D).");
+        AssertResource(english, "Shortcut_Description_SteamInput", "Open the controller layout settings for the currently running Steam game.");
+        AssertResource(english, "Shortcut_Description_ClawHud", "Turn the ClawHUD performance overlay on or off.");
+
+        AssertResource(korean, "Shortcut_Action_TouchKeyboard", "터치 키보드");
+        AssertResource(korean, "Shortcut_Action_ShowDesktop", "바탕화면");
+        AssertResource(korean, "Shortcut_Action_SteamInput", "Steam Input");
+        AssertResource(korean, "Shortcut_Action_ClawHud", "ClawHUD");
+        AssertResource(korean, "Shortcut_Description_TouchKeyboard", "Windows 터치 키보드를 표시하거나 숨깁니다.");
+        AssertResource(korean, "Shortcut_Description_ShowDesktop", "바탕화면을 표시하거나 열려 있던 창을 복원합니다. (Win+D)");
+        AssertResource(korean, "Shortcut_Description_SteamInput", "현재 실행 중인 Steam 게임의 컨트롤러 레이아웃 설정을 엽니다.");
+        AssertResource(korean, "Shortcut_Description_ClawHud", "ClawHUD 성능 오버레이를 켜거나 끕니다.");
+        Assert.DoesNotContain("Description", editorContract, StringComparison.Ordinal);
+        Assert.DoesNotContain("Description", overlayContract, StringComparison.Ordinal);
+    }
+
+    private static void AssertResource(XDocument document, string name, string expected) =>
+        Assert.Equal(expected, document.Root!.Elements("data")
+            .Single(element => (string?)element.Attribute("name") == name)
+            .Element("value")?.Value);
 
     [Fact]
     public void Shortcut_icon_picker_stages_curated_choices_and_keeps_card_reorder_separate()
