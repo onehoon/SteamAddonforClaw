@@ -1190,9 +1190,6 @@ public sealed class OverlayDeviceRendererWiringTests
         var tabRailEnd = xaml.IndexOf("</Border>", tabRailStart, StringComparison.Ordinal);
         var tabRail = xaml[tabRailStart..tabRailEnd];
         var tabRailStartIndex = xaml.IndexOf("x:Name=\"TabRail\"", StringComparison.Ordinal);
-        var bodyStart = xaml.IndexOf("<Grid Grid.Column=\"1\"", StringComparison.Ordinal);
-        var bodyEnd = xaml.IndexOf("</Grid>", bodyStart, StringComparison.Ordinal);
-        var bodyColumn = xaml[bodyStart..bodyEnd];
         var document = XDocument.Parse(xaml);
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
         var shellElement = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "QamShell");
@@ -1200,6 +1197,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var railGrid = Assert.Single(railElement.Elements(), element => element.Name.LocalName == "Grid");
         var pageHost = document.Descendants().Single(element =>
             element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1");
+        var bodyColumn = pageHost.ToString(SaveOptions.DisableFormatting);
         var railCluster = Assert.Single(railGrid.Elements(), element =>
             element.Name.LocalName == "StackPanel" && (string?)element.Attribute(x + "Name") == "TabRailCluster");
         var clusterChildren = railCluster.Elements().ToArray();

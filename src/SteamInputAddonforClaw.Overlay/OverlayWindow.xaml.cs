@@ -21,6 +21,7 @@ public sealed partial class OverlayWindow : Window
         Closed += (_, _) =>
         {
             StopRailClockUpdates();
+            ClearProfileArtwork();
             CancelPendingControllerVibrationDraft();
             foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.Dispose();
         };
