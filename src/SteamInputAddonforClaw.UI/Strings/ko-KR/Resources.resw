@@ -456,6 +456,10 @@
   <data name="Shortcut_Action_Steam" xml:space="preserve"><value>Steam</value></data>
   <data name="Shortcut_Action_XboxApp" xml:space="preserve"><value>XBOX</value></data>
   <data name="Shortcut_Action_Screenshot" xml:space="preserve"><value>Screenshot</value></data>
+  <data name="Shortcut_Action_TouchKeyboard" xml:space="preserve"><value>터치 키보드</value></data>
+  <data name="Shortcut_Action_ShowDesktop" xml:space="preserve"><value>바탕화면</value></data>
+  <data name="Shortcut_Action_SteamInput" xml:space="preserve"><value>Steam Input</value></data>
+  <data name="Shortcut_Action_ClawHud" xml:space="preserve"><value>ClawHUD</value></data>
   <data name="Shortcut_CloseOverlay_Header" xml:space="preserve"><value>Close Overlay after launch</value></data>
   <data name="Shortcut_CloseOverlay_Close" xml:space="preserve"><value>Close Overlay</value></data>
   <data name="Shortcut_CloseOverlay_KeepOpen" xml:space="preserve"><value>Keep Overlay open</value></data>
@@ -479,6 +483,10 @@
   <data name="Shortcut_Description_SteamBigPicture" xml:space="preserve"><value>Opens Steam Big Picture.</value></data>
   <data name="Shortcut_Description_Steam" xml:space="preserve"><value>Opens the Steam client.</value></data>
   <data name="Shortcut_Description_XboxApp" xml:space="preserve"><value>Opens the XBOX app.</value></data>
+  <data name="Shortcut_Description_TouchKeyboard" xml:space="preserve"><value>Windows 터치 키보드를 표시하거나 숨깁니다.</value></data>
+  <data name="Shortcut_Description_ShowDesktop" xml:space="preserve"><value>바탕화면을 표시하거나 열려 있던 창을 복원합니다. (Win+D)</value></data>
+  <data name="Shortcut_Description_SteamInput" xml:space="preserve"><value>현재 실행 중인 Steam 게임의 컨트롤러 레이아웃 설정을 엽니다.</value></data>
+  <data name="Shortcut_Description_ClawHud" xml:space="preserve"><value>ClawHUD 성능 오버레이를 켜거나 끕니다.</value></data>
   <data name="Shortcut_SettingsLoadFailed" xml:space="preserve"><value>Shortcut settings could not be loaded.</value></data>
   <data name="Shortcut_EditorUnavailable" xml:space="preserve"><value>Shortcut editing is unavailable.</value></data>
   <data name="Shortcut_TileNotFound" xml:space="preserve"><value>Shortcut tile was not found.</value></data>

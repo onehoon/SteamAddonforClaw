@@ -289,18 +289,22 @@ public sealed partial class ShortcutPage : UserControl
                 }
             }
         };
-        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_Application", "Application (.exe)"), FrontendShortcutEditorActionKind.Executable);
-        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_PowerShell", "PowerShell"), FrontendShortcutEditorActionKind.PowerShell);
-        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_Website", "Website (URL)"), FrontendShortcutEditorActionKind.Url);
-        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_SteamBigPicture", "Steam Big Picture"), FrontendShortcutEditorActionKind.SteamBigPicture);
-        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_Steam", "Steam"), FrontendShortcutEditorActionKind.SteamClient);
-        AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_XboxApp", "XBOX"), FrontendShortcutEditorActionKind.XboxApp);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.Executable), FrontendShortcutEditorActionKind.Executable);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.PowerShell), FrontendShortcutEditorActionKind.PowerShell);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.Url), FrontendShortcutEditorActionKind.Url);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamBigPicture), FrontendShortcutEditorActionKind.SteamBigPicture);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamClient), FrontendShortcutEditorActionKind.SteamClient);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.XboxApp), FrontendShortcutEditorActionKind.XboxApp);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.TouchKeyboard), FrontendShortcutEditorActionKind.TouchKeyboard);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ShowDesktop), FrontendShortcutEditorActionKind.ShowDesktop);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamInput), FrontendShortcutEditorActionKind.SteamInput);
+        AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ClawHudToggle), FrontendShortcutEditorActionKind.ClawHudToggle);
         var existingScreenshot = existing?.Action.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen;
         var screenshotAlreadyExists = authoritativeSnapshot.Tiles.Any(tile =>
             tile.Action.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen
             && tile.TileId != existing?.TileId);
         if (existingScreenshot || !screenshotAlreadyExists)
-            AddActionChoice(actionPicker, MainUiStrings.Get("Shortcut_Action_Screenshot", "Screenshot"), FrontendShortcutEditorActionKind.ScreenshotFullscreen);
+            AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ScreenshotFullscreen), FrontendShortcutEditorActionKind.ScreenshotFullscreen);
         var closeOverlayToggle = new ToggleSwitch
         {
             Header = MainUiStrings.Get("Shortcut_CloseOverlay_Header", "Close Overlay after launch"),
@@ -429,6 +433,10 @@ public sealed partial class ShortcutPage : UserControl
         var steamBigPicturePanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_SteamBigPicture", "Opens Steam Big Picture."));
         var steamClientPanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_Steam", "Opens the Steam client."));
         var xboxAppPanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_XboxApp", "Opens the XBOX app."));
+        var touchKeyboardPanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_TouchKeyboard", "Show or hide the Windows touch keyboard."));
+        var showDesktopPanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_ShowDesktop", "Show the desktop or restore open windows (Win+D)."));
+        var steamInputPanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_SteamInput", "Open the controller layout settings for the currently running Steam game."));
+        var clawHudPanel = CreateBuiltInActionPanel(MainUiStrings.Get("Shortcut_Description_ClawHud", "Turn the ClawHUD performance overlay on or off."));
 
         var panels = new Dictionary<FrontendShortcutEditorActionKind, UIElement>
         {
@@ -438,10 +446,21 @@ public sealed partial class ShortcutPage : UserControl
             [FrontendShortcutEditorActionKind.ScreenshotFullscreen] = screenshotPanel,
             [FrontendShortcutEditorActionKind.SteamBigPicture] = steamBigPicturePanel,
             [FrontendShortcutEditorActionKind.SteamClient] = steamClientPanel,
-            [FrontendShortcutEditorActionKind.XboxApp] = xboxAppPanel
+            [FrontendShortcutEditorActionKind.XboxApp] = xboxAppPanel,
+            [FrontendShortcutEditorActionKind.TouchKeyboard] = touchKeyboardPanel,
+            [FrontendShortcutEditorActionKind.ShowDesktop] = showDesktopPanel,
+            [FrontendShortcutEditorActionKind.SteamInput] = steamInputPanel,
+            [FrontendShortcutEditorActionKind.ClawHudToggle] = clawHudPanel
         };
 
         string? suggestedTitle = null;
+        var applyingSuggestedTitle = false;
+        var titleWasManuallyEdited = false;
+        titleBox.TextChanged += (_, _) =>
+        {
+            if (applyingSuggestedTitle) return;
+            titleWasManuallyEdited = !string.IsNullOrWhiteSpace(titleBox.Text);
+        };
         actionPicker.SelectionChanged += (_, _) =>
         {
             UpdateEditorPanel(actionPicker, panels);
@@ -457,16 +476,19 @@ public sealed partial class ShortcutPage : UserControl
                 closeOverlayToggle.IsOn = DefaultCloseOverlayAfterLaunch(selectedKind);
 
             var defaultTitle = GetDefaultTitle(selectedKind);
-            if (defaultTitle is null) return;
-            if (ShouldApplyDefaultTitle(existing is null, titleBox.Text, suggestedTitle))
+            if (defaultTitle is not null
+                && ShouldApplyDefaultTitle(existing is null, titleBox.Text, suggestedTitle, titleWasManuallyEdited))
             {
-                titleBox.Text = defaultTitle;
+                applyingSuggestedTitle = true;
+                try { titleBox.Text = defaultTitle; }
+                finally { applyingSuggestedTitle = false; }
                 suggestedTitle = defaultTitle;
             }
         };
         executableBrowse.Click += async (_, _) => await BrowseForExecutableAsync(executablePath);
         if (existing is not null)
         {
+            actionPicker.IsEnabled = existing.Action.TypeEditable;
             executablePath.Text = existing.Action.ExecutablePath ?? string.Empty;
             executableArguments.Text = existing.Action.ExecutableArguments ?? string.Empty;
             var selected = existing.Action.Kind;
@@ -486,7 +508,8 @@ public sealed partial class ShortcutPage : UserControl
             Children =
             {
                 titleBox, iconRow, actionPicker, closeOverlayToggle, executablePanel, scriptPanel, urlPanel,
-                steamBigPicturePanel, steamClientPanel, xboxAppPanel, screenshotPanel
+                steamBigPicturePanel, steamClientPanel, xboxAppPanel, screenshotPanel,
+                touchKeyboardPanel, showDesktopPanel, steamInputPanel, clawHudPanel
             }
         };
         var dialog = new ContentDialog
@@ -530,6 +553,10 @@ public sealed partial class ShortcutPage : UserControl
             FrontendShortcutEditorActionKind.SteamBigPicture => new FrontendShortcutActionInput(selectedKind),
             FrontendShortcutEditorActionKind.SteamClient => new FrontendShortcutActionInput(selectedKind),
             FrontendShortcutEditorActionKind.XboxApp => new FrontendShortcutActionInput(selectedKind),
+            FrontendShortcutEditorActionKind.TouchKeyboard => new FrontendShortcutActionInput(selectedKind),
+            FrontendShortcutEditorActionKind.ShowDesktop => new FrontendShortcutActionInput(selectedKind),
+            FrontendShortcutEditorActionKind.SteamInput => new FrontendShortcutActionInput(selectedKind),
+            FrontendShortcutEditorActionKind.ClawHudToggle => new FrontendShortcutActionInput(selectedKind),
             _ => new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.Unsupported)
         };
         var intent = new FrontendShortcutMutationIntent(
@@ -553,11 +580,31 @@ public sealed partial class ShortcutPage : UserControl
 
     internal static string? GetDefaultTitle(FrontendShortcutEditorActionKind kind) => kind switch
     {
-        FrontendShortcutEditorActionKind.SteamBigPicture => "Steam Big Picture",
-        FrontendShortcutEditorActionKind.SteamClient => "Steam",
-        FrontendShortcutEditorActionKind.XboxApp => "XBOX",
-        FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Screenshot",
+        FrontendShortcutEditorActionKind.SteamBigPicture or
+        FrontendShortcutEditorActionKind.SteamClient or
+        FrontendShortcutEditorActionKind.XboxApp or
+        FrontendShortcutEditorActionKind.ScreenshotFullscreen or
+        FrontendShortcutEditorActionKind.TouchKeyboard or
+        FrontendShortcutEditorActionKind.ShowDesktop or
+        FrontendShortcutEditorActionKind.SteamInput or
+        FrontendShortcutEditorActionKind.ClawHudToggle => GetLocalizedActionLabel(kind),
         _ => null
+    };
+
+    private static string GetLocalizedActionLabel(FrontendShortcutEditorActionKind kind) => kind switch
+    {
+        FrontendShortcutEditorActionKind.Executable => MainUiStrings.Get("Shortcut_Action_Application", "Application (.exe)"),
+        FrontendShortcutEditorActionKind.PowerShell => MainUiStrings.Get("Shortcut_Action_PowerShell", "PowerShell"),
+        FrontendShortcutEditorActionKind.Url => MainUiStrings.Get("Shortcut_Action_Website", "Website (URL)"),
+        FrontendShortcutEditorActionKind.SteamBigPicture => MainUiStrings.Get("Shortcut_Action_SteamBigPicture", "Steam Big Picture"),
+        FrontendShortcutEditorActionKind.SteamClient => MainUiStrings.Get("Shortcut_Action_Steam", "Steam"),
+        FrontendShortcutEditorActionKind.XboxApp => MainUiStrings.Get("Shortcut_Action_XboxApp", "XBOX"),
+        FrontendShortcutEditorActionKind.TouchKeyboard => MainUiStrings.Get("Shortcut_Action_TouchKeyboard", "Keyboard"),
+        FrontendShortcutEditorActionKind.ShowDesktop => MainUiStrings.Get("Shortcut_Action_ShowDesktop", "Show Desktop"),
+        FrontendShortcutEditorActionKind.SteamInput => MainUiStrings.Get("Shortcut_Action_SteamInput", "Steam Input"),
+        FrontendShortcutEditorActionKind.ClawHudToggle => MainUiStrings.Get("Shortcut_Action_ClawHud", "ClawHUD"),
+        FrontendShortcutEditorActionKind.ScreenshotFullscreen => MainUiStrings.Get("Shortcut_Action_Screenshot", "Screenshot"),
+        _ => kind.ToString()
     };
 
     public static string GetDisplayTargetSummary(FrontendShortcutEditorActionKind kind, string sourceSummary) => kind switch
@@ -590,10 +637,18 @@ public sealed partial class ShortcutPage : UserControl
     internal static bool DefaultCloseOverlayAfterLaunch(FrontendShortcutEditorActionKind kind) => kind is
         FrontendShortcutEditorActionKind.SteamBigPicture or
         FrontendShortcutEditorActionKind.SteamClient or
-        FrontendShortcutEditorActionKind.XboxApp;
+        FrontendShortcutEditorActionKind.XboxApp or
+        FrontendShortcutEditorActionKind.TouchKeyboard or
+        FrontendShortcutEditorActionKind.ShowDesktop or
+        FrontendShortcutEditorActionKind.SteamInput;
 
-    internal static bool ShouldApplyDefaultTitle(bool isCreating, string currentTitle, string? previousSuggestedTitle) =>
+    internal static bool ShouldApplyDefaultTitle(
+        bool isCreating,
+        string currentTitle,
+        string? previousSuggestedTitle,
+        bool titleWasManuallyEdited = false) =>
         isCreating
+        && !titleWasManuallyEdited
         && (string.IsNullOrWhiteSpace(currentTitle)
             || string.Equals(currentTitle, previousSuggestedTitle, StringComparison.Ordinal));
 

@@ -50,6 +50,12 @@ internal sealed class ShortcutRuntime
     private readonly UserProcessLauncher _userProcessLauncher;
     private readonly Func<string, bool> _fileExists;
     private readonly Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? _screenshotAction;
+    private readonly Func<uint>? _actualRunningAppIdSource;
+    private readonly Func<FrontendClawHudSnapshot>? _clawHudSnapshotSource;
+    private readonly Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
+    private readonly Func<bool> _toggleTouchKeyboard;
+    private readonly Func<bool> _showDesktop;
+    private readonly Func<CancellationToken, Task<bool>>? _retireOverlayBeforeFocusSensitiveAction;
     private readonly bool _available;
 
     internal ShortcutRuntime(
@@ -58,7 +64,13 @@ internal sealed class ShortcutRuntime
         Func<string, bool>? fileExists = null,
         Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null,
         Action<ShortcutDocument>? saveDocument = null,
-        UserProcessLauncher? userProcessLauncher = null)
+        UserProcessLauncher? userProcessLauncher = null,
+        Func<uint>? actualRunningAppIdSource = null,
+        Func<FrontendClawHudSnapshot>? clawHudSnapshotSource = null,
+        Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null,
+        Func<bool>? toggleTouchKeyboard = null,
+        Func<bool>? showDesktop = null,
+        Func<CancellationToken, Task<bool>>? retireOverlayBeforeFocusSensitiveAction = null)
     {
         ArgumentNullException.ThrowIfNull(store);
 
@@ -73,6 +85,12 @@ internal sealed class ShortcutRuntime
             }));
         _fileExists = fileExists ?? File.Exists;
         _screenshotAction = screenshotAction;
+        _actualRunningAppIdSource = actualRunningAppIdSource;
+        _clawHudSnapshotSource = clawHudSnapshotSource;
+        _setClawHudEnabled = setClawHudEnabled;
+        _toggleTouchKeyboard = toggleTouchKeyboard ?? WindowsShortcutActionCommands.ToggleTouchKeyboard;
+        _showDesktop = showDesktop ?? WindowsShortcutActionCommands.ShowDesktop;
+        _retireOverlayBeforeFocusSensitiveAction = retireOverlayBeforeFocusSensitiveAction;
         _store = store;
         _saveDocument = saveDocument;
 
@@ -124,6 +142,10 @@ internal sealed class ShortcutRuntime
                 Tile("Steam", ShortcutActionTypeIds.SteamClient, true),
                 Tile("Steam Big Picture", ShortcutActionTypeIds.SteamBigPicture, true),
                 Tile("XBOX", ShortcutActionTypeIds.XboxApp, true),
+                Tile("Keyboard", ShortcutActionTypeIds.TouchKeyboard, true),
+                Tile("Show Desktop", ShortcutActionTypeIds.ShowDesktop, true),
+                Tile("Steam Input", ShortcutActionTypeIds.SteamInput, true),
+                Tile("ClawHUD", ShortcutActionTypeIds.ClawHudToggle, false),
             ])
         };
     }
@@ -245,6 +267,9 @@ internal sealed class ShortcutRuntime
                 if (!ProjectEditorAction(tiles[index].Action).Editable)
                     return Fail("This Shortcut action cannot be edited in this version.", out failureMessage);
                 if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
+                if (IsBuiltInTypeId(tiles[index].Action.TypeId)
+                    && !string.Equals(tiles[index].Action.TypeId, action!.TypeId, StringComparison.Ordinal))
+                    return Fail("Built-in Shortcut actions cannot be changed.", out failureMessage);
                 if (!TryResolveMutationIconOverride(intent.IconGlyphOverride, tiles[index].IconGlyphOverride,
                         out var iconGlyphOverride, out failureMessage))
                     return false;
@@ -363,7 +388,11 @@ internal sealed class ShortcutRuntime
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => screenshotParametersValid,
             FrontendShortcutEditorActionKind.SteamBigPicture or
             FrontendShortcutEditorActionKind.SteamClient or
-            FrontendShortcutEditorActionKind.XboxApp => HasEmptyObjectParameters(action.Parameters),
+            FrontendShortcutEditorActionKind.XboxApp or
+            FrontendShortcutEditorActionKind.TouchKeyboard or
+            FrontendShortcutEditorActionKind.ShowDesktop or
+            FrontendShortcutEditorActionKind.SteamInput or
+            FrontendShortcutEditorActionKind.ClawHudToggle => HasEmptyObjectParameters(action.Parameters),
             _ => false
         };
         var runAsAdministrator = false;
@@ -382,7 +411,8 @@ internal sealed class ShortcutRuntime
             kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen && screenshotParametersValid
                 ? screenshotFolder
                 : null,
-            runAsAdministrator);
+            runAsAdministrator,
+            TypeEditable: !IsBuiltInTypeId(action.TypeId));
     }
 
     private static FrontendShortcutEditorActionKind? GetEditorActionKind(string typeId) => typeId switch
@@ -394,6 +424,10 @@ internal sealed class ShortcutRuntime
         ShortcutActionTypeIds.SteamBigPicture => FrontendShortcutEditorActionKind.SteamBigPicture,
         ShortcutActionTypeIds.SteamClient => FrontendShortcutEditorActionKind.SteamClient,
         ShortcutActionTypeIds.XboxApp => FrontendShortcutEditorActionKind.XboxApp,
+        ShortcutActionTypeIds.TouchKeyboard => FrontendShortcutEditorActionKind.TouchKeyboard,
+        ShortcutActionTypeIds.ShowDesktop => FrontendShortcutEditorActionKind.ShowDesktop,
+        ShortcutActionTypeIds.SteamInput => FrontendShortcutEditorActionKind.SteamInput,
+        ShortcutActionTypeIds.ClawHudToggle => FrontendShortcutEditorActionKind.ClawHudToggle,
         _ => null
     };
 
@@ -414,6 +448,10 @@ internal sealed class ShortcutRuntime
             FrontendShortcutEditorActionKind.SteamBigPicture => "Steam Big Picture",
             FrontendShortcutEditorActionKind.SteamClient => "Steam client",
             FrontendShortcutEditorActionKind.XboxApp => "XBOX app",
+            FrontendShortcutEditorActionKind.TouchKeyboard => "Keyboard",
+            FrontendShortcutEditorActionKind.ShowDesktop => "Show Desktop",
+            FrontendShortcutEditorActionKind.SteamInput => "Steam Input",
+            FrontendShortcutEditorActionKind.ClawHudToggle => "ClawHUD",
             _ => "Unsupported in this version"
         };
     }
@@ -521,7 +559,11 @@ internal sealed class ShortcutRuntime
 
         if ((input.Kind == FrontendShortcutEditorActionKind.SteamBigPicture
                 || input.Kind == FrontendShortcutEditorActionKind.SteamClient
-                || input.Kind == FrontendShortcutEditorActionKind.XboxApp)
+                || input.Kind == FrontendShortcutEditorActionKind.XboxApp
+                || input.Kind == FrontendShortcutEditorActionKind.TouchKeyboard
+                || input.Kind == FrontendShortcutEditorActionKind.ShowDesktop
+                || input.Kind == FrontendShortcutEditorActionKind.SteamInput
+                || input.Kind == FrontendShortcutEditorActionKind.ClawHudToggle)
             && input.ExecutablePath is null && input.ExecutableArguments is null
             && input.PowerShellScript is null && input.Url is null && !input.RunAsAdministrator)
         {
@@ -529,7 +571,11 @@ internal sealed class ShortcutRuntime
             {
                 FrontendShortcutEditorActionKind.SteamBigPicture => ShortcutActionTypeIds.SteamBigPicture,
                 FrontendShortcutEditorActionKind.SteamClient => ShortcutActionTypeIds.SteamClient,
-                _ => ShortcutActionTypeIds.XboxApp
+                FrontendShortcutEditorActionKind.XboxApp => ShortcutActionTypeIds.XboxApp,
+                FrontendShortcutEditorActionKind.TouchKeyboard => ShortcutActionTypeIds.TouchKeyboard,
+                FrontendShortcutEditorActionKind.ShowDesktop => ShortcutActionTypeIds.ShowDesktop,
+                FrontendShortcutEditorActionKind.SteamInput => ShortcutActionTypeIds.SteamInput,
+                _ => ShortcutActionTypeIds.ClawHudToggle
             };
             action = new(typeId, SupportedActionSchemaVersion, JsonSerializer.SerializeToElement(new { }));
             return true;
@@ -543,7 +589,11 @@ internal sealed class ShortcutRuntime
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Screenshot action input is invalid.",
             FrontendShortcutEditorActionKind.SteamBigPicture or
             FrontendShortcutEditorActionKind.SteamClient or
-            FrontendShortcutEditorActionKind.XboxApp => "Built-in Shortcut action input is invalid.",
+            FrontendShortcutEditorActionKind.XboxApp or
+            FrontendShortcutEditorActionKind.TouchKeyboard or
+            FrontendShortcutEditorActionKind.ShowDesktop or
+            FrontendShortcutEditorActionKind.SteamInput or
+            FrontendShortcutEditorActionKind.ClawHudToggle => "Built-in Shortcut action input is invalid.",
             _ => "Unsupported Shortcut action."
         };
         return false;
@@ -607,6 +657,33 @@ internal sealed class ShortcutRuntime
         if (string.Equals(tile.Action.TypeId, ShortcutActionTypeIds.ScreenshotFullscreen, StringComparison.Ordinal))
             return await ExecuteScreenshotAsync(tile, cancellationToken).ConfigureAwait(false);
 
+        if (IsBuiltInTypeId(tile.Action.TypeId))
+        {
+            if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
+                return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage);
+            if (!HasEmptyObjectParameters(tile.Action.Parameters))
+                return InvalidConfiguration();
+        }
+
+        uint? steamInputAppId = null;
+        if (string.Equals(tile.Action.TypeId, ShortcutActionTypeIds.SteamInput, StringComparison.Ordinal))
+        {
+            var appId = _actualRunningAppIdSource?.Invoke() ?? 0;
+            if (appId == 0)
+                return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unavailable, "No Steam game is running.");
+            steamInputAppId = appId;
+        }
+
+        var focusHandoffBeforeExecution = tile.CloseOverlayAfterLaunch
+            && IsFocusSensitiveAction(tile.Action.TypeId)
+            && _retireOverlayBeforeFocusSensitiveAction is not null;
+        if (focusHandoffBeforeExecution
+            && !await _retireOverlayBeforeFocusSensitiveAction!(cancellationToken).ConfigureAwait(false))
+        {
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Failed,
+                "The Overlay could not be closed before this action.");
+        }
+
         var result = tile.Action.TypeId switch
         {
             ShortcutActionTypeIds.Executable => ExecuteExecutable(tile, cancellationToken),
@@ -618,10 +695,19 @@ internal sealed class ShortcutRuntime
                 () => _userProcessLauncher.LaunchUri("steam://open/main"), cancellationToken),
             ShortcutActionTypeIds.XboxApp => ExecuteParameterlessBuiltIn(tile,
                 _userProcessLauncher.LaunchXboxApp, cancellationToken),
+            ShortcutActionTypeIds.TouchKeyboard => ExecuteParameterlessBuiltIn(tile,
+                _toggleTouchKeyboard, cancellationToken),
+            ShortcutActionTypeIds.ShowDesktop => ExecuteParameterlessBuiltIn(tile,
+                _showDesktop, cancellationToken),
+            ShortcutActionTypeIds.SteamInput => ExecuteParameterlessBuiltIn(tile,
+                () => _userProcessLauncher.LaunchUri($"steam://controllerconfig/{steamInputAppId!.Value}"), cancellationToken),
+            ShortcutActionTypeIds.ClawHudToggle => await ExecuteClawHudToggleAsync(tile, cancellationToken).ConfigureAwait(false),
             _ => new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage)
         };
 
-        return result.Outcome == ShortcutExecutionOutcome.Succeeded && tile.CloseOverlayAfterLaunch
+        return result.Outcome == ShortcutExecutionOutcome.Succeeded
+            && tile.CloseOverlayAfterLaunch
+            && !focusHandoffBeforeExecution
             ? result with { RetireOverlayAfterExecution = true }
             : result;
     }
@@ -635,6 +721,34 @@ internal sealed class ShortcutRuntime
             if (!TryReadScreenshotParameters(tile.Action.Parameters, out _))
                 return TileResolution.Invalid;
             return _screenshotAction is null ? TileResolution.Unavailable : TileResolution.Available;
+        }
+
+        if (tile.Action.TypeId is ShortcutActionTypeIds.SteamInput or ShortcutActionTypeIds.ClawHudToggle)
+        {
+            if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
+                return TileResolution.Unsupported;
+            if (!HasEmptyObjectParameters(tile.Action.Parameters))
+                return TileResolution.Invalid;
+
+            if (tile.Action.TypeId == ShortcutActionTypeIds.SteamInput)
+            {
+                if (_actualRunningAppIdSource is null)
+                    return TileResolution.Unavailable;
+                return _actualRunningAppIdSource() != 0
+                    ? TileResolution.Available
+                    : new TileResolution(FrontendShortcutTileState.Unavailable, false, "No game running");
+            }
+
+            var hud = _clawHudSnapshotSource?.Invoke();
+            if (hud is null || _setClawHudEnabled is null)
+                return TileResolution.Unavailable;
+            if (!hud.DesiredEnabled && hud.RuntimeState == FrontendClawHudRuntimeState.Disabled)
+                return new TileResolution(FrontendShortcutTileState.Inactive, true, "Off");
+            if (hud.DesiredEnabled && hud.RuntimeState == FrontendClawHudRuntimeState.Ready)
+                return new TileResolution(FrontendShortcutTileState.Active, true, "On");
+            if (hud.DesiredEnabled && hud.RuntimeState == FrontendClawHudRuntimeState.Starting)
+                return new TileResolution(FrontendShortcutTileState.Neutral, true, "Starting");
+            return new TileResolution(FrontendShortcutTileState.Unavailable, true, "Unavailable");
         }
 
         if (!IsSupportedAction(tile.Action))
@@ -685,6 +799,53 @@ internal sealed class ShortcutRuntime
                 ("Outcome", ShortcutExecutionOutcome.Failed),
                 ("ExceptionType", exception.GetType().Name));
             return new ShortcutExecutionResult(ShortcutExecutionOutcome.Failed, "Screenshot could not be saved.");
+        }
+    }
+
+    private async Task<ShortcutExecutionResult> ExecuteClawHudToggleAsync(
+        ShortcutTileDefinition tile,
+        CancellationToken cancellationToken)
+    {
+        var current = _clawHudSnapshotSource?.Invoke();
+        if (current is null || _setClawHudEnabled is null)
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unavailable, "ClawHUD is unavailable.");
+
+        var requestedEnabled = !current.DesiredEnabled;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var updated = await _setClawHudEnabled(requestedEnabled, cancellationToken).ConfigureAwait(false);
+            var reachedAcceptedState = updated.DesiredEnabled == requestedEnabled
+                && (requestedEnabled
+                    ? updated.RuntimeState is FrontendClawHudRuntimeState.Ready or FrontendClawHudRuntimeState.Starting
+                    : updated.RuntimeState == FrontendClawHudRuntimeState.Disabled);
+            if (!reachedAcceptedState)
+            {
+                AppLog.Warn("Shortcuts", "ClawHUD Shortcut toggle did not reach an accepted state.", null,
+                    ("TileId", tile.TileId),
+                    ("TypeId", tile.Action.TypeId),
+                    ("DesiredEnabled", updated.DesiredEnabled),
+                    ("RuntimeState", updated.RuntimeState));
+                return new ShortcutExecutionResult(ShortcutExecutionOutcome.Failed,
+                    "ClawHUD could not be changed to the requested state.");
+            }
+
+            AppLog.Info("Shortcuts", "ClawHUD Shortcut toggle was accepted.",
+                ("TileId", tile.TileId), ("DesiredEnabled", updated.DesiredEnabled),
+                ("RuntimeState", updated.RuntimeState));
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Shortcuts", "ClawHUD Shortcut toggle failed.", null,
+                ("TileId", tile.TileId), ("TypeId", tile.Action.TypeId),
+                ("ExceptionType", exception.GetType().Name));
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Failed,
+                "ClawHUD could not be changed to the requested state.");
         }
     }
 
@@ -913,7 +1074,20 @@ internal sealed class ShortcutRuntime
         && action.TypeId is ShortcutActionTypeIds.Executable or ShortcutActionTypeIds.PowerShell or ShortcutActionTypeIds.Url;
 
     private static bool IsParameterlessBuiltIn(string typeId) =>
-        typeId is ShortcutActionTypeIds.SteamBigPicture or ShortcutActionTypeIds.SteamClient or ShortcutActionTypeIds.XboxApp;
+        IsBuiltInTypeId(typeId);
+
+    private static bool IsBuiltInTypeId(string typeId) =>
+        typeId is ShortcutActionTypeIds.ScreenshotFullscreen
+            or ShortcutActionTypeIds.SteamBigPicture
+            or ShortcutActionTypeIds.SteamClient
+            or ShortcutActionTypeIds.XboxApp
+            or ShortcutActionTypeIds.TouchKeyboard
+            or ShortcutActionTypeIds.ShowDesktop
+            or ShortcutActionTypeIds.SteamInput
+            or ShortcutActionTypeIds.ClawHudToggle;
+
+    private static bool IsFocusSensitiveAction(string typeId) =>
+        typeId is ShortcutActionTypeIds.TouchKeyboard or ShortcutActionTypeIds.ShowDesktop or ShortcutActionTypeIds.SteamInput;
 
     private static bool TryReadExecutableParameters(JsonElement parameters, out string path, out string arguments, out bool runAsAdministrator)
     {

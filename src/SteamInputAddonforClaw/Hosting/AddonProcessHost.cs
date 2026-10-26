@@ -230,7 +230,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _profileStore = new(profilePath);
         _shortcutStore = new(shortcutsPath);
         _shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync,
-            userProcessLauncher: _userProcessLauncher);
+            userProcessLauncher: _userProcessLauncher,
+            actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0,
+            clawHudSnapshotSource: () => ClawHudFrontendMapping.MapState(CaptureClawHudState()),
+            setClawHudEnabled: (enabled, token) => (_frontendControl
+                ?? throw new InvalidOperationException("Frontend control has not been initialized."))
+                .SetClawHudEnabledAsync(enabled, token),
+            retireOverlayBeforeFocusSensitiveAction: RetireOverlayBeforeFocusSensitiveShortcutAsync);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _maximumProcessorStateRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
@@ -2604,6 +2610,26 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             }
 
             return new(true);
+        }
+        finally
+        {
+            _visibleSurfaceTransition.Release();
+        }
+    }
+
+    private async Task<bool> RetireOverlayBeforeFocusSensitiveShortcutAsync(CancellationToken token)
+    {
+        await _visibleSurfaceTransition.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0)
+                return false;
+            if (!_overlayCaptureActive && !_overlayController.IsVisible)
+                return true;
+
+            return await RetireOverlayCaptureUnderTransitionAsync(
+                "ShortcutFocusHandoff",
+                surfaceAlreadyGone: false).ConfigureAwait(false);
         }
         finally
         {

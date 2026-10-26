@@ -40,7 +40,7 @@ public sealed class OverlayTransportTests
     public void Active_profile_show_remains_a_narrow_overlay_command()
     {
         Assert.Equal(22, OverlayTransportProtocol.CurrentVersion);
-        Assert.Equal(89, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(90, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
             OverlayTransportProtocol.CurrentVersion,
@@ -57,7 +57,7 @@ public sealed class OverlayTransportTests
     public async Task Repeat_only_navigation_actions_round_trip_and_unknown_navigation_is_rejected()
     {
         Assert.Equal(22, OverlayTransportProtocol.CurrentVersion);
-        Assert.Equal(89, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(90, FrontendTransportProtocol.CurrentVersion);
 
         foreach (var action in new[]
         {

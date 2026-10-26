@@ -139,23 +139,23 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         var tile = Assert.Single(created.Snapshot.Tiles);
 
         var changedActionKeepingOverride = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update,
-            tile.TileId, "Web", new(FrontendShortcutEditorActionKind.SteamClient),
-            CloseOverlayAfterLaunch: true, IconGlyphOverride: "\uE722"));
+            tile.TileId, "Web", new(FrontendShortcutEditorActionKind.PowerShell, PowerShellScript: "Write-Output 1"),
+            CloseOverlayAfterLaunch: false, IconGlyphOverride: "\uE722"));
         var reset = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, tile.TileId,
-            "Web", new(FrontendShortcutEditorActionKind.SteamClient),
-            CloseOverlayAfterLaunch: true, IconGlyphOverride: null));
-        var changedAgain = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, tile.TileId,
             "Web", new(FrontendShortcutEditorActionKind.PowerShell, PowerShellScript: "Write-Output 1"),
-            CloseOverlayAfterLaunch: true, IconGlyphOverride: null));
+            CloseOverlayAfterLaunch: false, IconGlyphOverride: null));
+        var changedAgain = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, tile.TileId,
+            "Web", new(FrontendShortcutEditorActionKind.Url, Url: "https://example.com"),
+            CloseOverlayAfterLaunch: false, IconGlyphOverride: null));
 
         Assert.True(changedActionKeepingOverride.Succeeded && reset.Succeeded && changedAgain.Succeeded);
         Assert.Equal("\uE722", Assert.Single(changedActionKeepingOverride.Snapshot.Tiles).IconGlyph);
         var resetTile = Assert.Single(reset.Snapshot.Tiles);
         Assert.Null(resetTile.IconGlyphOverride);
-        Assert.Equal("\uE7FC", resetTile.IconGlyph);
+        Assert.Equal("\uE756", resetTile.IconGlyph);
         var changedTile = Assert.Single(changedAgain.Snapshot.Tiles);
         Assert.Null(changedTile.IconGlyphOverride);
-        Assert.Equal("\uE756", changedTile.IconGlyph);
+        Assert.Equal("\uE774", changedTile.IconGlyph);
         Assert.Null(Assert.Single(Load().Dashboard.Tiles).IconGlyphOverride);
     }
 
@@ -304,6 +304,10 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
     [InlineData(FrontendShortcutEditorActionKind.SteamClient, "system.steam-client")]
     [InlineData(FrontendShortcutEditorActionKind.XboxApp, "system.xbox-app")]
     [InlineData(FrontendShortcutEditorActionKind.ScreenshotFullscreen, "system.screenshot-fullscreen")]
+    [InlineData(FrontendShortcutEditorActionKind.TouchKeyboard, "system.touch-keyboard")]
+    [InlineData(FrontendShortcutEditorActionKind.ShowDesktop, "system.show-desktop")]
+    [InlineData(FrontendShortcutEditorActionKind.SteamInput, "steam.input-settings")]
+    [InlineData(FrontendShortcutEditorActionKind.ClawHudToggle, "addon.clawhud-toggle")]
     public void Parameterless_builtin_mutations_canonicalize_and_preserve_explicit_titles(
         FrontendShortcutEditorActionKind kind,
         string typeId)
@@ -316,6 +320,8 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.Equal("Custom title", createdTile.Title);
         Assert.Equal(kind, createdTile.Action.Kind);
         Assert.Equal(typeId, createdTile.Action.TypeId);
+        Assert.True(createdTile.Action.Editable);
+        Assert.False(createdTile.Action.TypeEditable);
         var stored = Assert.Single(Load().Dashboard.Tiles);
         Assert.Equal("Custom title", stored.Title);
         Assert.Equal(typeId, stored.Action.TypeId);
@@ -338,6 +344,62 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.Equal(typeId, updatedStored.Action.TypeId);
         Assert.Equal(1, updatedStored.Action.SchemaVersion);
         Assert.Equal("{}", ReadActionParameters(updatedStored));
+    }
+
+    [Theory]
+    [InlineData("system.steam-client", FrontendShortcutEditorActionKind.SteamBigPicture)]
+    [InlineData("system.touch-keyboard", FrontendShortcutEditorActionKind.ShowDesktop)]
+    [InlineData("addon.clawhud-toggle", FrontendShortcutEditorActionKind.Url)]
+    public void Existing_builtin_action_type_cannot_be_changed_but_title_can_be_edited(
+        string existingTypeId,
+        FrontendShortcutEditorActionKind requestedKind)
+    {
+        var tile = Tile("User title", existingTypeId, "{}");
+        Save(tile);
+        var runtime = CreateRuntime();
+        var before = File.ReadAllText(DocumentPath);
+        var requestedAction = requestedKind == FrontendShortcutEditorActionKind.Url
+            ? new FrontendShortcutActionInput(requestedKind, Url: "https://example.com")
+            : new FrontendShortcutActionInput(requestedKind);
+
+        var rejected = runtime.MutateEditor(new FrontendShortcutMutationIntent(
+            FrontendShortcutMutationKind.Update, tile.TileId, "Renamed", requestedAction,
+            CloseOverlayAfterLaunch: false));
+
+        Assert.False(rejected.Succeeded);
+        Assert.Equal("Built-in Shortcut actions cannot be changed.", rejected.FailureMessage);
+        Assert.Equal(before, File.ReadAllText(DocumentPath));
+
+        var editable = Assert.Single(runtime.CaptureEditor().Tiles);
+        Assert.True(editable.Action.Editable);
+        Assert.False(editable.Action.TypeEditable);
+        var titleUpdate = runtime.MutateEditor(new FrontendShortcutMutationIntent(
+            FrontendShortcutMutationKind.Update, tile.TileId, "Renamed",
+            new FrontendShortcutActionInput(editable.Action.Kind), CloseOverlayAfterLaunch: false));
+        Assert.True(titleUpdate.Succeeded);
+        Assert.Equal("Renamed", Assert.Single(titleUpdate.Snapshot.Tiles).Title);
+    }
+
+    [Fact]
+    public void Custom_action_can_be_changed_to_builtin_then_its_type_becomes_locked()
+    {
+        var custom = Tile("Custom", ShortcutActionTypeIds.Url, "{\"url\":\"https://example.com\"}");
+        Save(custom);
+        var runtime = CreateRuntime();
+
+        var changed = runtime.MutateEditor(new FrontendShortcutMutationIntent(
+            FrontendShortcutMutationKind.Update, custom.TileId, "Custom title",
+            new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.TouchKeyboard),
+            CloseOverlayAfterLaunch: true));
+
+        Assert.True(changed.Succeeded);
+        Assert.False(Assert.Single(changed.Snapshot.Tiles).Action.TypeEditable);
+        var typeChange = runtime.MutateEditor(new FrontendShortcutMutationIntent(
+            FrontendShortcutMutationKind.Update, custom.TileId, "Custom title",
+            new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.ShowDesktop),
+            CloseOverlayAfterLaunch: true));
+        Assert.False(typeChange.Succeeded);
+        Assert.Equal("Built-in Shortcut actions cannot be changed.", typeChange.FailureMessage);
     }
 
     [Theory]

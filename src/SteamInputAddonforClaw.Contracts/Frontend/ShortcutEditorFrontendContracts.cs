@@ -12,6 +12,10 @@ public enum FrontendShortcutEditorActionKind
     SteamBigPicture,
     SteamClient,
     XboxApp,
+    TouchKeyboard,
+    ShowDesktop,
+    SteamInput,
+    ClawHudToggle,
     Unsupported,
 }
 
@@ -35,7 +39,8 @@ public sealed record FrontendShortcutEditorAction(
     bool ConfigurationValid = true,
     string? ValidationMessage = null,
     string? ScreenshotFolder = null,
-    bool RunAsAdministrator = false);
+    bool RunAsAdministrator = false,
+    bool TypeEditable = true);
 
 public sealed record FrontendShortcutEditorTile(
     Guid TileId,
