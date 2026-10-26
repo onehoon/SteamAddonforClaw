@@ -466,6 +466,12 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void Show_desktop_native_input_matches_the_windows_input_abi_size()
+    {
+        Assert.True(WindowsShortcutActionCommands.NativeInputLayoutIsExpectedForTests());
+    }
+
+    [Fact]
     public void Show_desktop_retries_only_the_unaccepted_compensating_key_up_events()
     {
         var calls = new List<ShortcutKeyboardInput[]>();

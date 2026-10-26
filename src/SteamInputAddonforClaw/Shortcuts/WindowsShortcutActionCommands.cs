@@ -45,6 +45,9 @@ internal static class WindowsShortcutActionCommands
 
     internal static bool ShowDesktop() => SendWinD(SendKeyboardInput);
 
+    internal static bool NativeInputLayoutIsExpectedForTests() =>
+        Marshal.SizeOf<NativeInput>() == (IntPtr.Size == 8 ? 40 : 28);
+
     internal static bool SendWinD(Func<ShortcutKeyboardInput[], uint> sendInput)
     {
         ArgumentNullException.ThrowIfNull(sendInput);
@@ -148,7 +151,21 @@ internal static class WindowsShortcutActionCommands
     private struct InputUnion
     {
         [FieldOffset(0)]
+        internal MouseInputData Mouse;
+
+        [FieldOffset(0)]
         internal KeyboardInputData Keyboard;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInputData
+    {
+        internal int Dx;
+        internal int Dy;
+        internal uint MouseData;
+        internal uint Flags;
+        internal uint Time;
+        internal nint ExtraInfo;
     }
 
     [StructLayout(LayoutKind.Sequential)]
