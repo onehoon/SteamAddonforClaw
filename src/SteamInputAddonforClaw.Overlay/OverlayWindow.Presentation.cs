@@ -117,6 +117,7 @@ public sealed partial class OverlayWindow
         }
         finally
         {
+            ClearProfileArtwork();
             try
             {
                 SetHiddenVisualState();

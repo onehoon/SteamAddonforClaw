@@ -1,6 +1,8 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Imaging;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using Windows.Storage;
 
 namespace SteamInputAddonforClaw.Overlay;
 
@@ -14,6 +16,7 @@ public sealed partial class OverlayWindow
     private TextBlock? _profileStatusMessage;
     private bool _activeProfileInitialLoadPending;
     private bool _noGameRecheckRequestedForThisEntry;
+    private uint? _profileArtworkRequestedAppId;
 
     internal event Action? NoRunningGameProfileRecheckRequested;
 
@@ -50,6 +53,7 @@ public sealed partial class OverlayWindow
         if (!selected)
         {
             _noGameRecheckRequestedForThisEntry = false;
+            ClearProfileArtwork();
             return;
         }
 
@@ -57,6 +61,7 @@ public sealed partial class OverlayWindow
             return;
 
         ApplyProfilePresentation(surface.Binding?.AuthoritativePage);
+        UpdateProfileArtwork(surface.Binding?.AuthoritativePage);
         TryRequestNoRunningGameRecheck(surface.Binding?.AuthoritativePage);
     }
 
@@ -69,6 +74,7 @@ public sealed partial class OverlayWindow
         surface.Binding?.ApplyAuthoritativePage(page);
         RenderQuickSettingsPage(surface);
         ApplyProfilePresentation(page);
+        UpdateProfileArtwork(page);
     }
 
     internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)
@@ -80,7 +86,94 @@ public sealed partial class OverlayWindow
         surface.Binding?.ApplyAuthoritativePage(page);
         RenderQuickSettingsPage(surface);
         ApplyProfilePresentation(page);
+        UpdateProfileArtwork(page);
         TryRequestNoRunningGameRecheck(page);
+    }
+
+    private void UpdateProfileArtwork(QuickSettingsPageSnapshot? page)
+    {
+        var appId = _tabState.SelectedTab == AddonQuickSettingsTabId.Profile
+            ? SteamGameArtworkResolver.EligibleSteamAppId(page)
+            : null;
+        if (appId is null)
+        {
+            ClearProfileArtwork();
+            return;
+        }
+
+        if (_profileArtworkRequestedAppId == appId)
+            return;
+
+        ClearProfileArtwork();
+        _profileArtworkRequestedAppId = appId;
+        _ = ResolveAndApplyProfileArtworkAsync(appId.Value, page!);
+    }
+
+    private async Task ResolveAndApplyProfileArtworkAsync(uint appId, QuickSettingsPageSnapshot page)
+    {
+        IReadOnlyList<string> paths;
+        try
+        {
+            paths = await Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(page));
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        if (paths.Count == 0 || !IsCurrentProfileArtworkTarget(appId))
+            return;
+
+        var bitmap = await TryLoadProfileArtworkAsync(paths);
+        if (bitmap is null || !IsCurrentProfileArtworkTarget(appId))
+            return;
+
+        ProfileArtworkImage.Source = bitmap;
+        ProfileArtworkHost.Visibility = Visibility.Visible;
+    }
+
+    private async Task<BitmapImage?> TryLoadProfileArtworkAsync(IReadOnlyList<string> paths)
+    {
+        var scale = ProfileArtworkHost.XamlRoot?.RasterizationScale ?? 1.0;
+        var widthDip = ProfileArtworkHost.ActualWidth;
+        var decodePixelWidth = widthDip > 0
+            ? Math.Clamp((int)Math.Ceiling(widthDip * scale), 1, 1200)
+            : 960;
+
+        foreach (var path in paths)
+        {
+            try
+            {
+                var file = await StorageFile.GetFileFromPathAsync(path);
+                using var stream = await file.OpenReadAsync();
+                var bitmap = new BitmapImage { DecodePixelWidth = decodePixelWidth };
+                await bitmap.SetSourceAsync(stream);
+                return bitmap;
+            }
+            catch (Exception)
+            {
+                // Optional local artwork is best-effort; try the next bounded candidate.
+            }
+        }
+
+        return null;
+    }
+
+    private bool IsCurrentProfileArtworkTarget(uint appId)
+    {
+        if (!_isVisible || _tabState.SelectedTab != AddonQuickSettingsTabId.Profile
+            || _profileArtworkRequestedAppId != appId
+            || !_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface))
+            return false;
+
+        return SteamGameArtworkResolver.EligibleSteamAppId(surface.Binding?.AuthoritativePage) == appId;
+    }
+
+    private void ClearProfileArtwork()
+    {
+        _profileArtworkRequestedAppId = null;
+        ProfileArtworkImage.Source = null;
+        ProfileArtworkHost.Visibility = Visibility.Collapsed;
     }
 
     private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)

@@ -75,6 +75,29 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
+                            <Grid
+                                x:Name="ProfileArtworkHost"
+                                Grid.Row="0"
+                                Grid.RowSpan="2"
+                                Height="240"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Top"
+                                IsHitTestVisible="False"
+                                Visibility="Collapsed">
+                                <Image
+                                    x:Name="ProfileArtworkImage"
+                                    Stretch="UniformToFill"
+                                    IsHitTestVisible="False" />
+                                <Rectangle IsHitTestVisible="False">
+                                    <Rectangle.Fill>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#330E141B" Offset="0" />
+                                            <GradientStop Color="#900E141B" Offset="0.5" />
+                                            <GradientStop Color="#FF0E141B" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Rectangle.Fill>
+                                </Rectangle>
+                            </Grid>
                             <TextBlock
                                 x:Name="PageTitle"
                                 Grid.Row="0"
@@ -83,6 +106,7 @@
                             <ScrollViewer
                                 x:Name="BodyScroll"
                                 Grid.Row="1"
+                                Background="Transparent"
                                 VerticalScrollBarVisibility="Hidden"
                                 HorizontalScrollBarVisibility="Disabled"
                                 HorizontalContentAlignment="Stretch">
