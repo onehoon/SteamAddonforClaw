@@ -1060,10 +1060,11 @@ public sealed class OverlayDeviceRendererWiringTests
         var interop = ReadWindowInteropSource();
         var geometry = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindowGeometry.cs");
 
-        Assert.Contains("OverlayWindowGeometry.ClawHudTopInsetPx(", clawHud);
-        Assert.Contains("_clawHudMutation.DisplayEnabled", clawHud);
-        Assert.Contains("_clawHudMutation.DisplaySettings?.Font ?? FrontendClawHudFont.Unispace", clawHud);
-        Assert.Contains("_clawHudMutation.DisplaySettings?.HudSizeOffset ?? 0", clawHud);
+        Assert.Contains("_startupClawHudSettings.ResolveTopInsetPx(", clawHud);
+        Assert.Contains("_clawHudMutation.PendingEnabled ?? _clawHudMutation.Snapshot?.DesiredEnabled", clawHud);
+        Assert.Contains("_clawHudMutation.DisplaySettings", clawHud);
+        Assert.Contains("pendingFont", clawHud);
+        Assert.Contains("pendingSize", clawHud);
         Assert.Contains("Math.Clamp(hudSizeOffset, -2, 2)", geometry);
         var stateReconcile = SliceMethod(clawHud,
             "private void ReconcileClawHudTopInsetIfChanged(", "private void RenderClawHudControls()");

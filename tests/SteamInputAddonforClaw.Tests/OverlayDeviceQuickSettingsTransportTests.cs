@@ -323,7 +323,7 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     }
 
     [Fact]
-    public async Task Hidden_or_unready_overlay_receives_no_page_frame()
+    public async Task Ready_hidden_overlay_receives_clawhud_state_but_not_page_state()
     {
         var pipeName = Pipe();
         await using var server = new NamedPipeOverlayServer(pipeName);
@@ -331,12 +331,24 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
 
         // No client connected yet -> unready.
         Assert.False(await server.SendQuickSettingsPageStateAsync(SamplePage));
+        Assert.False(await server.SendClawHudStateAsync(new FrontendClawHudSnapshot(true,
+            FrontendClawHudRuntimeState.Ready, "Ready", "1.0.1", "1.0.1", null)));
 
+        var clawHudState = new FrontendClawHudSnapshot(true, FrontendClawHudRuntimeState.Ready, "Ready", "1.0.1", "1.0.1",
+            new(FrontendClawHudDisplayMode.Always, 0, FrontendClawHudFont.Unispace, FrontendClawHudAlignment.Left,
+                FrontendClawHudBackgroundMode.FullWidth, 100, false, null));
+        var clawHudReceived = new TaskCompletionSource<FrontendClawHudSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var client = new NamedPipeOverlayClient(pipeName);
-        var run = client.RunAsync(_ => Task.CompletedTask);
+        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, snapshot =>
+        {
+            clawHudReceived.TrySetResult(snapshot);
+            return Task.CompletedTask;
+        });
         Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
 
-        // Ready but still Hidden (no Show yet).
+        // Ready but still Hidden: ClawHUD is the only state allowed to refresh the next Show's geometry.
+        Assert.True(await server.SendClawHudStateAsync(clawHudState));
+        Assert.Equal(clawHudState, await clawHudReceived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.False(await server.SendQuickSettingsPageStateAsync(SamplePage));
 
         Assert.True(await server.SendCommandAsync(OverlayCommand.Show));

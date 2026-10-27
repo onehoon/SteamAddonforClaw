@@ -259,7 +259,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         NamedPipeOverlayServer? server;
         var capture = _captureClawHud;
         lock (_sync) server = _server;
-        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+        if (server is null || capture is null || !server.IsReady || server.State is not (OverlayState.Hidden or OverlayState.Visible)) return;
 
         FrontendClawHudSnapshot state;
         try { state = await capture(CancellationToken.None).ConfigureAwait(false); }

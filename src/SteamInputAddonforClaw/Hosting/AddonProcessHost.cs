@@ -322,7 +322,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return ClawHudFrontendMapping.MapState(state);
             return await CaptureClawHudFrontendAsync(cancellationToken).ConfigureAwait(false);
         }
-        finally { Volatile.Write(ref _clawHudFrontendOperationInFlight, 0); }
+        finally
+        {
+            Volatile.Write(ref _clawHudFrontendOperationInFlight, 0);
+            if (Volatile.Read(ref _processShutdownStarted) == 0 && !_overlayController.IsVisible)
+                _ = _overlayController.RefreshClawHudAsync();
+        }
     }
 
     internal async Task<FrontendClawHudMutationResult> MutateClawHudFrontendAsync(
@@ -360,7 +365,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ("Operation", intent.Kind), ("Failure", exception.GetType().Name));
             return new(false, "HUD settings could not be changed.", ClawHudFrontendMapping.MapState(CaptureClawHudState()));
         }
-        finally { _clawHudGate.Release(); }
+        finally
+        {
+            _clawHudGate.Release();
+            if (Volatile.Read(ref _processShutdownStarted) == 0 && !_overlayController.IsVisible)
+                _ = _overlayController.RefreshClawHudAsync();
+        }
     }
 
     internal void TestOnly_SetStartupForInitialization(AddonStartupComposition composition, StartupResult result)
@@ -2947,6 +2957,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Volatile.Read(ref _clawHudFrontendOperationInFlight) != 0) return;
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.NotifyStateInvalidated();
+        if (Volatile.Read(ref _processShutdownStarted) == 0 && !_overlayController.IsVisible)
+            _ = _overlayController.RefreshClawHudAsync();
     }
 
     private void StartBackgroundUpdate()

@@ -239,12 +239,14 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
+    // ClawHUD is the only feature snapshot also delivered to a Ready hidden Overlay, so its
+    // persisted settings can establish the next Show's geometry before the first visible frame.
     internal async Task<bool> SendClawHudStateAsync(FrontendClawHudSnapshot state, CancellationToken token = default)
     {
         NamedPipeServerStream? pipe;
         lock (_sync)
         {
-            if (!_readyState || _state != OverlayState.Visible) return false;
+            if (!_readyState || _state is not (OverlayState.Hidden or OverlayState.Visible)) return false;
             pipe = _activePipe;
         }
         if (pipe is null) return false;
