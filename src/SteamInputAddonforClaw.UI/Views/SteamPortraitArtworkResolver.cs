@@ -9,16 +9,16 @@ namespace SteamInputAddonforClaw.Views;
 
 internal sealed class SteamPortraitArtworkContext(string steamRoot, uint? accountId)
 {
-    private readonly ConcurrentDictionary<uint, IReadOnlyList<string>> _candidatesByAppId = new();
+    private readonly ConcurrentDictionary<(FrontendProfileGameSource Source, uint AppId), IReadOnlyList<string>> _candidatesByGame = new();
 
     internal string SteamRoot { get; } = steamRoot;
     internal uint? AccountId { get; } = accountId;
 
     internal IReadOnlyList<string> GetCandidates(FrontendProfileGameCatalogEntry game) =>
-        game.Source != FrontendProfileGameSource.Steam || game.AppId == 0
+        game.AppId == 0
             ? []
-            : _candidatesByAppId.GetOrAdd(game.AppId, appId =>
-                SteamPortraitArtworkResolver.ResolveCandidates(SteamRoot, appId, game.Source, AccountId));
+            : _candidatesByGame.GetOrAdd((game.Source, game.AppId), key =>
+                SteamPortraitArtworkResolver.ResolveCandidates(SteamRoot, key.AppId, key.Source, AccountId));
 }
 
 internal static class SteamPortraitArtworkResolver
@@ -52,12 +52,40 @@ internal static class SteamPortraitArtworkResolver
         FrontendProfileGameSource source,
         uint? accountId)
     {
-        if (source != FrontendProfileGameSource.Steam || appId == 0 || string.IsNullOrWhiteSpace(steamRoot))
+        if (appId == 0 || string.IsNullOrWhiteSpace(steamRoot))
             return [];
 
         var appIdText = appId.ToString(CultureInfo.InvariantCulture);
         var candidates = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (source == FrontendProfileGameSource.NonSteam)
+        {
+            if (accountId is not > 0)
+                return [];
+
+            var customDirectory = Path.Combine(
+                steamRoot,
+                "userdata",
+                accountId.Value.ToString(CultureInfo.InvariantCulture),
+                "config",
+                "grid");
+            AddExistingCandidates(candidates, seen, CustomExtensions.Select(extension =>
+                Path.Combine(customDirectory, $"{appIdText}p{extension}")));
+
+            if (candidates.Count == 0)
+            {
+                var launchId = ((ulong)appId << 32) | 0x02000000UL;
+                var launchIdText = launchId.ToString(CultureInfo.InvariantCulture);
+                AddExistingCandidates(candidates, seen, CustomExtensions.Select(extension =>
+                    Path.Combine(customDirectory, $"{launchIdText}p{extension}")));
+            }
+
+            return candidates;
+        }
+
+        if (source != FrontendProfileGameSource.Steam)
+            return [];
 
         if (accountId is > 0)
         {
