@@ -4,8 +4,8 @@ using Windows.Devices.Sensors;
 namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 
 // One-shot WinRT motion-sensor discovery for the diagnostic probe. A candidate is only produced when
-// GetDefault() returns a sensor AND a finite live reading can be obtained (docs/gyro/SD6A_CLAW_SENSOR_PROBE_
-// CHARACTERIZATION_WORK_ORDER.md section 5.4): a present-but-unreadable sensor is not diagnostic evidence
+// GetDefault() returns a sensor AND a finite live reading can be obtained: a present-but-unreadable
+// sensor is not diagnostic evidence
 // worth selecting over a validated legacy candidate. The full evidence (available/HResult/failure) is
 // preserved even when unavailable, so a real WinRT absence/exception stays visible in the finalized report
 // instead of collapsing to "no candidate" alongside a healthy legacy path.

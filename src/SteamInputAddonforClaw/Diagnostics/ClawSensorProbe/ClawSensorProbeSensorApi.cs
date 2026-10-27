@@ -19,7 +19,6 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     internal static readonly Guid SensorCategoryAll = new("C317C286-C468-4288-9975-D4C4587C442C");
     internal static readonly Guid SensorDataTypeCustomGuid = new("B14C764F-07CF-41E8-9D82-EBE3D0776A6F");
     // A2VM reference custom accelerometer type (WSGM/A2VM diagnostic evidence only, not a CG3EM production contract).
-    // See docs/gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md.
     internal static readonly Guid A2VmReferenceAccelerometerType = new("E83AF229-8640-4D18-A213-E22675EBB2C3");
     private const string A2VmReferenceAccelerometerLabel = "A2VM reference custom accelerometer type";
     private const int HResultFromWin32ErrorNoData = unchecked((int)0x800700E8);
@@ -47,8 +46,8 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
         return count;
     }
-    // Backend-aware discovery (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 5): broad legacy
-    // enumeration remains evidence, a direct GetSensorsByType lookup validates the A2VM reference accelerometer type
+    // Backend-aware discovery: broad legacy enumeration remains evidence; a direct GetSensorsByType lookup
+    // validates the A2VM reference accelerometer type
     // independently of it, and WinRT Gyrometer/Accelerometer are probed as separate candidate backends. Selection
     // between them is left entirely to ClawSensorDiscovery.Select; this method only collects evidence.
     internal ClawSensorDiscovery Discover()

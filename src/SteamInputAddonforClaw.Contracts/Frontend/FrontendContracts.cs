@@ -406,7 +406,7 @@ public sealed record FrontendPrerequisiteSnapshot(FrontendPrerequisiteStatus Hid
 public enum FrontendClawSensorProbeState { Idle, Discovering, Ready, Starting, Countdown, RecordingPhase, Stopping, Completed, Failed }
 public enum FrontendClawSensorProbePhase { Rest, RollLeft, RollRight, PitchUp, PitchDown, YawLeft, YawRight }
 /// <summary>The diagnostic session's purpose, chosen once at Start and immutable for the life of the
-/// session (docs/gyro/SD6A_CLAW_SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md).</summary>
+/// session.</summary>
 public enum FrontendClawSensorProbeMode { LiveSanity, AxisCharacterization, StationaryBias }
 public enum FrontendClawSensorProbeBackend { LegacySensorApi, WinRtGyrometer, WinRtAccelerometer }
 public enum FrontendClawSensorProbeUnitBasis { Unknown, DegreesPerSecond, G }

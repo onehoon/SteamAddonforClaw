@@ -629,7 +629,7 @@ mapping, lifecycle, and hardware evidence.
 Before any VIIPER implementation or review, read:
 
 1. `docs/VIIPER_INTEGRATION.md`
-2. `docs/VIIPER_IMPLEMENTATION_RULES.md`
+2. [VIIPER_IMPLEMENTATION_RULES.md](https://drive.google.com/file/d/1vGW64cuEH6lldeB7fbzlk-xa8s_k18X-/view?usp=drivesdk)
 3. `onehoon/VIIPER/FORK_ARCHITECTURE.md`
 4. `onehoon/VIIPER/docs/libviiper/fork-api.md`
 

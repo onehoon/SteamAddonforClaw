@@ -142,9 +142,9 @@ remains separate follow-up work.
 
 - [`docs/VIIPER_INTEGRATION.md`](docs/VIIPER_INTEGRATION.md)
 - [`docs/VIIPER_MIGRATION_TODO.md`](docs/VIIPER_MIGRATION_TODO.md)
-- [`docs/VIIPER_IMPLEMENTATION_RULES.md`](docs/VIIPER_IMPLEMENTATION_RULES.md)
-- [`docs/Reference Research_Steam Deck VIIPER SteamOutput Input Reports.txt`](docs/Reference%20Research_Steam%20Deck%20VIIPER%20SteamOutput%20Input%20Reports.txt)
-- [`docs/Reference Research_Physical Input HidHide MSI Claw Isolation.txt`](docs/Reference%20Research_Physical%20Input%20HidHide%20MSI%20Claw%20Isolation.txt)
+- [VIIPER_IMPLEMENTATION_RULES.md](https://drive.google.com/file/d/1vGW64cuEH6lldeB7fbzlk-xa8s_k18X-/view?usp=drivesdk)
+- [Reference Research_Steam Deck VIIPER SteamOutput Input Reports.txt](https://drive.google.com/file/d/1Xc1frC3GuVLyJgo_eU9MdZv9T1WD7UW2/view?usp=drivesdk)
+- [Reference Research_Physical Input HidHide MSI Claw Isolation.txt](https://drive.google.com/file/d/1dK47zrO-ZFccfItVdXlHkbNYoSec5L87/view?usp=drivesdk)
 
 ## Development policy
 

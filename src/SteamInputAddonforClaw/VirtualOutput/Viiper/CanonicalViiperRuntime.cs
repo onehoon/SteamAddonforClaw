@@ -3,8 +3,7 @@ using SteamInputAddonforClaw.Diagnostics;
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
-/// State of the process/runtime-lifetime persistent VIIPER owner. Kept intentionally small (see
-/// docs/VIIPER_IMPLEMENTATION_RULES.md "overengineering guard"): it only needs to answer real
+/// State of the process/runtime-lifetime persistent VIIPER owner. Kept intentionally small: it only needs to answer real
 /// native ownership questions -- can this owner safely accept route-time attachment, does native
 /// cleanup remain pending, has ownership become unsafe/unknown, is final teardown complete.
 /// </summary>
