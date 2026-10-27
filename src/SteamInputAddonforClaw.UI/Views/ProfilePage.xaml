@@ -20,7 +20,7 @@
 <VisualStateGroup x:Name="FocusStates">
 <VisualState x:Name="Unfocused"/>
 <VisualState x:Name="Focused"><VisualState.Setters><Setter Target="FocusRing.Visibility" Value="Visible"/></VisualState.Setters></VisualState>
-<VisualState x:Name="PointerFocused"><VisualState.Setters><Setter Target="FocusRing.Visibility" Value="Visible"/></VisualState.Setters></VisualState>
+<VisualState x:Name="PointerFocused"/>
 </VisualStateGroup>
 </VisualStateManager.VisualStateGroups>
 <ContentPresenter x:Name="StarContent" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" VerticalAlignment="Center"/>

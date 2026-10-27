@@ -119,7 +119,11 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("<VisualState x:Name=\"PointerOver\"/>", style, StringComparison.Ordinal);
         Assert.Contains("<VisualState x:Name=\"Pressed\"/>", style, StringComparison.Ordinal);
         Assert.Contains("UseSystemFocusVisuals\" Value=\"False\"", style, StringComparison.Ordinal);
-        Assert.Contains("FocusRing.Visibility\" Value=\"Visible\"", style, StringComparison.Ordinal);
+        Assert.Contains(
+            "<VisualState x:Name=\"Focused\"><VisualState.Setters><Setter Target=\"FocusRing.Visibility\" Value=\"Visible\"/></VisualState.Setters></VisualState>",
+            style,
+            StringComparison.Ordinal);
+        Assert.Contains("<VisualState x:Name=\"PointerFocused\"/>", style, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", catalog, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"{Binding FavoriteAutomationName}\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ToolTipService.ToolTip=\"{Binding FavoriteAutomationName}\"", catalog, StringComparison.Ordinal);
