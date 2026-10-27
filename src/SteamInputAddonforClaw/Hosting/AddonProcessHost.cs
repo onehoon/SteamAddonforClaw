@@ -755,8 +755,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         // Full1902 Policy B review [BLOCKER]: the whole Disabled-mode controller startup sequence
         // (VIIPER init -> PR5 physical acquire -> Win+G arm+prove -> first presentation attach) now
-        // runs deferred in StartDeferredRuntimeStartup, AFTER StartRuntimeEventWatchers has installed
-        // the WH_KEYBOARD_LL hook from the pumping message loop. Until it commits, the reboot-bound
+        // runs deferred in StartDeferredRuntimeStartup, AFTER StartRuntimeEventWatchers has completed
+        // the bounded startup handshake with the guard's dedicated hook thread. Until it commits, the reboot-bound
         // authority transition is gated (see the wrapped lower-level safety delegate above) so a user
         // cannot request Enable-and-Restart mid-commit -- preserving the old ordering guarantee.
         _runtimeStartupSettings = composition.StartupSettings;
@@ -2789,19 +2789,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartRuntimeEventWatchers()
     {
-        // Full1902 Policy B review [BLOCKER]: this is the ONE process-owned WH_KEYBOARD_LL
-        // installation site. It runs from the NativeMessageLoop WM_RUNTIME_READY callback -- i.e. on
-        // the thread that is now actively pumping GetMessageW -- and returns immediately, so the hook
-        // can respond within LowLevelHooksTimeout and Windows cannot silently unhook it. The
-        // long-running Disabled-mode controller acquisition + arm check runs afterwards, OFF this
-        // thread, in StartDeferredRuntimeStartup.
+        // Full1902 Policy B: this is the ONE process-owned WH_KEYBOARD_LL start site. The guard creates
+        // and verifies its own high-priority message-pump thread; the Runtime-ready callback waits only
+        // for the bounded installation result. Disabled-mode acquisition and first attach remain deferred.
         _winGSuppressionGuard.Start();
         _gameBarStateDiagnosticObserver ??= GameBarStateDiagnosticObserver.Start();
     }
 
     /// <summary>Full1902 Policy B section 5.2/13: arm native Win+G / Xbox Game Bar suppression for the
     /// Center M Disabled / Addon controller-authority lifetime and prove it took. The hook is
-    /// installed once by <see cref="StartRuntimeEventWatchers"/> from the pumping message loop; this
+    /// installed once by <see cref="StartRuntimeEventWatchers"/> on its dedicated worker; this only
     /// only arms it. Returns <see langword="false"/> fail-closed when the hook is unavailable or
     /// cannot be proven armed -- no retry loop.</summary>
     private bool EnsureAddonAuthorityWinGSuppression()
@@ -2825,10 +2822,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var cancellationToken = _startupCancellationTokenSource.Token;
         _deferredRuntimeStartup = Task.Run(async () =>
         {
-            // Full1902 Policy B review [BLOCKER]: the long-running Disabled-mode controller
-            // acquisition + Win+G arm+prove + first presentation attach runs here -- off the
-            // message-loop thread, so it can never block the WH_KEYBOARD_LL owner while GetMessageW
-            // keeps pumping. StartRuntimeEventWatchers has already installed the hook by this point.
+            // Full1902 Policy B: the long-running Disabled-mode controller acquisition + Win+G
+            // arm/prove + first presentation attach runs off both the Runtime message loop and the
+            // guard's dedicated high-priority hook pump. StartRuntimeEventWatchers has already completed
+            // the bounded hook-install handshake before this deferred task was queued.
             try
             {
                 await TryStartDisabledModeControllerAsync(

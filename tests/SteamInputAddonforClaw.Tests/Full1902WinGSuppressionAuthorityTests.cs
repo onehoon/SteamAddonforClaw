@@ -31,21 +31,21 @@ public sealed class Full1902WinGSuppressionAuthorityTests
         return next < 0 ? source[start..] : source[start..next];
     }
 
-    // ---- 14.2: hook installed on the one process-owned path, before the first Disabled attach ----
+    // ---- 14.2: guard started on the one process-owned path, before the first Disabled attach ----
 
-    [Fact] // review [BLOCKER]: install the WH_KEYBOARD_LL hook only from the pumping message loop.
-    public void Hook_is_installed_only_from_the_message_loop_ready_path()
+    [Fact]
+    public void Hook_guard_is_started_only_from_the_runtime_ready_path()
     {
         var source = HostSource();
 
-        // The one install site is StartRuntimeEventWatchers -- invoked from the NativeMessageLoop
-        // WM_RUNTIME_READY callback (RuntimeProcessApplication), i.e. on the actively-pumping thread.
+        // The one owner start site is StartRuntimeEventWatchers -- invoked from the
+        // NativeMessageLoop WM_RUNTIME_READY callback. WinGSuppressionGuard owns the worker thread.
         var watchers = Method(source, "internal void StartRuntimeEventWatchers()");
         Assert.Contains("_winGSuppressionGuard.Start();", watchers);
         Assert.True(
             watchers.IndexOf("_winGSuppressionGuard.Start();", StringComparison.Ordinal)
                 < watchers.IndexOf("GameBarStateDiagnosticObserver.Start()", StringComparison.Ordinal),
-            "the GameBar observer must be scheduled only after the hook is installed");
+            "keep the existing watcher ordering after the bounded guard-start handshake");
 
         // InitializeRuntimeAsync (runs before the loop starts) must NOT install the hook.
         var init = Method(source, "internal async Task InitializeRuntimeAsync()");

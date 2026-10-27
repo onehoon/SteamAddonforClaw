@@ -6,17 +6,22 @@ namespace SteamInputAddonforClaw.GameBar;
 internal sealed class WinGSuppressionGuard : IDisposable
 {
     private const int VkLWin = 0x5B, VkRWin = 0x5C, VkG = 0x47;
-    private const uint LlkhfInjected = 0x10, LlkhfLowerIlInjected = 0x02, LlkhfAltDown = 0x20;
     private const uint KeyUp = 0x0002, Extended = 0x0001;
-    private const uint WhKeyboardLl = 13;
+    private const uint WhKeyboardLl = 13, WmQuit = 0x0012, PmNoRemove = 0;
+    private const int HookStartupTimeoutMilliseconds = 1_000, HookShutdownTimeoutMilliseconds = 1_000;
     private readonly Func<IntPtr, int, LowLevelKeyboardProc, IntPtr, uint, IntPtr> _install;
     private readonly Func<IntPtr, int, IntPtr, IntPtr, IntPtr> _next;
     private readonly Func<IntPtr, bool> _remove;
-    private readonly Func<Input[], uint> _sendInput;
+    private readonly Func<Input[], uint, uint> _sendInput;
     private readonly Func<int, short> _getAsyncKeyState;
+    private readonly ManualResetEventSlim _hookStartupCompleted = new(false);
+    private readonly object _hookStartupSync = new();
+    private readonly int _hookStartupTimeoutMilliseconds;
     private LowLevelKeyboardProc? _callback;
+    private Thread? _hookThread;
     private IntPtr _hook;
-    private int _started, _disposed, _armed;
+    private uint _hookThreadId;
+    private int _started, _disposed, _armed, _hookStartupFailed;
     private int _winDown, _releasedByCleanup, _suppressG;
     private const long OwnMarker = unchecked((long)0x5349475F57494E47);
 
@@ -24,14 +29,16 @@ internal sealed class WinGSuppressionGuard : IDisposable
         Func<IntPtr, int, LowLevelKeyboardProc, IntPtr, uint, IntPtr>? install = null,
         Func<IntPtr, int, IntPtr, IntPtr, IntPtr>? next = null,
         Func<IntPtr, bool>? remove = null,
-        Func<Input[], uint>? sendInput = null,
-        Func<int, short>? getAsyncKeyState = null)
+        Func<Input[], uint, uint>? sendInput = null,
+        Func<int, short>? getAsyncKeyState = null,
+        int hookStartupTimeoutMilliseconds = HookStartupTimeoutMilliseconds)
     {
-        _install = install ?? ((module, thread, callback, _, flags) => SetWindowsHookEx(WhKeyboardLl, callback, module, (uint)thread));
+        _install = install ?? ((module, thread, callback, _, _) => SetWindowsHookEx(WhKeyboardLl, callback, module, (uint)thread));
         _next = next ?? ((hook, code, wParam, data) => CallNextHookEx(hook, code, wParam, data));
         _remove = remove ?? UnhookWindowsHookEx;
-        _sendInput = sendInput ?? (inputs => SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()));
+        _sendInput = sendInput ?? ((inputs, count) => SendInput(count, inputs, Marshal.SizeOf<Input>()));
         _getAsyncKeyState = getAsyncKeyState ?? (vk => GetAsyncKeyState(vk));
+        _hookStartupTimeoutMilliseconds = hookStartupTimeoutMilliseconds;
     }
 
     internal bool IsArmed => Volatile.Read(ref _armed) != 0 && Volatile.Read(ref _hook) != IntPtr.Zero;
@@ -41,24 +48,47 @@ internal sealed class WinGSuppressionGuard : IDisposable
     {
         if (Interlocked.Exchange(ref _started, 1) != 0 || Volatile.Read(ref _disposed) != 0) return;
         _callback = HookCallback;
-        try
+        var thread = new Thread(HookThreadMain)
         {
-            var module = GetModuleHandle(null);
-            if (module == IntPtr.Zero)
+            Name = "WinGSuppressionHook",
+            IsBackground = true,
+            Priority = ThreadPriority.Highest
+        };
+
+        lock (_hookStartupSync)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
             {
-                AppLog.Warn("Wing.Guard", "Win+G hook installation failed: module handle unavailable.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+                _callback = null;
                 return;
             }
-            var hook = _install(module, 0, _callback, IntPtr.Zero, 0);
-            if (hook == IntPtr.Zero)
+
+            _hookThread = thread;
+            try { thread.Start(); }
+            catch (Exception exception)
             {
-                AppLog.Warn("Wing.Guard", "Win+G hook installation failed.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+                Volatile.Write(ref _hookStartupFailed, 1);
+                _callback = null;
+                _hookStartupCompleted.Set();
+                AppLog.Warn("Wing.Guard", "Win+G hook thread failed to start.", exception);
                 return;
             }
-            Volatile.Write(ref _hook, hook);
-            AppLog.Info("Wing.Guard", "Win+G hook installed.");
         }
-        catch (Exception exception) { AppLog.Warn("Wing.Guard", "Win+G hook installation failed.", exception); }
+
+        if (_hookStartupCompleted.Wait(_hookStartupTimeoutMilliseconds)) return;
+
+        var timedOut = false;
+        lock (_hookStartupSync)
+        {
+            if (Volatile.Read(ref _hook) != IntPtr.Zero || _hookStartupCompleted.IsSet) return;
+            Volatile.Write(ref _hookStartupFailed, 1);
+            timedOut = true;
+        }
+
+        if (!timedOut) return;
+        AppLog.Warn("Wing.Guard", "Win+G hook installation did not complete before the startup deadline.",
+            fields: [("TimeoutMs", _hookStartupTimeoutMilliseconds)]);
+        RequestHookThreadStop(thread, waitForExit: false);
     }
 
     internal bool EnsureArmed()
@@ -81,36 +111,25 @@ internal sealed class WinGSuppressionGuard : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Volatile.Write(ref _armed, 0);
-        var hook = Volatile.Read(ref _hook);
-        if (hook != IntPtr.Zero)
-        {
-            bool removed;
-            try { removed = _remove(hook); }
-            catch (Exception exception)
-            {
-                AppLog.Warn("Wing.Guard", "Win+G hook removal failed; callback remains rooted until process exit.", exception);
-                return;
-            }
-            if (!removed)
-            {
-                AppLog.Warn("Wing.Guard", "Win+G hook removal failed; callback remains rooted until process exit.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
-                return;
-            }
-            Interlocked.Exchange(ref _hook, IntPtr.Zero);
-            AppLog.Info("Wing.Guard", "Win+G hook removed.");
-        }
-        _callback = null;
+
+        Thread? thread;
+        lock (_hookStartupSync) thread = _hookThread;
+        if (thread is not null && thread.IsAlive)
+            RequestHookThreadStop(thread, waitForExit: true);
+        else if (Volatile.Read(ref _hook) == IntPtr.Zero)
+            _callback = null;
     }
 
-    internal IntPtr ProcessKey(int vk, bool keyDown, uint flags = 0, long extraInfo = 0, uint scan = 0, IntPtr wParam = default)
+    internal IntPtr ProcessKey(int vk, bool keyDown, long extraInfo = 0)
     {
-        var own = extraInfo == OwnMarker;
-        if (own)
+        if (extraInfo == OwnMarker) return IntPtr.Zero;
+
+        if (vk == VkG && Volatile.Read(ref _suppressG) != 0)
         {
-            if (AppLog.IsEnabled(AppLogLevel.Debug) && (vk is VkLWin or VkRWin or 0xFF))
-                AppLog.Debug("Wing.Input", "Own synthetic cleanup event bypassed.", ("Vk", vk), ("Scan", scan), ("Flags", $"0x{flags:X}"), ("KeyDown", keyDown));
-            return IntPtr.Zero;
+            if (!keyDown) Interlocked.Exchange(ref _suppressG, 0);
+            return new(1);
         }
+
         var bit = vk == VkLWin ? 1 : vk == VkRWin ? 2 : 0;
         if (bit != 0)
         {
@@ -122,25 +141,20 @@ internal sealed class WinGSuppressionGuard : IDisposable
                 if (syntheticRelease)
                 {
                     Interlocked.And(ref _releasedByCleanup, ~bit);
-                    LogRelevant(vk, keyDown, flags, extraInfo, scan, wParam);
-                    AppLog.Debug("Wing.Input", "Physical Win-up consumed after synthetic release.", ("Vk", vk));
                     return new(1);
                 }
             }
         }
 
-        var blocking = IsArmed || Volatile.Read(ref _suppressG) != 0;
-        if (blocking && (bit != 0 || vk == VkG))
-            LogRelevant(vk, keyDown, flags, extraInfo, scan, wParam);
-        if (vk == VkG && keyDown && blocking && Volatile.Read(ref _winDown) != 0)
+        if (vk == VkG && keyDown && IsArmed && Volatile.Read(ref _winDown) != 0)
         {
             Interlocked.Exchange(ref _suppressG, 1);
             try { SendCleanup(Volatile.Read(ref _winDown)); }
             catch (Exception exception) { AppLog.Warn("Wing.Input", "Win+G modifier cleanup failed after suppression was committed.", exception); }
-            AppLog.Debug("Wing.Input", "Win+G suppressed.", ("Vk", vk), ("KeyDown", keyDown));
+            if (AppLog.IsEnabled(AppLogLevel.Debug)) AppLog.Debug("Wing.Input", "Win+G chord suppressed.");
             return new(1);
         }
-        if (vk == VkG && !keyDown && Interlocked.Exchange(ref _suppressG, 0) != 0) return new(1);
+
         if (!keyDown && bit != 0 && (Volatile.Read(ref _releasedByCleanup) & bit) != 0) return new(1);
         return IntPtr.Zero;
     }
@@ -158,24 +172,134 @@ internal sealed class WinGSuppressionGuard : IDisposable
 
     internal IntPtr InvokeHookForTest(IntPtr wParam, IntPtr lParam) => HookCallback(0, wParam, lParam);
 
+    private void HookThreadMain()
+    {
+        var hook = IntPtr.Zero;
+        try
+        {
+            _ = PeekMessage(out _, IntPtr.Zero, 0, 0, PmNoRemove);
+            Volatile.Write(ref _hookThreadId, GetCurrentThreadId());
+            if (Volatile.Read(ref _disposed) != 0 || Volatile.Read(ref _hookStartupFailed) != 0) return;
+
+            var module = GetModuleHandle(null);
+            if (module == IntPtr.Zero)
+            {
+                AppLog.Warn("Wing.Guard", "Win+G hook installation failed: module handle unavailable.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+                return;
+            }
+
+            hook = _install(module, 0, _callback!, IntPtr.Zero, 0);
+            if (hook == IntPtr.Zero)
+            {
+                AppLog.Warn("Wing.Guard", "Win+G hook installation failed.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+                return;
+            }
+
+            lock (_hookStartupSync)
+            {
+                if (Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _hookStartupFailed) == 0)
+                    Volatile.Write(ref _hook, hook);
+            }
+
+            if (Volatile.Read(ref _hook) != hook) return;
+            _hookStartupCompleted.Set();
+
+            var messageResult = RunMessagePump();
+            if (messageResult < 0)
+                AppLog.Warn("Wing.Guard", "Win+G hook message pump failed.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+            else if (messageResult == 0 && Volatile.Read(ref _disposed) == 0)
+                AppLog.Warn("Wing.Guard", "Win+G hook message pump received an unexpected quit request.");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Wing.Guard", "Win+G hook worker failed.", exception);
+        }
+        finally
+        {
+            Volatile.Write(ref _armed, 0);
+            if (hook != IntPtr.Zero)
+            {
+                var removed = TryRemoveHook(hook);
+                if (Volatile.Read(ref _hook) == hook) Interlocked.Exchange(ref _hook, IntPtr.Zero);
+                if (removed) _callback = null;
+            }
+            else
+            {
+                _callback = null;
+            }
+
+            Volatile.Write(ref _hookThreadId, 0);
+            _hookStartupCompleted.Set();
+        }
+    }
+
+    private int RunMessagePump()
+    {
+        while (true)
+        {
+            var result = GetMessage(out var message, IntPtr.Zero, 0, 0);
+            if (result <= 0) return result;
+            _ = TranslateMessage(ref message);
+            _ = DispatchMessage(ref message);
+        }
+    }
+
+    private void RequestHookThreadStop(Thread thread, bool waitForExit)
+    {
+        var threadId = Volatile.Read(ref _hookThreadId);
+        if (threadId != 0 && thread.IsAlive && !PostThreadMessage(threadId, WmQuit, UIntPtr.Zero, IntPtr.Zero))
+            AppLog.Warn("Wing.Guard", "Win+G hook thread stop message could not be posted.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+
+        if (waitForExit && thread.IsAlive && !thread.Join(HookShutdownTimeoutMilliseconds))
+            AppLog.Warn("Wing.Guard", "Win+G hook thread did not stop before the shutdown deadline.", fields: [("TimeoutMs", HookShutdownTimeoutMilliseconds)]);
+    }
+
+    private bool TryRemoveHook(IntPtr hook)
+    {
+        try
+        {
+            if (_remove(hook))
+            {
+                AppLog.Info("Wing.Guard", "Win+G hook removed.");
+                return true;
+            }
+            AppLog.Warn("Wing.Guard", "Win+G hook removal failed; callback remains rooted until process exit.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Wing.Guard", "Win+G hook removal failed; callback remains rooted until process exit.", exception);
+        }
+        return false;
+    }
+
     private void SendCleanup(int wins)
     {
-        var inputs = new List<Input> { Input.Key(0xFF, 0, OwnMarker), Input.Key(0xFF, KeyUp, OwnMarker) };
-        foreach (var bit in new[] { 1, 2 }) if ((wins & bit) != 0)
+        var winKeyCount = (wins & 1) != 0 ? 1 : 0;
+        if ((wins & 2) != 0) winKeyCount++;
+        var inputs = new Input[2 + winKeyCount];
+        inputs[0] = Input.Key(0xFF, 0, OwnMarker);
+        inputs[1] = Input.Key(0xFF, KeyUp, OwnMarker);
+        var inputCount = 2;
+        if ((wins & 1) != 0)
         {
-            var vk = bit == 1 ? VkLWin : VkRWin;
-            var scan = MapVirtualKey((uint)vk, 0);
-            inputs.Add(Input.Key((ushort)vk, KeyUp | Extended, OwnMarker, (ushort)scan));
+            var scan = MapVirtualKey(VkLWin, 0);
+            inputs[inputCount++] = Input.Key(VkLWin, KeyUp | Extended, OwnMarker, (ushort)scan);
         }
-        var sent = _sendInput(inputs.ToArray());
-        var primaryError = sent == inputs.Count ? 0 : Marshal.GetLastWin32Error();
+        if ((wins & 2) != 0)
+        {
+            var scan = MapVirtualKey(VkRWin, 0);
+            inputs[inputCount++] = Input.Key(VkRWin, KeyUp | Extended, OwnMarker, (ushort)scan);
+        }
+
+        var sent = _sendInput(inputs, (uint)inputCount);
+        var primaryError = sent == (uint)inputCount ? 0 : Marshal.GetLastWin32Error();
         if (sent == 1)
         {
             try
             {
-                var fallbackSent = _sendInput([inputs[1]]);
+                var fallbackSent = _sendInput([inputs[1]], 1);
                 var fallbackError = fallbackSent == 1 ? 0 : Marshal.GetLastWin32Error();
-                AppLog.Debug("Wing.Input", "Dummy cleanup fallback completed.", ("SentInputs", fallbackSent), ("Win32Error", fallbackError));
+                if (AppLog.IsEnabled(AppLogLevel.Debug)) AppLog.Debug("Wing.Input", "Dummy cleanup fallback completed.", ("SentInputs", fallbackSent), ("Win32Error", fallbackError));
                 if (fallbackSent != 1)
                     AppLog.Warn("Wing.Input", "Dummy cleanup fallback failed.", fields: [("SentInputs", fallbackSent), ("Win32Error", fallbackError)]);
             }
@@ -184,41 +308,12 @@ internal sealed class WinGSuppressionGuard : IDisposable
         if (wins is 1 or 2 or 3)
         {
             if ((wins & 1) != 0 && sent > 2) Interlocked.Or(ref _releasedByCleanup, 1);
-            if ((wins & 2) != 0 && sent > (wins == 3 ? 3 : 2)) Interlocked.Or(ref _releasedByCleanup, 2);
+            if ((wins & 2) != 0 && sent > (wins == 3 ? 3u : 2u)) Interlocked.Or(ref _releasedByCleanup, 2);
         }
-        AppLog.Debug("Wing.Input", "Modifier cleanup completed.", ("RequestedInputs", inputs.Count), ("SentInputs", sent));
-        if (sent != inputs.Count)
-            AppLog.Warn("Wing.Input", "Partial SendInput during Win+G cleanup.", fields: [("RequestedInputs", inputs.Count), ("SentInputs", sent), ("Win32Error", primaryError)]);
+        if (AppLog.IsEnabled(AppLogLevel.Debug)) AppLog.Debug("Wing.Input", "Modifier cleanup completed.", ("RequestedInputs", inputCount), ("SentInputs", sent));
+        if (sent != (uint)inputCount)
+            AppLog.Warn("Wing.Input", "Partial SendInput during Win+G cleanup.", fields: [("RequestedInputs", inputCount), ("SentInputs", sent), ("Win32Error", primaryError)]);
     }
-
-    private void LogRelevant(int vk, bool keyDown, uint flags, long extraInfo, uint scan, IntPtr wParam)
-    {
-        if (!AppLog.IsEnabled(AppLogLevel.Debug)) return;
-        var rawWParam = wParam == IntPtr.Zero
-            ? keyDown ? 0x00000100u : 0x00000101u
-            : unchecked((uint)wParam.ToInt64());
-        AppLog.Debug("Wing.Input", "Relevant keyboard hook event.",
-            ("Event", "WinG.KeyboardEvent"),
-            ("Vk", vk switch { VkLWin => "LWIN", VkRWin => "RWIN", VkG => "G", _ => $"0x{vk:X2}" }),
-            ("VkCode", $"0x{vk:X2}"), ("ScanCode", $"0x{scan:X}"), ("Flags", $"0x{flags:X}"),
-            ("WParam", $"0x{rawWParam:X}"), ("KeyAction", KeyAction(rawWParam)),
-            ("Injected", (flags & LlkhfInjected) != 0),
-            ("LowerIntegrityInjected", (flags & LlkhfLowerIlInjected) != 0),
-            ("AltDown", (flags & LlkhfAltDown) != 0), ("Extended", (flags & Extended) != 0),
-            ("DwExtraInfo", $"0x{unchecked((ulong)extraInfo):X}"),
-            ("TrackedLeftWinDown", (Volatile.Read(ref _winDown) & 1) != 0),
-            ("TrackedRightWinDown", (Volatile.Read(ref _winDown) & 2) != 0),
-            ("SuppressionArmed", IsArmed), ("Suppressed", vk == VkG && (Volatile.Read(ref _suppressG) != 0 || (keyDown && Volatile.Read(ref _winDown) != 0))));
-    }
-
-    private static string KeyAction(uint wParam) => wParam switch
-    {
-        0x0100 => "KeyDown",
-        0x0101 => "KeyUp",
-        0x0104 => "SysKeyDown",
-        0x0105 => "SysKeyUp",
-        _ => $"0x{wParam:X}"
-    };
 
     private IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam)
     {
@@ -226,13 +321,15 @@ internal sealed class WinGSuppressionGuard : IDisposable
         try
         {
             var data = Marshal.PtrToStructure<KeyboardData>(lParam);
-            var result = ProcessKey((int)data.VkCode, (wParam.ToInt64() & 1) == 0, data.Flags, data.ExtraInfo, data.ScanCode, wParam);
+            var result = ProcessKey((int)data.VkCode, (wParam.ToInt64() & 1) == 0, data.ExtraInfo);
             return result != IntPtr.Zero ? result : _next(_hook, code, wParam, lParam);
         }
         catch (Exception exception) { AppLog.Warn("Wing.Guard", "Win+G hook callback was contained.", exception); return _next(_hook, code, wParam, lParam); }
     }
 
     [StructLayout(LayoutKind.Sequential)] internal struct KeyboardData { internal uint VkCode, ScanCode, Flags, Time; internal nint ExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeMessage { internal IntPtr Window; internal uint Message; internal UIntPtr WParam; internal IntPtr LParam; internal uint Time; internal NativePoint Point; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativePoint { internal int X, Y; }
     [StructLayout(LayoutKind.Sequential)] internal struct Input { internal uint Type; internal InputUnion Data; internal static Input Key(ushort vk, uint flags, long extra, ushort scan = 0) => new() { Type = 1, Data = new() { Keyboard = new() { Vk = vk, Scan = scan, Flags = flags, ExtraInfo = (nint)extra } } }; }
     [StructLayout(LayoutKind.Explicit)] internal struct InputUnion { [FieldOffset(0)] internal KeyInput Keyboard; [FieldOffset(0)] internal MouseInput Mouse; }
     [StructLayout(LayoutKind.Sequential)] internal struct KeyInput { internal ushort Vk, Scan; internal uint Flags, Time; internal nint ExtraInfo; }
@@ -241,7 +338,13 @@ internal sealed class WinGSuppressionGuard : IDisposable
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(uint id, LowLevelKeyboardProc callback, IntPtr module, uint thread);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr data);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern IntPtr GetModuleHandle(string? moduleName);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     [DllImport("user32.dll", SetLastError = true)] private static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool PeekMessage(out NativeMessage message, IntPtr window, uint min, uint max, uint remove);
+    [DllImport("user32.dll", SetLastError = true)] private static extern int GetMessage(out NativeMessage message, IntPtr window, uint min, uint max);
+    [DllImport("user32.dll")] private static extern bool TranslateMessage(ref NativeMessage message);
+    [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref NativeMessage message);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool PostThreadMessage(uint threadId, uint message, UIntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern uint MapVirtualKey(uint code, uint mapType);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
