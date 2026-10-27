@@ -24,7 +24,8 @@ public partial class App : Application
         OverlayLog.Info("App", "OnLaunched entered.");
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         OverlayLog.Info("App", "DispatcherQueue acquired.");
-        _window = new OverlayWindow();
+        var startupClawHudSettings = OverlayStartupClawHudSettings.Load(OverlayLog.DirectoryPath);
+        _window = new OverlayWindow(startupClawHudSettings);
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
         _window.TabOrderMoveRequested += OnTabOrderMoveRequested;
         _window.BackButtonMappingEditRequested += OnBackButtonMappingEditRequested;

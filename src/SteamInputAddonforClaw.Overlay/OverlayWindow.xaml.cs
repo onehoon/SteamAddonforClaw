@@ -5,14 +5,21 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow : Window
 {
+    private readonly OverlayStartupClawHudSettings _startupClawHudSettings;
+
     // Shared selection resources are initialized here because both the shell and navigation
     // responsibilities use them while remaining part of the same OverlayWindow owner.
     private readonly Brush _rowSelectedBrush;
 
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
 
-    public OverlayWindow()
+    public OverlayWindow() : this(OverlayStartupClawHudSettings.Default)
     {
+    }
+
+    internal OverlayWindow(OverlayStartupClawHudSettings startupClawHudSettings)
+    {
+        _startupClawHudSettings = startupClawHudSettings;
         InitializeComponent();
         _rowSelectedBrush = OverlayQamResources.Brush("QamFocusBorderBrush");
         _rowSelectedFillBrush = OverlayQamResources.Brush("QamSelectedFillBrush");

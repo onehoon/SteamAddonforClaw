@@ -532,10 +532,15 @@ public sealed partial class OverlayWindow
         ClawHudSettingMutationRequested?.Invoke(intent);
     }
 
-    private int CurrentClawHudTopInsetPx() => OverlayWindowGeometry.ClawHudTopInsetPx(
-        _clawHudMutation.DisplayEnabled,
-        _clawHudMutation.DisplaySettings?.Font ?? FrontendClawHudFont.Unispace,
-        _clawHudMutation.DisplaySettings?.HudSizeOffset ?? 0);
+    private int CurrentClawHudTopInsetPx() => _startupClawHudSettings.ResolveTopInsetPx(
+        _clawHudMutation.PendingEnabled ?? _clawHudMutation.Snapshot?.DesiredEnabled,
+        _clawHudMutation.DisplaySettings,
+        _clawHudMutation.PendingIntent is { Kind: FrontendClawHudMutationKind.Font, Font: { } pendingFont }
+            ? pendingFont
+            : null,
+        _clawHudMutation.PendingIntent is { Kind: FrontendClawHudMutationKind.HudSizeOffset, HudSizeOffset: { } pendingSize }
+            ? pendingSize
+            : null);
 
     private void ReconcileClawHudTopInsetIfChanged(int previousInsetPx)
     {
