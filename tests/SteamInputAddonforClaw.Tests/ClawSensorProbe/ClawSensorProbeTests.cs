@@ -536,8 +536,7 @@ public sealed class ClawSensorProbeTests
         Assert.Contains(result.Errors, x => x.Contains("Accelerometer", StringComparison.Ordinal));
     }
 
-    // Real CG3EM hardware evidence (docs/work-order/SD6A_CG3EM_SENSOR_SELECTION_DUPLICATE_HOTFIX_WORK_ORDER.md
-    // section 4): the same physical LSM6DSO accelerometer and gyrometer are returned by both CategoryAll and a
+    // Real CG3EM hardware evidence: the same physical LSM6DSO accelerometer and gyrometer are returned by both CategoryAll and a
     // direct GetSensorsByType(A2VM reference GUID) lookup, and that same direct query also returns the physical
     // gyrometer, "Simple DMD", and "Shake Gesture" rows.
     [Fact] public void Discovery_Cg3emDuplicateQueryFixtureSelectsUniqueGyroAndAccelerometer()

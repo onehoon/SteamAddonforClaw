@@ -4,11 +4,11 @@ Status: research, diagnostic implementation, and hardware characterization
 Last updated: 2026-10-11  
 Production status: **Steam Deck native gyro output present in Addon 0.1.365; production gyro polling improved; Deck gyro-to-mouse choppiness remains unresolved and its investigation is deferred.** Historical PR milestones below reflect the state when originally written.
 
-This folder is the single documentation home for MSI Claw gyro / accelerometer research and the Addon's SD6 motion feature track.
+This retained index summarizes the Addon's SD6 motion feature track and links to detailed research and hardware reports preserved in Google Drive.
 
 ## Deferred Steam Deck gyro-to-mouse choppiness investigation (2026-10-11)
 
-- [Full1902 Steam Deck Gyro Choppiness — Investigation and Deferred Handoff](FULL1902_STEAMDECK_GYRO_CHOPPINESS_INVESTIGATION_AND_DEFERRED_HANDOFF_2026-10-11.md) — collected 0.1.359/0.1.360/0.1.365 sensor and publisher evidence, VIIPER PR #59 outcome, Classic Steam Controller vs Deck SDL/Linux comparison, HHC SteamDeckTarget reference, confirmed sporadic stalls, remaining unknown Windows/Steam Input host-consumption boundary, and the bounded deferred diagnostic plan. **No further implementation approved by this report; hardware checks remain user-owned after merge.**
+- [Full1902 Steam Deck Gyro Choppiness — Investigation and Deferred Handoff](https://drive.google.com/file/d/1BHlqVv9c5_evEc-gxdDzk9AcWGMqYFzy/view?usp=drivesdk) — collected 0.1.359/0.1.360/0.1.365 sensor and publisher evidence, VIIPER PR #59 outcome, Classic Steam Controller vs Deck SDL/Linux comparison, HHC SteamDeckTarget reference, confirmed sporadic stalls, remaining unknown Windows/Steam Input host-consumption boundary, and the bounded deferred diagnostic plan. **No further implementation approved by this report; hardware checks remain user-owned after merge.**
 
 ## Current implementation state
 
@@ -40,54 +40,27 @@ Current production-code checkpoint after PR #500:
 b1ff0b79dbd6a8215866567d900ee4499d262ec6
 ```
 
-The shared production Motion Core for A2VM and CG3EM was merged in **PR #731** (squash commit `a1a57ed8cdb78d05e016f862f22637ae446bd58c`). **Gyro PR2 Steam Deck native IMU publication is implemented in the current review PR**, using that PR1 snapshot without a new sensor owner, new virtual publisher or Addon gyro UI. EX-specific hardware confirmation and A2VM7 physical validation remain **post-merge user responsibilities**, not Codex/CI/PR-review blockers. See the approved plan and both work orders below.
+The shared production Motion Core for A2VM and CG3EM was merged in **PR #731** (squash commit `a1a57ed8cdb78d05e016f862f22637ae446bd58c`). **Gyro PR2 Steam Deck native IMU publication is implemented in the current review PR**, using that PR1 snapshot without a new sensor owner, new virtual publisher or Addon gyro UI. EX-specific hardware confirmation and A2VM7 physical validation remain **post-merge user responsibilities**, not Codex/CI/PR-review blockers. The PR milestones above record the implementation sequence.
 
 Two successful CG3EM Live Sanity captures have now confirmed that the repaired-driver machine exposes continuously readable STMicro LSM6DSO Physical Gyrometer and Physical Accelerometer sources through the legacy Windows Sensor API. The remaining characterization work is dedicated Stationary Bias, Axis Characterization, and practical restart / sleep-resume evidence before the measured CG3EM production source contract is frozen.
 
-## Approved implementation track (2026-10-09)
-
-- [Full1902 Gyro PR1/PR2 Implementation Plan](FULL1902_GYRO_PR1_PR2_IMPLEMENTATION_PLAN_2026-10-09.md) — approved two-PR split, all A2VM/EX models in both PRs, reference axes/units, lifecycle and deferred Xbox360 gyro.
-- [Gyro PR1 Full1902 Common Motion Core Work Order](../work-order/GYRO_PR1_FULL1902_COMMON_MOTION_CORE_WORK_ORDER_2026-10-09.md) — local Codex instructions; no SteamDeck virtual output or Xbox360 feature in PR1.
-- [Gyro PR2 Full1902 Steam Deck Native IMU Work Order](../work-order/GYRO_PR2_FULL1902_STEAMDECK_NATIVE_IMU_OUTPUT_WORK_ORDER_2026-10-09.md) — local Codex instructions for SteamDeck-only gyro/accel publication using the PR1 shared snapshot; no UI and no Xbox360 gyro-to-stick.
-
-The older 2026-09-05 research retains its source provenance. Its prior wait-for-more-EX-captures gate and older preliminary axis discussion are superseded for implementation sequencing and initial reference transforms by the 2026-10-09 approved plan. Current Full1902 controller ownership authority is unchanged.
-
 ## Current reading order
 
-1. [`GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md`](./GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md)  
+1. [GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md](https://drive.google.com/file/d/1lxHUe42eYSyqbnCA-7kLjHiQ4WT3Zf1t/view?usp=drivesdk)<br>
    Current synthesis and SD6 architecture. It reconciles the earlier CG3EM research, the 2026-08-15 driver correction, the current Full1902 / Steam Deck architecture, and the newer WSGM A2VM findings.
 
-2. [`CG3EM_LIVE_SANITY_HARDWARE_RESULTS_2026-09-05.md`](./CG3EM_LIVE_SANITY_HARDWARE_RESULTS_2026-09-05.md)  
+2. [CG3EM_LIVE_SANITY_HARDWARE_RESULTS_2026-09-05.md](https://drive.google.com/file/d/1QPeVm-2w-5IrNnIin29hwdgSkq27QZx6/view?usp=drivesdk)<br>
    First real CG3EM post-PR-500 hardware checkpoint. Compares an approximately 60° stationary capture with a desk-laid stationary capture; records measured source selection, cadence, gravity vectors, repeatable gyro zero-rate center, and the reproduced ~120 ms legacy gyroscope blocking-read behavior.
 
-3. [`DEVELOPER_DISCOVERY_REPORT_GYRO_REVIEW_2026-09-05.md`](./DEVELOPER_DISCOVERY_REPORT_GYRO_REVIEW_2026-09-05.md)  
+3. [DEVELOPER_DISCOVERY_REPORT_GYRO_REVIEW_2026-09-05.md](https://drive.google.com/file/d/1ITlNHPEtdmzkmY2dDS0sXV0HvzOGxovy/view?usp=drivesdk)<br>
    Review of the Developer Menu **Environment Discovery Report** and the sensor/ISH evidence added before SD6 characterization.
 
-4. [`DEVELOPER_CLAW_SENSOR_PROBE_GYRO_REVIEW_2026-09-05.md`](./DEVELOPER_CLAW_SENSOR_PROBE_GYRO_REVIEW_2026-09-05.md)  
+4. [DEVELOPER_CLAW_SENSOR_PROBE_GYRO_REVIEW_2026-09-05.md](https://drive.google.com/file/d/1Z1USet-qgNJn8zGwW5pszg159Azb0APE/view?usp=drivesdk)<br>
    Review of the Developer Menu **Claw Sensor Probe / Gyro Test** and the concrete changes required to characterize CG3EM correctly.
-
-## Implementation work orders
-
-Implementation history / order:
-
-1. [`SD6A_ENVIRONMENT_DISCOVERY_SENSOR_EVIDENCE_WORK_ORDER.md`](./SD6A_ENVIRONMENT_DISCOVERY_SENSOR_EVIDENCE_WORK_ORDER.md) — **implemented by PR #494**  
-   Extended the existing one-shot Environment Discovery Report with WinRT motion projection status, legacy Sensor API broad/direct-query evidence, exact HRESULTs, and a motion-focused view of the already-captured all-class PnP inventory.
-
-2. [`SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md`](./SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md) — **overall SD6-A probe design / split plan**  
-   Defines the complete backend-aware Claw Sensor Probe characterization target and the PR-A / PR-B split. PR A was implemented by #495 and PR B by #497.
-
-3. [`SD6A_CLAW_SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md`](./SD6A_CLAW_SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md) — **implemented by PR #497**  
-   Added Live Sanity / Axis Characterization / Stationary Bias modes through the existing Start RPC, completed schema-v2 per-phase and bias summaries, exposed compact timing/backend evidence to the developer UI, and preserved Runtime-owned session lifecycle.
-
-The CG3EM duplicate-source selection failure discovered during the first physical Live Sanity attempt was subsequently fixed by PR #500 under:
-
-```text
-docs/work-order/SD6A_CG3EM_SENSOR_SELECTION_DUPLICATE_HOTFIX_WORK_ORDER.md
-```
 
 ## Current hardware checkpoint
 
-The two successful Live Sanity captures documented in `CG3EM_LIVE_SANITY_HARDWARE_RESULTS_2026-09-05.md` establish the following practical observations on the tested CG3EM unit:
+The two successful Live Sanity captures documented in [CG3EM_LIVE_SANITY_HARDWARE_RESULTS_2026-09-05.md](https://drive.google.com/file/d/1QPeVm-2w-5IrNnIin29hwdgSkq27QZx6/view?usp=drivesdk) establish the following practical observations on the tested CG3EM unit:
 
 ```text
 Physical Gyrometer     = Legacy Sensor API / STMicro LSM6DSO / ~100 Hz
@@ -114,8 +87,8 @@ These are recommended physical validation captures and are **not** required befo
 
 ## Historical / source documents
 
-- [`Reference Research_CG3EM Gyro Driver Correction_2026-08-15.txt`](./Reference%20Research_CG3EM%20Gyro%20Driver%20Correction_2026-08-15.txt)  
-  Existing repository erratum moved here from `docs/`. Driver reinstallation restored Windows sensor access on the tested CG3EM system. The fresh September captures now supersede the earlier uncertainty about whether repaired-driver CG3EM exposes usable host-readable motion sensors, while axis/sign, final unit declaration, bias policy, and lifecycle behavior still require the remaining characterization.
+- [Reference Research_CG3EM Gyro Driver Correction_2026-08-15.txt](https://drive.google.com/file/d/1YgEmtPBU2jQ2ch8NeHSXAGMyjIIUWJd6/view?usp=drivesdk)<br>
+  Historical driver-correction reference preserved in Google Drive. Driver reinstallation restored Windows sensor access on the tested CG3EM system. The fresh September captures now supersede the earlier uncertainty about whether repaired-driver CG3EM exposes usable host-readable motion sensors, while axis/sign, final unit declaration, bias policy, and lifecycle behavior still require the remaining characterization.
 
 The earlier `gyro.txt` research notes and the detailed `SteamInputAddonforClaw_CG3EM_Gyro_Reanalysis_2026-08-12` source material were used when producing the consolidated design above. They predate the current Full1902 Steam Deck architecture, and the 2026-08-12 hardware-level interpretation is superseded by the 2026-08-15 correction and the newer September CG3EM physical captures. The consolidated design preserves the still-valid conclusions and explicitly marks the superseded ones rather than treating those early notes as current implementation contracts.
 
@@ -124,10 +97,10 @@ The earlier `gyro.txt` research notes and the detailed `SteamInputAddonforClaw_C
 When documents disagree, use this order:
 
 1. current repository code and Full1902 architecture;
-2. measured current-device hardware evidence such as `CG3EM_LIVE_SANITY_HARDWARE_RESULTS_2026-09-05.md` for facts actually established by those captures;
-3. the active implementation work order for the current PR;
-4. `GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md`;
-5. the 2026-08-15 CG3EM driver correction;
+2. measured current-device hardware evidence such as [CG3EM_LIVE_SANITY_HARDWARE_RESULTS_2026-09-05.md](https://drive.google.com/file/d/1QPeVm-2w-5IrNnIin29hwdgSkq27QZx6/view?usp=drivesdk) for facts actually established by those captures;
+3. the current implementation and review state;
+4. [GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md](https://drive.google.com/file/d/1lxHUe42eYSyqbnCA-7kLjHiQ4WT3Zf1t/view?usp=drivesdk);
+5. [the 2026-08-15 CG3EM driver correction](https://drive.google.com/file/d/1YgEmtPBU2jQ2ch8NeHSXAGMyjIIUWJd6/view?usp=drivesdk);
 6. earlier CG3EM / Classic Steam Controller research only as historical provenance.
 
 External WSGM A2VM findings are useful **reference evidence**, not CG3EM hardware evidence. In particular, do not copy A2VM sensor GUIDs, device paths, axis transforms, bias values, or freshness thresholds into CG3EM production code until the Addon's own CG3EM diagnostic captures confirm them.

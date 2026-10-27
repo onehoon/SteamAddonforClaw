@@ -4,7 +4,7 @@ namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 
 internal sealed class ClawSensorProbeReaders : IAsyncDisposable
 {
-    // Diagnostic-only staleness label (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 7):
+    // Diagnostic-only staleness label:
     // a quiet/duplicate/no-data source no longer terminates the session on its own. Only an actual backend
     // read failure (handle loss, COM/WinRT exception) is terminal. This threshold exists purely so timing
     // evidence can flag a suspiciously old reading; it is not a production freshness contract.
@@ -47,8 +47,8 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
     };
 
     // The sample's own SensorTimestamp reflects when the backend produced the reading, which can lag well
-    // behind "now" under a blocking/stalled read (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md
-    // section 4/8: the WSGM ~200ms accelerometer stall this diagnostic exists to catch). This is deliberately
+    // behind "now" under a blocking/stalled read, such as the WSGM ~200ms accelerometer stall this diagnostic
+    // is designed to catch. This is deliberately
     // distinct from FreshAgeMs (time since the last accepted report, used for stale/quiet-source tracking) --
     // a fast, freshly-accepted sample can still carry an old sensor timestamp, and that is exactly the signal
     // sensor_age_ms must preserve.

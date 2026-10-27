@@ -11,8 +11,7 @@ internal enum ClawSensorProbePhase { REST, ROLL_LEFT, ROLL_RIGHT, PITCH_UP, PITC
 internal enum ClawSensorProbeState { Idle, Discovering, Ready, Starting, Countdown, RecordingPhase, Stopping, Completed, Failed }
 internal enum ClawSensorCaptureMode { Inactive, Transition, Recording }
 // The diagnostic session's PURPOSE (chosen once at Start), distinct from ClawSensorCaptureMode above,
-// which is the per-sample recording STATE written into CSV (docs/gyro/SD6A_CLAW_SENSOR_PROBE_PR_B_
-// CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md section 4.2). Do not conflate the two.
+// which is the per-sample recording STATE written into CSV. Do not conflate the two.
 internal enum ClawSensorProbeMode { LiveSanity, AxisCharacterization, StationaryBias }
 internal enum ClawSensorProbeBackend { LegacySensorApi, WinRtGyrometer, WinRtAccelerometer }
 internal enum ClawSensorProbeUnitBasis { Unknown, DegreesPerSecond, G }
@@ -65,7 +64,7 @@ internal sealed record ClawSensorDiscovery(
 {
     public bool IsValid => Gyroscope is not null && Accelerometer is not null && Errors.Count == 0;
 
-    // Selection is diagnostic, model-bounded, and conservative (see docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 5.4):
+    // Selection is diagnostic, model-bounded, and conservative:
     // gyro prefers a unique WinRT Gyrometer candidate before falling back to the unique legacy "Physical Gyrometer" match;
     // accel prefers a unique WinRT Accelerometer candidate, then a unique legacy candidate validated through a direct
     // GetSensorsByType lookup, then finally the unique broad-enumeration "Physical Accelerometer" match. Ambiguous
@@ -93,8 +92,8 @@ internal sealed record ClawSensorDiscovery(
     }
 
     // The same physical legacy sensor can be returned by both GetSensorsByCategory(SENSOR_CATEGORY_ALL) and a
-    // direct GetSensorsByType lookup (real CG3EM evidence: docs/work-order/SD6A_CG3EM_SENSOR_SELECTION_DUPLICATE_
-    // HOTFIX_WORK_ORDER.md section 4). Collapse duplicate legacy rows sharing an exact usable SensorId into one
+    // direct GetSensorsByType lookup (real CG3EM evidence). Collapse duplicate legacy rows sharing an exact usable
+    // SensorId into one
     // logical candidate before role selection, propagating IsDirectTypeMatch and preferring the broad-enumeration
     // (CategoryAll) row's metadata as canonical when both exist. WinRT candidates and legacy rows with an empty/
     // placeholder SensorId are never merged.
@@ -194,8 +193,7 @@ internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTi
     {
     }
 }
-// Report-interval evidence for the source actually opened at capture time (docs/gyro/SD6A_CLAW_SENSOR_PROBE_
-// CHARACTERIZATION_WORK_ORDER.md section 6.1): distinguishes the sensor's own minimum from what the probe
+// Report-interval evidence for the source actually opened at capture time distinguishes the sensor's own minimum from what the probe
 // requested and what Windows actually granted, so later CG3EM analysis can tell configuration from cadence.
 // Legacy sources report null requested/effective values -- that request/grant negotiation is a WinRT concept.
 internal sealed record ClawSensorProbeSourceConfiguration(ClawSensorProbeBackend Backend, uint? MinimumReportIntervalMs, uint? RequestedReportIntervalMs, uint? EffectiveReportIntervalMs);
@@ -206,7 +204,7 @@ internal sealed record ClawSensorProbeError(string Code, string Message);
 // Immutable point-in-time copy of ClawSensorProbeTimingStatistics. The writer/report must only ever consume
 // this, never the live mutable object: the bounded reader-teardown wait can return while a worker is still
 // blocked in a backend read, so a live object handed to the writer could still be mutated concurrently with
-// report serialization (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 17).
+// report serialization.
 internal sealed record ClawSensorProbeTimingSnapshot(
     long FreshCount,
     long DuplicateCount,
@@ -220,7 +218,7 @@ internal sealed record ClawSensorProbeTimingSnapshot(
     double MaxFreshAgeMs,
     long LongReadCount);
 
-// Diagnostic-only timing/freshness evidence per docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 8.
+// Diagnostic-only timing/freshness evidence for this developer probe.
 // The 100ms long-read threshold and 5s stale-age threshold are labels for this developer capture, not a production
 // freshness contract: a quiet/duplicate/no-data source keeps accumulating age here rather than terminating the session.
 // All state is guarded by one lock: a running sum/count (not a List<double>.Average() on every read) backs
@@ -344,8 +342,7 @@ internal sealed class ClawSensorProbeLiveSnapshot
     }
 }
 
-// Pass-aware per-(Phase, Pass, Sensor) / stationary-bias vector aggregator (docs/gyro/SD6A_CLAW_
-// SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md section 9): mean/min/max/span plus an
+// Pass-aware per-(Phase, Pass, Sensor) / stationary-bias vector aggregator: mean/min/max/span plus an
 // optional known-g magnitude accumulation. All mutation happens from ClawSensorProbeSessionWriter's
 // single-consumer WriteLoopAsync, so -- like _restGyro/_restAccel before it -- no locking is needed.
 internal sealed class ClawSensorVectorAccumulator
@@ -611,8 +608,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     }
 
     // Axis-only: one entry per (Phase, Pass, Sensor) for every visit that actually reached Recording,
-    // in visit order (docs/gyro/SD6A_CLAW_SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md
-    // section 10). The phase log (_phases), not _phaseAccumulators, is the visit authority: a source
+    // in visit order. The phase log (_phases), not _phaseAccumulators, is the visit authority: a source
     // that was quiet/duplicate/no-data for an entire visit has no accumulator entry, but the visit
     // still happened, so it still gets an explicit SampleCount=0 summary rather than being silently
     // dropped (PR B review finding #2). Live Sanity / Stationary Bias never populate _phases for
@@ -745,7 +741,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
         timing.LongReadCount
     };
     // MagnitudeGMean is only meaningful -- and only computed -- when the selected source's unit basis is
-    // proven to be g (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 9): the normal
+    // proven to be g: the normal
     // legacy fallback path leaves UnitBasis Unknown, and a magnitude computed from an unproven unit would be
     // presented as if it meant something before CG3EM characterization confirms it.
     private static object AxisSummary(IReadOnlyList<(double X, double Y, double Z)> values, bool includeStandardDeviation, bool includeMagnitudeG = false)
