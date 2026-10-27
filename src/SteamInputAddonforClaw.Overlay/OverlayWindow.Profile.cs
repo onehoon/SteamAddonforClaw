@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using Windows.Foundation;
 using Windows.Storage;
 
 namespace SteamInputAddonforClaw.Overlay;
@@ -19,6 +21,29 @@ public sealed partial class OverlayWindow
     private uint? _profileArtworkRequestedAppId;
 
     internal event Action? NoRunningGameProfileRecheckRequested;
+
+    private void ProfileContentColumn_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var (width, height) = CalculateProfileArtworkSize(e.NewSize.Width);
+        if (Math.Abs(ProfileArtworkHost.Width - width) < 0.0001
+            && Math.Abs(ProfileArtworkHost.Height - height) < 0.0001)
+            return;
+
+        ProfileArtworkHost.Width = width;
+        ProfileArtworkHost.Height = height;
+        ProfileArtworkHost.Clip = new RectangleGeometry
+        {
+            Rect = new Rect(0, 0, width, height)
+        };
+    }
+
+    internal static (double Width, double Height) CalculateProfileArtworkSize(double rightColumnWidth)
+    {
+        var width = double.IsFinite(rightColumnWidth)
+            ? Math.Max(0, rightColumnWidth - 32.0)
+            : 0;
+        return (width, width * 430.0 / 920.0);
+    }
 
     private FrameworkElement BuildProfilePage()
     {

@@ -70,7 +70,7 @@
                             </Grid>
                         </Border>
 
-                        <Grid Grid.Column="1" Grid.Row="0">
+                        <Grid x:Name="ProfileContentColumn" Grid.Column="1" Grid.Row="0" SizeChanged="ProfileContentColumn_SizeChanged">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
@@ -79,14 +79,14 @@
                                 x:Name="ProfileArtworkHost"
                                 Grid.Row="0"
                                 Grid.RowSpan="2"
-                                Height="240"
-                                HorizontalAlignment="Stretch"
+                                Margin="16,0,16,0"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Top"
                                 IsHitTestVisible="False"
                                 Visibility="Collapsed">
                                 <Image
                                     x:Name="ProfileArtworkImage"
-                                    Stretch="UniformToFill"
+                                    Stretch="Uniform"
                                     IsHitTestVisible="False" />
                                 <Rectangle IsHitTestVisible="False">
                                     <Rectangle.Fill>
