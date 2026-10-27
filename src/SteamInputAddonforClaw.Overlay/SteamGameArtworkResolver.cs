@@ -63,9 +63,6 @@ internal static class SteamGameArtworkResolver
         {
             var customDirectory = Path.Combine(
                 steamRoot, "userdata", userdataAccountId.Value.ToString(CultureInfo.InvariantCulture), "config", "grid");
-            // Steam stores the custom Hero as <AppId>_hero.* and the custom Wide Cover as <AppId>.*.
-            AddExistingCandidates(candidates, seen,
-                CustomExtensions.Select(extension => Path.Combine(customDirectory, $"{appIdText}_hero{extension}")));
             AddExistingCandidates(candidates, seen,
                 CustomExtensions.Select(extension => Path.Combine(customDirectory, $"{appIdText}{extension}")));
         }
@@ -85,12 +82,6 @@ internal static class SteamGameArtworkResolver
             catch (UnauthorizedAccessException) { }
             catch (SecurityException) { }
         }
-
-        // Library Hero (details-page background) is distinct from Library Header (the wide artwork).
-        AddExistingCandidates(candidates, seen,
-            appDirectories.Select(directory => Path.Combine(directory, "library_hero.jpg")));
-        AddExistingCandidates(candidates, seen,
-            [Path.Combine(cacheRoot, $"{appIdText}_library_hero.jpg")]);
 
         AddExistingCandidates(candidates, seen,
             appDirectories.Select(directory => Path.Combine(directory, "library_header.jpg")));

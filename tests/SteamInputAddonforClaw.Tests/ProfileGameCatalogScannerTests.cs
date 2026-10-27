@@ -75,6 +75,18 @@ public sealed class ProfileGameCatalogScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task ScanAsync_PreservesSignedShortcutAppIdAsUnsigned32BitValue()
+    {
+        WriteShortcuts("123", (uint.MaxValue, "Unsigned Shortcut"));
+
+        var entry = Assert.Single(await new ProfileGameCatalogScanner(() => _root).ScanAsync());
+
+        Assert.Equal(uint.MaxValue, entry.AppId);
+        Assert.Equal(-1, unchecked((int)entry.AppId));
+        Assert.Equal(ProfileGameSource.NonSteam, entry.Source);
+    }
+
+    [Fact]
     public async Task ScanAsync_IgnoresMissingOrMalformedOptionalInputs_AndIsFresh()
     {
         WriteManifest(_root, 1, "First");

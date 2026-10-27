@@ -86,6 +86,8 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("MinRowSpacing=\"12\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("MaximumRowsOrColumns", catalog, StringComparison.Ordinal);
         Assert.Contains("Width=\"176\" Height=\"264\"", catalog, StringComparison.Ordinal);
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(catalog, "CornerRadius=\"0\"").Count);
+        Assert.DoesNotContain("CornerRadius=\"8\"", catalog, StringComparison.Ordinal);
         var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
         Assert.Contains("Stretch = Stretch.UniformToFill", code, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"FallbackCard\"", catalog, StringComparison.Ordinal);
@@ -97,6 +99,36 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("AutomationProperties.Name=\"{Binding Name}\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("Shadow", catalog, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Gradient", catalog, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Steam_favorite_uses_a_chromeless_star_button_with_accessible_keyboard_focus()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var styleStart = xaml.IndexOf("<Style x:Key=\"SteamCoverFavoriteStarButtonStyle\"", StringComparison.Ordinal);
+        var styleEnd = xaml.IndexOf("</Style>", styleStart, StringComparison.Ordinal);
+        Assert.True(styleStart >= 0 && styleEnd > styleStart);
+        var style = xaml[styleStart..(styleEnd + "</Style>".Length)];
+        var catalog = xaml[..xaml.IndexOf("<Grid x:Name=\"DetailPanel\"", StringComparison.Ordinal)];
+
+        Assert.Contains("Width=\"32\" Height=\"32\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource SteamCoverFavoriteStarButtonStyle}\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding FavoriteGlyph}\" FontSize=\"24\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Property=\"Foreground\" Value=\"{ThemeResource TextFillColorPrimaryBrush}\"", style, StringComparison.Ordinal);
+        Assert.Contains("<VisualState x:Name=\"PointerOver\"/>", style, StringComparison.Ordinal);
+        Assert.Contains("<VisualState x:Name=\"Pressed\"/>", style, StringComparison.Ordinal);
+        Assert.Contains("UseSystemFocusVisuals\" Value=\"False\"", style, StringComparison.Ordinal);
+        Assert.Contains(
+            "<VisualState x:Name=\"Focused\"><VisualState.Setters><Setter Target=\"FocusRing.Visibility\" Value=\"Visible\"/></VisualState.Setters></VisualState>",
+            style,
+            StringComparison.Ordinal);
+        Assert.Contains("<VisualState x:Name=\"PointerFocused\"/>", style, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"{Binding FavoriteAutomationName}\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.ToolTip=\"{Binding FavoriteAutomationName}\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Click=\"FavoriteButton_Click\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Click=\"GameCardButton_Click\"", catalog, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -166,26 +198,79 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
-    public void Portrait_candidate_paths_are_cached_for_the_current_catalog_view()
+    public void Portrait_candidate_paths_are_cached_per_source_and_app_id_for_the_current_catalog_view()
     {
         using var temp = new TemporaryDirectory();
-        var context = new SteamPortraitArtworkContext(temp.Root, accountId: null);
-        var game = new FrontendProfileGameCatalogEntry(480, "Spacewar", FrontendProfileGameSource.Steam);
+        const uint appId = 480;
+        const uint accountId = 123;
+        var context = new SteamPortraitArtworkContext(temp.Root, accountId);
+        var steamGame = new FrontendProfileGameCatalogEntry(appId, "Spacewar", FrontendProfileGameSource.Steam);
+        var shortcut = new FrontendProfileGameCatalogEntry(appId, "Shortcut", FrontendProfileGameSource.NonSteam);
+        var steamArt = temp.PathFor($"appcache/librarycache/{appId}/library_600x900.jpg");
+        var shortcutArt = temp.PathFor($"userdata/{accountId}/config/grid/{appId}p.png");
+        temp.CreateFile(steamArt);
+        temp.CreateFile(shortcutArt);
 
-        Assert.Empty(context.GetCandidates(game));
-        temp.CreateFile(temp.PathFor("appcache/librarycache/480/library_600x900.jpg"));
-        Assert.Empty(context.GetCandidates(game));
+        Assert.Equal([shortcutArt, steamArt], context.GetCandidates(steamGame));
+        Assert.Equal([shortcutArt], context.GetCandidates(shortcut));
     }
 
     [Fact]
-    public void Non_steam_shortcuts_and_missing_Steam_art_use_the_named_fallback_without_cross_account_lookup()
+    public void Non_steam_shortcuts_use_active_account_shortcut_app_id_before_launch_id_fallback()
     {
         using var temp = new TemporaryDirectory();
+        const uint accountId = 123;
+        const uint appId = 123456789;
+        var customDirectory = temp.PathFor($"userdata/{accountId}/config/grid");
+        var appIdPng = Path.Combine(customDirectory, $"{appId}p.png");
+        var appIdJpg = Path.Combine(customDirectory, $"{appId}p.jpg");
+        var appIdJpeg = Path.Combine(customDirectory, $"{appId}p.jpeg");
+        var launchId = ((ulong)appId << 32) | 0x02000000UL;
+        var launchArt = temp.PathFor($"userdata/{accountId}/config/grid/{launchId}p.png");
+        temp.CreateFile(appIdPng);
+        temp.CreateFile(appIdJpg);
+        temp.CreateFile(appIdJpeg);
+        temp.CreateFile(launchArt);
+
+        Assert.Equal([appIdPng, appIdJpg, appIdJpeg], SteamPortraitArtworkResolver.ResolveCandidates(
+            temp.Root,
+            appId,
+            FrontendProfileGameSource.NonSteam,
+            accountId));
+
+        const uint fallbackAppId = 987654321;
+        var fallbackLaunchId = ((ulong)fallbackAppId << 32) | 0x02000000UL;
+        var fallbackArt = temp.CreateFile(temp.PathFor($"userdata/{accountId}/config/grid/{fallbackLaunchId}p.jpg"));
+        Assert.Equal([fallbackArt], SteamPortraitArtworkResolver.ResolveCandidates(
+            temp.Root,
+            fallbackAppId,
+            FrontendProfileGameSource.NonSteam,
+            accountId));
+
+        var maxAppIdArt = temp.CreateFile(temp.PathFor($"userdata/{accountId}/config/grid/{uint.MaxValue}p.png"));
+        Assert.Equal([maxAppIdArt], SteamPortraitArtworkResolver.ResolveCandidates(
+            temp.Root,
+            uint.MaxValue,
+            FrontendProfileGameSource.NonSteam,
+            accountId));
+
+        temp.CreateFile(temp.PathFor("userdata/456/config/grid/321p.png"));
         Assert.Empty(SteamPortraitArtworkResolver.ResolveCandidates(
             temp.Root,
-            appId: 123456789,
+            321,
             FrontendProfileGameSource.NonSteam,
-            accountId: 123));
+            accountId));
+        Assert.Empty(SteamPortraitArtworkResolver.ResolveCandidates(
+            temp.Root,
+            321,
+            FrontendProfileGameSource.NonSteam,
+            accountId: null));
+        temp.CreateFile(temp.PathFor("appcache/librarycache/654/library_600x900.jpg"));
+        Assert.Empty(SteamPortraitArtworkResolver.ResolveCandidates(
+            temp.Root,
+            654,
+            FrontendProfileGameSource.NonSteam,
+            accountId));
         Assert.Empty(SteamPortraitArtworkResolver.ResolveCandidates(
             temp.Root,
             appId: 480,
@@ -193,8 +278,11 @@ public sealed class ProfilePagePolicyTests
             accountId: null));
 
         var code = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
-        var prepare = Method(code, "private void GameGrid_ElementPrepared(", "private void GameGrid_ElementClearing(");
-        Assert.Contains("card.Item.Source != FrontendProfileGameSource.Steam", code, StringComparison.Ordinal);
+        var refresh = Method(code, "private async Task RefreshGamesAsync(", "private void GameSearchBox_TextChanged(");
+        Assert.Contains("if (scannedCatalog.Count > 0)", refresh, StringComparison.Ordinal);
+        var load = Method(code, "private void StartGameCardArtworkLoad(", "private async Task LoadGameCardArtworkAsync(");
+        Assert.DoesNotContain("card.Item.Source != FrontendProfileGameSource.Steam", load, StringComparison.Ordinal);
+        Assert.Contains("_portraitArtworkContext is null", load, StringComparison.Ordinal);
         var reset = Method(code, "public void Reset(GameCardItem item)", "public void CancelLoad()");
         Assert.Contains("ClearArtwork()", reset, StringComparison.Ordinal);
         Assert.Contains("FallbackCard.Visibility = Visibility.Visible", reset, StringComparison.Ordinal);

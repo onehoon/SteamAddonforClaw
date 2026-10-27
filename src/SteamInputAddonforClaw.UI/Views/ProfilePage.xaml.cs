@@ -81,7 +81,7 @@ public sealed partial class ProfilePage : UserControl
         {
             var selected = _selectedGame?.AppId;
             var scannedCatalog = await _frontend.ScanProfileGamesAsync();
-            if (scannedCatalog.Any(game => game.Source == FrontendProfileGameSource.Steam))
+            if (scannedCatalog.Count > 0)
             {
                 try { _portraitArtworkContext = await Task.Run(SteamPortraitArtworkResolver.CreateContext); }
                 catch (Exception) { _portraitArtworkContext = null; }
@@ -223,8 +223,7 @@ public sealed partial class ProfilePage : UserControl
 
     private void StartGameCardArtworkLoad(RealizedGameCard card)
     {
-        if (card.LoadAttempted || card.LoadCancellation is not null || _portraitArtworkContext is null
-            || card.Item.Source != FrontendProfileGameSource.Steam)
+        if (card.LoadAttempted || card.LoadCancellation is not null || _portraitArtworkContext is null)
             return;
 
         card.LoadAttempted = true;
