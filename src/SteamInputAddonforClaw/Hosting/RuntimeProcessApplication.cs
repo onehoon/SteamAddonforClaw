@@ -44,7 +44,7 @@ internal sealed class RuntimeProcessApplication
             _messageLoop.Run(() =>
             {
                 _processHost.StartRuntimeEventWatchers();
-                // Return to GetMessageW before unrelated startup/reconcile work can hold the hook thread.
+                // The guard owns its dedicated hook pump; keep unrelated startup/reconcile work off this Runtime loop.
                 _processHost.StartDeferredRuntimeStartup();
             });
             exitCode = SelectExitCode(startupOutcome, runtimeFailed: false,
