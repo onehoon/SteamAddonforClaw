@@ -1449,7 +1449,7 @@ public sealed class UiArchitectureTests
 
         Assert.Contains("ShouldStartCatalogScan(_catalogLoaded, _catalogScanInProgress)", activate, StringComparison.Ordinal);
         Assert.Contains("if (_catalogLoaded)", activate, StringComparison.Ordinal);
-        Assert.Contains("ApplyCatalogFilter();", activate, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyCatalogFilter();", activate, StringComparison.Ordinal);
         Assert.DoesNotContain("ScanProfileGamesAsync", activate, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshGamesAsync();", activate, StringComparison.Ordinal);
         Assert.Contains("private bool _catalogLoaded, _catalogScanInProgress", profileCodeBehind, StringComparison.Ordinal);

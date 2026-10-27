@@ -1,7 +1,11 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using System.Diagnostics;
+using System.Globalization;
+using Windows.Storage;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.UI;
@@ -15,6 +19,10 @@ public sealed partial class ProfilePage : UserControl
     private bool _catalogLoaded, _catalogScanInProgress;
     private bool? _steamActive;
     private int _steamVirtualControllerMutationInProgress;
+    private readonly Dictionary<Border, RealizedGameCard> _realizedGameCards = [];
+    private SteamPortraitArtworkContext? _portraitArtworkContext;
+    private XamlRoot? _observedXamlRoot;
+    private double _lastRasterizationScale = double.NaN;
     private IReadOnlyList<FrontendProfileGameCatalogEntry> _catalog = [];
     private FrontendProfileGameCatalogEntry? _selectedGame;
     private FrontendGameProfileSnapshot? _snapshot;
@@ -30,6 +38,8 @@ public sealed partial class ProfilePage : UserControl
     public ProfilePage()
     {
         InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; SetEditorsEnabled(false);
+        Loaded += ProfilePage_Loaded;
+        Unloaded += ProfilePage_Unloaded;
 }
     internal event EventHandler? SteamActivityRefreshRequested;
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
@@ -37,10 +47,10 @@ public sealed partial class ProfilePage : UserControl
     {
         _active = true;
         if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated;
+        RestartMissingGameCardArtworkLoads();
 
         if (_catalogLoaded)
         {
-            ApplyCatalogFilter();
             if (_selectedGame is { } selected)
                 _ = CaptureSelectedAsync(selected.AppId);
             return;
@@ -53,7 +63,7 @@ public sealed partial class ProfilePage : UserControl
     internal static bool ShouldStartCatalogScan(bool catalogLoaded, bool scanInProgress) =>
         !catalogLoaded && !scanInProgress;
 
-    internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; CancelGpuMinimumClockDebounce(); }
+    internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; CancelGpuMinimumClockDebounce(); CancelPendingGameCardArtworkLoads(); }
     private void OnStateInvalidated(object? sender, EventArgs e) { if (_active && _selectedGame is not null) DispatcherQueue.TryEnqueue(() => _ = CaptureSelectedAsync(_selectedGame.AppId)); }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
@@ -71,6 +81,15 @@ public sealed partial class ProfilePage : UserControl
         {
             var selected = _selectedGame?.AppId;
             var scannedCatalog = await _frontend.ScanProfileGamesAsync();
+            if (scannedCatalog.Any(game => game.Source == FrontendProfileGameSource.Steam))
+            {
+                try { _portraitArtworkContext = await Task.Run(SteamPortraitArtworkResolver.CreateContext); }
+                catch (Exception) { _portraitArtworkContext = null; }
+            }
+            else
+            {
+                _portraitArtworkContext = null;
+            }
             _catalog = scannedCatalog;
             _catalogLoaded = true;
             FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown);
@@ -100,6 +119,231 @@ public sealed partial class ProfilePage : UserControl
     {
         var query = GameSearchBox.Text.Trim();
         GameGrid.ItemsSource = FilterAndSort(_catalog, query).Select(x => new GameCardItem(x)).ToArray();
+    }
+
+    private void ProfilePage_Loaded(object sender, RoutedEventArgs e)
+    {
+        AttachXamlRoot();
+        UpdateCoverCardSize(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
+        RestartMissingGameCardArtworkLoads();
+    }
+
+    private void ProfilePage_Unloaded(object sender, RoutedEventArgs e)
+    {
+        DetachXamlRoot();
+        CancelPendingGameCardArtworkLoads();
+    }
+
+    private void AttachXamlRoot()
+    {
+        var xamlRoot = GameGrid.XamlRoot;
+        if (ReferenceEquals(_observedXamlRoot, xamlRoot))
+            return;
+
+        DetachXamlRoot();
+        _observedXamlRoot = xamlRoot;
+        if (_observedXamlRoot is not null)
+            _observedXamlRoot.Changed += XamlRoot_Changed;
+    }
+
+    private void DetachXamlRoot()
+    {
+        if (_observedXamlRoot is not null)
+            _observedXamlRoot.Changed -= XamlRoot_Changed;
+        _observedXamlRoot = null;
+        _lastRasterizationScale = double.NaN;
+    }
+
+    private void XamlRoot_Changed(XamlRoot sender, XamlRootChangedEventArgs args) =>
+        UpdateCoverCardSize(sender.RasterizationScale);
+
+    private void UpdateCoverCardSize(double rasterizationScale)
+    {
+        if (!double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
+            rasterizationScale = 1.0;
+        if (Math.Abs(_lastRasterizationScale - rasterizationScale) < 0.0001)
+            return;
+
+        _lastRasterizationScale = rasterizationScale;
+        var size = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale);
+        if (GameGrid.Layout is UniformGridLayout layout)
+        {
+            layout.MinItemWidth = size.Width;
+            layout.MinItemHeight = size.Height;
+        }
+
+        foreach (var card in _realizedGameCards.Values)
+            SetCardSize(card.Root, size.Width, size.Height);
+    }
+
+    private void GameGrid_ElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
+    {
+        if (args.Element is not Border root || root.DataContext is not GameCardItem item
+            || root.FindName("CoverImageFrame") is not Border coverImageFrame
+            || root.FindName("FallbackCard") is not FrameworkElement fallbackCard)
+            return;
+
+        var scale = GameGrid.XamlRoot?.RasterizationScale ?? 1.0;
+        UpdateCoverCardSize(scale);
+        var size = SteamPortraitArtworkResolver.GetCoverSizeDip(scale);
+        SetCardSize(root, size.Width, size.Height);
+
+        if (_realizedGameCards.TryGetValue(root, out var existing))
+        {
+            if (existing.Matches(item))
+            {
+                existing.Item = item;
+                if (existing.HasArtwork || existing.LoadCancellation is not null || existing.LoadAttempted)
+                    return;
+            }
+            else
+            {
+                existing.CancelLoad();
+                existing.Reset(item);
+            }
+        }
+        else
+        {
+            existing = new RealizedGameCard(root, coverImageFrame, fallbackCard, item);
+            _realizedGameCards.Add(root, existing);
+        }
+
+        StartGameCardArtworkLoad(existing);
+    }
+
+    private void GameGrid_ElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
+    {
+        if (args.Element is not Border root || !_realizedGameCards.Remove(root, out var card))
+            return;
+
+        card.CancelLoad();
+        card.ClearArtwork();
+        card.FallbackCard.Visibility = Visibility.Visible;
+    }
+
+    private void StartGameCardArtworkLoad(RealizedGameCard card)
+    {
+        if (card.LoadAttempted || card.LoadCancellation is not null || _portraitArtworkContext is null
+            || card.Item.Source != FrontendProfileGameSource.Steam)
+            return;
+
+        card.LoadAttempted = true;
+        card.LoadCancellation = new CancellationTokenSource();
+        var generation = ++card.Generation;
+        _ = LoadGameCardArtworkAsync(card, generation, card.Item.Game, _portraitArtworkContext, card.LoadCancellation.Token);
+    }
+
+    private async Task LoadGameCardArtworkAsync(
+        RealizedGameCard card,
+        long generation,
+        FrontendProfileGameCatalogEntry game,
+        SteamPortraitArtworkContext artworkContext,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var paths = await Task.Run(
+                () => SteamPortraitArtworkResolver.ResolveCandidates(artworkContext, game),
+                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var bitmap = await TryLoadProfileArtworkAsync(paths, cancellationToken);
+            if (bitmap is null || !IsCurrentGameCard(card, generation))
+                return;
+
+            card.CoverImageFrame.Background = new ImageBrush
+            {
+                ImageSource = bitmap,
+                Stretch = Stretch.UniformToFill
+            };
+            card.FallbackCard.Visibility = Visibility.Collapsed;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception)
+        {
+            // Artwork is optional; keep the named fallback card available.
+        }
+        finally
+        {
+            if (IsCurrentGameCard(card, generation))
+            {
+                card.LoadCancellation?.Dispose();
+                card.LoadCancellation = null;
+                if (cancellationToken.IsCancellationRequested)
+                    card.LoadAttempted = false;
+            }
+        }
+    }
+
+    private static Task<BitmapImage?> TryLoadProfileArtworkAsync(
+        IReadOnlyList<string> paths,
+        CancellationToken cancellationToken) =>
+        TryLoadFirstAvailableAsync(paths, async path =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var file = await StorageFile.GetFileFromPathAsync(path);
+            using var stream = await file.OpenReadAsync();
+            var bitmap = new BitmapImage { DecodePixelWidth = 352 };
+            await bitmap.SetSourceAsync(stream);
+            cancellationToken.ThrowIfCancellationRequested();
+            return bitmap;
+        });
+
+    internal static async Task<T?> TryLoadFirstAvailableAsync<T>(
+        IEnumerable<string> paths,
+        Func<string, Task<T?>> tryLoad)
+        where T : class
+    {
+        foreach (var path in paths)
+        {
+            try
+            {
+                var result = await tryLoad(path);
+                if (result is not null)
+                    return result;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // An unsupported or corrupt optional image falls through to the next candidate.
+            }
+        }
+
+        return null;
+    }
+
+    private bool IsCurrentGameCard(RealizedGameCard card, long generation) =>
+        _realizedGameCards.TryGetValue(card.Root, out var current)
+        && ReferenceEquals(current, card)
+        && card.Generation == generation
+        && card.Root.DataContext is GameCardItem item
+        && card.Matches(item);
+
+    private void RestartMissingGameCardArtworkLoads()
+    {
+        foreach (var card in _realizedGameCards.Values.ToArray())
+            StartGameCardArtworkLoad(card);
+    }
+
+    private void CancelPendingGameCardArtworkLoads()
+    {
+        foreach (var card in _realizedGameCards.Values)
+        {
+            if (card.LoadCancellation is null)
+                continue;
+            card.CancelLoad();
+            card.LoadAttempted = false;
+        }
+    }
+
+    private static void SetCardSize(FrameworkElement card, double width, double height)
+    {
+        if (Math.Abs(card.Width - width) >= 0.0001)
+            card.Width = width;
+        if (Math.Abs(card.Height - height) >= 0.0001)
+            card.Height = height;
     }
 
     internal static IReadOnlyList<FrontendProfileGameCatalogEntry> FilterAndSort(
@@ -487,9 +731,56 @@ public sealed partial class ProfilePage : UserControl
     {
         public uint AppId => Game.AppId;
         public string Name => Game.Name;
+        public FrontendProfileGameSource Source => Game.Source;
         public bool Favorite => Game.Favorite;
         public bool FavoriteStateKnown => Game.FavoriteStateKnown;
         public string FavoriteGlyph => GetFavoriteGlyph(Game.Favorite, Game.FavoriteStateKnown);
+        public string FavoriteAutomationName
+        {
+            get
+            {
+                var (key, fallback) = !Game.FavoriteStateKnown
+                    ? ("Steam_Favorite_UnknownAutomationName", "Favorite state unavailable for {0}")
+                    : Game.Favorite
+                        ? ("Steam_Favorite_RemoveAutomationName", "Remove {0} from favorites")
+                        : ("Steam_Favorite_AddAutomationName", "Add {0} to favorites");
+                return string.Format(CultureInfo.CurrentUICulture, MainUiStrings.Get(key, fallback), Name);
+            }
+        }
+    }
+
+    private sealed class RealizedGameCard(Border root, Border coverImageFrame, FrameworkElement fallbackCard, GameCardItem item)
+    {
+        public Border Root { get; } = root;
+        public Border CoverImageFrame { get; } = coverImageFrame;
+        public FrameworkElement FallbackCard { get; } = fallbackCard;
+        public Brush FallbackBrush { get; } = coverImageFrame.Background;
+        public GameCardItem Item { get; set; } = item;
+        public long Generation { get; set; }
+        public bool LoadAttempted { get; set; }
+        public CancellationTokenSource? LoadCancellation { get; set; }
+        public bool HasArtwork => CoverImageFrame.Background is ImageBrush;
+
+        public bool Matches(GameCardItem other) => Item.AppId == other.AppId && Item.Source == other.Source;
+
+        public void Reset(GameCardItem item)
+        {
+            Item = item;
+            Generation++;
+            LoadAttempted = false;
+            ClearArtwork();
+            FallbackCard.Visibility = Visibility.Visible;
+        }
+
+        public void ClearArtwork() => CoverImageFrame.Background = FallbackBrush;
+
+        public void CancelLoad()
+        {
+            Generation++;
+            LoadCancellation?.Cancel();
+            LoadCancellation?.Dispose();
+            LoadCancellation = null;
+        }
     }
 
     internal static string GetFavoriteGlyph(bool favorite, bool stateKnown) =>

@@ -250,6 +250,9 @@
   <data name="Steam_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
   <data name="Steam_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Steam_Favorite_SaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
+  <data name="Steam_Favorite_AddAutomationName" xml:space="preserve"><value>Add {0} to favorites</value></data>
+  <data name="Steam_Favorite_RemoveAutomationName" xml:space="preserve"><value>Remove {0} from favorites</value></data>
+  <data name="Steam_Favorite_UnknownAutomationName" xml:space="preserve"><value>Favorite state unavailable for {0}</value></data>
   <data name="Steam_FpsAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
   <data name="Steam_FpsDcCard.Header" xml:space="preserve"><value>On battery</value></data>
   <data name="Steam_GameSearchBox.PlaceholderText" xml:space="preserve"><value>Search games...</value></data>
