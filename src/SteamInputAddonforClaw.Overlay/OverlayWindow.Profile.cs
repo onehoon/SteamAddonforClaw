@@ -3,6 +3,10 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Overlay.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Security;
 using Windows.Foundation;
 using Windows.Storage;
 
@@ -13,12 +17,15 @@ public sealed partial class OverlayWindow
     private const string NoActiveGameMessage = "No game is currently running. Start a game to configure its profile.";
     private const string NoActiveGameDisplayMessage = "No game is currently running.\nStart a game to configure its profile.";
     private const string UnavailableProfileMessage = "Profile settings are unavailable.";
+    private const int ProfileArtworkMaximumAttempts = 2;
+    private static readonly TimeSpan ProfileArtworkRetryDelay = TimeSpan.FromMilliseconds(750);
 
     private FrameworkElement? _profileDetailRoot;
     private TextBlock? _profileStatusMessage;
     private bool _activeProfileInitialLoadPending;
     private bool _noGameRecheckRequestedForThisEntry;
     private uint? _profileArtworkRequestedAppId;
+    private CancellationTokenSource? _profileArtworkRequestCancellation;
 
     internal event Action? NoRunningGameProfileRecheckRequested;
 
@@ -40,7 +47,7 @@ public sealed partial class OverlayWindow
     internal static (double Width, double Height) CalculateProfileArtworkSize(double rightColumnWidth)
     {
         var width = double.IsFinite(rightColumnWidth)
-            ? Math.Max(0, rightColumnWidth - 32.0)
+            ? Math.Max(0, rightColumnWidth)
             : 0;
         return (width, width * 430.0 / 920.0);
     }
@@ -131,33 +138,128 @@ public sealed partial class OverlayWindow
 
         ClearProfileArtwork();
         _profileArtworkRequestedAppId = appId;
-        _ = ResolveAndApplyProfileArtworkAsync(appId.Value, page!);
+        var requestCancellation = new CancellationTokenSource();
+        _profileArtworkRequestCancellation = requestCancellation;
+        _ = ResolveAndApplyProfileArtworkAsync(appId.Value, page!, requestCancellation);
     }
 
-    private async Task ResolveAndApplyProfileArtworkAsync(uint appId, QuickSettingsPageSnapshot page)
+    private async Task ResolveAndApplyProfileArtworkAsync(
+        uint appId,
+        QuickSettingsPageSnapshot page,
+        CancellationTokenSource requestCancellation)
     {
-        IReadOnlyList<string> paths;
+        var cancellationToken = requestCancellation.Token;
+        var retryUsed = false;
+        var candidateCount = 0;
         try
         {
-            paths = await Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(page));
+            for (var attempt = 0; attempt < ProfileArtworkMaximumAttempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsCurrentProfileArtworkRequest(appId, requestCancellation))
+                {
+                    if (ReferenceEquals(_profileArtworkRequestCancellation, requestCancellation))
+                        ClearProfileArtwork();
+                    OverlayLog.Debug("ProfileArtwork", "Ignored stale local artwork lookup.",
+                        ("AppId", appId), ("CandidateCount", candidateCount),
+                        ("Stage", "StaleOrHidden"), ("RetryUsed", retryUsed));
+                    return;
+                }
+
+                IReadOnlyList<string> paths;
+                try
+                {
+                    paths = await Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(page));
+                }
+                catch (Exception exception) when (IsOptionalProfileArtworkFailure(exception))
+                {
+                    paths = [];
+                    OverlayLog.Debug("ProfileArtwork", "Local artwork candidate lookup failed.",
+                        ("AppId", appId), ("CandidateCount", 0),
+                        ("Stage", "NoCandidate"), ("RetryUsed", retryUsed),
+                        ("ExceptionType", exception.GetType().Name));
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsCurrentProfileArtworkRequest(appId, requestCancellation))
+                {
+                    if (ReferenceEquals(_profileArtworkRequestCancellation, requestCancellation))
+                        ClearProfileArtwork();
+                    OverlayLog.Debug("ProfileArtwork", "Ignored stale local artwork candidates.",
+                        ("AppId", appId), ("CandidateCount", paths.Count),
+                        ("Stage", "StaleOrHidden"), ("RetryUsed", retryUsed));
+                    return;
+                }
+
+                candidateCount = paths.Count;
+                OverlayLog.Debug("ProfileArtwork", "Resolved local artwork candidates.",
+                    ("AppId", appId), ("CandidateCount", candidateCount), ("RetryUsed", retryUsed));
+
+                var bitmap = candidateCount == 0
+                    ? null
+                    : await TryLoadProfileArtworkAsync(paths, cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsCurrentProfileArtworkRequest(appId, requestCancellation))
+                {
+                    if (ReferenceEquals(_profileArtworkRequestCancellation, requestCancellation))
+                        ClearProfileArtwork();
+                    OverlayLog.Debug("ProfileArtwork", "Ignored stale local artwork result.",
+                        ("AppId", appId), ("CandidateCount", candidateCount),
+                        ("Stage", "StaleOrHidden"), ("RetryUsed", retryUsed));
+                    return;
+                }
+
+                if (bitmap is not null)
+                {
+                    ProfileArtworkImage.Source = bitmap;
+                    ProfileArtworkHost.Visibility = Visibility.Visible;
+                    PageTitle.Visibility = Visibility.Collapsed;
+                    OverlayLog.Debug("ProfileArtwork", "Loaded local Profile artwork.",
+                        ("AppId", appId), ("CandidateCount", candidateCount),
+                        ("Stage", "Success"), ("RetryUsed", retryUsed));
+                    return;
+                }
+
+                var failureStage = candidateCount == 0 ? "NoCandidate" : "OpenOrDecodeFailed";
+                if (attempt == 0)
+                {
+                    OverlayLog.Debug("ProfileArtwork", "Local artwork was unavailable; scheduling one bounded retry.",
+                        ("AppId", appId), ("CandidateCount", candidateCount),
+                        ("Stage", failureStage), ("RetryUsed", false));
+                    retryUsed = true;
+                    await Task.Delay(ProfileArtworkRetryDelay, cancellationToken);
+                    continue;
+                }
+
+                ProfileArtworkImage.Source = null;
+                ProfileArtworkHost.Visibility = Visibility.Collapsed;
+                PageTitle.Visibility = Visibility.Visible;
+                OverlayLog.Warn("ProfileArtwork", "Local artwork unavailable after the bounded retry; keeping the Profile title visible.",
+                    null, ("AppId", appId), ("CandidateCount", candidateCount),
+                    ("Stage", failureStage), ("RetryUsed", retryUsed));
+                return;
+            }
         }
-        catch (Exception)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return;
+            OverlayLog.Debug("ProfileArtwork", "Stopped stale local artwork lookup.",
+                ("AppId", appId), ("CandidateCount", candidateCount),
+                ("Stage", "StaleOrHidden"), ("RetryUsed", retryUsed));
         }
-
-        if (paths.Count == 0 || !IsCurrentProfileArtworkTarget(appId))
-            return;
-
-        var bitmap = await TryLoadProfileArtworkAsync(paths);
-        if (bitmap is null || !IsCurrentProfileArtworkTarget(appId))
-            return;
-
-        ProfileArtworkImage.Source = bitmap;
-        ProfileArtworkHost.Visibility = Visibility.Visible;
+        finally
+        {
+            if (ReferenceEquals(_profileArtworkRequestCancellation, requestCancellation))
+            {
+                requestCancellation.Dispose();
+                _profileArtworkRequestCancellation = null;
+            }
+        }
     }
 
-    private async Task<BitmapImage?> TryLoadProfileArtworkAsync(IReadOnlyList<string> paths)
+    private async Task<BitmapImage?> TryLoadProfileArtworkAsync(
+        IReadOnlyList<string> paths,
+        CancellationToken cancellationToken)
     {
         var scale = ProfileArtworkHost.XamlRoot?.RasterizationScale ?? 1.0;
         var widthDip = ProfileArtworkHost.ActualWidth;
@@ -167,22 +269,37 @@ public sealed partial class OverlayWindow
 
         foreach (var path in paths)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var file = await StorageFile.GetFileFromPathAsync(path);
                 using var stream = await file.OpenReadAsync();
                 var bitmap = new BitmapImage { DecodePixelWidth = decodePixelWidth };
                 await bitmap.SetSourceAsync(stream);
+                cancellationToken.ThrowIfCancellationRequested();
                 return bitmap;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception)
             {
-                // Optional local artwork is best-effort; try the next bounded candidate.
+                // File access and image decoding are optional; try the next bounded candidate.
             }
         }
 
         return null;
     }
+
+    private static bool IsOptionalProfileArtworkFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or SecurityException or
+            ArgumentException or NotSupportedException or InvalidOperationException or COMException;
+
+    private bool IsCurrentProfileArtworkRequest(uint appId, CancellationTokenSource requestCancellation) =>
+        !requestCancellation.IsCancellationRequested
+        && ReferenceEquals(_profileArtworkRequestCancellation, requestCancellation)
+        && IsCurrentProfileArtworkTarget(appId);
 
     private bool IsCurrentProfileArtworkTarget(uint appId)
     {
@@ -196,9 +313,13 @@ public sealed partial class OverlayWindow
 
     private void ClearProfileArtwork()
     {
+        _profileArtworkRequestCancellation?.Cancel();
+        _profileArtworkRequestCancellation?.Dispose();
+        _profileArtworkRequestCancellation = null;
         _profileArtworkRequestedAppId = null;
         ProfileArtworkImage.Source = null;
         ProfileArtworkHost.Visibility = Visibility.Collapsed;
+        PageTitle.Visibility = Visibility.Visible;
     }
 
     private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)

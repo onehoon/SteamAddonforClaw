@@ -187,72 +187,129 @@ public sealed class OverlaySteamGameArtworkTests
     }
 
     [Fact]
-    public void Artwork_layer_is_right_column_only_behind_title_and_scroll_and_does_not_extend_page_content()
+    public void Artwork_uses_a_separate_full_width_profile_row_above_scrollable_settings()
     {
         var xaml = XDocument.Load(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml"));
         var rightColumn = xaml.Descendants().Single(element => element.Name.LocalName == "Grid"
             && Attribute(element, "Grid.Column") == "1" && Attribute(element, "Grid.Row") == "0");
         var visualChildren = rightColumn.Elements().Where(element => element.Name.LocalName != "RowDefinitions").ToArray();
-        var artworkIndex = Array.FindIndex(visualChildren, element => Attribute(element, "Name") == "ProfileArtworkHost");
-        var titleIndex = Array.FindIndex(visualChildren, element => Attribute(element, "Name") == "PageTitle");
-        var scrollIndex = Array.FindIndex(visualChildren, element => Attribute(element, "Name") == "BodyScroll");
-        Assert.True(artworkIndex >= 0 && titleIndex >= 0 && scrollIndex >= 0);
-        var host = visualChildren[artworkIndex];
+        var title = visualChildren.Single(element => Attribute(element, "Name") == "PageTitle");
+        var host = visualChildren.Single(element => Attribute(element, "Name") == "ProfileArtworkHost");
+        var scroll = visualChildren.Single(element => Attribute(element, "Name") == "BodyScroll");
 
-        Assert.True(artworkIndex >= 0 && artworkIndex < titleIndex && titleIndex < scrollIndex);
-        Assert.Equal("2", Attribute(host, "Grid.RowSpan"));
-        Assert.Null(Attribute(host, "Height"));
-        Assert.Equal("Left", Attribute(host, "HorizontalAlignment"));
+        Assert.True(Array.IndexOf(visualChildren, title) < Array.IndexOf(visualChildren, host));
+        Assert.True(Array.IndexOf(visualChildren, host) < Array.IndexOf(visualChildren, scroll));
+        Assert.Equal(["Auto", "Auto", "*"], rightColumn.Elements().Single(element => element.Name.LocalName == "Grid.RowDefinitions")
+            .Elements().Select(element => Attribute(element, "Height")));
+        Assert.Equal("Visible", Attribute(title, "Visibility"));
+        Assert.Equal("0", Attribute(title, "Grid.Row"));
+        Assert.Equal("1", Attribute(host, "Grid.Row"));
+        Assert.Null(Attribute(host, "Grid.RowSpan"));
+        Assert.Null(Attribute(host, "Margin"));
+        Assert.Equal("Stretch", Attribute(host, "HorizontalAlignment"));
         Assert.Equal("Top", Attribute(host, "VerticalAlignment"));
-        Assert.Equal("16,0,16,0", Attribute(host, "Margin"));
         Assert.Equal("False", Attribute(host, "IsHitTestVisible"));
         Assert.Equal("Collapsed", Attribute(host, "Visibility"));
         Assert.Null(Attribute(host, "Width"));
-        Assert.Equal("Transparent", Attribute(visualChildren[scrollIndex], "Background"));
+        Assert.Null(Attribute(host, "Height"));
+        Assert.Equal("2", Attribute(scroll, "Grid.Row"));
+        Assert.Equal("Transparent", Attribute(scroll, "Background"));
+        Assert.Equal("Hidden", Attribute(scroll, "VerticalScrollBarVisibility"));
+        Assert.Equal("Disabled", Attribute(scroll, "HorizontalScrollBarVisibility"));
         Assert.Equal("ProfileContentColumn_SizeChanged", Attribute(rightColumn, "SizeChanged"));
+        Assert.Equal("{StaticResource QamBodyContentPadding}",
+            Attribute(scroll.Elements().Single(element => element.Name.LocalName == "Border"), "Padding"));
 
         var image = host.Elements().Single(element => element.Name.LocalName == "Image");
-        Assert.Equal("Uniform", Attribute(image, "Stretch"));
-        Assert.Contains(host.Elements(), element => element.Name.LocalName == "Rectangle");
+        Assert.Equal("UniformToFill", Attribute(image, "Stretch"));
+        var gradient = host.Descendants().Single(element => element.Name.LocalName == "LinearGradientBrush");
+        Assert.Equal("0,0", Attribute(gradient, "StartPoint"));
+        Assert.Equal("0,1", Attribute(gradient, "EndPoint"));
+        Assert.Equal(
+            [("#330E141B", "0"), ("#900E141B", "0.5"), ("#FF0E141B", "1")],
+            gradient.Elements().Where(element => element.Name.LocalName == "GradientStop")
+                .Select(element => (Attribute(element, "Color"), Attribute(element, "Offset"))));
+        Assert.DoesNotContain(host.Descendants(), element =>
+            element.Name.LocalName is "TextBlock" or "ToggleSwitch");
+
         var profile = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
         var sizeChanged = ExtractMethod(profile, "private void ProfileContentColumn_SizeChanged(object sender, SizeChangedEventArgs e)");
         Assert.Contains("ProfileArtworkHost.Clip = new RectangleGeometry", sizeChanged);
         Assert.Contains("new Rect(0, 0, width, height)", sizeChanged);
         Assert.DoesNotContain("Height=\"240\"", File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml")));
-        var artworkSize = OverlayWindow.CalculateProfileArtworkSize(400);
-        Assert.Equal(368, artworkSize.Width);
-        Assert.Equal(368.0 * 430.0 / 920.0, artworkSize.Height, 8);
-        Assert.Equal((0d, 0d), OverlayWindow.CalculateProfileArtworkSize(32));
-        Assert.Equal((0d, 0d), OverlayWindow.CalculateProfileArtworkSize(double.NaN));
+        Assert.DoesNotContain("rightColumnWidth - 32", profile);
         Assert.DoesNotContain("ProfileArtwork", profile[profile.IndexOf("private FrameworkElement BuildProfilePage()", StringComparison.Ordinal)..
             profile.IndexOf("internal bool TryHandleBack()", StringComparison.Ordinal)]);
-        Assert.Contains("Grid.Row=\"1\"", File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml")));
+    }
+
+    [Theory]
+    [InlineData(400, 400)]
+    [InlineData(32, 32)]
+    [InlineData(0, 0)]
+    [InlineData(-10, 0)]
+    [InlineData(double.NaN, 0)]
+    [InlineData(double.PositiveInfinity, 0)]
+    public void Artwork_size_uses_the_finite_full_content_column_width(double requestedWidth, double expectedWidth)
+    {
+        var artworkSize = OverlayWindow.CalculateProfileArtworkSize(requestedWidth);
+
+        Assert.Equal(expectedWidth, artworkSize.Width);
+        Assert.Equal(expectedWidth * 430.0 / 920.0, artworkSize.Height, 8);
     }
 
     [Fact]
-    public void Artwork_refresh_reuses_same_target_and_clears_on_tab_change_hide_and_stale_async_completion()
+    public void Artwork_visibility_and_retry_are_scoped_to_the_current_profile_entry()
     {
         var profile = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
         var entry = ExtractMethod(profile, "private void OnProfileTabSelectionChanged(bool selected)");
         var update = ExtractMethod(profile, "private void UpdateProfileArtwork(QuickSettingsPageSnapshot? page)");
-        var resolve = ExtractMethod(profile, "private async Task ResolveAndApplyProfileArtworkAsync(uint appId, QuickSettingsPageSnapshot page)");
-        var loader = ExtractMethod(profile, "private async Task<BitmapImage?> TryLoadProfileArtworkAsync(IReadOnlyList<string> paths)");
+        var resolve = ExtractMethod(profile, "private async Task ResolveAndApplyProfileArtworkAsync(");
+        var loader = ExtractMethod(profile, "private async Task<BitmapImage?> TryLoadProfileArtworkAsync(");
+        var clear = ExtractMethod(profile, "private void ClearProfileArtwork()");
         var presentation = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"));
         var hide = ExtractMethod(presentation, "internal async Task HideForPocAsync()");
+        const string source = "ProfileArtworkImage.Source = bitmap;";
+        const string showHero = "ProfileArtworkHost.Visibility = Visibility.Visible;";
+        const string hideTitle = "PageTitle.Visibility = Visibility.Collapsed;";
 
         Assert.Contains("if (!selected)", entry);
         Assert.Contains("ClearProfileArtwork();", entry);
         Assert.Contains("UpdateProfileArtwork(surface.Binding?.AuthoritativePage);", entry);
         Assert.Contains("if (_profileArtworkRequestedAppId == appId)", update);
+        Assert.Contains("new CancellationTokenSource()", update);
+        Assert.Contains("ProfileArtworkMaximumAttempts = 2", profile);
+        Assert.Contains("ProfileArtworkRetryDelay = TimeSpan.FromMilliseconds(750)", profile);
+        Assert.Contains("for (var attempt = 0; attempt < ProfileArtworkMaximumAttempts; attempt++)", resolve);
         Assert.Contains("Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(page))", resolve);
-        Assert.Contains("IsCurrentProfileArtworkTarget(appId)", resolve);
-        Assert.Contains("if (paths.Count == 0", resolve);
+        Assert.Contains("CandidateCount", resolve);
+        Assert.Contains("\"NoCandidate\"", resolve);
+        Assert.Contains("\"OpenOrDecodeFailed\"", resolve);
+        Assert.Contains("\"StaleOrHidden\"", resolve);
+        Assert.Contains("Task.Delay(ProfileArtworkRetryDelay, cancellationToken)", resolve);
+        Assert.Contains("if (attempt == 0)", resolve);
+        var currentRequest = ExtractMethod(profile, "private bool IsCurrentProfileArtworkRequest(");
+        Assert.Contains("IsCurrentProfileArtworkRequest(appId, requestCancellation)", resolve);
+        Assert.Contains("IsCurrentProfileArtworkTarget(appId)", currentRequest);
+        Assert.Equal(1, profile.Split("PageTitle.Visibility = Visibility.Collapsed;", StringSplitOptions.None).Length - 1);
+        Assert.Contains("cancellationToken.ThrowIfCancellationRequested();", loader);
         Assert.Contains("foreach (var path in paths)", loader);
         Assert.Contains("await bitmap.SetSourceAsync(stream);", loader);
-        Assert.Contains("catch (Exception)", loader);
+        Assert.Contains("catch (Exception", loader);
         Assert.Contains("return null;", loader);
+        var sourceIndex = resolve.IndexOf(source, StringComparison.Ordinal);
+        var targetGuardIndex = resolve.LastIndexOf("if (!IsCurrentProfileArtworkRequest(appId, requestCancellation))", sourceIndex, StringComparison.Ordinal);
+        Assert.True(resolve.IndexOf("if (bitmap is not null)", StringComparison.Ordinal) < sourceIndex);
+        Assert.True(targetGuardIndex >= 0 && targetGuardIndex < sourceIndex);
+        Assert.True(resolve.IndexOf(source, StringComparison.Ordinal)
+            < resolve.IndexOf(showHero, StringComparison.Ordinal));
+        Assert.True(resolve.IndexOf(showHero, StringComparison.Ordinal)
+            < resolve.IndexOf(hideTitle, StringComparison.Ordinal));
+        Assert.Contains("PageTitle.Visibility = Visibility.Visible;", clear);
+        Assert.Contains("ProfileArtworkHost.Visibility = Visibility.Collapsed;", clear);
+        Assert.Contains("ProfileArtworkImage.Source = null;", clear);
+        Assert.Contains("_profileArtworkRequestedAppId = null;", clear);
+        Assert.Contains("_profileArtworkRequestCancellation?.Cancel();", clear);
         Assert.Contains("ClearProfileArtwork();", hide);
-        Assert.Contains("ProfileArtworkImage.Source = null;", profile);
     }
 
     private static QuickSettingsPageSnapshot SteamPage(uint appId) => new(

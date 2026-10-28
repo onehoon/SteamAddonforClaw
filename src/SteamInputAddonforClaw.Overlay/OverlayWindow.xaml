@@ -73,20 +73,25 @@
                         <Grid x:Name="ProfileContentColumn" Grid.Column="1" Grid.Row="0" SizeChanged="ProfileContentColumn_SizeChanged">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
+                            <TextBlock
+                                x:Name="PageTitle"
+                                Grid.Row="0"
+                                Visibility="Visible"
+                                Style="{StaticResource QamPageTitleTextStyle}"
+                                Margin="{StaticResource QamPageTitleMargin}" />
                             <Grid
                                 x:Name="ProfileArtworkHost"
-                                Grid.Row="0"
-                                Grid.RowSpan="2"
-                                Margin="16,0,16,0"
-                                HorizontalAlignment="Left"
+                                Grid.Row="1"
+                                HorizontalAlignment="Stretch"
                                 VerticalAlignment="Top"
                                 IsHitTestVisible="False"
                                 Visibility="Collapsed">
                                 <Image
                                     x:Name="ProfileArtworkImage"
-                                    Stretch="Uniform"
+                                    Stretch="UniformToFill"
                                     IsHitTestVisible="False" />
                                 <Rectangle IsHitTestVisible="False">
                                     <Rectangle.Fill>
@@ -98,14 +103,9 @@
                                     </Rectangle.Fill>
                                 </Rectangle>
                             </Grid>
-                            <TextBlock
-                                x:Name="PageTitle"
-                                Grid.Row="0"
-                                Style="{StaticResource QamPageTitleTextStyle}"
-                                Margin="{StaticResource QamPageTitleMargin}" />
                             <ScrollViewer
                                 x:Name="BodyScroll"
-                                Grid.Row="1"
+                                Grid.Row="2"
                                 Background="Transparent"
                                 VerticalScrollBarVisibility="Hidden"
                                 HorizontalScrollBarVisibility="Disabled"
