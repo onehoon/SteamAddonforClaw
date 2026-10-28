@@ -49,6 +49,86 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown)", code, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(480u)]
+    [InlineData(228980u)]
+    [InlineData(993090u)]
+    public void Steam_catalog_hides_only_the_configured_native_app_ids(uint appId)
+    {
+        var hidden = new FrontendProfileGameCatalogEntry(
+            appId,
+            "Renamed or localized title",
+            FrontendProfileGameSource.Steam,
+            Favorite: true,
+            FavoriteStateKnown: false);
+
+        Assert.False(ProfilePage.ShouldShowInSteamCatalog(hidden));
+        Assert.True(ProfilePage.ShouldShowInSteamCatalog(
+            new FrontendProfileGameCatalogEntry(570u, "Ordinary game", FrontendProfileGameSource.Steam)));
+    }
+
+    [Theory]
+    [InlineData(480u)]
+    [InlineData(228980u)]
+    [InlineData(993090u)]
+    public void Steam_catalog_keeps_non_steam_shortcuts_with_matching_app_ids(uint appId)
+    {
+        var shortcut = new FrontendProfileGameCatalogEntry(
+            appId,
+            "User shortcut",
+            FrontendProfileGameSource.NonSteam);
+
+        Assert.True(ProfilePage.ShouldShowInSteamCatalog(shortcut));
+    }
+
+    [Fact]
+    public void Steam_catalog_filters_by_source_and_app_id_before_search_and_favorite_sorting()
+    {
+        var games = new[]
+        {
+            new FrontendProfileGameCatalogEntry(480u, "Localized title", FrontendProfileGameSource.Steam, Favorite: true, FavoriteStateKnown: false),
+            new FrontendProfileGameCatalogEntry(228980u, "Renamed dependency", FrontendProfileGameSource.Steam, Favorite: true),
+            new FrontendProfileGameCatalogEntry(993090u, "Different displayed name", FrontendProfileGameSource.Steam),
+            new FrontendProfileGameCatalogEntry(570u, "Zulu ordinary", FrontendProfileGameSource.Steam),
+            new FrontendProfileGameCatalogEntry(571u, "Localized title", FrontendProfileGameSource.Steam, Favorite: true),
+            new FrontendProfileGameCatalogEntry(993090u, "Non-Steam shortcut", FrontendProfileGameSource.NonSteam)
+        };
+
+        var visible = ProfilePage.FilterSteamCatalog(games);
+
+        Assert.Equal(
+            new (uint AppId, FrontendProfileGameSource Source)[]
+            {
+                (570u, FrontendProfileGameSource.Steam),
+                (571u, FrontendProfileGameSource.Steam),
+                (993090u, FrontendProfileGameSource.NonSteam)
+            },
+            visible.Select(game => (game.AppId, game.Source)));
+        Assert.Equal(new uint[] { 571u, 993090u, 570u }, ProfilePage.FilterAndSort(visible, null).Select(game => game.AppId));
+        Assert.Empty(ProfilePage.FilterAndSort(visible, "480"));
+        Assert.Equal(new uint[] { 571u }, ProfilePage.FilterAndSort(visible, "Localized title").Select(game => game.AppId));
+
+        var hiddenOnly = games.Where(game => game.Source == FrontendProfileGameSource.Steam && game.AppId != 570u && game.AppId != 571u);
+        Assert.Empty(ProfilePage.FilterSteamCatalog(hiddenOnly));
+    }
+
+    [Fact]
+    public void Steam_catalog_empty_state_distinguishes_no_scan_results_from_hidden_only_results()
+    {
+        Assert.Equal("Steam_Catalog_NoGames", ProfilePage.GetEmptyCatalogMessageKey(scannedGameCount: 0));
+        Assert.Equal("Steam_Catalog_NoVisibleGames", ProfilePage.GetEmptyCatalogMessageKey(scannedGameCount: 3));
+
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var refresh = Method(code, "private async Task RefreshGamesAsync(", "private void GameSearchBox_TextChanged(");
+        var restoreSelection = refresh.IndexOf("_selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null", StringComparison.Ordinal);
+        Assert.True(restoreSelection >= 0);
+        var clearSelection = refresh.IndexOf("ClearSelection()", restoreSelection, StringComparison.Ordinal);
+        var emptyCatalog = refresh.IndexOf("if (_catalog.Count == 0)", clearSelection, StringComparison.Ordinal);
+        var emptyMessage = refresh.IndexOf("GetEmptyCatalogMessageKey(scannedCatalog.Count)", emptyCatalog, StringComparison.Ordinal);
+        Assert.True(restoreSelection >= 0 && clearSelection > restoreSelection && emptyCatalog > clearSelection && emptyMessage > emptyCatalog);
+    }
+
     [Fact]
     public void Steam_catalog_scans_only_until_the_first_success_and_never_overlaps()
     {
@@ -62,10 +142,13 @@ public sealed class ProfilePagePolicyTests
         var manualRefresh = Method(code, "private async void RefreshGamesButton_Click(", "private async Task RefreshGamesAsync(");
 
         var scan = refresh.IndexOf("await _frontend.ScanProfileGamesAsync()", StringComparison.Ordinal);
-        var successfulCache = refresh.IndexOf("_catalog = scannedCatalog", StringComparison.Ordinal);
+        var successfulCache = refresh.IndexOf("_catalog = FilterSteamCatalog(scannedCatalog)", StringComparison.Ordinal);
         var loadedFlag = refresh.IndexOf("_catalogLoaded = true", StringComparison.Ordinal);
+        var favoriteWarning = refresh.IndexOf("FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown)", StringComparison.Ordinal);
+        var applyFilter = refresh.IndexOf("ApplyCatalogFilter()", StringComparison.Ordinal);
         var failure = refresh.IndexOf("catch (Exception exception)", StringComparison.Ordinal);
         Assert.True(scan >= 0 && successfulCache > scan && loadedFlag > successfulCache);
+        Assert.True(favoriteWarning > loadedFlag && applyFilter > favoriteWarning);
         Assert.True(failure > loadedFlag);
         Assert.DoesNotContain("_catalogLoaded = false", refresh, StringComparison.Ordinal);
         Assert.Contains("await RefreshGamesAsync(explicitRefresh: true)", manualRefresh, StringComparison.Ordinal);

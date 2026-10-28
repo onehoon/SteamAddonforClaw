@@ -234,6 +234,7 @@
   <data name="MainNav_Steam.Content" xml:space="preserve"><value>Steam</value></data>
   <data name="Steam_BackButton.Content" xml:space="preserve"><value>Back</value></data>
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
+  <data name="Steam_Catalog_NoVisibleGames" xml:space="preserve"><value>표시할 게임이 없습니다.</value></data>
   <data name="Steam_Catalog_RefreshFailed" xml:space="preserve"><value>Game catalog could not be refreshed.</value></data>
   <data name="Steam_CatalogTitle.Text" xml:space="preserve"><value>Steam</value></data>
   <data name="Steam_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>프로필 설정을 읽을 수 없어 즐겨찾기 상태를 확인할 수 없습니다.</value></data>

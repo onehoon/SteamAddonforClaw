@@ -31,6 +31,12 @@ public sealed partial class ProfilePage : UserControl
     private long _tdpGeneration;
     private bool _tdpDraftDirty;
     private CancellationTokenSource? _acFpsDebounce, _dcFpsDebounce; private long _acFpsGeneration, _dcFpsGeneration; private int? _acFpsDraft, _dcFpsDraft;
+    private static readonly HashSet<uint> HiddenSteamAppIds =
+    [
+        480u,     // Spacewar
+        228980u,  // Steamworks Common Redistributables
+        993090u   // Lossless Scaling
+    ];
     private CancellationTokenSource? _acGpuDebounce, _dcGpuDebounce; private long _acGpuGeneration, _dcGpuGeneration, _gpuDraftGeneration; private int? _acGpuDraftIndex, _dcGpuDraftIndex; private bool _gpuDraftDirty;
     private static readonly CpuBoostModeItem[] Modes = [new(CpuBoostMode.Disabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Disabled", "Disabled")), new(CpuBoostMode.Enabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Enabled", "Enabled")), new(CpuBoostMode.Aggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_Aggressive", "Aggressive")), new(CpuBoostMode.EfficientEnabled, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientEnabled", "Efficient Enabled")), new(CpuBoostMode.EfficientAggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressive", "Efficient Aggressive")), new(CpuBoostMode.AggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_AggressiveAtGuaranteed", "Aggressive At Guaranteed")), new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed"))];
     private static readonly ResolutionItem[] ResolutionItems = [new(null, null, MainUiStrings.Get("Steam_Resolution_DoNotChange", "Do not change")), new(1920, 1200, "1920 × 1200"), new(1920, 1080, "1920 × 1080"), new(1680, 1050, "1680 × 1050"), new(1440, 900, "1440 × 900")];
@@ -90,12 +96,32 @@ public sealed partial class ProfilePage : UserControl
             {
                 _portraitArtworkContext = null;
             }
-            _catalog = scannedCatalog;
+            _catalog = FilterSteamCatalog(scannedCatalog);
             _catalogLoaded = true;
             FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown);
             ApplyCatalogFilter();
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
-            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo(MainUiStrings.Get("Steam_Catalog_NoGames", "No installed Steam games were found.")); else ClearError(); } else { await CaptureSelectedAsync(_selectedGame.AppId); }
+            if (_selectedGame is null)
+            {
+                ClearSelection();
+                if (_catalog.Count == 0)
+                {
+                    var message = GetEmptyCatalogMessageKey(scannedCatalog.Count) switch
+                    {
+                        "Steam_Catalog_NoGames" => MainUiStrings.Get("Steam_Catalog_NoGames", "No installed Steam games were found."),
+                        _ => MainUiStrings.Get("Steam_Catalog_NoVisibleGames", "No games to display.")
+                    };
+                    ShowInfo(message);
+                }
+                else
+                {
+                    ClearError();
+                }
+            }
+            else
+            {
+                await CaptureSelectedAsync(_selectedGame.AppId);
+            }
             AppLog.Info("Profiles.Catalog", "Steam profile catalog scan completed.",
                 ("GameCount", _catalog.Count),
                 ("DurationMs", scanTimer.Elapsed.TotalMilliseconds));
@@ -359,6 +385,17 @@ public sealed partial class ProfilePage : UserControl
             .ThenBy(game => game.AppId)
             .ToArray();
     }
+
+    internal static bool ShouldShowInSteamCatalog(FrontendProfileGameCatalogEntry game) =>
+        game.Source != FrontendProfileGameSource.Steam || !HiddenSteamAppIds.Contains(game.AppId);
+
+    internal static IReadOnlyList<FrontendProfileGameCatalogEntry> FilterSteamCatalog(
+        IEnumerable<FrontendProfileGameCatalogEntry> games) =>
+        games.Where(ShouldShowInSteamCatalog).ToArray();
+
+    internal static string GetEmptyCatalogMessageKey(int scannedGameCount) =>
+        scannedGameCount == 0 ? "Steam_Catalog_NoGames" : "Steam_Catalog_NoVisibleGames";
+
     private async void GameCardButton_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button)?.Tag is not FrontendProfileGameCatalogEntry game) return;
