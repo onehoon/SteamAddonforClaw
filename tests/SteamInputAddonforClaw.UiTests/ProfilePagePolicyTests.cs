@@ -158,14 +158,14 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
-    public void Steam_catalog_uses_centered_virtualized_portrait_cards_and_independent_favorite_target()
+    public void Steam_catalog_uses_left_aligned_virtualized_portrait_cards_and_independent_favorite_target()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
         var catalog = xaml[..xaml.IndexOf("<Grid x:Name=\"DetailPanel\"", StringComparison.Ordinal)];
 
         Assert.Contains("<ItemsRepeater x:Name=\"GameGrid\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("ItemsJustification=\"Center\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
         Assert.Contains("MinColumnSpacing=\"12\"", catalog, StringComparison.Ordinal);
         Assert.Contains("MinRowSpacing=\"12\"", catalog, StringComparison.Ordinal);
