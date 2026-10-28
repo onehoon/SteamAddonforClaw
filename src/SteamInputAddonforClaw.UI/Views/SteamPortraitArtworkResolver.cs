@@ -73,13 +73,10 @@ internal static class SteamPortraitArtworkResolver
             AddExistingCandidates(candidates, seen, CustomExtensions.Select(extension =>
                 Path.Combine(customDirectory, $"{appIdText}p{extension}")));
 
-            if (candidates.Count == 0)
-            {
-                var launchId = ((ulong)appId << 32) | 0x02000000UL;
-                var launchIdText = launchId.ToString(CultureInfo.InvariantCulture);
-                AddExistingCandidates(candidates, seen, CustomExtensions.Select(extension =>
-                    Path.Combine(customDirectory, $"{launchIdText}p{extension}")));
-            }
+            var launchId = ((ulong)appId << 32) | 0x02000000UL;
+            var launchIdText = launchId.ToString(CultureInfo.InvariantCulture);
+            AddExistingCandidates(candidates, seen, CustomExtensions.Select(extension =>
+                Path.Combine(customDirectory, $"{launchIdText}p{extension}")));
 
             return candidates;
         }
@@ -115,17 +112,19 @@ internal static class SteamPortraitArtworkResolver
             catch (SecurityException) { }
         }
 
-        foreach (var directory in appDirectories)
-        {
-            AddExistingCandidates(candidates, seen, [Path.Combine(directory, "library_600x900_2x.jpg")]);
-        }
+        foreach (var name in new[] { "library_600x900_2x.jpg", "library_capsule_2x.jpg" })
+            AddExistingCandidates(candidates, seen,
+                appDirectories.Select(directory => Path.Combine(directory, name)));
 
-        AddExistingCandidates(candidates, seen, [Path.Combine(cacheRoot, $"{appIdText}_library_600x900_2x.jpg")]);
+        AddExistingCandidates(candidates, seen,
+            [Path.Combine(cacheRoot, $"{appIdText}_library_600x900_2x.jpg")]);
 
-        foreach (var directory in appDirectories)
-            AddExistingCandidates(candidates, seen, [Path.Combine(directory, "library_600x900.jpg")]);
+        foreach (var name in new[] { "library_600x900.jpg", "library_capsule.jpg" })
+            AddExistingCandidates(candidates, seen,
+                appDirectories.Select(directory => Path.Combine(directory, name)));
 
-        AddExistingCandidates(candidates, seen, [Path.Combine(cacheRoot, $"{appIdText}_library_600x900.jpg")]);
+        AddExistingCandidates(candidates, seen,
+            [Path.Combine(cacheRoot, $"{appIdText}_library_600x900.jpg")]);
 
         return candidates;
     }

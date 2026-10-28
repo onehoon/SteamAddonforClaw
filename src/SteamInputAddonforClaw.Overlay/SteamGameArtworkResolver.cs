@@ -52,12 +52,13 @@ internal static class SteamGameArtworkResolver
         uint appId,
         uint? userdataAccountId)
     {
-        if (appId == 0 || string.IsNullOrWhiteSpace(steamRoot) || !HasNativeSteamManifest(steamRoot, appId))
+        if (appId == 0 || string.IsNullOrWhiteSpace(steamRoot))
             return [];
 
         var candidates = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var appIdText = appId.ToString(CultureInfo.InvariantCulture);
+        var isNativeSteamApp = userdataAccountId is > 0 && HasNativeSteamManifest(steamRoot, appId);
 
         if (userdataAccountId is > 0)
         {
@@ -65,6 +66,14 @@ internal static class SteamGameArtworkResolver
                 steamRoot, "userdata", userdataAccountId.Value.ToString(CultureInfo.InvariantCulture), "config", "grid");
             AddExistingCandidates(candidates, seen,
                 CustomExtensions.Select(extension => Path.Combine(customDirectory, $"{appIdText}{extension}")));
+
+            if (!isNativeSteamApp)
+            {
+                var launchId = ((ulong)appId << 32) | 0x02000000UL;
+                var launchIdText = launchId.ToString(CultureInfo.InvariantCulture);
+                AddExistingCandidates(candidates, seen,
+                    CustomExtensions.Select(extension => Path.Combine(customDirectory, $"{launchIdText}{extension}")));
+            }
         }
 
         var cacheRoot = Path.Combine(steamRoot, "appcache", "librarycache");
@@ -83,10 +92,10 @@ internal static class SteamGameArtworkResolver
             catch (SecurityException) { }
         }
 
-        AddExistingCandidates(candidates, seen,
-            appDirectories.Select(directory => Path.Combine(directory, "library_header.jpg")));
-        AddExistingCandidates(candidates, seen,
-            appDirectories.Select(directory => Path.Combine(directory, "header.jpg")));
+        foreach (var name in new[] { "library_header_2x.jpg", "library_header.jpg", "header_2x.jpg", "header.jpg" })
+            AddExistingCandidates(candidates, seen,
+                appDirectories.Select(directory => Path.Combine(directory, name)));
+
         AddExistingCandidates(candidates, seen,
             [Path.Combine(cacheRoot, $"{appIdText}_library_header.jpg")]);
 

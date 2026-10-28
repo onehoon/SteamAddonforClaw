@@ -155,10 +155,12 @@ public sealed class ProfilePagePolicyTests
         var customJpg = temp.PathFor($"userdata/{accountId}/config/grid/{appId}p.jpg");
         var customJpeg = temp.PathFor($"userdata/{accountId}/config/grid/{appId}p.jpeg");
         var cache = temp.PathFor($"appcache/librarycache/{appId}/library_600x900_2x.jpg");
+        var capsuleCache = temp.PathFor($"appcache/librarycache/{appId}/library_capsule_2x.jpg");
         temp.CreateFile(customPng);
         temp.CreateFile(customJpg);
         temp.CreateFile(customJpeg);
         temp.CreateFile(cache);
+        temp.CreateFile(capsuleCache);
         temp.CreateFile(temp.PathFor($"appcache/librarycache/{appId}/header.jpg"));
         temp.CreateFile(temp.PathFor($"appcache/librarycache/{appId}/library_hero.jpg"));
 
@@ -168,24 +170,32 @@ public sealed class ProfilePagePolicyTests
             FrontendProfileGameSource.Steam,
             accountId);
 
-        Assert.Equal([customPng, customJpg, customJpeg, cache], candidates);
+        Assert.Equal([customPng, customJpg, customJpeg, cache, capsuleCache], candidates);
         Assert.DoesNotContain(candidates, path => Path.GetFileName(path).Contains("header", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(candidates, path => Path.GetFileName(path).Contains("hero", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void Steam_portrait_cache_uses_direct_hashed_and_legacy_candidates_with_two_x_first()
+    public void Steam_portrait_cache_uses_capsule_names_in_direct_and_hashed_directories()
     {
         using var temp = new TemporaryDirectory();
         const uint appId = 730;
         var cache = $"appcache/librarycache/{appId}";
         var directTwoX = temp.PathFor($"{cache}/library_600x900_2x.jpg");
-        var direct = temp.PathFor($"{cache}/library_600x900.jpg");
         var hashedTwoX = temp.PathFor($"{cache}/abc/library_600x900_2x.jpg");
-        var hashed = temp.PathFor($"{cache}/abc/library_600x900.jpg");
+        var directCapsuleTwoX = temp.PathFor($"{cache}/library_capsule_2x.jpg");
+        var hashedCapsuleTwoX = temp.PathFor($"{cache}/abc/library_capsule_2x.jpg");
         var flatTwoX = temp.PathFor($"appcache/librarycache/{appId}_library_600x900_2x.jpg");
+        var direct = temp.PathFor($"{cache}/library_600x900.jpg");
+        var hashed = temp.PathFor($"{cache}/abc/library_600x900.jpg");
+        var directCapsule = temp.PathFor($"{cache}/library_capsule.jpg");
+        var hashedCapsule = temp.PathFor($"{cache}/abc/library_capsule.jpg");
         var flat = temp.PathFor($"appcache/librarycache/{appId}_library_600x900.jpg");
-        foreach (var path in new[] { directTwoX, direct, hashedTwoX, hashed, flatTwoX, flat })
+        var unverifiedFlatCapsule = temp.PathFor($"appcache/librarycache/{appId}_library_capsule.jpg");
+        foreach (var path in new[] {
+            directTwoX, hashedTwoX, directCapsuleTwoX, hashedCapsuleTwoX, flatTwoX,
+            direct, hashed, directCapsule, hashedCapsule, flat, unverifiedFlatCapsule
+        })
             temp.CreateFile(path);
 
         var candidates = SteamPortraitArtworkResolver.ResolveCandidates(
@@ -194,7 +204,11 @@ public sealed class ProfilePagePolicyTests
             FrontendProfileGameSource.Steam,
             accountId: null);
 
-        Assert.Equal([directTwoX, hashedTwoX, flatTwoX, direct, hashed, flat], candidates);
+        Assert.Equal([
+            directTwoX, hashedTwoX, directCapsuleTwoX, hashedCapsuleTwoX, flatTwoX,
+            direct, hashed, directCapsule, hashedCapsule, flat
+        ], candidates);
+        Assert.DoesNotContain(unverifiedFlatCapsule, candidates);
     }
 
     [Fact]
@@ -232,7 +246,7 @@ public sealed class ProfilePagePolicyTests
         temp.CreateFile(appIdJpeg);
         temp.CreateFile(launchArt);
 
-        Assert.Equal([appIdPng, appIdJpg, appIdJpeg], SteamPortraitArtworkResolver.ResolveCandidates(
+        Assert.Equal([appIdPng, appIdJpg, appIdJpeg, launchArt], SteamPortraitArtworkResolver.ResolveCandidates(
             temp.Root,
             appId,
             FrontendProfileGameSource.NonSteam,

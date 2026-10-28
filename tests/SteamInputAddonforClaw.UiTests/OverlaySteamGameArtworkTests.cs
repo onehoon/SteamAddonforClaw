@@ -43,10 +43,13 @@ public sealed class OverlaySteamGameArtworkTests
         tree.WriteLibraryFolders(externalLibrary);
         tree.WriteManifest(571, externalLibrary);
         tree.WriteManifest(5701);
+        var artworkWithoutManifest = tree.WriteArtwork(Path.Combine(
+            tree.Root, "appcache", "librarycache", "570", "library_header_2x.jpg"));
 
         Assert.True(SteamGameArtworkResolver.HasNativeSteamManifest(tree.Root, 571));
         Assert.False(SteamGameArtworkResolver.HasNativeSteamManifest(tree.Root, 570));
-        Assert.Empty(SteamGameArtworkResolver.ResolveArtworkCandidates(tree.Root, SteamPage(570), null));
+        Assert.Equal([artworkWithoutManifest],
+            SteamGameArtworkResolver.ResolveArtworkCandidates(tree.Root, SteamPage(570), null));
     }
 
     [Fact]
@@ -66,6 +69,23 @@ public sealed class OverlaySteamGameArtworkTests
     }
 
     [Fact]
+    public void Shortcut_custom_wide_art_includes_derived_launch_id_after_the_32_bit_app_id()
+    {
+        using var tree = new SteamTree();
+        const uint shortcutAppId = 123456789;
+        const uint accountId = 1;
+        var grid = Path.Combine(tree.Root, "userdata", accountId.ToString(), "config", "grid");
+        var appIdPng = tree.WriteArtwork(Path.Combine(grid, $"{shortcutAppId}.png"));
+        var appIdJpeg = tree.WriteArtwork(Path.Combine(grid, $"{shortcutAppId}.jpeg"));
+        var launchId = ((ulong)shortcutAppId << 32) | 0x02000000UL;
+        var launchArt = tree.WriteArtwork(Path.Combine(grid, $"{launchId}.jpg"));
+
+        Assert.False(SteamGameArtworkResolver.HasNativeSteamManifest(tree.Root, shortcutAppId));
+        Assert.Equal([appIdPng, appIdJpeg, launchArt],
+            SteamGameArtworkResolver.ResolveArtworkCandidates(tree.Root, SteamPage(shortcutAppId), accountId));
+    }
+
+    [Fact]
     public void Missing_custom_art_prefers_library_header_then_header_then_legacy_and_excludes_heroes()
     {
         using var tree = new SteamTree();
@@ -75,8 +95,12 @@ public sealed class OverlaySteamGameArtworkTests
         var directHero = tree.WriteArtwork(Path.Combine(appDirectory, "library_hero.jpg"));
         var hashHero = tree.WriteArtwork(Path.Combine(appDirectory, "aaa", "library_hero.jpg"));
         var flatHero = tree.WriteArtwork(Path.Combine(cache, $"{AppId}_library_hero.jpg"));
+        var directLibraryHeaderTwoX = tree.WriteArtwork(Path.Combine(appDirectory, "library_header_2x.jpg"));
+        var hashLibraryHeaderTwoX = tree.WriteArtwork(Path.Combine(appDirectory, "aaa", "library_header_2x.jpg"));
         var directLibraryHeader = tree.WriteArtwork(Path.Combine(appDirectory, "library_header.jpg"));
         var hashLibraryHeader = tree.WriteArtwork(Path.Combine(appDirectory, "aaa", "library_header.jpg"));
+        var directWideCoverTwoX = tree.WriteArtwork(Path.Combine(appDirectory, "header_2x.jpg"));
+        var hashWideCoverTwoX = tree.WriteArtwork(Path.Combine(appDirectory, "bbb", "header_2x.jpg"));
         var directWideCover = tree.WriteArtwork(Path.Combine(appDirectory, "header.jpg"));
         var hashWideCover = tree.WriteArtwork(Path.Combine(appDirectory, "bbb", "header.jpg"));
         var nestedOnly = tree.WriteArtwork(Path.Combine(appDirectory, "deep", "nested", "library_header.jpg"));
@@ -87,7 +111,10 @@ public sealed class OverlaySteamGameArtworkTests
         var candidates = SteamGameArtworkResolver.ResolveArtworkCandidates(tree.Root, SteamPage(AppId), null);
 
         Assert.Equal([
-            directLibraryHeader, hashLibraryHeader, directWideCover, hashWideCover, flatHeader
+            directLibraryHeaderTwoX, hashLibraryHeaderTwoX,
+            directLibraryHeader, hashLibraryHeader,
+            directWideCoverTwoX, hashWideCoverTwoX,
+            directWideCover, hashWideCover, flatHeader
         ], candidates);
         Assert.DoesNotContain(directHero, candidates);
         Assert.DoesNotContain(hashHero, candidates);
