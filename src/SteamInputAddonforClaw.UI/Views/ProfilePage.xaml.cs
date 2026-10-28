@@ -3,6 +3,8 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using Windows.Storage;
@@ -24,6 +26,7 @@ public sealed partial class ProfilePage : UserControl
     private XamlRoot? _observedXamlRoot;
     private double _lastRasterizationScale = double.NaN;
     private IReadOnlyList<FrontendProfileGameCatalogEntry> _catalog = [];
+    private ObservableCollection<GameCardItem> _visibleGameCards = new();
     private FrontendProfileGameCatalogEntry? _selectedGame;
     private FrontendGameProfileSnapshot? _snapshot;
     private int? _acPl1, _acPl2, _dcPl1, _dcPl2;
@@ -31,6 +34,12 @@ public sealed partial class ProfilePage : UserControl
     private long _tdpGeneration;
     private bool _tdpDraftDirty;
     private CancellationTokenSource? _acFpsDebounce, _dcFpsDebounce; private long _acFpsGeneration, _dcFpsGeneration; private int? _acFpsDraft, _dcFpsDraft;
+    private static readonly HashSet<uint> HiddenSteamAppIds =
+    [
+        480u,     // Spacewar
+        228980u,  // Steamworks Common Redistributables
+        993090u   // Lossless Scaling
+    ];
     private CancellationTokenSource? _acGpuDebounce, _dcGpuDebounce; private long _acGpuGeneration, _dcGpuGeneration, _gpuDraftGeneration; private int? _acGpuDraftIndex, _dcGpuDraftIndex; private bool _gpuDraftDirty;
     private static readonly CpuBoostModeItem[] Modes = [new(CpuBoostMode.Disabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Disabled", "Disabled")), new(CpuBoostMode.Enabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Enabled", "Enabled")), new(CpuBoostMode.Aggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_Aggressive", "Aggressive")), new(CpuBoostMode.EfficientEnabled, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientEnabled", "Efficient Enabled")), new(CpuBoostMode.EfficientAggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressive", "Efficient Aggressive")), new(CpuBoostMode.AggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_AggressiveAtGuaranteed", "Aggressive At Guaranteed")), new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed"))];
     private static readonly ResolutionItem[] ResolutionItems = [new(null, null, MainUiStrings.Get("Steam_Resolution_DoNotChange", "Do not change")), new(1920, 1200, "1920 × 1200"), new(1920, 1080, "1920 × 1080"), new(1680, 1050, "1680 × 1050"), new(1440, 900, "1440 × 900")];
@@ -90,12 +99,32 @@ public sealed partial class ProfilePage : UserControl
             {
                 _portraitArtworkContext = null;
             }
-            _catalog = scannedCatalog;
+            _catalog = FilterSteamCatalog(scannedCatalog);
             _catalogLoaded = true;
             FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown);
             ApplyCatalogFilter();
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
-            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo(MainUiStrings.Get("Steam_Catalog_NoGames", "No installed Steam games were found.")); else ClearError(); } else { await CaptureSelectedAsync(_selectedGame.AppId); }
+            if (_selectedGame is null)
+            {
+                ClearSelection();
+                if (_catalog.Count == 0)
+                {
+                    var message = GetEmptyCatalogMessageKey(scannedCatalog.Count) switch
+                    {
+                        "Steam_Catalog_NoGames" => MainUiStrings.Get("Steam_Catalog_NoGames", "No installed Steam games were found."),
+                        _ => MainUiStrings.Get("Steam_Catalog_NoVisibleGames", "No games to display.")
+                    };
+                    ShowInfo(message);
+                }
+                else
+                {
+                    ClearError();
+                }
+            }
+            else
+            {
+                await CaptureSelectedAsync(_selectedGame.AppId);
+            }
             AppLog.Info("Profiles.Catalog", "Steam profile catalog scan completed.",
                 ("GameCount", _catalog.Count),
                 ("DurationMs", scanTimer.Elapsed.TotalMilliseconds));
@@ -118,7 +147,9 @@ public sealed partial class ProfilePage : UserControl
     private void ApplyCatalogFilter()
     {
         var query = GameSearchBox.Text.Trim();
-        GameGrid.ItemsSource = FilterAndSort(_catalog, query).Select(x => new GameCardItem(x)).ToArray();
+        _visibleGameCards = new ObservableCollection<GameCardItem>(
+            FilterAndSort(_catalog, query).Select(game => new GameCardItem(game)));
+        GameGrid.ItemsSource = _visibleGameCards;
     }
 
     private void ProfilePage_Loaded(object sender, RoutedEventArgs e)
@@ -359,6 +390,50 @@ public sealed partial class ProfilePage : UserControl
             .ThenBy(game => game.AppId)
             .ToArray();
     }
+
+    internal static bool ShouldShowInSteamCatalog(FrontendProfileGameCatalogEntry game) =>
+        game.Source != FrontendProfileGameSource.Steam || !HiddenSteamAppIds.Contains(game.AppId);
+
+    internal static IReadOnlyList<FrontendProfileGameCatalogEntry> FilterSteamCatalog(
+        IEnumerable<FrontendProfileGameCatalogEntry> games) =>
+        games.Where(ShouldShowInSteamCatalog).ToArray();
+
+    internal static string GetEmptyCatalogMessageKey(int scannedGameCount) =>
+        scannedGameCount == 0 ? "Steam_Catalog_NoGames" : "Steam_Catalog_NoVisibleGames";
+
+    internal static IReadOnlyList<FrontendProfileGameCatalogEntry> ApplyFavoriteToVisibleCards(
+        IReadOnlyList<FrontendProfileGameCatalogEntry> catalog,
+        ObservableCollection<GameCardItem> visibleGameCards,
+        string? query,
+        FrontendProfileGameCatalogEntry oldGame,
+        FrontendProfileGameCatalogEntry updatedGame)
+    {
+        var updatedCatalog = catalog.Select(game =>
+            game.AppId == oldGame.AppId && game.Source == oldGame.Source ? updatedGame : game).ToArray();
+        var card = visibleGameCards.FirstOrDefault(item =>
+            item.AppId == updatedGame.AppId && item.Source == updatedGame.Source);
+        if (card is null)
+            return updatedCatalog;
+
+        card.UpdateFavorite(updatedGame);
+
+        var desired = FilterAndSort(updatedCatalog, query);
+        var target = -1;
+        for (var index = 0; index < desired.Count; index++)
+        {
+            if (desired[index].AppId == updatedGame.AppId && desired[index].Source == updatedGame.Source)
+            {
+                target = index;
+                break;
+            }
+        }
+        var current = visibleGameCards.IndexOf(card);
+        if (current >= 0 && target >= 0 && current != target)
+            visibleGameCards.Move(current, target);
+
+        return updatedCatalog;
+    }
+
     private async void GameCardButton_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button)?.Tag is not FrontendProfileGameCatalogEntry game) return;
@@ -373,7 +448,10 @@ public sealed partial class ProfilePage : UserControl
         {
             var result = await _frontend.SetGameProfileFavoriteAsync(game.AppId, !game.Favorite, game.Name);
             if (!result.Succeeded) { ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_Favorite_SaveFailed", "Favorite could not be saved."), null); return; }
-            _catalog = _catalog.Select(x => x.AppId == game.AppId ? x with { Favorite = !game.Favorite } : x).ToArray(); ApplyCatalogFilter();
+            var currentGame = _catalog.FirstOrDefault(x => x.AppId == game.AppId && x.Source == game.Source);
+            if (currentGame is null || !currentGame.FavoriteStateKnown || currentGame.Favorite != game.Favorite) return;
+            var updatedGame = currentGame with { Favorite = !currentGame.Favorite };
+            _catalog = ApplyFavoriteToVisibleCards(_catalog, _visibleGameCards, GameSearchBox.Text.Trim(), currentGame, updatedGame);
         }
         catch (Exception exception) { ShowError(MainUiStrings.Get("Steam_Favorite_SaveFailed", "Favorite could not be saved."), exception); }
     }
@@ -726,8 +804,12 @@ public sealed partial class ProfilePage : UserControl
     private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, MainUiStrings.Get("Steam_PowerMode_Mode_BestPowerEfficiency", "Best power efficiency")), new(WindowsPowerMode.Balanced, MainUiStrings.Get("Steam_PowerMode_Mode_Balanced", "Balanced")), new(WindowsPowerMode.BestPerformance, MainUiStrings.Get("Steam_PowerMode_Mode_BestPerformance", "Best performance"))];
     private sealed record PowerModeItem(WindowsPowerMode Mode, string Label);
     private sealed record ResolutionItem(int? Width, int? Height, string Label);
-    private sealed record GameCardItem(FrontendProfileGameCatalogEntry Game)
+    internal sealed class GameCardItem : INotifyPropertyChanged
     {
+        internal GameCardItem(FrontendProfileGameCatalogEntry game) => Game = game;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public FrontendProfileGameCatalogEntry Game { get; private set; }
         public uint AppId => Game.AppId;
         public string Name => Game.Name;
         public FrontendProfileGameSource Source => Game.Source;
@@ -745,6 +827,15 @@ public sealed partial class ProfilePage : UserControl
                         : ("Steam_Favorite_AddAutomationName", "Add {0} to favorites");
                 return string.Format(CultureInfo.CurrentUICulture, MainUiStrings.Get(key, fallback), Name);
             }
+        }
+
+        internal void UpdateFavorite(FrontendProfileGameCatalogEntry updatedGame)
+        {
+            Game = updatedGame;
+            PropertyChanged?.Invoke(this, new(nameof(Game)));
+            PropertyChanged?.Invoke(this, new(nameof(Favorite)));
+            PropertyChanged?.Invoke(this, new(nameof(FavoriteGlyph)));
+            PropertyChanged?.Invoke(this, new(nameof(FavoriteAutomationName)));
         }
     }
 

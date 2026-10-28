@@ -1455,7 +1455,7 @@ public sealed class UiArchitectureTests
         Assert.Contains("private bool _catalogLoaded, _catalogScanInProgress", profileCodeBehind, StringComparison.Ordinal);
         Assert.Contains("if (_frontend is null || _catalogScanInProgress) return", refresh, StringComparison.Ordinal);
         Assert.Contains("await _frontend.ScanProfileGamesAsync()", refresh, StringComparison.Ordinal);
-        Assert.Contains("_catalog = scannedCatalog", refresh, StringComparison.Ordinal);
+        Assert.Contains("_catalog = FilterSteamCatalog(scannedCatalog)", refresh, StringComparison.Ordinal);
         Assert.Contains("_catalogLoaded = true", refresh, StringComparison.Ordinal);
         Assert.Contains("explicitRefresh: true", profileCodeBehind, StringComparison.Ordinal);
         Assert.Contains("RefreshGamesButton.IsEnabled = false", refresh, StringComparison.Ordinal);

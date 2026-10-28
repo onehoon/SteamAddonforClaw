@@ -1108,6 +1108,7 @@ public sealed class MainUiLocalizationResourceTests
         var localErrors = new[]
         {
             ("Steam_Catalog_NoGames", "No installed Steam games were found."),
+            ("Steam_Catalog_NoVisibleGames", "No games to display."),
             ("Steam_Catalog_RefreshFailed", "Game catalog could not be refreshed."),
             ("Steam_Favorite_SaveFailed", "Favorite could not be saved."),
             ("Steam_Profile_LoadFailed", "Profile settings could not be loaded."),

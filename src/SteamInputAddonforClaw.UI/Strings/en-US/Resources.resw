@@ -234,6 +234,7 @@
   <data name="MainNav_Steam.Content" xml:space="preserve"><value>Steam</value></data>
   <data name="Steam_BackButton.Content" xml:space="preserve"><value>Back</value></data>
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
+  <data name="Steam_Catalog_NoVisibleGames" xml:space="preserve"><value>No games to display.</value></data>
   <data name="Steam_Catalog_RefreshFailed" xml:space="preserve"><value>Game catalog could not be refreshed.</value></data>
   <data name="Steam_CatalogTitle.Text" xml:space="preserve"><value>Steam</value></data>
   <data name="Steam_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>Favorite state is unavailable because profile settings could not be read.</value></data>

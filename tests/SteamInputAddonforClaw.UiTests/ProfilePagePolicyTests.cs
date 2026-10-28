@@ -1,5 +1,7 @@
 using SteamInputAddonforClaw.Views;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Globalization;
 using Xunit;
 
@@ -49,6 +51,86 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown)", code, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(480u)]
+    [InlineData(228980u)]
+    [InlineData(993090u)]
+    public void Steam_catalog_hides_only_the_configured_native_app_ids(uint appId)
+    {
+        var hidden = new FrontendProfileGameCatalogEntry(
+            appId,
+            "Renamed or localized title",
+            FrontendProfileGameSource.Steam,
+            Favorite: true,
+            FavoriteStateKnown: false);
+
+        Assert.False(ProfilePage.ShouldShowInSteamCatalog(hidden));
+        Assert.True(ProfilePage.ShouldShowInSteamCatalog(
+            new FrontendProfileGameCatalogEntry(570u, "Ordinary game", FrontendProfileGameSource.Steam)));
+    }
+
+    [Theory]
+    [InlineData(480u)]
+    [InlineData(228980u)]
+    [InlineData(993090u)]
+    public void Steam_catalog_keeps_non_steam_shortcuts_with_matching_app_ids(uint appId)
+    {
+        var shortcut = new FrontendProfileGameCatalogEntry(
+            appId,
+            "User shortcut",
+            FrontendProfileGameSource.NonSteam);
+
+        Assert.True(ProfilePage.ShouldShowInSteamCatalog(shortcut));
+    }
+
+    [Fact]
+    public void Steam_catalog_filters_by_source_and_app_id_before_search_and_favorite_sorting()
+    {
+        var games = new[]
+        {
+            new FrontendProfileGameCatalogEntry(480u, "Localized title", FrontendProfileGameSource.Steam, Favorite: true, FavoriteStateKnown: false),
+            new FrontendProfileGameCatalogEntry(228980u, "Renamed dependency", FrontendProfileGameSource.Steam, Favorite: true),
+            new FrontendProfileGameCatalogEntry(993090u, "Different displayed name", FrontendProfileGameSource.Steam),
+            new FrontendProfileGameCatalogEntry(570u, "Zulu ordinary", FrontendProfileGameSource.Steam),
+            new FrontendProfileGameCatalogEntry(571u, "Localized title", FrontendProfileGameSource.Steam, Favorite: true),
+            new FrontendProfileGameCatalogEntry(993090u, "Non-Steam shortcut", FrontendProfileGameSource.NonSteam)
+        };
+
+        var visible = ProfilePage.FilterSteamCatalog(games);
+
+        Assert.Equal(
+            new (uint AppId, FrontendProfileGameSource Source)[]
+            {
+                (570u, FrontendProfileGameSource.Steam),
+                (571u, FrontendProfileGameSource.Steam),
+                (993090u, FrontendProfileGameSource.NonSteam)
+            },
+            visible.Select(game => (game.AppId, game.Source)));
+        Assert.Equal(new uint[] { 571u, 993090u, 570u }, ProfilePage.FilterAndSort(visible, null).Select(game => game.AppId));
+        Assert.Empty(ProfilePage.FilterAndSort(visible, "480"));
+        Assert.Equal(new uint[] { 571u }, ProfilePage.FilterAndSort(visible, "Localized title").Select(game => game.AppId));
+
+        var hiddenOnly = games.Where(game => game.Source == FrontendProfileGameSource.Steam && game.AppId != 570u && game.AppId != 571u);
+        Assert.Empty(ProfilePage.FilterSteamCatalog(hiddenOnly));
+    }
+
+    [Fact]
+    public void Steam_catalog_empty_state_distinguishes_no_scan_results_from_hidden_only_results()
+    {
+        Assert.Equal("Steam_Catalog_NoGames", ProfilePage.GetEmptyCatalogMessageKey(scannedGameCount: 0));
+        Assert.Equal("Steam_Catalog_NoVisibleGames", ProfilePage.GetEmptyCatalogMessageKey(scannedGameCount: 3));
+
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var refresh = Method(code, "private async Task RefreshGamesAsync(", "private void GameSearchBox_TextChanged(");
+        var restoreSelection = refresh.IndexOf("_selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null", StringComparison.Ordinal);
+        Assert.True(restoreSelection >= 0);
+        var clearSelection = refresh.IndexOf("ClearSelection()", restoreSelection, StringComparison.Ordinal);
+        var emptyCatalog = refresh.IndexOf("if (_catalog.Count == 0)", clearSelection, StringComparison.Ordinal);
+        var emptyMessage = refresh.IndexOf("GetEmptyCatalogMessageKey(scannedCatalog.Count)", emptyCatalog, StringComparison.Ordinal);
+        Assert.True(restoreSelection >= 0 && clearSelection > restoreSelection && emptyCatalog > clearSelection && emptyMessage > emptyCatalog);
+    }
+
     [Fact]
     public void Steam_catalog_scans_only_until_the_first_success_and_never_overlaps()
     {
@@ -62,10 +144,13 @@ public sealed class ProfilePagePolicyTests
         var manualRefresh = Method(code, "private async void RefreshGamesButton_Click(", "private async Task RefreshGamesAsync(");
 
         var scan = refresh.IndexOf("await _frontend.ScanProfileGamesAsync()", StringComparison.Ordinal);
-        var successfulCache = refresh.IndexOf("_catalog = scannedCatalog", StringComparison.Ordinal);
+        var successfulCache = refresh.IndexOf("_catalog = FilterSteamCatalog(scannedCatalog)", StringComparison.Ordinal);
         var loadedFlag = refresh.IndexOf("_catalogLoaded = true", StringComparison.Ordinal);
+        var favoriteWarning = refresh.IndexOf("FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown)", StringComparison.Ordinal);
+        var applyFilter = refresh.IndexOf("ApplyCatalogFilter()", StringComparison.Ordinal);
         var failure = refresh.IndexOf("catch (Exception exception)", StringComparison.Ordinal);
         Assert.True(scan >= 0 && successfulCache > scan && loadedFlag > successfulCache);
+        Assert.True(favoriteWarning > loadedFlag && applyFilter > favoriteWarning);
         Assert.True(failure > loadedFlag);
         Assert.DoesNotContain("_catalogLoaded = false", refresh, StringComparison.Ordinal);
         Assert.Contains("await RefreshGamesAsync(explicitRefresh: true)", manualRefresh, StringComparison.Ordinal);
@@ -390,9 +475,157 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("SetGameProfileFavoriteAsync(game.AppId, !game.Favorite, game.Name)", favorite, StringComparison.Ordinal);
         Assert.Contains("if (!result.Succeeded)", favorite, StringComparison.Ordinal);
         Assert.DoesNotContain("SelectGameAsync", favorite, StringComparison.Ordinal);
-        Assert.Contains("ApplyCatalogFilter()", favorite, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyCatalogFilter()", favorite, StringComparison.Ordinal);
+        Assert.Contains("ApplyFavoriteToVisibleCards", favorite, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FavoriteAutomationName", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Favorite_toggle_does_not_replace_the_visible_game_collection()
+    {
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var applyFilter = Method(code, "private void ApplyCatalogFilter()", "private void ProfilePage_Loaded(");
+        var favorite = Method(code, "private async void FavoriteButton_Click(", "private async Task SelectGameAsync(");
+
+        Assert.Contains("_visibleGameCards = new ObservableCollection<GameCardItem>", applyFilter, StringComparison.Ordinal);
+        Assert.Contains("GameGrid.ItemsSource = _visibleGameCards", applyFilter, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyCatalogFilter()", favorite, StringComparison.Ordinal);
+        Assert.DoesNotContain("GameGrid.ItemsSource", favorite, StringComparison.Ordinal);
+        Assert.Contains("currentGame.Favorite != game.Favorite", favorite, StringComparison.Ordinal);
+        Assert.Contains("!currentGame.FavoriteStateKnown", favorite, StringComparison.Ordinal);
+
+        var failedSave = favorite.IndexOf("if (!result.Succeeded)", StringComparison.Ordinal);
+        var failedSaveReturn = favorite.IndexOf("return;", failedSave, StringComparison.Ordinal);
+        var incrementalUpdate = favorite.IndexOf("ApplyFavoriteToVisibleCards", StringComparison.Ordinal);
+        Assert.True(failedSave >= 0 && failedSaveReturn > failedSave && incrementalUpdate > failedSaveReturn);
+
+        var update = Method(code, "internal static IReadOnlyList<FrontendProfileGameCatalogEntry> ApplyFavoriteToVisibleCards(", "private async void GameCardButton_Click(");
+        Assert.DoesNotContain("ApplyCatalogFilter()", update, StringComparison.Ordinal);
+        Assert.DoesNotContain("GameGrid.ItemsSource", update, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearArtwork()", update, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Favorite_toggle_notifies_only_its_card_and_moves_it_only_when_sort_position_changes()
+    {
+        var games = new[]
+        {
+            new FrontendProfileGameCatalogEntry(1u, "Beta", FrontendProfileGameSource.Steam),
+            new FrontendProfileGameCatalogEntry(2u, "Alpha", FrontendProfileGameSource.Steam, Favorite: true),
+            new FrontendProfileGameCatalogEntry(3u, "Zulu", FrontendProfileGameSource.Steam)
+        };
+        var cards = new ObservableCollection<ProfilePage.GameCardItem>(
+            ProfilePage.FilterAndSort(games, null).Select(game => new ProfilePage.GameCardItem(game)));
+        var installedItemsSource = cards;
+        var originalCards = cards.ToDictionary(card => card.AppId);
+        var changedCard = originalCards[3u];
+        var propertyChanges = new List<string?>();
+        var collectionChanges = new List<NotifyCollectionChangedEventArgs>();
+        changedCard.PropertyChanged += (_, args) => propertyChanges.Add(args.PropertyName);
+        cards.CollectionChanged += (_, args) => collectionChanges.Add(args);
+        var oldAutomationName = changedCard.FavoriteAutomationName;
+
+        var favorite = changedCard.Game with { Favorite = true };
+        var updatedCatalog = ProfilePage.ApplyFavoriteToVisibleCards(games, cards, null, changedCard.Game, favorite);
+
+        Assert.Same(installedItemsSource, cards);
+        Assert.Equal(new uint[] { 2u, 3u, 1u }, cards.Select(card => card.AppId));
+        Assert.Equal(new uint[] { 1u, 2u, 3u }, updatedCatalog.Select(game => game.AppId));
+        Assert.Same(originalCards[1u], cards.Single(card => card.AppId == 1u));
+        Assert.Same(originalCards[2u], cards.Single(card => card.AppId == 2u));
+        Assert.Same(changedCard, cards.Single(card => card.AppId == 3u));
+        Assert.Same(favorite, changedCard.Game);
+        Assert.True(changedCard.Favorite);
+        Assert.Equal("★", changedCard.FavoriteGlyph);
+        Assert.NotEqual(oldAutomationName, changedCard.FavoriteAutomationName);
+        Assert.Equal(new[] { "Game", "Favorite", "FavoriteGlyph", "FavoriteAutomationName" }, propertyChanges);
+        Assert.Collection(collectionChanges, change => Assert.Equal(NotifyCollectionChangedAction.Move, change.Action));
+
+        propertyChanges.Clear();
+        collectionChanges.Clear();
+        var unfavorite = favorite with { Favorite = false };
+        updatedCatalog = ProfilePage.ApplyFavoriteToVisibleCards(updatedCatalog, cards, null, favorite, unfavorite);
+
+        Assert.Same(installedItemsSource, cards);
+        Assert.Equal(new uint[] { 2u, 1u, 3u }, cards.Select(card => card.AppId));
+        Assert.Same(changedCard, cards.Single(card => card.AppId == 3u));
+        Assert.False(changedCard.Favorite);
+        Assert.Equal("☆", changedCard.FavoriteGlyph);
+        Assert.Equal(new[] { "Game", "Favorite", "FavoriteGlyph", "FavoriteAutomationName" }, propertyChanges);
+        Assert.Collection(collectionChanges, change => Assert.Equal(NotifyCollectionChangedAction.Move, change.Action));
+    }
+
+    [Fact]
+    public void Favorite_update_matches_catalog_entries_by_source_and_app_id()
+    {
+        var games = new[]
+        {
+            new FrontendProfileGameCatalogEntry(570u, "Same display name", FrontendProfileGameSource.Steam),
+            new FrontendProfileGameCatalogEntry(570u, "Same display name", FrontendProfileGameSource.NonSteam)
+        };
+        var cards = new ObservableCollection<ProfilePage.GameCardItem>(
+            ProfilePage.FilterAndSort(games, null).Select(game => new ProfilePage.GameCardItem(game)));
+        var steamCard = cards.Single(card => card.Source == FrontendProfileGameSource.Steam);
+        var shortcutCard = cards.Single(card => card.Source == FrontendProfileGameSource.NonSteam);
+        var unaffectedNotifications = new List<string?>();
+        steamCard.PropertyChanged += (_, args) => unaffectedNotifications.Add(args.PropertyName);
+
+        var updatedShortcut = shortcutCard.Game with { Favorite = true };
+        var updatedCatalog = ProfilePage.ApplyFavoriteToVisibleCards(
+            games, cards, null, shortcutCard.Game, updatedShortcut);
+
+        Assert.False(updatedCatalog.Single(game => game.Source == FrontendProfileGameSource.Steam).Favorite);
+        Assert.True(updatedCatalog.Single(game => game.Source == FrontendProfileGameSource.NonSteam).Favorite);
+        Assert.Same(steamCard, cards.Single(card => card.Source == FrontendProfileGameSource.Steam));
+        Assert.Empty(unaffectedNotifications);
+    }
+
+    [Fact]
+    public void Favorite_update_preserves_source_identity_and_does_not_resurrect_a_search_filtered_card()
+    {
+        var scanned = new[]
+        {
+            new FrontendProfileGameCatalogEntry(480u, "Native Steam entry", FrontendProfileGameSource.Steam),
+            new FrontendProfileGameCatalogEntry(480u, "User shortcut", FrontendProfileGameSource.NonSteam),
+            new FrontendProfileGameCatalogEntry(570u, "Search match", FrontendProfileGameSource.Steam),
+            new FrontendProfileGameCatalogEntry(571u, "Outside current search", FrontendProfileGameSource.Steam)
+        };
+        var catalog = ProfilePage.FilterSteamCatalog(scanned);
+        var visibleCards = new ObservableCollection<ProfilePage.GameCardItem>(
+            ProfilePage.FilterAndSort(catalog, "User shortcut").Select(game => new ProfilePage.GameCardItem(game)));
+        var installedItemsSource = visibleCards;
+        var shortcut = visibleCards.Single();
+        var collectionChanges = new List<NotifyCollectionChangedEventArgs>();
+        visibleCards.CollectionChanged += (_, args) => collectionChanges.Add(args);
+
+        var updatedShortcut = shortcut.Game with { Favorite = true };
+        var afterShortcutUpdate = ProfilePage.ApplyFavoriteToVisibleCards(
+            catalog, visibleCards, "User shortcut", shortcut.Game, updatedShortcut);
+
+        Assert.Same(installedItemsSource, visibleCards);
+        Assert.Same(shortcut, visibleCards.Single());
+        Assert.Same(updatedShortcut, shortcut.Game);
+        Assert.DoesNotContain(afterShortcutUpdate, game => game.Source == FrontendProfileGameSource.Steam && game.AppId == 480u);
+        Assert.Contains(afterShortcutUpdate, game => game.Source == FrontendProfileGameSource.NonSteam && game.AppId == 480u && game.Favorite);
+        Assert.Empty(collectionChanges);
+
+        var searchVisible = new ObservableCollection<ProfilePage.GameCardItem>(
+            ProfilePage.FilterAndSort(afterShortcutUpdate, "Search match").Select(game => new ProfilePage.GameCardItem(game)));
+        var stillVisible = searchVisible.Single();
+        var filteredOut = afterShortcutUpdate.Single(game => game.AppId == 571u);
+        collectionChanges.Clear();
+        searchVisible.CollectionChanged += (_, args) => collectionChanges.Add(args);
+
+        var updatedFilteredOut = filteredOut with { Favorite = true };
+        var afterFilteredUpdate = ProfilePage.ApplyFavoriteToVisibleCards(
+            afterShortcutUpdate, searchVisible, "Search match", filteredOut, updatedFilteredOut);
+
+        Assert.Same(stillVisible, searchVisible.Single());
+        Assert.Single(searchVisible);
+        Assert.Contains(afterFilteredUpdate, game => game.AppId == 571u && game.Favorite);
+        Assert.Empty(collectionChanges);
     }
 
     private static string FindRepositoryRoot()
