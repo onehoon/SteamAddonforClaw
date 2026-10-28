@@ -202,6 +202,21 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
     }
 
     [Fact]
+    public void Profile_game_title_is_the_existing_mutable_general_toggle_row()
+    {
+        var row = ToggleRow(QuickSettingsRowId.ProfileEnabled) with { Label = "Profile" };
+        var section = new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, "Current game", [row]);
+
+        var rendered = OverlayQuickSettingsSectionRendering.DescribeRows(section).Single();
+
+        Assert.Equal(QuickSettingsRowId.ProfileEnabled, rendered.Row.RowId);
+        Assert.True(rendered.IsFeatureHeader);
+        Assert.Equal("Current game", rendered.DisplayLabel);
+        Assert.Equal(QuickSettingsCommitPolicy.Immediate, rendered.Row.CommitPolicy);
+        Assert.True(OverlayQuickSettingsPageBinding.CanMutate(rendered.Row));
+    }
+
+    [Fact]
     public void Profile_fps_value_only_update_identifies_only_the_changed_power_source_row()
     {
         var before = ProfileFpsPage(ac: 60, dc: 45);

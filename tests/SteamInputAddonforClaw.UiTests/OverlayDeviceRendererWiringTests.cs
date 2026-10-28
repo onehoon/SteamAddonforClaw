@@ -873,6 +873,22 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Profile_title_and_enable_toggle_stay_data_driven_before_other_profile_sections()
+    {
+        var presentation = ReadSource("src", "SteamInputAddonforClaw", "Frontend", "QuickSettingsPresentation.cs");
+        var buildProfile = ExtractMethod(presentation,
+            "private static QuickSettingsPageSnapshot BuildProfile(ProfileQuickSettingsProjection snapshot)");
+        var buildGeneral = ExtractMethod(presentation,
+            "private static QuickSettingsSection BuildProfileGeneralSection(ProfileQuickSettingsProjection snapshot)");
+
+        Assert.True(buildProfile.IndexOf("BuildProfileGeneralSection(snapshot)", StringComparison.Ordinal)
+            < buildProfile.IndexOf("BuildProfileTdpSection(snapshot)", StringComparison.Ordinal));
+        Assert.Contains("QuickSettingsRowId.ProfileEnabled", buildGeneral);
+        Assert.Contains("QuickSettingsSectionId.ProfileGeneral, snapshot.DisplayName, [row]", buildGeneral);
+        Assert.DoesNotContain("new OverlayToggleRow", presentation);
+    }
+
+    [Fact]
     public void Profile_resolution_row_uses_the_shared_detail_indent_in_the_generic_renderer()
     {
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");

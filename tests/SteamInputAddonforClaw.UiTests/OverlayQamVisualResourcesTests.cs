@@ -108,8 +108,8 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Same(shell, tabRail.Parent);
         Assert.Same(rightContentHost, pageTitle.Parent);
         Assert.Equal("0", (string?)pageTitle.Attribute("Grid.Row"));
-        Assert.Equal("1", (string?)bodyScroll.Attribute("Grid.Row"));
-        Assert.Equal(new[] { "Auto", "*" }, rightRows);
+        Assert.Equal("2", (string?)bodyScroll.Attribute("Grid.Row"));
+        Assert.Equal(new[] { "Auto", "Auto", "*" }, rightRows);
         Assert.Same(rightContentHost, bodyScroll.Parent);
         Assert.Null(rightContentHost.Attribute("Margin"));
         Assert.DoesNotContain(bodyScroll.DescendantsAndSelf(), element => ReferenceEquals(element, pageTitle));
