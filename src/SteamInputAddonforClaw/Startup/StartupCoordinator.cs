@@ -19,6 +19,10 @@ internal sealed class StartupCoordinator
     private readonly TimeSpan _hardwareProbePollInterval;
     private readonly TimeSpan _hardwareProbeTimeout;
     private readonly Func<TimeSpan, CancellationToken, Task> _hardwareProbeDelay;
+    private readonly TimeSpan _disabledAdmissionRetryWindow;
+    private readonly TimeSpan _disabledAdmissionRetryInterval;
+    private readonly int _disabledAdmissionRetryMaxAttempts;
+    private readonly Func<TimeSpan, CancellationToken, Task> _disabledAdmissionRetryDelay;
 
     public StartupCoordinator(
         IControllerTopologyWaiter topologyWaiter,
@@ -29,7 +33,11 @@ internal sealed class StartupCoordinator
         Func<FrontendCenterMStartupSnapshot>? captureCenterMStartup = null,
         TimeSpan? hardwareProbePollInterval = null,
         TimeSpan? hardwareProbeTimeout = null,
-        Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null)
+        Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null,
+        TimeSpan? disabledAdmissionRetryWindow = null,
+        TimeSpan? disabledAdmissionRetryInterval = null,
+        int disabledAdmissionRetryMaxAttempts = 60,
+        Func<TimeSpan, CancellationToken, Task>? disabledAdmissionRetryDelay = null)
     {
         _topologyWaiter = topologyWaiter;
         _stockCenterMBaseline = stockCenterMBaseline;
@@ -40,6 +48,10 @@ internal sealed class StartupCoordinator
         _hardwareProbePollInterval = hardwareProbePollInterval ?? TimeSpan.FromMilliseconds(500);
         _hardwareProbeTimeout = hardwareProbeTimeout ?? TimeSpan.FromSeconds(5);
         _hardwareProbeDelay = hardwareProbeDelay ?? Task.Delay;
+        _disabledAdmissionRetryWindow = disabledAdmissionRetryWindow ?? TimeSpan.FromSeconds(120);
+        _disabledAdmissionRetryInterval = disabledAdmissionRetryInterval ?? TimeSpan.FromSeconds(2);
+        _disabledAdmissionRetryMaxAttempts = disabledAdmissionRetryMaxAttempts;
+        _disabledAdmissionRetryDelay = disabledAdmissionRetryDelay ?? Task.Delay;
     }
 
 
@@ -155,6 +167,103 @@ internal sealed class StartupCoordinator
         }
     }
 
+    /// <summary>Rechecks only the existing Disabled-boot admission authority. It never reruns the
+    /// broader startup coordinator, which could otherwise re-enter stock/Enabled baseline work.</summary>
+    internal async Task<DisabledBootControllerAdmissionResult> RecheckDisabledBootAdmissionAsync(
+        HandheldDeviceModelId? deviceModel,
+        CancellationToken cancellationToken)
+    {
+        if (_disabledBootAdmission is null)
+            return DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionUnavailable");
+
+        try
+        {
+            var readiness = IsA2vmModel(deviceModel)
+                ? await _topologyWaiter.WaitForFirstUnambiguousControlHidAsync(cancellationToken).ConfigureAwait(false)
+                : await _topologyWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
+            if (readiness != ControllerTopologyReadiness.Stable)
+                return new DisabledBootControllerAdmissionResult(
+                    DisabledBootAdmissionOutcome.Blocked, "ControllerTopologyNotStable:" + readiness);
+
+            return _disabledBootAdmission.Evaluate();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerAdmission", "Fresh Disabled-boot admission recheck failed.", exception,
+                ("ExceptionType", exception.GetType().Name), ("HResult", $"0x{exception.HResult:X8}"));
+            return DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionRecheckFailed:" + exception.GetType().Name);
+        }
+    }
+
+    /// <summary>Waits for the one boot-time transient USBIP state to clear, bounded by both a total
+    /// deadline and an attempt count. Every attempt re-proves topology and runs the complete existing
+    /// prerequisite plus HidHide-baseline admission before returning Ready.</summary>
+    internal async Task<DisabledBootControllerAdmissionResult> RetryTransientDisabledBootAdmissionAsync(
+        StartupResult startupResult,
+        CancellationToken cancellationToken)
+    {
+        var initial = startupResult.DisabledBootAdmission;
+        if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled
+            || !startupResult.HardwareSupported
+            || !string.Equals(startupResult.HardwareDeviceFamily?.Value, "msi.claw", StringComparison.OrdinalIgnoreCase)
+            || startupResult.HardwareDeviceModel is null
+            || initial?.IsEligibleForTransientUsbIpRetry != true)
+            return initial ?? DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionUnavailable");
+
+        if (_disabledAdmissionRetryMaxAttempts <= 0 || _disabledAdmissionRetryWindow <= TimeSpan.Zero)
+            return DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionRetryBudgetExpired");
+
+        var stopwatch = Stopwatch.StartNew();
+        var last = initial;
+        for (var attempt = 1; attempt <= _disabledAdmissionRetryMaxAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var remaining = _disabledAdmissionRetryWindow - stopwatch.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+                break;
+
+            var delay = _disabledAdmissionRetryInterval < remaining ? _disabledAdmissionRetryInterval : remaining;
+            if (delay > TimeSpan.Zero)
+                await _disabledAdmissionRetryDelay(delay, cancellationToken).ConfigureAwait(false);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            remaining = _disabledAdmissionRetryWindow - stopwatch.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+                break;
+
+            using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attemptCancellation.CancelAfter(remaining);
+            try
+            {
+                last = await RecheckDisabledBootAdmissionAsync(startupResult.HardwareDeviceModel, attemptCancellation.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (attemptCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            AppLog.Debug("ControllerAdmission", "Deferred Disabled-boot admission recheck completed.",
+                ("Attempt", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+                ("Outcome", last.Outcome));
+            if (last.IsReady)
+                return last;
+
+            var topologyMaySettle = last.Outcome == DisabledBootAdmissionOutcome.Blocked
+                && last.Reason.StartsWith("ControllerTopologyNotStable:", StringComparison.Ordinal);
+            if (!topologyMaySettle && !last.IsEligibleForTransientUsbIpRetry)
+                return last;
+        }
+
+        AppLog.Warn("ControllerAdmission", "Deferred Disabled-boot admission retry ended without a Ready result.", null,
+            ("Attempts", _disabledAdmissionRetryMaxAttempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds),
+            ("LastOutcome", last.Outcome), ("LastReason", last.Reason), ("Action", "KeepRuntimePassive"));
+        return last.IsReady ? last : DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionRetryBudgetExpired");
+    }
+
     /// <summary>PR4 Disabled branch: read-only only. Waits for a stable MSI Claw topology, then runs
     /// the read-only admission facts. Never calls <see cref="IStockCenterMStartupBaseline.EstablishAsync"/>;
     /// issues no PID/HidHide/VIIPER mutation.</summary>
@@ -175,6 +284,8 @@ internal sealed class StartupCoordinator
         else
             admission = _disabledBootAdmission?.Evaluate()
                 ?? DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionUnavailable");
+
+        admission.LogInitialPrerequisiteFailure();
 
         return new StartupResult(true,
             RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: deviceModel, HardwareStatus: hardware.Status,

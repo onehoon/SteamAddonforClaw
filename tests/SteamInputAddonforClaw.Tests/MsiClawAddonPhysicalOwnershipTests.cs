@@ -3064,15 +3064,19 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         // release seam is constructed on ANY exact Disabled boot (including a Blocked one).
         var host = File.ReadAllText(Path.Combine(dir.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
         Assert.Contains("startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled", host, StringComparison.Ordinal);
-        Assert.Contains("var owner = CreatePhysicalOwnership(startupComposition, startupResult.HardwareDeviceModel);", host, StringComparison.Ordinal);
+        var disabledStartup = host[host.IndexOf("private async Task TryStartDisabledModeControllerAsync(", StringComparison.Ordinal)..];
+        var ownerCreation = disabledStartup.IndexOf("owner = CreatePhysicalOwnership(startupComposition, startupResult.HardwareDeviceModel);", StringComparison.Ordinal);
+        var ownerReuse = disabledStartup.IndexOf("Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? owner = existingOwner;", StringComparison.Ordinal);
+        Assert.True(ownerReuse >= 0 && ownerCreation > ownerReuse);
+        Assert.Contains("else if (!ReferenceEquals(_physicalOwnership, owner))", disabledStartup, StringComparison.Ordinal);
         Assert.Contains("startupResult.DisabledBootAdmission?.IsReady != true", host, StringComparison.Ordinal);
         Assert.Contains("var allowPrerequisiteRepairWhileRecoveryUnsafe =", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady", host, StringComparison.Ordinal);
         Assert.Contains("new SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor(", host, StringComparison.Ordinal);
         Assert.Contains("setupExecutor: setupExecutor", host, StringComparison.Ordinal);
         Assert.True(
-            host.IndexOf("_physicalOwnership = owner;", StringComparison.Ordinal)
-            < host.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal),
+            disabledStartup.IndexOf("_physicalOwnership = owner;", StringComparison.Ordinal)
+            < disabledStartup.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal),
             "the release seam must be assigned before the acquisition admission gate");
     }
 

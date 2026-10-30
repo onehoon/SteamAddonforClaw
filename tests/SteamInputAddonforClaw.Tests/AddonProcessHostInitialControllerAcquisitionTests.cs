@@ -117,6 +117,63 @@ public sealed class AddonProcessHostInitialControllerAcquisitionTests
             < dispose.IndexOf("await _presentationReconcile.ConfigureAwait(false)", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Transient_disabled_boot_retry_is_scheduled_after_initial_gate_clears_without_blocking_optional_startup()
+    {
+        var host = ReadHost();
+        var deferred = Method(host, "internal void StartDeferredRuntimeStartup()", "private void StartDisabledBootAdmissionRetryIfEligible()");
+        var clearPending = deferred.IndexOf("Volatile.Write(ref _disabledControllerStartupPending, 0)", StringComparison.Ordinal);
+        var startRetry = deferred.IndexOf("StartDisabledBootAdmissionRetryIfEligible()", clearPending, StringComparison.Ordinal);
+        var optionalOverlay = deferred.IndexOf("_overlayStartup = StartOverlayWarmupAsync()", startRetry, StringComparison.Ordinal);
+        var retryTask = DeclarationContaining(host, "RetryTransientDisabledBootAdmissionAsync(startupResult, cancellationToken)");
+        var schedule = DeclarationContaining(host, "startupResult.DisabledBootAdmission?.IsEligibleForTransientUsbIpRetry != true");
+
+        Assert.True(clearPending >= 0 && startRetry > clearPending && optionalOverlay > startRetry);
+        Assert.DoesNotContain("await _disabledBootAdmissionRetryTask", deferred, StringComparison.Ordinal);
+        Assert.Contains("startupResult.DisabledBootAdmission?.IsEligibleForTransientUsbIpRetry != true", schedule, StringComparison.Ordinal);
+        Assert.Contains("startupComposition.Coordinator", retryTask, StringComparison.Ordinal);
+        Assert.DoesNotContain("startupComposition.Coordinator.RunAsync", retryTask, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Deferred_ready_commit_reuses_original_owner_and_checks_current_authority_before_pending_gate()
+    {
+        var host = ReadHost();
+        var retry = DeclarationContaining(host, "RetryTransientDisabledBootAdmissionAsync(startupResult, cancellationToken)");
+        var readiness = retry.IndexOf("if (!admission.IsReady)", StringComparison.Ordinal);
+        var centerM = retry.IndexOf("_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled", readiness, StringComparison.Ordinal);
+        var transition = retry.IndexOf("_centerMAuthorityTransition?.IsInProgress == true", centerM, StringComparison.Ordinal);
+        var owner = retry.IndexOf("owner = currentOwner", transition, StringComparison.Ordinal);
+        var pending = retry.IndexOf("Volatile.Write(ref _disabledControllerStartupPending, 1)", owner, StringComparison.Ordinal);
+        var continueStartup = retry.IndexOf("TryStartDisabledModeControllerAsync(", pending, StringComparison.Ordinal);
+
+        Assert.True(readiness >= 0 && centerM > readiness && transition > centerM && owner > transition
+            && pending > owner && continueStartup > pending);
+        Assert.Contains("_physicalOwnership is not Devices.MSI.Claw.MsiClawAddonPhysicalOwnership currentOwner", retry, StringComparison.Ordinal);
+        Assert.DoesNotContain("CreatePhysicalOwnership(", retry, StringComparison.Ordinal);
+        Assert.Contains("TryStartDisabledModeControllerAsync(", retry, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Enable_and_shutdown_cancel_and_drain_admission_retry_before_owner_release()
+    {
+        var host = ReadHost();
+        var releaseStart = host.IndexOf("async Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult> ReleasePhysicalOwnershipAsync(", StringComparison.Ordinal);
+        var releaseEnd = host.IndexOf("static bool IsFileProvenAbsent", releaseStart, StringComparison.Ordinal);
+        var release = host[releaseStart..releaseEnd];
+        Assert.True(release.IndexOf("admissionRetryCancellation?.Cancel()", StringComparison.Ordinal)
+            < release.IndexOf("await admissionRetryTask.ConfigureAwait(false)", StringComparison.Ordinal));
+        Assert.True(release.IndexOf("await admissionRetryTask.ConfigureAwait(false)", StringComparison.Ordinal)
+            < release.IndexOf("await inFlightControllerWork.ConfigureAwait(false)", StringComparison.Ordinal)
+            && release.IndexOf("await inFlightControllerWork.ConfigureAwait(false)", StringComparison.Ordinal)
+            < release.IndexOf("presentation.ReleaseForCenterMEnableAsync", StringComparison.Ordinal));
+
+        var dispose = Method(host, "public async ValueTask DisposeAsync()");
+        Assert.True(dispose.IndexOf("await _disabledBootAdmissionRetryTask.ConfigureAwait(false)", StringComparison.Ordinal)
+            < dispose.IndexOf("_presentationOwnership.DisposeAsync()", StringComparison.Ordinal));
+        Assert.Contains("_startupCancellationTokenSource.Token", DeclarationContaining(host, "CancellationTokenSource.CreateLinkedTokenSource(_startupCancellationTokenSource.Token)"), StringComparison.Ordinal);
+    }
+
     private static int Count(string source, string token) => source.Split(token, StringSplitOptions.None).Length - 1;
 
     private static string DeclarationContaining(string source, string token)

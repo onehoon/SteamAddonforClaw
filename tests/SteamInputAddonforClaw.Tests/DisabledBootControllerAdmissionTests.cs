@@ -87,6 +87,59 @@ public sealed class DisabledBootControllerAdmissionTests
         Assert.False(baselineCalled);
     }
 
+    [Theory]
+    [InlineData("Indeterminate", "UsbIpWin2InspectionFailed")]
+    [InlineData("Indeterminate", "UsbIpWin2PackageInspectionFailed")]
+    [InlineData("Indeterminate", "UsbIpWin2VersionUnavailable")]
+    [InlineData("Unusable", "UsbIpWin2DeviceUnavailable")]
+    public void Only_transient_usbip_prerequisite_failures_are_retry_eligible(string status, string reason)
+    {
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideReady"),
+            new(PrerequisiteKind.UsbIpWin2, Enum.Parse<PrerequisiteStatus>(status), reason),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "ViiperReady"));
+
+        Assert.True(Build(prerequisites).Evaluate().IsEligibleForTransientUsbIpRetry);
+    }
+
+    [Theory]
+    [InlineData("Missing", "UsbIpWin2DeviceMissing")]
+    [InlineData("Incompatible", "UsbIpWin2VersionUnsupported")]
+    [InlineData("Indeterminate", "UsbIpWin2VersionMalformed")]
+    public void Missing_incompatible_malformed_or_other_prerequisite_states_are_not_retry_eligible(string status, string reason)
+    {
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideReady"),
+            new(PrerequisiteKind.UsbIpWin2, Enum.Parse<PrerequisiteStatus>(status), reason),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "ViiperReady"));
+
+        Assert.False(Build(prerequisites).Evaluate().IsEligibleForTransientUsbIpRetry);
+    }
+
+    [Fact]
+    public void Retry_eligibility_requires_hidhide_and_viiper_ready()
+    {
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Indeterminate, "HidHideUnavailable"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2InspectionFailed"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "ViiperReady"));
+
+        Assert.False(Build(prerequisites).Evaluate().IsEligibleForTransientUsbIpRetry);
+    }
+
+    [Fact]
+    public void Prerequisite_failure_retains_status_reason_and_usbip_version_for_diagnostics()
+    {
+        var result = Build(prerequisites: new(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideReady"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable", "0.9.8.0"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "ViiperReady"))).Evaluate();
+
+        Assert.Equal("UsbIpWin2DeviceUnavailable", result.Prerequisites?.UsbIpWin2.Reason);
+        Assert.Equal("0.9.8.0", result.Prerequisites?.UsbIpWin2.Version);
+        Assert.Contains("UsbIpWin2=Unusable:UsbIpWin2DeviceUnavailable@0.9.8.0", result.Reason, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Actual_0927_prerequisite_state_is_prerequisites_not_ready()
     {

@@ -5,6 +5,8 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.HidHide;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -608,6 +610,224 @@ public sealed class StartupCoordinatorTests : IDisposable
         Assert.DoesNotContain("Baseline", events);
     }
 
+    [Fact]
+    public async Task Initial_prerequisite_block_logs_each_reason_and_available_usbip_version()
+    {
+        var events = new List<string>();
+        var prerequisites = PrerequisitesWithUsbIp(PrerequisiteStatus.Indeterminate, "UsbIpWin2VersionUnavailable") with
+        {
+            UsbIpWin2 = new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2VersionUnavailable", "0.9.8.0"),
+        };
+        var admission = new DisabledBootControllerAdmission(
+            new SequencedPrerequisiteInspector(events, prerequisites),
+            () => throw new Xunit.Sdk.XunitException("HidHide baseline must not run before USBIP readiness."));
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            disabledBootAdmission: admission,
+            captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        AppLog.DrainForTests();
+        var logText = string.Join(Environment.NewLine,
+            Directory.GetFiles(_logDirectory, "*.log", SearchOption.AllDirectories).Select(File.ReadAllText));
+
+        Assert.Equal(DisabledBootAdmissionOutcome.PrerequisitesNotReady, result.DisabledBootAdmission?.Outcome);
+        Assert.Contains("HidHideStatus", logText, StringComparison.Ordinal);
+        Assert.Contains("HidHideReason", logText, StringComparison.Ordinal);
+        Assert.Contains("UsbIpWin2Status", logText, StringComparison.Ordinal);
+        Assert.Contains("UsbIpWin2Reason", logText, StringComparison.Ordinal);
+        Assert.Contains("UsbIpWin2Version", logText, StringComparison.Ordinal);
+        Assert.Contains("0.9.8.0", logText, StringComparison.Ordinal);
+        Assert.Contains("ViiperStatus", logText, StringComparison.Ordinal);
+        Assert.Contains("ViiperReason", logText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Indeterminate", "UsbIpWin2InspectionFailed")]
+    [InlineData("Unusable", "UsbIpWin2DeviceUnavailable")]
+    public async Task Deferred_disabled_admission_rechecks_transient_usbip_and_runs_full_hidhide_gate(string status, string reason)
+    {
+        var events = new List<string>();
+        var inspector = new SequencedPrerequisiteInspector(events, ReadyPrerequisites());
+        var admission = new DisabledBootControllerAdmission(inspector, () =>
+        {
+            events.Add("HidHideBaseline");
+            return new(AddonHidHideBaselineOutcome.AlreadyCompliant, "verified", AddonHidHideBaselineSnapshot.Unknown);
+        });
+        var delay = new RecordingAdmissionRetryDelay();
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            disabledBootAdmission: admission,
+            disabledAdmissionRetryWindow: TimeSpan.FromSeconds(10),
+            disabledAdmissionRetryInterval: TimeSpan.FromSeconds(2),
+            disabledAdmissionRetryMaxAttempts: 3,
+            disabledAdmissionRetryDelay: delay.DelayAsync);
+        var initial = DisabledBootControllerAdmissionResult.PrerequisitesNotReady(PrerequisitesWithUsbIp(
+            Enum.Parse<PrerequisiteStatus>(status), reason));
+
+        var result = await coordinator.RetryTransientDisabledBootAdmissionAsync(DisabledStartup(initial), CancellationToken.None);
+        events.Add("PhysicalMutation");
+
+        Assert.True(result.IsReady);
+        Assert.Equal(1, inspector.Calls);
+        Assert.Equal([TimeSpan.FromSeconds(2)], delay.Delays);
+        Assert.True(events.IndexOf("HidHideBaseline") < events.IndexOf("PhysicalMutation"));
+        Assert.Equal(1, events.Count(value => value == "TopologyWaiter"));
+    }
+
+    [Fact]
+    public async Task Deferred_disabled_admission_stops_on_incompatible_prerequisite_without_another_retry()
+    {
+        var events = new List<string>();
+        var incompatible = PrerequisitesWithUsbIp(PrerequisiteStatus.Incompatible, "UsbIpWin2VersionUnsupported");
+        var inspector = new SequencedPrerequisiteInspector(events, incompatible);
+        var admission = new DisabledBootControllerAdmission(inspector, () =>
+        {
+            events.Add("HidHideBaseline");
+            return new(AddonHidHideBaselineOutcome.AlreadyCompliant, "verified", AddonHidHideBaselineSnapshot.Unknown);
+        });
+        var delay = new RecordingAdmissionRetryDelay();
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            disabledBootAdmission: admission,
+            disabledAdmissionRetryWindow: TimeSpan.FromSeconds(10),
+            disabledAdmissionRetryMaxAttempts: 4,
+            disabledAdmissionRetryDelay: delay.DelayAsync);
+        var initial = DisabledBootControllerAdmissionResult.PrerequisitesNotReady(PrerequisitesWithUsbIp(
+            PrerequisiteStatus.Indeterminate, "UsbIpWin2InspectionFailed"));
+
+        var result = await coordinator.RetryTransientDisabledBootAdmissionAsync(DisabledStartup(initial), CancellationToken.None);
+
+        Assert.Equal(DisabledBootAdmissionOutcome.PrerequisitesNotReady, result.Outcome);
+        Assert.Equal("UsbIpWin2VersionUnsupported", result.Prerequisites?.UsbIpWin2.Reason);
+        Assert.Equal(1, inspector.Calls);
+        Assert.Single(delay.Delays);
+        Assert.DoesNotContain("HidHideBaseline", events);
+    }
+
+    [Fact]
+    public async Task Deferred_disabled_admission_baseline_failure_returns_non_ready_and_blocks_takeover()
+    {
+        var events = new List<string>();
+        var inspector = new SequencedPrerequisiteInspector(events, ReadyPrerequisites());
+        var admission = new DisabledBootControllerAdmission(inspector, () =>
+        {
+            events.Add("HidHideBaseline");
+            return new(AddonHidHideBaselineOutcome.VerificationFailed, "readback", AddonHidHideBaselineSnapshot.Unknown);
+        });
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            disabledBootAdmission: admission, disabledAdmissionRetryInterval: TimeSpan.Zero,
+            disabledAdmissionRetryMaxAttempts: 2, disabledAdmissionRetryDelay: (_, _) => Task.CompletedTask);
+        var initial = DisabledBootControllerAdmissionResult.PrerequisitesNotReady(
+            PrerequisitesWithUsbIp(PrerequisiteStatus.Indeterminate, "UsbIpWin2InspectionFailed"));
+
+        var result = await coordinator.RetryTransientDisabledBootAdmissionAsync(DisabledStartup(initial), CancellationToken.None);
+
+        Assert.Equal(DisabledBootAdmissionOutcome.Blocked, result.Outcome);
+        Assert.Contains("HidHideBaseline=VerificationFailed:readback", result.Reason, StringComparison.Ordinal);
+        Assert.Equal(["TopologyWaiter", "PrerequisiteInspection", "HidHideBaseline"], events);
+    }
+
+    [Fact]
+    public async Task Deferred_disabled_admission_stops_after_bounded_attempts_when_usbip_never_recovers()
+    {
+        var events = new List<string>();
+        var inspector = new SequencedPrerequisiteInspector(events,
+            PrerequisitesWithUsbIp(PrerequisiteStatus.Indeterminate, "UsbIpWin2PackageInspectionFailed"));
+        var admission = new DisabledBootControllerAdmission(inspector,
+            () => throw new Xunit.Sdk.XunitException("HidHide must not normalize before all prerequisites are Ready."));
+        var delay = new RecordingAdmissionRetryDelay();
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            disabledBootAdmission: admission,
+            disabledAdmissionRetryWindow: TimeSpan.FromSeconds(10),
+            disabledAdmissionRetryInterval: TimeSpan.Zero,
+            disabledAdmissionRetryMaxAttempts: 3,
+            disabledAdmissionRetryDelay: delay.DelayAsync);
+        var initial = DisabledBootControllerAdmissionResult.PrerequisitesNotReady(
+            PrerequisitesWithUsbIp(PrerequisiteStatus.Indeterminate, "UsbIpWin2PackageInspectionFailed"));
+
+        var result = await coordinator.RetryTransientDisabledBootAdmissionAsync(DisabledStartup(initial), CancellationToken.None);
+
+        Assert.Equal(DisabledBootAdmissionOutcome.Blocked, result.Outcome);
+        Assert.Equal("DisabledBootAdmissionRetryBudgetExpired", result.Reason);
+        Assert.Equal(3, inspector.Calls);
+        Assert.Equal(3, events.Count(value => value == "TopologyWaiter"));
+    }
+
+    [Fact]
+    public async Task Deferred_disabled_admission_waits_for_a_fresh_stable_topology_before_inspection()
+    {
+        var events = new List<string>();
+        var inspector = new SequencedPrerequisiteInspector(events, ReadyPrerequisites());
+        var admission = new DisabledBootControllerAdmission(inspector,
+            () => new(AddonHidHideBaselineOutcome.AlreadyCompliant, "verified", AddonHidHideBaselineSnapshot.Unknown));
+        var coordinator = new StartupCoordinator(
+            new SequencedTopologyWaiter(events, ControllerTopologyReadiness.Indeterminate, ControllerTopologyReadiness.Stable),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(), disabledBootAdmission: admission,
+            disabledAdmissionRetryWindow: TimeSpan.FromSeconds(10), disabledAdmissionRetryInterval: TimeSpan.Zero,
+            disabledAdmissionRetryMaxAttempts: 2, disabledAdmissionRetryDelay: (_, _) => Task.CompletedTask);
+        var initial = DisabledBootControllerAdmissionResult.PrerequisitesNotReady(
+            PrerequisitesWithUsbIp(PrerequisiteStatus.Indeterminate, "UsbIpWin2InspectionFailed"));
+
+        var result = await coordinator.RetryTransientDisabledBootAdmissionAsync(DisabledStartup(initial), CancellationToken.None);
+
+        Assert.True(result.IsReady);
+        Assert.Equal(1, inspector.Calls);
+        Assert.Equal(["TopologyWaiter", "TopologyWaiter", "PrerequisiteInspection"], events);
+    }
+
+    [Fact]
+    public async Task Deferred_disabled_admission_does_not_retry_an_initial_incompatible_result()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            disabledAdmissionRetryDelay: (_, _) => throw new Xunit.Sdk.XunitException("Incompatible USBIP must not be retried."));
+        var incompatible = DisabledBootControllerAdmissionResult.PrerequisitesNotReady(
+            PrerequisitesWithUsbIp(PrerequisiteStatus.Incompatible, "UsbIpWin2VersionUnsupported"));
+
+        var result = await coordinator.RetryTransientDisabledBootAdmissionAsync(DisabledStartup(incompatible), CancellationToken.None);
+
+        Assert.Same(incompatible, result);
+        Assert.Empty(events);
+    }
+
+    [Fact]
+    public async Task Deferred_disabled_admission_requires_supported_msi_hardware_before_retrying()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            disabledAdmissionRetryDelay: (_, _) => throw new Xunit.Sdk.XunitException("Unsupported hardware must not be retried."));
+        var initial = DisabledBootControllerAdmissionResult.PrerequisitesNotReady(
+            PrerequisitesWithUsbIp(PrerequisiteStatus.Indeterminate, "UsbIpWin2InspectionFailed"));
+
+        var result = await coordinator.RetryTransientDisabledBootAdmissionAsync(
+            DisabledStartup(initial) with { HardwareDeviceFamily = new("other") }, CancellationToken.None);
+
+        Assert.Same(initial, result);
+        Assert.Empty(events);
+    }
+
+    private static StartupResult DisabledStartup(DisabledBootControllerAdmissionResult admission) => new(
+        ShouldStartRuntime: true,
+        HardwareSupported: true,
+        HardwareDeviceFamily: new("msi.claw"),
+        HardwareDeviceModel: new("msi.claw.cg3em"),
+        CenterMStartupState: FrontendCenterMStartupState.Disabled,
+        DisabledBootAdmission: admission);
+
+    private static RuntimePrerequisiteAssessment ReadyPrerequisites() => new(
+        new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideReady"),
+        new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "UsbIpWin2DeviceReady", "0.9.8.1"),
+        new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "ViiperReady"));
+
+    private static RuntimePrerequisiteAssessment PrerequisitesWithUsbIp(PrerequisiteStatus status, string reason) => new(
+        new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideReady"),
+        new(PrerequisiteKind.UsbIpWin2, status, reason, status == PrerequisiteStatus.Incompatible ? "0.9.8.0" : null),
+        new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "ViiperReady"));
+
     [Theory]
     [InlineData("Partial")]
     [InlineData("Unavailable")]
@@ -717,6 +937,49 @@ public sealed class StartupCoordinatorTests : IDisposable
                 DisabledBootAdmissionOutcome.PrerequisitesNotReady => new(DisabledBootAdmissionOutcome.PrerequisitesNotReady, "test"),
                 _ => DisabledBootControllerAdmissionResult.Blocked("test"),
             };
+        }
+    }
+
+    private sealed class SequencedPrerequisiteInspector(
+        List<string> events,
+        RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector
+    {
+        public int Calls { get; private set; }
+        public RuntimePrerequisiteAssessment Inspect()
+        {
+            Calls++;
+            events.Add("PrerequisiteInspection");
+            return assessment;
+        }
+    }
+
+    private sealed class SequencedTopologyWaiter : IControllerTopologyWaiter
+    {
+        private readonly List<string> _events;
+        private readonly Queue<ControllerTopologyReadiness> _results;
+        public SequencedTopologyWaiter(List<string> events, params ControllerTopologyReadiness[] results)
+        {
+            _events = events;
+            _results = new(results);
+        }
+        public Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _events.Add("TopologyWaiter");
+            return Task.FromResult(_results.Count > 0 ? _results.Dequeue() : ControllerTopologyReadiness.Indeterminate);
+        }
+        public Task<ControllerTopologyReadiness> WaitForFirstUnambiguousControlHidAsync(CancellationToken cancellationToken) =>
+            WaitUntilStableAsync(cancellationToken);
+    }
+
+    private sealed class RecordingAdmissionRetryDelay
+    {
+        public List<TimeSpan> Delays { get; } = [];
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            Delays.Add(delay);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
         }
     }
 

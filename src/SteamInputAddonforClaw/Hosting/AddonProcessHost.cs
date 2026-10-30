@@ -128,6 +128,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeShutdownPrepared;
     private int _profileRuntimeStartupReady;
     private Task? _deferredRuntimeStartup;
+    private Task _disabledBootAdmissionRetryTask = Task.CompletedTask;
+    private CancellationTokenSource? _disabledBootAdmissionRetryCancellation;
     private Task? _backgroundUpdateTask;
     private int _backgroundUpdateStarted;
     private Task? _overlayStartup;
@@ -550,13 +552,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             CancellationToken token)
         {
             Task inFlightControllerWork;
+            Task admissionRetryTask;
+            CancellationTokenSource? admissionRetryCancellation;
             lock (_controllerOwnershipOperationSync)
             {
                 Volatile.Write(ref _controllerOwnershipReleaseStarted, 1);
                 _initialControllerAcquisition = null;
                 Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0);
                 inFlightControllerWork = _ownedControllerRecovery;
+                admissionRetryTask = _disabledBootAdmissionRetryTask;
+                admissionRetryCancellation = _disabledBootAdmissionRetryCancellation;
             }
+            admissionRetryCancellation?.Cancel();
+            await admissionRetryTask.ConfigureAwait(false);
             // Close admission first, then drain the existing single task before retiring VIIPER or
             // releasing the physical owner. No deferred initial AcquireAsync may outlive Enable.
             await inFlightControllerWork.ConfigureAwait(false);
@@ -968,49 +976,63 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// init canonical VIIPER -> require VIIPER Ready -> PR5 AcquireAsync -> require Owned + live input
     /// -> fresh Steam/BPM snapshot -> attach exactly one Xbox360, Steam Deck, or Edge presentation. Any failure
     /// keeps the mandatory Runtime/tray/frontend alive; PID1902 is never rolled back here.</summary>
-    private async Task TryStartDisabledModeControllerAsync(AddonStartupComposition startupComposition, StartupResult startupResult, Settings.StartupSettingsCoordinator startupSettings)
+    private async Task TryStartDisabledModeControllerAsync(
+        AddonStartupComposition startupComposition,
+        StartupResult startupResult,
+        Settings.StartupSettingsCoordinator startupSettings,
+        Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? existingOwner = null)
     {
         if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)
             return;
 
-        // Subscribe before reconciling existing processes so starts during Runtime restart/crash
-        // gaps are observed without polling. A WMI failure must not skip startup cleanup.
-        try
-        {
-            StartMsiQuickSettingsProcessStartWatcher();
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("MsiQuickSettings", "Best-effort process-start watcher startup threw; startup reconcile continues.", exception,
-                ("Event", "MsiQuickSettingsProcessWatcherUnavailable"),
-                ("ExceptionType", exception.GetType().Name), ("HResult", exception.HResult));
-        }
-
-        // Full1902 cleanup: the exact Center M Disabled authority fact is the sole product gate.
-        // This best-effort one-shot cleanup precedes admission so an orphaned MSI Quick Settings
-        // package does not keep running while controller startup is temporarily blocked.
-        try
-        {
-            var quiesceResult = MsiQuickSettingsRuntimeQuiescer.QuiesceExisting();
-            AppLog.Debug("MsiQuickSettings", "Disabled-startup package quiesce attempt completed.",
-                ("CandidateCount", quiesceResult.CandidateCount),
-                ("IdentityUnavailableCount", quiesceResult.IdentityUnavailableCount),
-                ("PackageCount", quiesceResult.PackageCount),
-                ("TerminatedProcessCount", quiesceResult.TerminatedProcessCount),
-                ("FailureCount", quiesceResult.FailureCount));
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("MsiQuickSettings", "Best-effort package quiesce threw; Disabled-mode controller startup continues.", exception,
-                ("Event", "MsiQuickSettingsTerminationFailed"), ("Reason", "UnexpectedQuiesceFailure"));
-        }
-
-        // Construct the narrow PR5 owner on ANY exact Disabled boot -- even a Blocked one -- so
-        // Enable-and-Restart can always release existing PID1902 / persisted PR5 HidHide ownership.
-        var owner = CreatePhysicalOwnership(startupComposition, startupResult.HardwareDeviceModel);
+        Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? owner = existingOwner;
         if (owner is null)
+        {
+            // Subscribe before reconciling existing processes so starts during Runtime restart/crash
+            // gaps are observed without polling. A WMI failure must not skip startup cleanup.
+            try
+            {
+                StartMsiQuickSettingsProcessStartWatcher();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("MsiQuickSettings", "Best-effort process-start watcher startup threw; startup reconcile continues.", exception,
+                    ("Event", "MsiQuickSettingsProcessWatcherUnavailable"),
+                    ("ExceptionType", exception.GetType().Name), ("HResult", exception.HResult));
+            }
+
+            // Full1902 cleanup: the exact Center M Disabled authority fact is the sole product gate.
+            // This best-effort one-shot cleanup precedes admission so an orphaned MSI Quick Settings
+            // package does not keep running while controller startup is temporarily blocked.
+            try
+            {
+                var quiesceResult = MsiQuickSettingsRuntimeQuiescer.QuiesceExisting();
+                AppLog.Debug("MsiQuickSettings", "Disabled-startup package quiesce attempt completed.",
+                    ("CandidateCount", quiesceResult.CandidateCount),
+                    ("IdentityUnavailableCount", quiesceResult.IdentityUnavailableCount),
+                    ("PackageCount", quiesceResult.PackageCount),
+                    ("TerminatedProcessCount", quiesceResult.TerminatedProcessCount),
+                    ("FailureCount", quiesceResult.FailureCount));
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("MsiQuickSettings", "Best-effort package quiesce threw; Disabled-mode controller startup continues.", exception,
+                    ("Event", "MsiQuickSettingsTerminationFailed"), ("Reason", "UnexpectedQuiesceFailure"));
+            }
+
+            // Construct the narrow PR5 owner on ANY exact Disabled boot -- even a Blocked one -- so
+            // Enable-and-Restart can always release existing PID1902 / persisted PR5 HidHide ownership.
+            owner = CreatePhysicalOwnership(startupComposition, startupResult.HardwareDeviceModel);
+            if (owner is null)
+                return;
+            _physicalOwnership = owner;
+        }
+        else if (!ReferenceEquals(_physicalOwnership, owner))
+        {
+            AppLog.Warn("ControllerOwnership", "Deferred admission retry no longer owns the original physical owner.", null,
+                ("Event", "DisabledBootAdmissionRetryOwnerChanged"), ("Action", "KeepRuntimePassive"));
             return;
-        _physicalOwnership = owner;
+        }
 
         if (startupResult.DisabledBootAdmission?.IsReady != true)
         {
@@ -1019,6 +1041,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return;
         }
 
+        await ContinueDisabledModeControllerStartupAsync(startupResult, startupSettings, owner).ConfigureAwait(false);
+    }
+
+    private async Task ContinueDisabledModeControllerStartupAsync(
+        StartupResult startupResult,
+        Settings.StartupSettingsCoordinator startupSettings,
+        Devices.MSI.Claw.MsiClawAddonPhysicalOwnership owner)
+    {
         try
         {
             // PR6 section 5: canonical VIIPER must be positively Ready before any new PID takeover.
@@ -2856,6 +2886,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 || Volatile.Read(ref _processShutdownStarted) != 0)
                 return;
 
+            StartDisabledBootAdmissionRetryIfEligible();
+
             // Optional Overlay warmup starts only after the initial Full1902 controller attempt
             // has completed. It remains non-blocking and is independent of acquisition success.
             _overlayStartup = StartOverlayWarmupAsync();
@@ -2892,6 +2924,115 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             ReconcileDeviceProfileStartup();
             StartBackgroundUpdate();
         }, cancellationToken);
+    }
+
+    private void StartDisabledBootAdmissionRetryIfEligible()
+    {
+        if (_startupComposition is not { } startupComposition
+            || _startupResult is not { } startupResult
+            || _runtimeStartupSettings is not { } startupSettings
+            || !startupResult.HardwareSupported
+            || !string.Equals(startupResult.HardwareDeviceFamily?.Value, "msi.claw", StringComparison.OrdinalIgnoreCase)
+            || startupResult.HardwareDeviceModel is null
+            || startupResult.DisabledBootAdmission?.IsEligibleForTransientUsbIpRetry != true)
+            return;
+
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_startupCancellationTokenSource.Token);
+        lock (_controllerOwnershipOperationSync)
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0
+                || Volatile.Read(ref _controllerOwnershipReleaseStarted) != 0
+                || _centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+                || _centerMAuthorityTransition?.IsInProgress == true
+                || _physicalOwnership is null)
+            {
+                cancellation.Dispose();
+                return;
+            }
+
+            if (!_disabledBootAdmissionRetryTask.IsCompleted)
+            {
+                cancellation.Dispose();
+                return;
+            }
+
+            _disabledBootAdmissionRetryCancellation = cancellation;
+            _disabledBootAdmissionRetryTask = Task.Run(() => RunDisabledBootAdmissionRetryAsync(
+                startupComposition, startupResult, startupSettings, cancellation.Token), CancellationToken.None);
+        }
+    }
+
+    private async Task RunDisabledBootAdmissionRetryAsync(
+        AddonStartupComposition startupComposition,
+        StartupResult startupResult,
+        Settings.StartupSettingsCoordinator startupSettings,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var admission = await startupComposition.Coordinator
+                .RetryTransientDisabledBootAdmissionAsync(startupResult, cancellationToken)
+                .ConfigureAwait(false);
+            if (!admission.IsReady)
+            {
+                AppLog.Info("ControllerAdmission", "Deferred controller admission did not become Ready; Runtime remains passive.",
+                    ("Outcome", admission.Outcome), ("Reason", admission.Reason));
+                return;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var previousBadge = CaptureCurrentControllerBadge();
+            Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? owner;
+            lock (_controllerOwnershipOperationSync)
+            {
+                if (Volatile.Read(ref _processShutdownStarted) != 0
+                    || Volatile.Read(ref _controllerOwnershipReleaseStarted) != 0
+                    || _centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled
+                    || _centerMAuthorityTransition?.IsInProgress == true
+                    || _startupCancellationTokenSource.IsCancellationRequested)
+                {
+                    AppLog.Info("ControllerAdmission", "Ready admission was not committed because Disabled authority is no longer current.",
+                        ("Event", "DisabledBootAdmissionRetryCommitDeclined"), ("Action", "KeepRuntimePassive"));
+                    return;
+                }
+
+                if (_physicalOwnership is not Devices.MSI.Claw.MsiClawAddonPhysicalOwnership currentOwner)
+                {
+                    AppLog.Warn("ControllerAdmission", "Ready admission has no retained physical owner; no new owner will be created.", null,
+                        ("Event", "DisabledBootAdmissionRetryOwnerUnavailable"));
+                    return;
+                }
+
+                owner = currentOwner;
+                // The existing authority-transition safety gate treats this as the short ownership
+                // commit window. The bounded admission wait above never holds the gate closed.
+                Volatile.Write(ref _disabledControllerStartupPending, 1);
+            }
+
+            try
+            {
+                await TryStartDisabledModeControllerAsync(
+                    startupComposition,
+                    startupResult with { DisabledBootAdmission = admission },
+                    startupSettings,
+                    owner).ConfigureAwait(false);
+            }
+            finally
+            {
+                Volatile.Write(ref _disabledControllerStartupPending, 0);
+                NotifyControllerBadgeIfChanged(previousBadge);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            AppLog.Debug("ControllerAdmission", "Deferred Disabled-boot admission retry was cancelled.",
+                ("Action", "NoControllerTakeover"));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerAdmission", "Deferred Disabled-boot admission retry failed; Runtime remains passive.", exception,
+                ("ExceptionType", exception.GetType().Name), ("HResult", $"0x{exception.HResult:X8}"));
+        }
     }
 
     private void StartClawHudStartup()
@@ -3520,6 +3661,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception) { AppLog.Error("Startup", "Deferred Runtime startup work failed.", exception); }
             _deferredRuntimeStartup = null;
         }
+        try { await _disabledBootAdmissionRetryTask.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+        catch (Exception exception) { AppLog.Warn("ControllerAdmission", "Deferred admission retry did not drain cleanly during shutdown.", exception); }
+        _disabledBootAdmissionRetryCancellation?.Dispose();
+        _disabledBootAdmissionRetryCancellation = null;
         try { await _developerRumbleRearmTask.ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Warn("ControllerOwnership", "Developer rumble re-arm did not complete cleanly during shutdown.", exception); }
         if (_xboxGameSessionRuntime is not null)
