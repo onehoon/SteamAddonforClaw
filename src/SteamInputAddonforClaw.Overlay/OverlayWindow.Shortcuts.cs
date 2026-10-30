@@ -72,11 +72,6 @@ public sealed partial class OverlayWindow
         // The calling transport path records failures; this surface intentionally renders no status text.
     }
 
-    private void ResetShortcutForShow()
-    {
-        RefreshShortcutSelection(FrontendShortcutDashboardSnapshot.Unavailable());
-    }
-
     private void RenderShortcutSnapshot()
     {
         if (_shortcutGrid is null) return;

@@ -119,7 +119,6 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("<Setter Property=\"FontSize\" Value=\"16\" />", resources, StringComparison.Ordinal);
         Assert.Contains("<x:Double x:Key=\"QamShortcutTileSize\">117.33333333333333</x:Double>", resources, StringComparison.Ordinal);
         Assert.DoesNotContain("_shortcutStatus", renderer, StringComparison.Ordinal);
-        Assert.Contains("ResetShortcutForShow", renderer, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -175,16 +174,64 @@ public sealed class OverlayShortcutRendererTests
     }
 
     [Fact]
-    public void Live_refresh_preserves_tile_identity_and_new_show_clears_stale_state()
+    public void Warm_show_retains_last_known_tiles_and_resets_shortcut_selection_before_reveal()
     {
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
         var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
-        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var resetStart = shell.IndexOf("private void ResetUiForShow()", StringComparison.Ordinal);
+        var resetEnd = shell.IndexOf("// OQ5-UI-02:", resetStart, StringComparison.Ordinal);
+        var reset = shell[resetStart..resetEnd];
+        var shortcutTabStart = shell.IndexOf("if (selected == AddonQuickSettingsTabId.Shortcut)", StringComparison.Ordinal);
+        var shortcutTabEnd = shell.IndexOf("OnProfileTabSelectionChanged", shortcutTabStart, StringComparison.Ordinal);
+        var shortcutTabSelection = shell[shortcutTabStart..shortcutTabEnd];
+        var showStart = presentation.IndexOf("internal async Task ShowForPocAsync()", StringComparison.Ordinal);
+        var hideStart = presentation.IndexOf("internal async Task HideForPocAsync()", showStart, StringComparison.Ordinal);
+        var show = presentation[showStart..hideStart];
 
-        Assert.Contains("ResetShortcutForShow();", shell, StringComparison.Ordinal);
-        Assert.Contains("selectedTileId", navigation, StringComparison.Ordinal);
+        Assert.Contains("_tabState.ResetForShow();", reset, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResetShortcutForShow", reset + renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshShortcutSelection(FrontendShortcutDashboardSnapshot.Unavailable())", renderer, StringComparison.Ordinal);
+        Assert.True(reset.IndexOf("_tabState.ResetForShow();", StringComparison.Ordinal)
+            < reset.IndexOf("ApplySelectedTabVisualState();", StringComparison.Ordinal));
+        Assert.True(show.IndexOf("ResetUiForShow();", StringComparison.Ordinal)
+            < show.IndexOf("WindowInterop.ShowWithoutActivation(this);", StringComparison.Ordinal));
+        Assert.Contains("ResetShortcutSelection();", shortcutTabSelection, StringComparison.Ordinal);
+        Assert.Contains("ApplyShortcutSelectionVisual();", shortcutTabSelection, StringComparison.Ordinal);
+        Assert.Contains("preferredIndex: 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"), StringComparison.Ordinal);
+        Assert.Contains("_shortcutTiles.TryGetValue(tile.TileId, out var existing)", renderer, StringComparison.Ordinal);
+        Assert.Contains("selectedTileId", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"), StringComparison.Ordinal);
         Assert.Contains("FirstOrDefault", renderer, StringComparison.Ordinal);
-        Assert.Contains("FrontendShortcutDashboardSnapshot.Unavailable()", renderer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void First_show_without_a_runtime_snapshot_starts_empty_until_authoritative_state_arrives()
+    {
+        var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
+        var buildStart = renderer.IndexOf("private FrameworkElement BuildShortcutPage()", StringComparison.Ordinal);
+        var buildEnd = renderer.IndexOf("internal void ApplyShortcutState(", buildStart, StringComparison.Ordinal);
+        var build = renderer[buildStart..buildEnd];
+        var renderStart = renderer.IndexOf("private void RenderShortcutSnapshot()", StringComparison.Ordinal);
+        var renderEnd = renderer.IndexOf("private ShortcutTileControls CreateShortcutTile(", renderStart, StringComparison.Ordinal);
+        var render = renderer[renderStart..renderEnd];
+
+        Assert.Contains("FrontendShortcutDashboardSnapshot.Unavailable();", renderer, StringComparison.Ordinal);
+        Assert.Contains("RenderShortcutSnapshot();", build, StringComparison.Ordinal);
+        Assert.Contains("_shortcutSnapshot.Available", render, StringComparison.Ordinal);
+        Assert.Contains("_shortcutSnapshot.Tiles", render, StringComparison.Ordinal);
+        Assert.Contains(": []", render, StringComparison.Ordinal);
+        Assert.Contains("OverlayShortcutTileReconciliation.Between(_renderedShortcutTiles, tiles)", render, StringComparison.Ordinal);
+        Assert.DoesNotContain("_shortcutGrid.Children.Clear()", render, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Show_animation_is_120ms_and_hide_animation_remains_140ms()
+    {
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+
+        Assert.Contains("ShowDuration = TimeSpan.FromMilliseconds(120)", presentation, StringComparison.Ordinal);
+        Assert.Contains("HideDuration = TimeSpan.FromMilliseconds(140)", presentation, StringComparison.Ordinal);
+        Assert.Contains("new UISettings().AnimationsEnabled", presentation, StringComparison.Ordinal);
     }
 
     [Fact]

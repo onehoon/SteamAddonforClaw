@@ -15,7 +15,7 @@ public sealed partial class OverlayWindow
     private const float HiddenScale = 0.98f;
     private const float HiddenTranslateYDip = 8.0f;
     private const double HiddenOpacity = 0.90;
-    private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(140);
     private uint _lastConfiguredDpi;
     private int _lastAppliedClawHudTopInsetPx;
