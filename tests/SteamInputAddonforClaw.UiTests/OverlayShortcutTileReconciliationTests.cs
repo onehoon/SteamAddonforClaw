@@ -21,6 +21,28 @@ public sealed class OverlayShortcutTileReconciliationTests
     }
 
     [Fact]
+    public void Authoritative_unavailable_or_empty_snapshot_removes_existing_tiles()
+    {
+        var existing = new[] { Tile("one"), Tile("two") };
+        var snapshots = new[]
+        {
+            FrontendShortcutDashboardSnapshot.Unavailable(),
+            new FrontendShortcutDashboardSnapshot(true, []),
+        };
+
+        foreach (var snapshot in snapshots)
+        {
+            IReadOnlyList<FrontendShortcutTile> tiles = snapshot.Available ? snapshot.Tiles : [];
+            var diff = OverlayShortcutTileReconciliation.Between(existing, tiles);
+
+            Assert.Equal(existing.Select(tile => tile.TileId), diff.RemovedTileIds);
+            Assert.Empty(diff.AddedTileIds);
+            Assert.Empty(diff.UpdatedTileIds);
+            Assert.Empty(diff.RepositionedTileIds);
+        }
+    }
+
+    [Fact]
     public void Single_tile_presentation_change_updates_only_that_tile()
     {
         var first = Tile("one");
