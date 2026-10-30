@@ -191,7 +191,7 @@ public sealed class Full1902WinGSuppressionAuthorityTests
         // (Enabled/Partial/Unavailable) boot returns before EnsureAddonAuthorityWinGSuppression().
         Assert.Contains("startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled", body);
         var guardReturn = body.IndexOf("!= FrontendCenterMStartupState.Disabled", StringComparison.Ordinal);
-        var continuation = body.IndexOf("CompleteInitialControllerOwnershipAsync(", StringComparison.Ordinal);
+        var continuation = body.IndexOf("ContinueDisabledModeControllerStartupAsync(", StringComparison.Ordinal);
         Assert.True(guardReturn >= 0 && continuation > guardReturn);
         var ensure = Method(source, "private async Task<InitialControllerCommitResult> CompleteInitialControllerOwnershipAsync(");
         Assert.Contains("EnsureAddonAuthorityWinGSuppression()", ensure, StringComparison.Ordinal);

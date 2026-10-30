@@ -22,6 +22,18 @@ public sealed class AddonProcessHostWindowsSessionEndTests
     }
 
     [Fact]
+    public void Tray_shell_registration_failure_does_not_make_runtime_tray_host_initialization_fail()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
+        var tray = Method(host, "internal bool TryInitializeTray(Action restart)");
+
+        Assert.Contains("new NativeTrayHostWindow(", tray, StringComparison.Ordinal);
+        Assert.Contains("new SystemTrayIcon(_trayHostWindow.Handle", tray, StringComparison.Ordinal);
+        Assert.DoesNotContain("_systemTrayIcon.IsAvailable", tray, StringComparison.Ordinal);
+        Assert.Contains("return true;", tray, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void One_disabled_host_policy_controls_both_automatic_entry_points()
     {
         var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
