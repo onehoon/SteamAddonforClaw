@@ -22,9 +22,18 @@ internal enum DisabledBootAdmissionOutcome
 /// <summary>The one in-memory result PR4 carries forward for PR5 (work order PR4 section 6). It only
 /// answers "may the next Full PID1902 ownership stage run?" -- the detailed facts keep their own
 /// existing types. It is never persisted.</summary>
-internal sealed record DisabledBootControllerAdmissionResult(DisabledBootAdmissionOutcome Outcome, string Reason)
+internal sealed record DisabledBootControllerAdmissionResult(
+    DisabledBootAdmissionOutcome Outcome,
+    string Reason,
+    RuntimePrerequisiteAssessment? Prerequisites = null)
 {
     internal bool IsReady => Outcome == DisabledBootAdmissionOutcome.Ready;
+
+    internal bool IsEligibleForTransientUsbIpRetry => Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady
+        && Prerequisites is { } prerequisites
+        && prerequisites.HidHide.Status == PrerequisiteStatus.Ready
+        && prerequisites.Viiper.Status == PrerequisiteStatus.Ready
+        && IsTransientUsbIpAssessment(prerequisites.UsbIpWin2);
 
     internal static DisabledBootControllerAdmissionResult NotApplicable { get; } =
         new(DisabledBootAdmissionOutcome.NotApplicable, "CenterMNotDisabled");
@@ -40,15 +49,37 @@ internal sealed record DisabledBootControllerAdmissionResult(DisabledBootAdmissi
 
     internal static DisabledBootControllerAdmissionResult PrerequisitesNotReady(RuntimePrerequisiteAssessment prerequisites)
     {
-        var reason =
-            $"Prerequisites HidHide={prerequisites.HidHide.Status} " +
-            $"UsbIpWin2={prerequisites.UsbIpWin2.Status} " +
-            $"Viiper={prerequisites.Viiper.Status}";
+        var reason = DescribePrerequisites(prerequisites);
+        return new(DisabledBootAdmissionOutcome.PrerequisitesNotReady, reason, prerequisites);
+    }
+
+    internal void LogInitialPrerequisiteFailure()
+    {
+        if (Outcome != DisabledBootAdmissionOutcome.PrerequisitesNotReady || Prerequisites is not { } prerequisites)
+            return;
 
         AppLog.Warn("ControllerAdmission", "Disabled-boot controller admission requires prerequisite repair.", null,
-            ("Result", "PrerequisitesNotReady"), ("Reason", reason));
-        return new(DisabledBootAdmissionOutcome.PrerequisitesNotReady, reason);
+            ("Result", "PrerequisitesNotReady"), ("Reason", Reason),
+            ("HidHideStatus", prerequisites.HidHide.Status), ("HidHideReason", prerequisites.HidHide.Reason),
+            ("UsbIpWin2Status", prerequisites.UsbIpWin2.Status), ("UsbIpWin2Reason", prerequisites.UsbIpWin2.Reason),
+            ("UsbIpWin2Version", prerequisites.UsbIpWin2.Version),
+            ("ViiperStatus", prerequisites.Viiper.Status), ("ViiperReason", prerequisites.Viiper.Reason));
     }
+
+    private static string DescribePrerequisites(RuntimePrerequisiteAssessment prerequisites) =>
+        $"HidHide={prerequisites.HidHide.Status}:{prerequisites.HidHide.Reason} " +
+        $"UsbIpWin2={prerequisites.UsbIpWin2.Status}:{prerequisites.UsbIpWin2.Reason}" +
+        (string.IsNullOrWhiteSpace(prerequisites.UsbIpWin2.Version) ? string.Empty : $"@{prerequisites.UsbIpWin2.Version}") +
+        $" Viiper={prerequisites.Viiper.Status}:{prerequisites.Viiper.Reason}";
+
+    private static bool IsTransientUsbIpAssessment(PrerequisiteAssessment assessment) => assessment.Reason switch
+    {
+        "UsbIpWin2InspectionFailed" => assessment.Status == PrerequisiteStatus.Indeterminate,
+        "UsbIpWin2PackageInspectionFailed" => assessment.Status == PrerequisiteStatus.Indeterminate,
+        "UsbIpWin2VersionUnavailable" => assessment.Status == PrerequisiteStatus.Indeterminate,
+        "UsbIpWin2DeviceUnavailable" => assessment.Status == PrerequisiteStatus.Unusable,
+        _ => false,
+    };
 }
 
 internal interface IDisabledBootControllerAdmission
@@ -83,7 +114,8 @@ internal sealed class DisabledBootControllerAdmission(
         }
         catch (Exception exception)
         {
-            AppLog.Warn("ControllerAdmission", "Runtime prerequisite inspection failed.", exception);
+            AppLog.Warn("ControllerAdmission", "Runtime prerequisite inspection failed.", exception,
+                ("ExceptionType", exception.GetType().Name), ("HResult", $"0x{exception.HResult:X8}"));
             return DisabledBootControllerAdmissionResult.Blocked("PrerequisiteInspectionUnavailable");
         }
         if (!prerequisites.IsRoutingReady)
