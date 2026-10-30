@@ -146,7 +146,6 @@ public sealed partial class OverlayWindow
     {
         PrepareActiveProfileFirstShow();
         _tabState.ResetForShow();
-        ResetShortcutForShow();
         ResetSettingCardsForShow();
         ApplySelectedTabVisualState();
     }
