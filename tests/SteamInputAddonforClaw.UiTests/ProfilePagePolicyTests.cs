@@ -187,14 +187,14 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Theory]
-    [InlineData(800, 176, 4, 31.99)]
-    [InlineData(722, 176, 4, 5.99)]
-    [InlineData(721, 176, 4, 5.656666666666667)]
+    [InlineData(800, 176, 4, 31.656666666666666)]
+    [InlineData(722, 176, 4, 5.656666666666666)]
+    [InlineData(721, 176, 4, 5.323333333333334)]
     [InlineData(710, 176, 4, 2)]
-    [InlineData(709, 176, 3, 90.49)]
-    [InlineData(550, 176, 3, 10.99)]
-    [InlineData(540, 176, 3, 5.99)]
-    [InlineData(539, 176, 3, 5.49)]
+    [InlineData(709, 176, 3, 89.99)]
+    [InlineData(550, 176, 3, 10.49)]
+    [InlineData(540, 176, 3, 5.49)]
+    [InlineData(539, 176, 3, 4.99)]
     [InlineData(176, 176, 1, 2)]
     [InlineData(175, 176, 1, 2)]
     public void Steam_cover_grid_spacing_uses_available_width_and_a_shared_minimum_gap(
@@ -203,7 +203,7 @@ public sealed class ProfilePagePolicyTests
         int expectedColumns,
         double expectedGapDip)
     {
-        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, out var spacing));
+        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, 1.0, out var spacing));
         Assert.Equal(expectedColumns, spacing.Columns);
         Assert.Equal(expectedGapDip, spacing.GapDip, 8);
         Assert.True(double.IsFinite(spacing.GapDip));
@@ -222,7 +222,7 @@ public sealed class ProfilePagePolicyTests
         double availableWidthDip,
         double coverWidthDip)
     {
-        Assert.False(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, out _));
+        Assert.False(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, 1.0, out _));
     }
 
     [Fact]
@@ -235,7 +235,7 @@ public sealed class ProfilePagePolicyTests
             Assert.Equal(264.0, coverSize.Height * scale, 8);
 
             var coverWidthDip = coverSize.Width;
-            Assert.True(SteamCoverGridSpacing.TryCalculate(800, coverWidthDip, out var spacing));
+            Assert.True(SteamCoverGridSpacing.TryCalculate(800, coverWidthDip, scale, out var spacing));
             Assert.True(spacing.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
             Assert.True(double.IsFinite(spacing.GapDip));
         }
@@ -292,8 +292,8 @@ public sealed class ProfilePagePolicyTests
         var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width;
 
         Assert.True(SteamCoverGridSpacing.TryResolveAvailableWidthDip(951, 957, out var availableWidthDip));
-        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, out var viewportSpacing));
-        Assert.True(SteamCoverGridSpacing.TryCalculate(957, coverWidthDip, out var repeaterSpacing));
+        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, 1.5, out var viewportSpacing));
+        Assert.True(SteamCoverGridSpacing.TryCalculate(957, coverWidthDip, 1.5, out var repeaterSpacing));
 
         Assert.Equal(951, availableWidthDip);
         Assert.Equal(7, viewportSpacing.Columns);
@@ -312,7 +312,7 @@ public sealed class ProfilePagePolicyTests
         int expectedColumns)
     {
         var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale).Width;
-        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, out var spacing));
+        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, rasterizationScale, out var spacing));
 
         Assert.Equal(expectedColumns, spacing.Columns);
         Assert.Equal(expectedColumns, GetUniformGridLayoutColumnCount(
@@ -335,7 +335,7 @@ public sealed class ProfilePagePolicyTests
                 {
                     var availableWidthDip = boundaryWidthDip + offsetDip;
                     Assert.True(SteamCoverGridSpacing.TryCalculate(
-                        availableWidthDip, coverWidthDip, out var spacing));
+                        availableWidthDip, coverWidthDip, rasterizationScale, out var spacing));
                     Assert.Equal(spacing.Columns, GetUniformGridLayoutColumnCount(
                         availableWidthDip, coverWidthDip, spacing.GapDip));
                 }
@@ -343,9 +343,42 @@ public sealed class ProfilePagePolicyTests
         }
 
         var scaledCoverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width;
-        Assert.True(SteamCoverGridSpacing.TryCalculate(1000, scaledCoverWidthDip, out var spacingAt1000Dip));
+        Assert.True(SteamCoverGridSpacing.TryCalculate(1000, scaledCoverWidthDip, 1.5, out var spacingAt1000Dip));
         Assert.Equal(spacingAt1000Dip.Columns, GetUniformGridLayoutColumnCount(
             1000, scaledCoverWidthDip, spacingAt1000Dip.GapDip));
+    }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    public void Steam_cover_spacing_reserves_one_physical_pixel_across_the_entire_row(double rasterizationScale)
+    {
+        const int columns = 8;
+        var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale).Width;
+        var unadjustedGapDip = 20.0 / rasterizationScale;
+        var availableWidthDip = columns * coverWidthDip + (columns - 1) * unadjustedGapDip;
+
+        Assert.True(SteamCoverGridSpacing.TryCalculate(
+            availableWidthDip, coverWidthDip, rasterizationScale, out var spacing));
+        Assert.Equal(columns, spacing.Columns);
+
+        // A single pixel is removed from the total gap budget; the old 0.01 DIP float guard is retained.
+        var totalReservedPixels = (unadjustedGapDip - spacing.GapDip) * (columns - 1) * rasterizationScale;
+        Assert.Equal(1.0 + 0.01 * (columns - 1) * rasterizationScale, totalReservedPixels, 6);
+        Assert.Equal(columns, GetUniformGridLayoutColumnCount(
+            availableWidthDip - 1.0 / rasterizationScale, coverWidthDip, spacing.GapDip));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void Steam_cover_spacing_rejects_invalid_rasterization_scales(double rasterizationScale)
+    {
+        Assert.False(SteamCoverGridSpacing.TryCalculate(800, 176, rasterizationScale, out _));
     }
 
     private static int GetUniformGridLayoutColumnCount(

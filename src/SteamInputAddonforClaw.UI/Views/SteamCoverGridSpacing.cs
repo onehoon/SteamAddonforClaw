@@ -17,11 +17,13 @@ internal readonly record struct SteamCoverGridSpacing(int Columns, double GapDip
     internal static bool TryCalculate(
         double availableWidthDip,
         double coverWidthDip,
+        double rasterizationScale,
         out SteamCoverGridSpacing spacing)
     {
         spacing = default;
         if (!double.IsFinite(availableWidthDip) || availableWidthDip <= 0
-            || !double.IsFinite(coverWidthDip) || coverWidthDip <= 0)
+            || !double.IsFinite(coverWidthDip) || coverWidthDip <= 0
+            || !double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
             return false;
 
         // UniformGridLayout derives items per line from single-precision available width and item stride.
@@ -38,8 +40,11 @@ internal readonly record struct SteamCoverGridSpacing(int Columns, double GapDip
         if (!double.IsFinite(idealGapDip))
             return false;
 
+        // Reserve one physical pixel across all gaps in a row, not one pixel per gap.
+        // Preserve the existing float-stride safety margin without changing the column count.
         var gapDip = columns > 1
-            ? Math.Max(MinimumGapDip, idealGapDip - LayoutFitSlackDip)
+            ? Math.Max(MinimumGapDip,
+                idealGapDip - LayoutFitSlackDip - (1.0 / rasterizationScale) / (columns - 1))
             : MinimumGapDip;
         spacing = new SteamCoverGridSpacing(columns, gapDip);
         return true;
