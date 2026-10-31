@@ -267,7 +267,7 @@ public sealed class OverlaySteamGameArtworkTests
         var loader = ExtractMethod(profile, "private async Task<BitmapImage?> TryLoadProfileArtworkAsync(");
         var clear = ExtractMethod(profile, "private void ClearProfileArtwork()");
         var presentation = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"));
-        var hide = ExtractMethod(presentation, "internal async Task HideForPocAsync()");
+        var hide = ExtractMethod(presentation, "internal Task HideForPocAsync()");
         const string source = "ProfileArtworkImage.Source = bitmap;";
         const string showHero = "ProfileArtworkHost.Visibility = Visibility.Visible;";
         const string hideTitle = "PageTitle.Visibility = Visibility.Collapsed;";

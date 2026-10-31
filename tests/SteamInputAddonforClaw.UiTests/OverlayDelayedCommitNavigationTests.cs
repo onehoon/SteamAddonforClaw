@@ -87,14 +87,45 @@ public sealed class OverlayDelayedCommitNavigationTests
     public void Forced_hide_cancels_local_drafts_and_vibration_flush_is_not_duplicated()
     {
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
-        var hideStart = presentation.IndexOf("internal async Task HideForPocAsync()", StringComparison.Ordinal);
+        var hideStart = presentation.IndexOf("internal Task HideForPocAsync()", StringComparison.Ordinal);
         var hideEnd = presentation.IndexOf("private void ConfigureWindow()", hideStart, StringComparison.Ordinal);
         Assert.True(hideStart >= 0 && hideEnd > hideStart);
         var hide = presentation[hideStart..hideEnd];
         Assert.Contains("CancelUnsubmittedDrafts()", hide, StringComparison.Ordinal);
         Assert.Contains("CancelPendingControllerVibrationDraft()", hide, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Delay(300", hide, StringComparison.Ordinal);
+        Assert.DoesNotContain("Task.Delay", hide, StringComparison.Ordinal);
+        Assert.DoesNotContain("AnimationsEnabled()", hide, StringComparison.Ordinal);
+        Assert.DoesNotContain("AnimateAsync", hide, StringComparison.Ordinal);
         Assert.DoesNotContain("FlushPendingUserEditsAsync", hide, StringComparison.Ordinal);
+
+        var cleanupSteps = new[]
+        {
+            "StopRailClockUpdates();",
+            "_isVisible = false;",
+            "_numericSliderRepeatTarget.Clear();",
+            "CancelUnsubmittedDrafts()",
+            "CancelPendingControllerVibrationDraft();",
+            "WindowInterop.DisarmOutsideClickDismissal();",
+            "try",
+            "WindowInterop.Hide(this);",
+            "finally",
+            "ClearProfileArtwork();",
+            "SetHiddenVisualState();",
+            "return Task.CompletedTask;",
+        };
+        var previousIndex = -1;
+        foreach (var step in cleanupSteps)
+        {
+            var currentIndex = hide.IndexOf(step, StringComparison.Ordinal);
+            Assert.True(currentIndex > previousIndex, $"Expected '{step}' after the preceding Hide step.");
+            previousIndex = currentIndex;
+        }
+        var nativeHideIndex = hide.IndexOf("WindowInterop.Hide(this);", StringComparison.Ordinal);
+        var nativeHideFinallyIndex = hide.IndexOf("finally", nativeHideIndex, StringComparison.Ordinal);
+        Assert.True(nativeHideIndex >= 0 && nativeHideFinallyIndex > nativeHideIndex);
+        Assert.DoesNotContain("catch", hide[nativeHideIndex..nativeHideFinallyIndex], StringComparison.Ordinal);
+
         var window = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
         var closedStart = window.IndexOf("Closed += (_, _) =>", StringComparison.Ordinal);
         var closedEnd = window.IndexOf("};", closedStart, StringComparison.Ordinal);
@@ -115,6 +146,13 @@ public sealed class OverlayDelayedCommitNavigationTests
         Assert.Contains("_controllerVibrationMutationTask = SendControllerVibrationMutationAsync", app, StringComparison.Ordinal);
         Assert.Contains("var vibrationMutation = _controllerVibrationMutationTask ?? Task.CompletedTask", app, StringComparison.Ordinal);
         Assert.DoesNotContain("TestControllerVibrationMotorAsync", controller, StringComparison.Ordinal);
+
+        Assert.Contains("await _window.HideForPocAsync();", app, StringComparison.Ordinal);
+        var client = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "NamedPipeOverlayClient.cs");
+        var handlerIndex = client.IndexOf("await commandHandler(command).ConfigureAwait(false);", StringComparison.Ordinal);
+        Assert.True(handlerIndex >= 0);
+        var hiddenAckIndex = client.IndexOf("SendStateAsync(pipe, OverlayState.Hidden, linked.Token)", handlerIndex, StringComparison.Ordinal);
+        Assert.True(hiddenAckIndex > handlerIndex);
     }
 
     private static string ReadSource(params string[] parts)

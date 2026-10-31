@@ -244,13 +244,18 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("private const float HiddenScale = 0.98f;", source);
         Assert.Contains("private const float HiddenTranslateYDip = 8.0f;", source);
-        Assert.Contains("private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(140);", source);
+        Assert.Contains("private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(120);", source);
+        Assert.DoesNotContain("HideDuration", source);
         Assert.Contains("ElementCompositionPreview.GetElementVisual(AnimatedContent)", source);
         Assert.Contains("AnimatedContent.ActualWidth", source);
         Assert.Contains("AnimatedContent.ActualHeight", source);
         Assert.Contains("visual.CenterPoint", source);
         Assert.Contains("visual.StartAnimation(nameof(visual.Scale), scale);", source);
         Assert.Contains("AnimationTranslateYPhysical", source);
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var hide = SliceMethod(presentation, "internal Task HideForPocAsync()", "private void ConfigureWindow()");
+        Assert.Contains("WindowInterop.Hide(this);", hide);
+        Assert.DoesNotContain("AnimateAsync", hide);
         Assert.DoesNotContain("ContentSlideDistanceDip", source);
     }
 
@@ -1364,8 +1369,8 @@ public sealed class OverlayDeviceRendererWiringTests
         var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
         var window = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
-        var show = SliceMethod(presentation, "internal async Task ShowForPocAsync()", "internal async Task HideForPocAsync()");
-        var hide = SliceMethod(presentation, "internal async Task HideForPocAsync()", "private void ConfigureWindow()");
+        var show = SliceMethod(presentation, "internal async Task ShowForPocAsync()", "internal Task HideForPocAsync()");
+        var hide = SliceMethod(presentation, "internal Task HideForPocAsync()", "private void ConfigureWindow()");
         var clock = SliceMethod(presentation, "private void UpdateRailClockText()", "private void LogSurfaceBounds(");
 
         Assert.Contains("UpdateRailClockText();", show);
