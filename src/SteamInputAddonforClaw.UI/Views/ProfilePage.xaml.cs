@@ -25,9 +25,6 @@ public sealed partial class ProfilePage : UserControl
     private SteamPortraitArtworkContext? _portraitArtworkContext;
     private XamlRoot? _observedXamlRoot;
     private double _lastRasterizationScale = double.NaN;
-    private bool _coverGridDiagnosticPending;
-    private string? _coverGridDiagnosticTrigger;
-    private string? _lastCoverGridDiagnosticSignature;
     private IReadOnlyList<FrontendProfileGameCatalogEntry> _catalog = [];
     private ObservableCollection<GameCardItem> _visibleGameCards = new();
     private FrontendProfileGameCatalogEntry? _selectedGame;
@@ -106,7 +103,6 @@ public sealed partial class ProfilePage : UserControl
             _catalogLoaded = true;
             FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown);
             ApplyCatalogFilter();
-            ScheduleCoverGridLayoutDiagnostic("CatalogRefreshed");
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
             if (_selectedGame is null)
             {
@@ -161,13 +157,10 @@ public sealed partial class ProfilePage : UserControl
         AttachXamlRoot();
         UpdateCoverCardSize(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
         RestartMissingGameCardArtworkLoads();
-        ScheduleCoverGridLayoutDiagnostic("Loaded");
     }
 
     private void ProfilePage_Unloaded(object sender, RoutedEventArgs e)
     {
-        CancelPendingCoverGridLayoutDiagnostic();
-        _lastCoverGridDiagnosticSignature = null;
         DetachXamlRoot();
         CancelPendingGameCardArtworkLoads();
     }
@@ -195,7 +188,6 @@ public sealed partial class ProfilePage : UserControl
     private void XamlRoot_Changed(XamlRoot sender, XamlRootChangedEventArgs args)
     {
         UpdateCoverCardSize(sender.RasterizationScale);
-        ScheduleCoverGridLayoutDiagnostic("XamlRootChanged");
     }
 
     private void UpdateCoverCardSize(double rasterizationScale)
@@ -225,13 +217,11 @@ public sealed partial class ProfilePage : UserControl
     private void GameGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         UpdateCoverGridSpacing(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
-        ScheduleCoverGridLayoutDiagnostic("GridSizeChanged");
     }
 
     private void CatalogScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         UpdateCoverGridSpacing(CatalogScrollViewer.XamlRoot?.RasterizationScale ?? 1.0);
-        ScheduleCoverGridLayoutDiagnostic("ViewerSizeChanged");
     }
 
     private void UpdateCoverGridSpacing(double rasterizationScale)
@@ -496,7 +486,6 @@ public sealed partial class ProfilePage : UserControl
         DetailPanel.Visibility = Visibility.Collapsed;
         CatalogPanel.Visibility = Visibility.Visible;
         RefreshGamesButton.Visibility = Visibility.Visible;
-        ScheduleCoverGridLayoutDiagnostic("CatalogReturned");
     }
     private async void FavoriteButton_Click(object sender, RoutedEventArgs e)
     {
@@ -795,176 +784,6 @@ public sealed partial class ProfilePage : UserControl
     private async Task SubmitFpsAfterDelayAsync(bool ac, int value, long generation, CancellationToken token) { try { await Task.Delay(300, token); if ((ac ? generation != _acFpsGeneration : generation != _dcFpsGeneration) || _frontend is null || _selectedGame is null) return; var id = _selectedGame.AppId; var result = ac ? await _frontend.SetGameProfileFpsLimitAcAsync(id, value) : await _frontend.SetGameProfileFpsLimitDcAsync(id, value); if (IsCurrentProfileResponse(_selectedGame?.AppId, id)) { Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), null); } } catch (OperationCanceledException) { } catch (Exception ex) { if (_selectedGame is not null) await RestoreSelectedAfterMutationFailureAsync(_selectedGame.AppId, MainUiStrings.Get("Steam_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), ex); } }
     private void CancelFpsDebounce() { _acFpsGeneration++; _dcFpsGeneration++; _acFpsDebounce?.Cancel(); _dcFpsDebounce?.Cancel(); _acFpsDebounce = _dcFpsDebounce = null; }
     private static void ConfigureSlider(Slider slider, int? minimum, int? maximum, int value) { if (minimum is not { } min || maximum is not { } max) { slider.IsEnabled = false; return; } slider.Minimum = min; slider.Maximum = max; slider.StepFrequency = 1; slider.Value = Math.Clamp(value, min, max); }
-
-    private void ScheduleCoverGridLayoutDiagnostic(string trigger)
-    {
-        if (!GameGrid.IsLoaded)
-            return;
-
-        if (_coverGridDiagnosticPending)
-        {
-            _coverGridDiagnosticTrigger = trigger;
-            return;
-        }
-
-        _coverGridDiagnosticPending = true;
-        _coverGridDiagnosticTrigger = trigger;
-        GameGrid.LayoutUpdated += GameGrid_LayoutUpdated;
-    }
-
-    private void GameGrid_LayoutUpdated(object? sender, object e)
-    {
-        GameGrid.LayoutUpdated -= GameGrid_LayoutUpdated;
-        _coverGridDiagnosticPending = false;
-        var trigger = _coverGridDiagnosticTrigger;
-        _coverGridDiagnosticTrigger = null;
-        if (trigger is not null && GameGrid.IsLoaded)
-        {
-            try { CaptureCoverGridLayoutDiagnostic(trigger); }
-            catch (Exception exception)
-            {
-                AppLog.Debug("Profiles.Catalog", "Steam cover grid layout diagnostic could not be captured.",
-                    ("ExceptionType", exception.GetType().Name));
-            }
-        }
-    }
-
-    private void CancelPendingCoverGridLayoutDiagnostic()
-    {
-        GameGrid.LayoutUpdated -= GameGrid_LayoutUpdated;
-        _coverGridDiagnosticPending = false;
-        _coverGridDiagnosticTrigger = null;
-    }
-
-    private void CaptureCoverGridLayoutDiagnostic(string trigger)
-    {
-        var scale = GameGrid.XamlRoot?.RasterizationScale ?? double.NaN;
-        var effectiveScale = double.IsFinite(scale) && scale > 0 ? scale : 1.0;
-        var coverSize = SteamPortraitArtworkResolver.GetCoverSizeDip(effectiveScale);
-        var layout = GameGrid.Layout as UniformGridLayout;
-        var viewportWidth = CatalogScrollViewer.ViewportWidth;
-        var gridWidth = GameGrid.ActualWidth;
-        var hasResolvedWidth = SteamCoverGridSpacing.TryResolveAvailableWidthDip(
-            viewportWidth, gridWidth, out var resolvedWidth);
-        var calculatedSpacing = default(SteamCoverGridSpacing);
-        var hasCalculatedSpacing = hasResolvedWidth
-            && SteamCoverGridSpacing.TryCalculate(
-                resolvedWidth, coverSize.Width, effectiveScale, out calculatedSpacing);
-        var itemCount = _visibleGameCards.Count;
-        var scrollOffset = CatalogScrollViewer.VerticalOffset;
-
-        SteamCoverGridObservation observation;
-        if (CatalogPanel.Visibility != Visibility.Visible)
-        {
-            observation = new(
-                SteamCoverGridObservationStatus.PendingArrange,
-                null,
-                null,
-                "catalog-panel-hidden",
-                []);
-        }
-        else
-        {
-            var arrangedItems = CaptureArrangedCoverGridItems(itemCount);
-            observation = SteamCoverGridLayoutObservation.ObserveFirstRow(
-                itemCount,
-                scrollOffset,
-                arrangedItems,
-                Math.Max(0.01, 0.5 / effectiveScale));
-        }
-
-        var cardActualWidth = GameGrid.TryGetElement(0) is FrameworkElement firstCard
-            ? firstCard.ActualWidth
-            : double.NaN;
-        var scaleText = FormatDiagnosticDip(scale);
-        var viewportWidthText = FormatDiagnosticDip(viewportWidth);
-        var viewerActualWidthText = FormatDiagnosticDip(CatalogScrollViewer.ActualWidth);
-        var gridActualWidthText = FormatDiagnosticDip(gridWidth);
-        var gridDesiredWidthText = FormatDiagnosticDip(GameGrid.DesiredSize.Width);
-        var resolvedWidthText = hasResolvedWidth ? FormatDiagnosticDip(resolvedWidth) : "Unknown";
-        var coverWidthText = FormatDiagnosticDip(layout?.MinItemWidth ?? double.NaN);
-        var coverHeightText = FormatDiagnosticDip(layout?.MinItemHeight ?? double.NaN);
-        var cardActualWidthText = double.IsFinite(cardActualWidth) && cardActualWidth > 0
-            ? FormatDiagnosticDip(cardActualWidth)
-            : "Unknown";
-        var calculatedColumnsText = hasCalculatedSpacing
-            ? calculatedSpacing.Columns.ToString(CultureInfo.InvariantCulture)
-            : "Unknown";
-        var gapColumnText = FormatDiagnosticDip(layout?.MinColumnSpacing ?? double.NaN);
-        var gapRowText = FormatDiagnosticDip(layout?.MinRowSpacing ?? double.NaN);
-        var scrollOffsetText = FormatDiagnosticDip(scrollOffset);
-        var columnsObservedText = observation.ColumnsObserved?.ToString(CultureInfo.InvariantCulture) ?? "Unknown";
-        var firstWrappedIndexText = observation.FirstWrappedIndex?.ToString(CultureInfo.InvariantCulture) ?? "Unknown";
-        var positionsText = FormatArrangedCoverGridItems(observation.FirstRow);
-        var observedStatusText = observation.Status.ToString();
-        var physicalWidthText = hasResolvedWidth && double.IsFinite(scale) && scale > 0
-            ? FormatDiagnosticDip(resolvedWidth * scale)
-            : "Unknown";
-
-        (string Key, object? Value)[] fields =
-        [
-            ("Trigger", trigger),
-            ("Scale", scaleText),
-            ("ViewportWidthDip", viewportWidthText),
-            ("ViewerActualWidthDip", viewerActualWidthText),
-            ("GridActualWidthDip", gridActualWidthText),
-            ("GridDesiredWidthDip", gridDesiredWidthText),
-            ("ResolvedWidthDip", resolvedWidthText),
-            ("WidthPhysicalPx", physicalWidthText),
-            ("CoverWidthDip", coverWidthText),
-            ("CoverHeightDip", coverHeightText),
-            ("SpacingCoverWidthDip", FormatDiagnosticDip(coverSize.Width)),
-            ("CardActualWidthDip", cardActualWidthText),
-            ("ColumnsCalculated", calculatedColumnsText),
-            ("GapColumnDip", gapColumnText),
-            ("GapRowDip", gapRowText),
-            ("GridItemCount", itemCount),
-            ("ScrollOffsetDip", scrollOffsetText),
-            ("ColumnsObserved", columnsObservedText),
-            ("FirstWrappedIndex", firstWrappedIndexText),
-            ("Row0IndicesAndPositions", positionsText),
-            ("ObservedWidthStatus", observedStatusText),
-            ("ObservedWidthReason", observation.Reason)
-        ];
-        var signature = string.Join("\u001f", fields.Skip(1).Select(field => $"{field.Key}={field.Value}"));
-        if (string.Equals(signature, _lastCoverGridDiagnosticSignature, StringComparison.Ordinal))
-            return;
-
-        _lastCoverGridDiagnosticSignature = signature;
-        AppLog.Info("Profiles.Catalog", "Steam cover grid layout diagnostic.", fields);
-    }
-
-    private IReadOnlyList<SteamCoverGridArrangedItem> CaptureArrangedCoverGridItems(int itemCount)
-    {
-        var count = Math.Min(itemCount, SteamCoverGridLayoutObservation.MaximumSampledItems);
-        var arrangedItems = new List<SteamCoverGridArrangedItem>(count);
-        for (var index = 0; index < count; index++)
-        {
-            try
-            {
-                if (GameGrid.TryGetElement(index) is not FrameworkElement element)
-                    continue;
-
-                var point = element.TransformToVisual(GameGrid).TransformPoint(new Windows.Foundation.Point(0, 0));
-                arrangedItems.Add(new SteamCoverGridArrangedItem(index, point.X, point.Y));
-            }
-            catch (Exception)
-            {
-                break;
-            }
-        }
-
-        return arrangedItems;
-    }
-
-    private static string FormatArrangedCoverGridItems(IReadOnlyList<SteamCoverGridArrangedItem> items) =>
-        items.Count == 0
-            ? "Unknown"
-            : string.Join(";", items.Select(item =>
-                $"{item.Index}:{FormatDiagnosticDip(item.X)},{FormatDiagnosticDip(item.Y)}"));
-
-    private static string FormatDiagnosticDip(double value) =>
-        double.IsFinite(value) ? value.ToString("0.###", CultureInfo.InvariantCulture) : "Unknown";
 
     private async void ProfileEnabledToggle_Toggled(object sender, RoutedEventArgs e)
     {
