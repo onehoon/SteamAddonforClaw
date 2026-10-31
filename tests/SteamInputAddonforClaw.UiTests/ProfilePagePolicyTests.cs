@@ -187,12 +187,12 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Theory]
-    [InlineData(800, 176, 4, 32)]
+    [InlineData(800, 176, 4, 31.99)]
     [InlineData(722, 176, 4, 6)]
-    [InlineData(721, 176, 3, 96.5)]
-    [InlineData(550, 176, 3, 11)]
+    [InlineData(721, 176, 3, 96.49)]
+    [InlineData(550, 176, 3, 10.99)]
     [InlineData(540, 176, 3, 6)]
-    [InlineData(539, 176, 2, 187)]
+    [InlineData(539, 176, 2, 186.99)]
     [InlineData(176, 176, 1, 6)]
     [InlineData(175, 176, 1, 6)]
     public void Steam_cover_grid_spacing_uses_available_width_and_a_shared_minimum_gap(
@@ -235,6 +235,35 @@ public sealed class ProfilePagePolicyTests
         }
 
         Assert.Equal(176.0 / 1.5, SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width, 8);
+    }
+
+    [Theory]
+    [InlineData(1.0, 800, 4)]
+    [InlineData(1.5, 800, 6)]
+    [InlineData(2.0, 800, 8)]
+    public void Steam_cover_spacing_preserves_columns_after_UniformGridLayout_float_rounding(
+        double rasterizationScale,
+        double availableWidthDip,
+        int expectedColumns)
+    {
+        var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale).Width;
+        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, out var spacing));
+
+        Assert.Equal(expectedColumns, spacing.Columns);
+        Assert.Equal(expectedColumns, GetUniformGridLayoutColumnCount(
+            availableWidthDip,
+            coverWidthDip,
+            spacing.GapDip));
+    }
+
+    private static int GetUniformGridLayoutColumnCount(
+        double availableWidthDip,
+        double coverWidthDip,
+        double spacingDip)
+    {
+        var availableWidth = (float)availableWidthDip;
+        var itemStride = (float)(coverWidthDip + spacingDip);
+        return Math.Max(1, (int)((availableWidth + spacingDip) / itemStride));
     }
 
     [Fact]

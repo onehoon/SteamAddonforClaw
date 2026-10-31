@@ -3,6 +3,7 @@ namespace SteamInputAddonforClaw.Views;
 internal readonly record struct SteamCoverGridSpacing(int Columns, double GapDip)
 {
     internal const double MinimumGapDip = 6.0;
+    private const double LayoutFitSlackDip = 0.01; // Account for UniformGridLayout's single-precision item stride.
 
     internal static bool TryCalculate(
         double availableWidthDip,
@@ -20,13 +21,16 @@ internal readonly record struct SteamCoverGridSpacing(int Columns, double GapDip
             return false;
 
         var columns = Math.Max(1, (int)columnCount);
-        var gapDip = columns > 1
+        var idealGapDip = columns > 1
             ? (availableWidthDip - columns * coverWidthDip) / (columns - 1)
             : MinimumGapDip;
-        if (!double.IsFinite(gapDip))
+        if (!double.IsFinite(idealGapDip))
             return false;
 
-        spacing = new SteamCoverGridSpacing(columns, Math.Max(MinimumGapDip, gapDip));
+        var gapDip = columns > 1
+            ? Math.Max(MinimumGapDip, idealGapDip - LayoutFitSlackDip)
+            : MinimumGapDip;
+        spacing = new SteamCoverGridSpacing(columns, gapDip);
         return true;
     }
 }
