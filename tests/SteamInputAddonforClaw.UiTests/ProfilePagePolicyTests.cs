@@ -167,8 +167,8 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("<ItemsRepeater x:Name=\"GameGrid\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinColumnSpacing=\"6\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinRowSpacing=\"6\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinColumnSpacing=\"2\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinRowSpacing=\"2\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("MaximumRowsOrColumns", catalog, StringComparison.Ordinal);
         Assert.Contains("Width=\"176\" Height=\"264\"", catalog, StringComparison.Ordinal);
         Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(catalog, "CornerRadius=\"0\"").Count);
@@ -188,13 +188,15 @@ public sealed class ProfilePagePolicyTests
 
     [Theory]
     [InlineData(800, 176, 4, 31.99)]
-    [InlineData(722, 176, 4, 6)]
-    [InlineData(721, 176, 3, 96.49)]
+    [InlineData(722, 176, 4, 5.99)]
+    [InlineData(721, 176, 4, 5.656666666666667)]
+    [InlineData(710, 176, 4, 2)]
+    [InlineData(709, 176, 3, 90.49)]
     [InlineData(550, 176, 3, 10.99)]
-    [InlineData(540, 176, 3, 6)]
-    [InlineData(539, 176, 2, 186.99)]
-    [InlineData(176, 176, 1, 6)]
-    [InlineData(175, 176, 1, 6)]
+    [InlineData(540, 176, 3, 5.99)]
+    [InlineData(539, 176, 3, 5.49)]
+    [InlineData(176, 176, 1, 2)]
+    [InlineData(175, 176, 1, 2)]
     public void Steam_cover_grid_spacing_uses_available_width_and_a_shared_minimum_gap(
         double availableWidthDip,
         double coverWidthDip,

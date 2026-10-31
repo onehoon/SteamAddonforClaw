@@ -2,7 +2,7 @@ namespace SteamInputAddonforClaw.Views;
 
 internal readonly record struct SteamCoverGridSpacing(int Columns, double GapDip)
 {
-    internal const double MinimumGapDip = 6.0;
+    internal const double MinimumGapDip = 2.0;
     private const double LayoutFitSlackDip = 0.01; // Account for UniformGridLayout's single-precision item stride.
 
     internal static bool TryCalculate(
