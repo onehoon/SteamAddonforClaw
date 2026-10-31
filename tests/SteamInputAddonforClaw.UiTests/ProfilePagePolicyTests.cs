@@ -167,8 +167,8 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("<ItemsRepeater x:Name=\"GameGrid\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinColumnSpacing=\"12\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinRowSpacing=\"12\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinColumnSpacing=\"6\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinRowSpacing=\"6\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("MaximumRowsOrColumns", catalog, StringComparison.Ordinal);
         Assert.Contains("Width=\"176\" Height=\"264\"", catalog, StringComparison.Ordinal);
         Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(catalog, "CornerRadius=\"0\"").Count);
@@ -184,6 +184,88 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("AutomationProperties.Name=\"{Binding Name}\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("Shadow", catalog, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Gradient", catalog, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(800, 176, 4, 32)]
+    [InlineData(722, 176, 4, 6)]
+    [InlineData(721, 176, 3, 96.5)]
+    [InlineData(550, 176, 3, 11)]
+    [InlineData(540, 176, 3, 6)]
+    [InlineData(539, 176, 2, 187)]
+    [InlineData(176, 176, 1, 6)]
+    [InlineData(175, 176, 1, 6)]
+    public void Steam_cover_grid_spacing_uses_available_width_and_a_shared_minimum_gap(
+        double availableWidthDip,
+        double coverWidthDip,
+        int expectedColumns,
+        double expectedGapDip)
+    {
+        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, out var spacing));
+        Assert.Equal(expectedColumns, spacing.Columns);
+        Assert.Equal(expectedGapDip, spacing.GapDip, 8);
+        Assert.True(double.IsFinite(spacing.GapDip));
+        Assert.True(spacing.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
+    }
+
+    [Theory]
+    [InlineData(0, 176)]
+    [InlineData(-1, 176)]
+    [InlineData(double.NaN, 176)]
+    [InlineData(double.PositiveInfinity, 176)]
+    [InlineData(800, 0)]
+    [InlineData(800, double.NaN)]
+    [InlineData(800, double.NegativeInfinity)]
+    public void Steam_cover_grid_spacing_rejects_unmeasured_or_invalid_dimensions(
+        double availableWidthDip,
+        double coverWidthDip)
+    {
+        Assert.False(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, out _));
+    }
+
+    [Fact]
+    public void Steam_cover_grid_spacing_tracks_fixed_physical_cover_width_at_common_DPI_scales()
+    {
+        foreach (var scale in new[] { 1.0, 1.5, 2.0 })
+        {
+            var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(scale).Width;
+            Assert.True(SteamCoverGridSpacing.TryCalculate(800, coverWidthDip, out var spacing));
+            Assert.True(spacing.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
+            Assert.True(double.IsFinite(spacing.GapDip));
+        }
+
+        Assert.Equal(176.0 / 1.5, SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width, 8);
+    }
+
+    [Fact]
+    public void Steam_cover_grid_spacing_is_grid_level_and_recalculates_only_on_measurement_or_DPI_changes()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var catalog = xaml[..xaml.IndexOf("<Grid x:Name=\"DetailPanel\"", StringComparison.Ordinal)];
+        var updateSpacing = Method(code, "private void UpdateCoverGridSpacing(", "private void GameGrid_ElementPrepared(");
+        var updateCardSize = Method(code, "private void UpdateCoverCardSize(", "private void GameGrid_SizeChanged(");
+        var gridSizeChanged = Method(code, "private void GameGrid_SizeChanged(", "private void UpdateCoverGridSpacing(");
+        var rootChanged = Method(code, "private void XamlRoot_Changed(", "private void UpdateCoverCardSize(");
+
+        Assert.Contains("SizeChanged=\"GameGrid_SizeChanged\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("UpdateCoverGridSpacing(GameGrid.XamlRoot?.RasterizationScale ?? 1.0)", gridSizeChanged, StringComparison.Ordinal);
+        Assert.Contains("UpdateCoverCardSize(sender.RasterizationScale)", rootChanged, StringComparison.Ordinal);
+        Assert.Contains("GameGrid.ActualWidth", updateSpacing, StringComparison.Ordinal);
+        Assert.DoesNotContain("_visibleGameCards", updateSpacing, StringComparison.Ordinal);
+        Assert.DoesNotContain("GameSearchBox", updateSpacing, StringComparison.Ordinal);
+        Assert.Contains("GetCoverSizeDip(rasterizationScale)", updateSpacing, StringComparison.Ordinal);
+        Assert.Contains("layout.MinColumnSpacing = spacing.GapDip", updateSpacing, StringComparison.Ordinal);
+        Assert.Contains("layout.MinRowSpacing = spacing.GapDip", updateSpacing, StringComparison.Ordinal);
+        Assert.Contains("Math.Abs(layout.MinColumnSpacing - spacing.GapDip) <= SpacingUpdateToleranceDip", updateSpacing, StringComparison.Ordinal);
+        Assert.Contains("Math.Abs(layout.MinRowSpacing - spacing.GapDip) <= SpacingUpdateToleranceDip", updateSpacing, StringComparison.Ordinal);
+        Assert.Contains("UpdateCoverGridSpacing(rasterizationScale)", updateCardSize, StringComparison.Ordinal);
+        Assert.Contains("_observedXamlRoot.Changed += XamlRoot_Changed", code, StringComparison.Ordinal);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(code, "_observedXamlRoot\\.Changed \\+= XamlRoot_Changed"));
+        Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Width=\"176\" Height=\"264\"", catalog, StringComparison.Ordinal);
     }
 
     [Fact]

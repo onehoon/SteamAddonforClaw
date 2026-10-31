@@ -41,8 +41,8 @@
 <TextBox x:Name="GameSearchBox" Grid.Row="1" x:Uid="Steam_GameSearchBox" PlaceholderText="Search games..." TextChanged="GameSearchBox_TextChanged" Margin="0,16,0,0"/>
 <InfoBar x:Name="FavoriteStateInfoBar" x:Uid="Steam_FavoriteStateUnavailableInfoBar" Grid.Row="2" IsClosable="False" IsOpen="False" Severity="Informational" Message="Favorite state is unavailable because profile settings could not be read."/>
 <ScrollViewer Grid.Row="3" Margin="0,16,0,0" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollMode="Enabled" VerticalScrollBarVisibility="Auto">
-<ItemsRepeater x:Name="GameGrid" HorizontalAlignment="Stretch" ElementPrepared="GameGrid_ElementPrepared" ElementClearing="GameGrid_ElementClearing">
-<ItemsRepeater.Layout><UniformGridLayout Orientation="Horizontal" MinItemWidth="176" MinItemHeight="264" MinColumnSpacing="12" MinRowSpacing="12" ItemsStretch="None" ItemsJustification="Start"/></ItemsRepeater.Layout>
+<ItemsRepeater x:Name="GameGrid" HorizontalAlignment="Stretch" SizeChanged="GameGrid_SizeChanged" ElementPrepared="GameGrid_ElementPrepared" ElementClearing="GameGrid_ElementClearing">
+<ItemsRepeater.Layout><UniformGridLayout Orientation="Horizontal" MinItemWidth="176" MinItemHeight="264" MinColumnSpacing="6" MinRowSpacing="6" ItemsStretch="None" ItemsJustification="Start"/></ItemsRepeater.Layout>
 <ItemsRepeater.ItemTemplate>
 <DataTemplate>
 <Border x:Name="GameCardRoot" Width="176" Height="264" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
