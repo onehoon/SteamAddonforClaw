@@ -242,7 +242,8 @@ public sealed partial class ProfilePage : UserControl
         var coverSize = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale);
         if (!SteamCoverGridSpacing.TryResolveAvailableWidthDip(
                 CatalogScrollViewer.ViewportWidth, GameGrid.ActualWidth, out var availableWidthDip)
-            || !SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverSize.Width, out var spacing))
+            || !SteamCoverGridSpacing.TryCalculate(
+                availableWidthDip, coverSize.Width, rasterizationScale, out var spacing))
             return;
 
         const double SpacingUpdateToleranceDip = 0.001;
@@ -847,7 +848,8 @@ public sealed partial class ProfilePage : UserControl
             viewportWidth, gridWidth, out var resolvedWidth);
         var calculatedSpacing = default(SteamCoverGridSpacing);
         var hasCalculatedSpacing = hasResolvedWidth
-            && SteamCoverGridSpacing.TryCalculate(resolvedWidth, coverSize.Width, out calculatedSpacing);
+            && SteamCoverGridSpacing.TryCalculate(
+                resolvedWidth, coverSize.Width, effectiveScale, out calculatedSpacing);
         var itemCount = _visibleGameCards.Count;
         var scrollOffset = CatalogScrollViewer.VerticalOffset;
 
