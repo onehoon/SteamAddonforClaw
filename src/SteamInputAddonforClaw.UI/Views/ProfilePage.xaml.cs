@@ -193,7 +193,10 @@ public sealed partial class ProfilePage : UserControl
         if (!double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
             rasterizationScale = 1.0;
         if (Math.Abs(_lastRasterizationScale - rasterizationScale) < 0.0001)
+        {
+            UpdateCoverGridSpacing(rasterizationScale);
             return;
+        }
 
         _lastRasterizationScale = rasterizationScale;
         var size = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale);
@@ -205,6 +208,31 @@ public sealed partial class ProfilePage : UserControl
 
         foreach (var card in _realizedGameCards.Values)
             SetCardSize(card.Root, size.Width, size.Height);
+
+        UpdateCoverGridSpacing(rasterizationScale);
+    }
+
+    private void GameGrid_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        UpdateCoverGridSpacing(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
+
+    private void UpdateCoverGridSpacing(double rasterizationScale)
+    {
+        if (GameGrid.Layout is not UniformGridLayout layout)
+            return;
+
+        var coverSize = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale);
+        if (!SteamCoverGridSpacing.TryCalculate(GameGrid.ActualWidth, coverSize.Width, out var spacing))
+            return;
+
+        const double SpacingUpdateToleranceDip = 0.001;
+        if (double.IsFinite(layout.MinColumnSpacing)
+            && double.IsFinite(layout.MinRowSpacing)
+            && Math.Abs(layout.MinColumnSpacing - spacing.GapDip) <= SpacingUpdateToleranceDip
+            && Math.Abs(layout.MinRowSpacing - spacing.GapDip) <= SpacingUpdateToleranceDip)
+            return;
+
+        layout.MinColumnSpacing = spacing.GapDip;
+        layout.MinRowSpacing = spacing.GapDip;
     }
 
     private void GameGrid_ElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
