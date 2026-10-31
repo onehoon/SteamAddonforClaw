@@ -215,13 +215,18 @@ public sealed partial class ProfilePage : UserControl
     private void GameGrid_SizeChanged(object sender, SizeChangedEventArgs e) =>
         UpdateCoverGridSpacing(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
 
+    private void CatalogScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        UpdateCoverGridSpacing(CatalogScrollViewer.XamlRoot?.RasterizationScale ?? 1.0);
+
     private void UpdateCoverGridSpacing(double rasterizationScale)
     {
         if (GameGrid.Layout is not UniformGridLayout layout)
             return;
 
         var coverSize = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale);
-        if (!SteamCoverGridSpacing.TryCalculate(GameGrid.ActualWidth, coverSize.Width, out var spacing))
+        if (!SteamCoverGridSpacing.TryResolveAvailableWidthDip(
+                CatalogScrollViewer.ViewportWidth, GameGrid.ActualWidth, out var availableWidthDip)
+            || !SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverSize.Width, out var spacing))
             return;
 
         const double SpacingUpdateToleranceDip = 0.001;
