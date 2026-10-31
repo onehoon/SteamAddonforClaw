@@ -169,7 +169,7 @@ internal static class SteamPortraitArtworkResolver
         var scale = double.IsFinite(rasterizationScale) && rasterizationScale > 0
             ? rasterizationScale
             : 1.0;
-        return (176.0 / scale, 264.0 / scale);
+        return (175.0 / scale, 264.0 / scale);
     }
 
     private static string? LocateSteamRoot()
