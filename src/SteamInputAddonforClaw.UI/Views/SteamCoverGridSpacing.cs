@@ -4,6 +4,7 @@ internal readonly record struct SteamCoverGridSpacing(int Columns, double GapDip
 {
     internal const double MinimumGapDip = 2.0;
     private const double LayoutFitSlackDip = 0.01; // Account for UniformGridLayout's single-precision item stride.
+    private const double ExtraGapReservePx = 1.0; // Reserve one physical pixel per inter-card gap.
 
     internal static bool TryResolveAvailableWidthDip(
         double viewportWidthDip,
@@ -84,7 +85,7 @@ internal readonly record struct SteamCoverGridSpacing(int Columns, double GapDip
             return false;
 
         var gapPx = columns > 1
-            ? Math.Max(minGapPx, Math.Floor(idealGapPx - fitSlackPx))
+            ? Math.Max(minGapPx, Math.Floor(idealGapPx - fitSlackPx) - ExtraGapReservePx)
             : minGapPx;
         var gapDip = gapPx / rasterizationScale;
         if (!double.IsFinite(gapPx) || !double.IsFinite(gapDip) || gapDip < MinimumGapDip)

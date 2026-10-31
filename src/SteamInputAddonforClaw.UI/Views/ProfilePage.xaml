@@ -42,10 +42,10 @@
 <InfoBar x:Name="FavoriteStateInfoBar" x:Uid="Steam_FavoriteStateUnavailableInfoBar" Grid.Row="2" IsClosable="False" IsOpen="False" Severity="Informational" Message="Favorite state is unavailable because profile settings could not be read."/>
 <ScrollViewer x:Name="CatalogScrollViewer" Grid.Row="3" Margin="0,16,0,0" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollMode="Enabled" VerticalScrollBarVisibility="Hidden" SizeChanged="CatalogScrollViewer_SizeChanged">
 <ItemsRepeater x:Name="GameGrid" HorizontalAlignment="Stretch" SizeChanged="GameGrid_SizeChanged" ElementPrepared="GameGrid_ElementPrepared" ElementClearing="GameGrid_ElementClearing">
-<ItemsRepeater.Layout><UniformGridLayout Orientation="Horizontal" MinItemWidth="176" MinItemHeight="264" MinColumnSpacing="2" MinRowSpacing="2" ItemsStretch="None" ItemsJustification="Start"/></ItemsRepeater.Layout>
+<ItemsRepeater.Layout><UniformGridLayout Orientation="Horizontal" MinItemWidth="175" MinItemHeight="264" MinColumnSpacing="2" MinRowSpacing="2" ItemsStretch="None" ItemsJustification="Start"/></ItemsRepeater.Layout>
 <ItemsRepeater.ItemTemplate>
 <DataTemplate>
-<Border x:Name="GameCardRoot" Width="176" Height="264" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+<Border x:Name="GameCardRoot" Width="175" Height="264" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
 <Grid>
 <Border x:Name="CoverImageFrame" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" IsHitTestVisible="False"/>
 <Border x:Name="FallbackCard" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" IsHitTestVisible="False">

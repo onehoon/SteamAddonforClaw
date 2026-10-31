@@ -170,7 +170,8 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("MinColumnSpacing=\"2\"", catalog, StringComparison.Ordinal);
         Assert.Contains("MinRowSpacing=\"2\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("MaximumRowsOrColumns", catalog, StringComparison.Ordinal);
-        Assert.Contains("Width=\"176\" Height=\"264\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"264\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Width=\"175\" Height=\"264\"", catalog, StringComparison.Ordinal);
         Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(catalog, "CornerRadius=\"0\"").Count);
         Assert.DoesNotContain("CornerRadius=\"8\"", catalog, StringComparison.Ordinal);
         var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
@@ -187,14 +188,14 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Theory]
-    [InlineData(800, 176, 4, 31)]
-    [InlineData(722, 176, 4, 5)]
-    [InlineData(721, 176, 4, 5)]
+    [InlineData(800, 176, 4, 30)]
+    [InlineData(722, 176, 4, 4)]
+    [InlineData(721, 176, 4, 4)]
     [InlineData(710, 176, 4, 2)]
-    [InlineData(709, 176, 3, 90)]
-    [InlineData(550, 176, 3, 10)]
-    [InlineData(540, 176, 3, 5)]
-    [InlineData(539, 176, 3, 5)]
+    [InlineData(709, 176, 3, 89)]
+    [InlineData(550, 176, 3, 9)]
+    [InlineData(540, 176, 3, 4)]
+    [InlineData(539, 176, 3, 4)]
     [InlineData(176, 176, 1, 2)]
     [InlineData(175, 176, 1, 2)]
     public void Steam_cover_grid_spacing_uses_available_width_and_a_shared_minimum_gap(
@@ -241,7 +242,7 @@ public sealed class ProfilePagePolicyTests
         foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
         {
             var coverSize = SteamPortraitArtworkResolver.GetCoverSizeDip(scale);
-            Assert.Equal(176.0, coverSize.Width * scale, 8);
+            Assert.Equal(175.0, coverSize.Width * scale, 8);
             Assert.Equal(264.0, coverSize.Height * scale, 8);
 
             var coverWidthDip = coverSize.Width;
@@ -256,11 +257,11 @@ public sealed class ProfilePagePolicyTests
             Assert.True(occupiedWidthPx <= 800 * scale + 1e-7);
         }
 
-        Assert.Equal(176.0 / 1.5, SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width, 8);
+        Assert.Equal(175.0 / 1.5, SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width, 8);
     }
 
     [Theory]
-    [InlineData(951, 957, 951)]
+    [InlineData(945, 951, 945)]
     [InlineData(800, 700, 800)]
     public void Steam_cover_grid_width_prefers_the_measured_viewport_over_the_repeater_width(
         double viewportWidthDip,
@@ -307,11 +308,11 @@ public sealed class ProfilePagePolicyTests
     {
         var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width;
 
-        Assert.True(SteamCoverGridSpacing.TryResolveAvailableWidthDip(951, 957, out var availableWidthDip));
+        Assert.True(SteamCoverGridSpacing.TryResolveAvailableWidthDip(945, 951, out var availableWidthDip));
         Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, 1.5, out var viewportSpacing));
-        Assert.True(SteamCoverGridSpacing.TryCalculate(957, coverWidthDip, 1.5, out var repeaterSpacing));
+        Assert.True(SteamCoverGridSpacing.TryCalculate(951, coverWidthDip, 1.5, out var repeaterSpacing));
 
-        Assert.Equal(951, availableWidthDip);
+        Assert.Equal(945, availableWidthDip);
         Assert.Equal(7, viewportSpacing.Columns);
         Assert.Equal(8, repeaterSpacing.Columns);
         Assert.Equal(viewportSpacing.Columns, GetUniformGridLayoutColumnCount(
@@ -367,13 +368,16 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Theory]
-    [InlineData(984.667, 8, 9)]
-    [InlineData(982.667, 8, 9)]
-    [InlineData(1079.333, 9, 4)]
-    public void Steam_cover_grid_spacing_floors_log_derived_gaps_to_physical_pixels(
+    [InlineData(984.667, 8, 9, 14)]
+    [InlineData(982.667, 8, 9, 11)]
+    [InlineData(1000, 8, 13, 9)]
+    [InlineData(1024, 8, 18, 10)]
+    [InlineData(1079.333, 9, 4, 12)]
+    public void Steam_cover_grid_spacing_reserves_one_physical_pixel_per_gap_for_log_derived_widths(
         double availableWidthDip,
         int expectedColumns,
-        int expectedGapPixels)
+        int expectedGapPixels,
+        double expectedUnusedWidthPixels)
     {
         const double scale = 1.5;
         var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(scale).Width;
@@ -382,11 +386,16 @@ public sealed class ProfilePagePolicyTests
             availableWidthDip, coverWidthDip, scale, out var spacing));
 
         Assert.Equal(expectedColumns, spacing.Columns);
-        Assert.Equal(expectedGapPixels, spacing.GapDip * scale, 8);
+        Assert.True(double.IsFinite(spacing.GapDip));
+        var gapPixels = spacing.GapDip * scale;
+        Assert.True(gapPixels > 0);
+        Assert.Equal(expectedGapPixels, gapPixels, 8);
+        Assert.Equal(Math.Round(gapPixels), gapPixels, 8);
         Assert.True(spacing.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
         var occupiedWidthPx = spacing.Columns * coverWidthDip * scale
-            + (spacing.Columns - 1) * spacing.GapDip * scale;
+            + (spacing.Columns - 1) * gapPixels;
         Assert.True(occupiedWidthPx <= availableWidthDip * scale + 1e-7);
+        Assert.Equal(expectedUnusedWidthPixels, availableWidthDip * scale - occupiedWidthPx, 2);
     }
 
     [Fact]
@@ -422,11 +431,11 @@ public sealed class ProfilePagePolicyTests
         Assert.Equal(3, oneColumn.GapDip * scale, 8);
         Assert.True(double.IsFinite(oneColumn.GapDip));
 
-        var nearlyExactWidthDip = (4 * 176.0 + 3 * 10.0) / scale;
+        var nearlyExactWidthDip = (4 * 175.0 + 3 * 10.0) / scale;
         Assert.True(SteamCoverGridSpacing.TryCalculate(
             nearlyExactWidthDip, coverWidthDip, scale, out var nearIntegerGap));
         Assert.Equal(4, nearIntegerGap.Columns);
-        Assert.Equal(9, nearIntegerGap.GapDip * scale, 8);
+        Assert.Equal(8, nearIntegerGap.GapDip * scale, 8);
         Assert.True(double.IsFinite(nearIntegerGap.GapDip));
         Assert.True(nearIntegerGap.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
     }
@@ -569,7 +578,8 @@ public sealed class ProfilePagePolicyTests
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(code, "_observedXamlRoot\\.Changed \\+= XamlRoot_Changed"));
         Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Width=\"176\" Height=\"264\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"264\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Width=\"175\" Height=\"264\"", catalog, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -605,15 +615,17 @@ public sealed class ProfilePagePolicyTests
     [Fact]
     public void Steam_cover_card_DIP_dimensions_preserve_physical_size_at_common_scales()
     {
-        Assert.Equal((176, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(1.0));
+        Assert.Equal((175, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(1.0));
 
         var at150Percent = SteamPortraitArtworkResolver.GetCoverSizeDip(1.5);
-        Assert.Equal(176.0 / 1.5, at150Percent.Width, 5);
-        Assert.Equal(176.0, at150Percent.Height, 5);
+        Assert.Equal(175.0 / 1.5, at150Percent.Width, 5);
+        Assert.Equal(264.0 / 1.5, at150Percent.Height, 5);
+        Assert.Equal(175.0, at150Percent.Width * 1.5, 5);
+        Assert.Equal(264.0, at150Percent.Height * 1.5, 5);
 
-        Assert.Equal((88, 132), SteamPortraitArtworkResolver.GetCoverSizeDip(2.0));
-        Assert.Equal((176, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(0));
-        Assert.Equal((176, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(double.NaN));
+        Assert.Equal((87.5, 132), SteamPortraitArtworkResolver.GetCoverSizeDip(2.0));
+        Assert.Equal((175, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(0));
+        Assert.Equal((175, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(double.NaN));
     }
 
     [Fact]
