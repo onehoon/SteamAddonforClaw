@@ -16,7 +16,6 @@ public sealed partial class OverlayWindow
     private const float HiddenTranslateYDip = 8.0f;
     private const double HiddenOpacity = 0.90;
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(120);
-    private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(140);
     private uint _lastConfiguredDpi;
     private int _lastAppliedClawHudTopInsetPx;
     private DispatcherQueueTimer? _railClockTimer;
@@ -81,7 +80,7 @@ public sealed partial class OverlayWindow
         }
     }
 
-    internal async Task HideForPocAsync()
+    internal Task HideForPocAsync()
     {
         StopRailClockUpdates();
         _isVisible = false;
@@ -92,25 +91,6 @@ public sealed partial class OverlayWindow
         foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.CancelUnsubmittedDrafts();
         CancelPendingControllerVibrationDraft();
         WindowInterop.DisarmOutsideClickDismissal();
-        if (AnimationsEnabled())
-        {
-            var stopwatch = Stopwatch.StartNew();
-            OverlayLog.Debug("Animation", "Hide animation started",
-                ("DurationMs", HideDuration.TotalMilliseconds),
-                ("StartScale", 1.0), ("EndScale", HiddenScale),
-                ("StartTranslateYDip", 0.0), ("EndTranslateYDip", HiddenTranslateYDip),
-                ("StartOpacity", 1.0), ("EndOpacity", HiddenOpacity));
-            try
-            {
-                await AnimateAsync(1.0f, HiddenScale, 0.0, HiddenTranslateYDip, 1.0, HiddenOpacity, HideDuration, easeIn: true);
-                OverlayLog.Debug("Animation", "Hide animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
-            }
-            catch (Exception exception)
-            {
-                OverlayLog.Error("Animation", "Hide animation failed; hiding Overlay immediately.", exception);
-            }
-        }
-
         try
         {
             WindowInterop.Hide(this);
@@ -127,6 +107,8 @@ public sealed partial class OverlayWindow
                 OverlayLog.Error("Animation", "Could not reset hidden visual state.", exception);
             }
         }
+
+        return Task.CompletedTask;
     }
 
     private void ConfigureWindow()

@@ -186,7 +186,7 @@ public sealed class OverlayShortcutRendererTests
         var shortcutTabEnd = shell.IndexOf("OnProfileTabSelectionChanged", shortcutTabStart, StringComparison.Ordinal);
         var shortcutTabSelection = shell[shortcutTabStart..shortcutTabEnd];
         var showStart = presentation.IndexOf("internal async Task ShowForPocAsync()", StringComparison.Ordinal);
-        var hideStart = presentation.IndexOf("internal async Task HideForPocAsync()", showStart, StringComparison.Ordinal);
+        var hideStart = presentation.IndexOf("internal Task HideForPocAsync()", showStart, StringComparison.Ordinal);
         var show = presentation[showStart..hideStart];
 
         Assert.Contains("_tabState.ResetForShow();", reset, StringComparison.Ordinal);
@@ -225,13 +225,24 @@ public sealed class OverlayShortcutRendererTests
     }
 
     [Fact]
-    public void Show_animation_is_120ms_and_hide_animation_remains_140ms()
+    public void Show_animation_is_120ms_and_hide_is_immediate()
     {
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var showStart = presentation.IndexOf("internal async Task ShowForPocAsync()", StringComparison.Ordinal);
+        var hideStart = presentation.IndexOf("internal Task HideForPocAsync()", showStart, StringComparison.Ordinal);
+        var hideEnd = presentation.IndexOf("private void ConfigureWindow()", hideStart, StringComparison.Ordinal);
+        Assert.True(showStart >= 0 && hideStart > showStart && hideEnd > hideStart);
+        var show = presentation[showStart..hideStart];
+        var hide = presentation[hideStart..hideEnd];
 
         Assert.Contains("ShowDuration = TimeSpan.FromMilliseconds(120)", presentation, StringComparison.Ordinal);
-        Assert.Contains("HideDuration = TimeSpan.FromMilliseconds(140)", presentation, StringComparison.Ordinal);
+        Assert.Contains("!AnimationsEnabled()", show, StringComparison.Ordinal);
         Assert.Contains("new UISettings().AnimationsEnabled", presentation, StringComparison.Ordinal);
+        Assert.Contains("await AnimateAsync(HiddenScale, 1.0f, HiddenTranslateYDip, 0.0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);", show, StringComparison.Ordinal);
+        Assert.DoesNotContain("HideDuration", presentation, StringComparison.Ordinal);
+        Assert.DoesNotContain("AnimationsEnabled()", hide, StringComparison.Ordinal);
+        Assert.DoesNotContain("AnimateAsync", hide, StringComparison.Ordinal);
+        Assert.Contains("WindowInterop.Hide(this);", hide, StringComparison.Ordinal);
     }
 
     [Fact]

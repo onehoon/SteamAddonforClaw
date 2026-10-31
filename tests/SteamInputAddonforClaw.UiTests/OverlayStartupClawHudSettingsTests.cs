@@ -137,7 +137,7 @@ public sealed class OverlayStartupClawHudSettingsTests
         var app = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs"));
         var clawHud = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs"));
         var presentation = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"));
-        var show = Method(presentation, "internal async Task ShowForPocAsync()", "internal async Task HideForPocAsync()");
+        var show = Method(presentation, "internal async Task ShowForPocAsync()", "internal Task HideForPocAsync()");
 
         var load = app.IndexOf("OverlayStartupClawHudSettings.Load(OverlayLog.DirectoryPath)", StringComparison.Ordinal);
         var prepareHidden = app.IndexOf("_window.PrepareHidden();", StringComparison.Ordinal);
