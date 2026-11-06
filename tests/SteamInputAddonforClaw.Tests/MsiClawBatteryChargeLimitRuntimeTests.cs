@@ -17,6 +17,7 @@ public sealed class MsiClawBatteryChargeLimitRuntimeTests : IDisposable
 
         runtime.StartupReconcile();
 
+        Assert.True(runtime.Snapshot.Available);
         Assert.Empty(transport.Writes);
         var persisted = new ProfileStore(Path.Combine(_directory, "profiles.json")).Load().Document.Device.Battery.ChargeLimit;
         Assert.Equal(new DeviceBatteryChargeLimitSettings { Enabled = true, LimitPercent = 80 }, persisted);
@@ -118,6 +119,37 @@ public sealed class MsiClawBatteryChargeLimitRuntimeTests : IDisposable
         Assert.Equal(80, new ProfileStore(Path.Combine(_directory, "profiles.json")).Load().Document.Device.Battery.ChargeLimit!.LimitPercent);
     }
 
+    [Fact]
+    public void Unknown_model_is_unavailable_without_profile_bootstrap_or_hardware_io()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new ProfileStore(Path.Combine(_directory, "profiles.json"));
+        var desired = new DeviceBatteryChargeLimitSettings { Enabled = true, LimitPercent = 95 };
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Battery = new DeviceBatterySettings { ChargeLimit = desired } }
+        });
+        var transport = new FakeTransport(0xD0);
+        var runtime = new MsiClawBatteryChargeLimitRuntime(
+            store,
+            new ProfileMutationGate(),
+            new SteamInputAddonforClaw.Devices.Abstractions.HandheldDeviceModelId("msi.claw.future"),
+            new MsiClawBatteryChargeLimitHardware(transport));
+
+        runtime.StartupReconcile();
+        runtime.CaptureSnapshot();
+        runtime.Reconcile("Test");
+        var enabled = runtime.SetEnabled(false);
+        var percent = runtime.SetPercent(85);
+
+        Assert.Equal(BatteryChargeLimitMutationOutcome.Unavailable, enabled.Outcome);
+        Assert.Equal(BatteryChargeLimitMutationOutcome.Unavailable, percent.Outcome);
+        Assert.False(runtime.Snapshot.Available);
+        Assert.Equal(0, transport.ReadCalls);
+        Assert.Empty(transport.Writes);
+        Assert.Equal(desired, store.Load().Document.Device.Battery.ChargeLimit);
+    }
+
     private MsiClawBatteryChargeLimitRuntime CreateRuntime(FakeTransport transport, DeviceBatteryChargeLimitSettings? desired = null)
     {
         Directory.CreateDirectory(_directory);
@@ -140,12 +172,14 @@ public sealed class MsiClawBatteryChargeLimitRuntimeTests : IDisposable
         private byte _value = initialValue;
         private bool _firstRead = true;
         public List<byte> Writes { get; } = [];
+        public int ReadCalls { get; private set; }
         public bool FailReads { get; init; }
         public Action? OnFirstRead { get; set; }
         public bool TryGetAp(int index, out byte[] payload) { payload = []; return false; }
         public bool TrySetData(int block, byte value) { Writes.Add(value); _value = value; return !FailReads; }
         public bool TryGetData(int block, out byte[] payload)
         {
+            ReadCalls++;
             if (FailReads) { payload = []; return false; }
             if (_firstRead)
             {
