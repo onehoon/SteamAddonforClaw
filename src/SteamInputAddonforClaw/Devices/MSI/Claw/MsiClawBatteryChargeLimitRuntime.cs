@@ -53,7 +53,9 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _mutationGate = mutationGate ?? throw new ArgumentNullException(nameof(mutationGate));
         _hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
-        _available = modelId is { } id && MsiClawDeviceModels.All.Any(model => model.Id == id);
+        _available = modelId is { } id
+            && MsiClawDeviceModels.TryGetFeatures(MsiClawDeviceModels.FamilyId, id, out var features)
+            && features.SupportsBatteryChargeLimit;
         _snapshot = _available
             ? new(true, true, false, null, null, null, null, null)
             : BatteryChargeLimitRuntimeSnapshot.Unavailable;
@@ -99,7 +101,7 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
         lock (_sync)
         {
             if (!_accepting || !_available)
-                return Result(BatteryChargeLimitMutationOutcome.Unavailable, "MSI battery charge-limit control is unavailable.");
+                return UnavailableResult();
 
             ProfileLoadResult? loadedForFailure = null;
             BatteryChargeLimitMutationOutcome? failureOutcome = null;
@@ -147,7 +149,7 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
         lock (_sync)
         {
             if (!_accepting || !_available)
-                return Result(BatteryChargeLimitMutationOutcome.Unavailable, "MSI battery charge-limit control is unavailable.");
+                return UnavailableResult();
             if (!MsiClawBatteryChargeLimitHardware.IsProductValue(percent))
                 return Result(BatteryChargeLimitMutationOutcome.InvalidTarget,
                     "The battery limit must be 60% to 100% in 5% steps.");
@@ -392,6 +394,13 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
             ? new(true, true, false, current.State?.Enabled, current.State?.LimitPercent, null, null, message)
             : BuildSnapshot(loaded, current.State, message);
         return new(outcome, message, _snapshot);
+    }
+
+    private BatteryChargeLimitMutationResult UnavailableResult()
+    {
+        _snapshot = BatteryChargeLimitRuntimeSnapshot.Unavailable;
+        const string message = "MSI battery charge-limit control is unavailable.";
+        return new(BatteryChargeLimitMutationOutcome.Unavailable, message, _snapshot);
     }
 
     private static bool IsValidTarget(DeviceBatteryChargeLimitSettings? settings) =>
