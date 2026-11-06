@@ -22,14 +22,14 @@ public sealed class OverlayControllerRendererTests
         Assert.DoesNotContain("CreateControllerSection(\"Joystick LED\")", controller);
         Assert.Contains("var steamDetails = CreateOverlayDetailStack();", controller);
         Assert.Contains("AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities,", controller);
-        Assert.Contains("AddControllerRow(steamDetails, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities,", controller);
+        Assert.Contains("AddControllerRow(steamDetails, rows, gyroscopeRow.Container, gyroscopeRow.Capabilities with", controller);
         Assert.Contains("steamSection.Children.Add(steamDetails)", controller);
         Assert.Contains("new OverlayValueRow(\"Controller\", FormatSteamController", controller);
         Assert.Contains("new OverlayToggleRow(\"Gyroscope\", RequestGyroscopeChange);", controller);
         Assert.DoesNotContain("new OverlayToggleRow(\"Gyroscope\", RequestGyroscopeChange, strongLabel: true)", controller);
         Assert.Contains("var controllerAvailable = _frontendSettingsAvailable && _controllerForSteam.Available", controller);
         Assert.Contains("_steamControllerRow?.ApplyState(controllerAvailable, 0, controllerAvailable ? 1 : 2, 1, displayValue);", controller);
-        Assert.Contains("_gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_gyroscopeMutationInFlight", controller);
+        Assert.Contains("_gyroscopeRow?.ApplyState(_controllerMotionSupported && _frontendSettingsAvailable && !_gyroscopeMutationInFlight", controller);
         Assert.Contains("ControllerForSteamEditRequested?.Invoke(preference, null, ControllerForSteamMutationKind.Controller)", controller);
         Assert.Contains("ControllerForSteamEditRequested?.Invoke(null, enabled, ControllerForSteamMutationKind.Gyroscope)", controller);
         Assert.DoesNotContain("_controllerForSteamMutationInFlight", controller);
@@ -204,7 +204,7 @@ public sealed class OverlayControllerRendererTests
         Assert.DoesNotContain("AddBackButtonMappingRow(mappingSection, rows,", build);
         Assert.Contains("SetOverlaySectionSeparator(mappingCard, visible: true)", build);
         Assert.Contains("SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true)", build);
-        Assert.Contains("SetOverlaySectionSeparator(vibrationCard, visible: true)", build);
+        Assert.Contains("SetOverlaySectionSeparator(_controllerVibrationSectionCard, visible: true)", build);
         Assert.DoesNotContain("_backButtonStatusText", controller);
         Assert.DoesNotContain("BackButtonMappingCaption", controller);
         Assert.Contains("FailureMessage = response.Succeeded", controller);
@@ -244,8 +244,12 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("private void BuildControllerVibrationRows", controller);
         Assert.Contains("new OverlayValueRow(\"Left Motor\"", controller);
         Assert.Contains("new OverlayValueRow(\"Right Motor\"", controller);
-        Assert.Contains("AddControllerRow(details, rows, _leftVibrationRow.Container", controller);
-        Assert.Contains("AddControllerRow(details, rows, _rightVibrationRow.Container", controller);
+        Assert.Contains("var leftVibrationRow = new OverlayValueRow(\"Left Motor\"", controller);
+        Assert.Contains("var rightVibrationRow = new OverlayValueRow(\"Right Motor\"", controller);
+        Assert.Contains("IsSelectable = () => _controllerVibrationSupported && leftVibrationRow.Capabilities.IsSelectable()", controller);
+        Assert.Contains("IsSelectable = () => _controllerVibrationSupported && rightVibrationRow.Capabilities.IsSelectable()", controller);
+        Assert.Contains("AddControllerRow(details, rows, leftVibrationRow.Container", controller);
+        Assert.Contains("AddControllerRow(details, rows, rightVibrationRow.Container", controller);
         Assert.DoesNotContain("ColorPicker", controller);
         Assert.DoesNotContain("ColorChanged", controller);
         Assert.Contains("ControllerLedEditRequested?.Invoke(settings)", controller);
@@ -259,6 +263,26 @@ public sealed class OverlayControllerRendererTests
         Assert.DoesNotContain("TestControllerVibrationMotorAsync", app);
         Assert.DoesNotContain("RunControllerVibrationProfileWriteProbeAsync", controller);
         Assert.DoesNotContain("MsiClaw", controller);
+    }
+
+    [Fact]
+    public void Structural_controller_support_is_separate_from_temporary_availability()
+    {
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var settingsStateStart = controller.IndexOf("internal void ApplyFrontendSettingsState(", StringComparison.Ordinal);
+        var settingsStateEnd = controller.IndexOf("internal void ApplyFrontendSettingsMutationResult(", settingsStateStart, StringComparison.Ordinal);
+        var settingsState = controller[settingsStateStart..settingsStateEnd];
+
+        Assert.Contains("if (settingsAvailable)", settingsState);
+        Assert.Contains("_controllerMotionSupported = settings.FeatureSupport.Motion", settingsState);
+        Assert.Contains("_controllerVibrationSupported = settings.FeatureSupport.ControllerVibrationStrength", settingsState);
+        Assert.Contains("_controllerLedSupported = settings.FeatureSupport.ControllerLed", settingsState);
+        Assert.Contains("_controllerLedVisibilityEligible = _controllerLedSupported && controllerLedAvailable", settingsState);
+        Assert.Contains("_controllerLedAvailable = settingsAvailable && _controllerLedSupported && controllerLedAvailable", settingsState);
+        Assert.Contains("_controllerLedSectionCard.Visibility = _controllerLedVisibilityEligible", controller);
+        Assert.Contains("_controllerVibrationSectionCard.Visibility = _controllerVibrationSupported", controller);
+        Assert.Contains("IsSelectable = () => _controllerMotionSupported", controller);
+        Assert.Contains("IsSelectable = () => _controllerVibrationSupported", controller);
     }
 
     private static string ReadSource(params string[] parts)

@@ -153,7 +153,7 @@ public sealed class UiArchitectureTests
         });
 
         var constructor = ExtractMethod(mainWindow, "internal MainWindow(");
-        Assert.Contains("DeviceContent.Initialize(_frontend)", constructor, StringComparison.Ordinal);
+        Assert.Contains("DeviceContent.Initialize(_frontend, _bootstrap.FeatureSupport)", constructor, StringComparison.Ordinal);
         Assert.DoesNotContain("GetOrCreate", constructor, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsPage.Initialize", constructor, StringComparison.Ordinal);
         Assert.DoesNotContain("ScanProfileGamesAsync", constructor, StringComparison.Ordinal);
@@ -399,16 +399,73 @@ public sealed class UiArchitectureTests
         Assert.Contains("RenderPowerMode(snapshot.PowerMode);", refresh, StringComparison.Ordinal);
         Assert.Contains("RenderBatteryChargeLimit(snapshot.BatteryChargeLimit);", refresh, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureBatteryChargeLimitAsync()", refresh, StringComparison.Ordinal);
-        // Whole-transport failure fails closed: all three children render Unavailable and the TDP
-        // dirty draft is not preserved as if it were still authoritative/editable (section 10.4).
+        // Whole-transport failure fails closed: child controls render unavailable/disabled while
+        // supported TDP and battery drafts stay visible for the next successful readback.
         Assert.Contains("Render(FrontendCpuBoostSnapshot.Unavailable);", refresh, StringComparison.Ordinal);
-        Assert.Contains("RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: false);", refresh, StringComparison.Ordinal);
+        Assert.Contains("RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: true);", refresh, StringComparison.Ordinal);
         Assert.Contains("RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);", refresh, StringComparison.Ordinal);
-        Assert.Contains("RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot.Unavailable, preserveDirtyDraft: false);", refresh, StringComparison.Ordinal);
+        Assert.Contains("RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot.Unavailable, preserveDirtyDraft: true);", refresh, StringComparison.Ordinal);
 
         // Center M keeps its own separate, reboot-bound page-entry refresh.
         Assert.Contains("_ = RefreshCenterMStartupAsync();", page, StringComparison.Ordinal);
         Assert.Contains("private async Task RefreshCenterMStartupAsync()", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Device_unsupported_tdp_and_battery_features_close_runtime_error_banners()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var tdp = ExtractMethod(page, "private void RenderTdp(");
+        var battery = ExtractMethod(page, "private void RenderBatteryChargeLimit(");
+
+        Assert.Contains("TdpExpander.Visibility = _featureSupport.Tdp", page, StringComparison.Ordinal);
+        Assert.Contains("BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit", page, StringComparison.Ordinal);
+        AssertUnsupportedFeatureClosesInfoBar(tdp, "if (!_featureSupport.Tdp)", "TdpInfoBar", "_tdpSnapshot = snapshot;");
+        Assert.Contains("if (!snapshot.Available)", tdp, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(TdpInfoBar, true)", tdp, StringComparison.Ordinal);
+
+        AssertUnsupportedFeatureClosesInfoBar(
+            battery,
+            "if (!_featureSupport.BatteryChargeLimit)",
+            "BatteryChargeLimitInfoBar",
+            "_batteryChargeLimitSnapshot = snapshot;");
+        Assert.Contains("if (!snapshot.Available)", battery, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(BatteryChargeLimitInfoBar, true)", battery, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Failed_tdp_mutation_retires_only_its_generation_before_authoritative_refresh()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var mutation = ExtractMethod(page, "private async Task RunTdpMutationAsync(");
+        var catchIndex = mutation.IndexOf("catch (Exception exception)", StringComparison.Ordinal);
+        var generationGuard = mutation.IndexOf(
+            "if (submittedGeneration == Volatile.Read(ref _tdpEditGeneration))",
+            catchIndex,
+            StringComparison.Ordinal);
+        var retireDraft = mutation.IndexOf("_tdpDraftDirty = false;", generationGuard, StringComparison.Ordinal);
+        var refresh = mutation.IndexOf("await RefreshAsync();", retireDraft, StringComparison.Ordinal);
+
+        Assert.True(catchIndex >= 0 && generationGuard > catchIndex && retireDraft > generationGuard && refresh > retireDraft);
+        Assert.False(DevicePage.TdpDraftPolicy.ShouldPreserveDirtyDraft(true, submittedGeneration: 8, currentGeneration: 8));
+        Assert.True(DevicePage.TdpDraftPolicy.ShouldPreserveDirtyDraft(true, submittedGeneration: 8, currentGeneration: 9));
+    }
+
+    private static void AssertUnsupportedFeatureClosesInfoBar(
+        string renderer,
+        string supportGuard,
+        string infoBarName,
+        string runtimeSnapshotAssignment)
+    {
+        var guardIndex = renderer.IndexOf(supportGuard, StringComparison.Ordinal);
+        var closeIndex = renderer.IndexOf($"SetInfoBarOpen({infoBarName}, false);", StringComparison.Ordinal);
+        var returnIndex = renderer.IndexOf("return;", StringComparison.Ordinal);
+        var runtimeAssignmentIndex = renderer.IndexOf(runtimeSnapshotAssignment, StringComparison.Ordinal);
+
+        Assert.True(guardIndex >= 0 && closeIndex > guardIndex && returnIndex > closeIndex);
+        Assert.True(runtimeAssignmentIndex > returnIndex);
     }
 
     [Fact]

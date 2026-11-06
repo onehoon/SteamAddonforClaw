@@ -33,11 +33,14 @@ public sealed partial class OverlayWindow
     private FrontendSettingsSnapshot? _frontendSettingsSnapshot;
     private FrontendControllerForSteamSnapshot _controllerForSteam = FrontendControllerForSteamSnapshot.Unavailable(SteamVirtualControllerPreference.SteamDeck);
     private bool _frontendSettingsAvailable;
+    private bool _controllerMotionSupported;
     private bool _steamControllerMutationInFlight;
     private bool _gyroscopeMutationInFlight;
     private SteamVirtualControllerPreference? _pendingSteamControllerPreference;
     private bool? _pendingGyroscopeEnabled;
     private bool _controllerLedAvailable;
+    private bool _controllerLedSupported;
+    private bool _controllerLedVisibilityEligible;
     private bool _controllerLedMutationInFlight;
     private OverlayControllerLedPendingEdit? _pendingControllerLedEdit;
     private bool _controllerVibrationMutationInFlight;
@@ -50,6 +53,8 @@ public sealed partial class OverlayWindow
     private Border? _controllerLedColorSwatch;
     private StackPanel? _controllerLedDetailStack;
     private Border? _controllerLedSectionCard;
+    private Border? _controllerVibrationSectionCard;
+    private bool _controllerVibrationSupported;
     private OverlayValueRow? _leftVibrationRow;
     private OverlayValueRow? _rightVibrationRow;
     private FrontendControllerVibrationStrengthSnapshot _vibrationSnapshot = FrontendControllerVibrationStrengthSnapshot.Unavailable();
@@ -79,8 +84,12 @@ public sealed partial class OverlayWindow
         AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities,
             () => _steamControllerMutationInFlight && _frontendSettingsAvailable
                 && _controllerForSteam.Available && _controllerForSteam.CanChangeController);
-        _gyroscopeRow = new OverlayToggleRow("Gyroscope", RequestGyroscopeChange);
-        AddControllerRow(steamDetails, rows, _gyroscopeRow.Container, _gyroscopeRow.Capabilities,
+        var gyroscopeRow = new OverlayToggleRow("Gyroscope", RequestGyroscopeChange);
+        _gyroscopeRow = gyroscopeRow;
+        AddControllerRow(steamDetails, rows, gyroscopeRow.Container, gyroscopeRow.Capabilities with
+            {
+                IsSelectable = () => _controllerMotionSupported && gyroscopeRow.Capabilities.IsSelectable(),
+            },
             () => _gyroscopeMutationInFlight && _frontendSettingsAvailable
                 && _frontendSettingsSnapshot is not null);
         steamSection.Children.Add(steamDetails);
@@ -109,11 +118,12 @@ public sealed partial class OverlayWindow
         _controllerLedSectionCard = CreateOverlaySectionCard(ledSection);
         SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true);
         page.Children.Add(_controllerLedSectionCard);
-        var vibrationCard = CreateOverlaySectionCard(vibrationSection);
-        SetOverlaySectionSeparator(vibrationCard, visible: true);
-        page.Children.Add(vibrationCard);
+        _controllerVibrationSectionCard = CreateOverlaySectionCard(vibrationSection);
+        SetOverlaySectionSeparator(_controllerVibrationSectionCard, visible: true);
+        page.Children.Add(_controllerVibrationSectionCard);
         RenderControllerLedRows();
         RenderControllerForSteamRows();
+        RenderControllerVibrationRows();
         return page;
     }
 
@@ -164,7 +174,9 @@ public sealed partial class OverlayWindow
         var gyroscopeValue = _gyroscopeMutationInFlight && _pendingGyroscopeEnabled is { } pendingGyroscope
             ? pendingGyroscope
             : _frontendSettingsSnapshot?.GyroscopeEnabled == true;
-        _gyroscopeRow?.ApplyState(_frontendSettingsAvailable && !_gyroscopeMutationInFlight, gyroscopeValue);
+        _gyroscopeRow?.ApplyState(_controllerMotionSupported && _frontendSettingsAvailable && !_gyroscopeMutationInFlight, gyroscopeValue);
+        if (_gyroscopeRow is not null)
+            _gyroscopeRow.Container.Visibility = _controllerMotionSupported ? Visibility.Visible : Visibility.Collapsed;
 
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
@@ -235,14 +247,22 @@ public sealed partial class OverlayWindow
     private void BuildControllerVibrationRows(StackPanel section, List<OverlayRow> rows)
     {
         var details = CreateOverlayDetailStack();
-        _leftVibrationRow = new OverlayValueRow("Left Motor", FormatPercent,
+        var leftVibrationRow = new OverlayValueRow("Left Motor", FormatPercent,
             value => RequestVibrationEdit(left: (int)Math.Round(value), right: null), OverlayValueButtonKind.NumericStepper);
-        _rightVibrationRow = new OverlayValueRow("Right Motor", FormatPercent,
+        _leftVibrationRow = leftVibrationRow;
+        var rightVibrationRow = new OverlayValueRow("Right Motor", FormatPercent,
             value => RequestVibrationEdit(left: null, right: (int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
-        AddControllerRow(details, rows, _leftVibrationRow.Container, _leftVibrationRow.Capabilities,
+        _rightVibrationRow = rightVibrationRow;
+        AddControllerRow(details, rows, leftVibrationRow.Container, leftVibrationRow.Capabilities with
+            {
+                IsSelectable = () => _controllerVibrationSupported && leftVibrationRow.Capabilities.IsSelectable(),
+            },
             () => _controllerVibrationMutationInFlight && _vibrationSnapshot.Available
                 && _vibrationSnapshot.Writable && _vibrationSnapshot.LeftPercent is not null);
-        AddControllerRow(details, rows, _rightVibrationRow.Container, _rightVibrationRow.Capabilities,
+        AddControllerRow(details, rows, rightVibrationRow.Container, rightVibrationRow.Capabilities with
+            {
+                IsSelectable = () => _controllerVibrationSupported && rightVibrationRow.Capabilities.IsSelectable(),
+            },
             () => _controllerVibrationMutationInFlight && _vibrationSnapshot.Available
                 && _vibrationSnapshot.Writable && _vibrationSnapshot.RightPercent is not null);
         section.Children.Add(details);
@@ -350,10 +370,18 @@ public sealed partial class OverlayWindow
         _frontendSettingsSnapshot = settings;
         _frontendSettingsAvailable = settingsAvailable;
         _controllerForSteam = settings.ControllerForSteam;
-        _controllerLedAvailable = settingsAvailable && controllerLedAvailable;
+        if (settingsAvailable)
+        {
+            _controllerMotionSupported = settings.FeatureSupport.Motion;
+            _controllerVibrationSupported = settings.FeatureSupport.ControllerVibrationStrength;
+            _controllerLedSupported = settings.FeatureSupport.ControllerLed;
+            _controllerLedVisibilityEligible = _controllerLedSupported && controllerLedAvailable;
+        }
+        _controllerLedAvailable = settingsAvailable && _controllerLedSupported && controllerLedAvailable;
         _controllerLed = settings.ControllerLed;
         RenderControllerForSteamRows();
         RenderControllerLedRows();
+        RenderControllerVibrationRows();
         ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
         ApplyQuickSettingsYButtonQuickJumpTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
         ApplyYButtonQuickJumpFooterTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
@@ -472,7 +500,7 @@ public sealed partial class OverlayWindow
     {
         var displaySettings = ProjectControllerLedPendingEdit(_controllerLed, _pendingControllerLedEdit);
         if (_controllerLedSectionCard is not null)
-            _controllerLedSectionCard.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
+            _controllerLedSectionCard.Visibility = _controllerLedVisibilityEligible ? Visibility.Visible : Visibility.Collapsed;
         if (_controllerLedDetailStack is not null)
             _controllerLedDetailStack.Visibility = _controllerLed.Enabled ? Visibility.Visible : Visibility.Collapsed;
         var available = _controllerLedAvailable && !_controllerLedMutationInFlight;
@@ -612,6 +640,8 @@ public sealed partial class OverlayWindow
     private void RenderControllerVibrationRows()
     {
         var enabled = _vibrationSnapshot.Available && _vibrationSnapshot.Writable && !_controllerVibrationMutationInFlight;
+        if (_controllerVibrationSectionCard is not null)
+            _controllerVibrationSectionCard.Visibility = _controllerVibrationSupported ? Visibility.Visible : Visibility.Collapsed;
         var left = _vibrationDraftLeft ?? _vibrationSnapshot.LeftPercent;
         var right = _vibrationDraftRight ?? _vibrationSnapshot.RightPercent;
         _leftVibrationRow?.ApplyState(enabled && left is not null, 0, 100, 1, left ?? double.NaN);

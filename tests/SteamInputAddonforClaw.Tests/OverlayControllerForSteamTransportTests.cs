@@ -11,6 +11,27 @@ public sealed class OverlayControllerForSteamTransportTests
     private static string Pipe() => $"SteamInputAddonforClaw.Overlay.ControllerForSteam.Tests.{Guid.NewGuid():N}";
 
     [Fact]
+    public async Task Model_feature_support_round_trips_on_the_existing_frontend_settings_state_frame()
+    {
+        var support = new FrontendModelFeatureSupport(true, false, true, true, false, true, false);
+        var settings = new FrontendSettingsSnapshot(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default)
+        {
+            FeatureSupport = support,
+        };
+        var message = new OverlayWireMessage(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.FrontendSettingsState,
+            FrontendSettingsState: settings, ControllerLedAvailable: true, FrontendSettingsAvailable: true);
+        using var stream = new MemoryStream();
+        using var writeGate = new SemaphoreSlim(1, 1);
+
+        await OverlayWireCodec.WriteAsync(stream, message, writeGate, CancellationToken.None);
+        stream.Position = 0;
+        var restored = await OverlayWireCodec.ReadAsync(stream, CancellationToken.None);
+
+        Assert.True(OverlayProductionControlsWireValidation.IsValidSettingsState(restored));
+        Assert.Equal(support, restored.FrontendSettingsState!.FeatureSupport);
+    }
+
+    [Fact]
     public void Controller_for_steam_mutation_requires_exactly_one_known_setting()
     {
         Assert.True(OverlayProductionControlsWireValidation.IsValidControllerForSteamMutationRequest(

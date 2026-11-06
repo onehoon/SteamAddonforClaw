@@ -31,6 +31,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
             gameProfileMutations: gameMutations, actualRunningAppIdSource: () => 0);
 
         var before = await control.CaptureGameProfileAsync(42);
+        Assert.Equal(new FrontendModelFeatureSupport(true, true, true, true, true, true, true), before.FeatureSupport);
         Assert.True(before.GpuMinimumClock!.Available);
         Assert.False(before.GpuMinimumClock.Initialized);
         Assert.False(before.GpuMinimumClock.Enabled);
@@ -137,7 +138,8 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
             gameProfileMutations: gameProfileMutations,
             actualRunningAppIdSource: actualRunningAppIdSource,
             activeProfileTargetSource: activeProfileTargetSource,
-            intelGpuMinimumClockRuntime: runtime);
+            intelGpuMinimumClockRuntime: runtime,
+            featureSupport: new(true, true, true, true, true, true, true));
     }
 
     public void Dispose()

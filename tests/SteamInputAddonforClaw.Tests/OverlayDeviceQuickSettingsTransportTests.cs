@@ -26,13 +26,15 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         new FrontendCpuBoostSnapshot(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), true, true, null),
         new FrontendTdpSnapshot(true, true, new(true, new(20, 25), new(20, 25)), new(8, 30, 8, 37)),
         new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null),
-        new FrontendBatteryChargeLimitSnapshot(true, true, true, true, 70, true, 70, null)));
+        new FrontendBatteryChargeLimitSnapshot(true, true, true, true, 70, true, 70, null))
+    { FeatureSupport = new(true, true, true, true, true, true, true) });
 
     private static readonly QuickSettingsPageSnapshot PartialPage = QuickSettingsPresentation.BuildDevice(new FrontendDeviceQuickSettingsSnapshot(
         new FrontendCpuBoostSnapshot(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), true, true, null),
         FrontendTdpSnapshot.Unavailable,
         new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null),
-        FrontendBatteryChargeLimitSnapshot.Unavailable));
+        FrontendBatteryChargeLimitSnapshot.Unavailable)
+    { FeatureSupport = new(true, true, true, true, true, true, true) });
 
     // ---- Protocol / handshake -----------------------------------------------------------------
 

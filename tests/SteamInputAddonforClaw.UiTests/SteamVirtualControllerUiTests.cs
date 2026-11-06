@@ -55,7 +55,7 @@ public sealed class SteamVirtualControllerUiTests
         Assert.Contains("SteamVirtualControllerComboBox.Visibility = available ? Visibility.Visible : Visibility.Collapsed", controllerCode, StringComparison.Ordinal);
         Assert.Contains("SteamVirtualControllerUnavailableText.Visibility = available ? Visibility.Collapsed : Visibility.Visible", controllerCode, StringComparison.Ordinal);
         Assert.Contains("SteamVirtualControllerComboBox.IsEnabled = CanEditSteamVirtualController", controllerCode, StringComparison.Ordinal);
-        Assert.Contains("GyroscopeEnabledToggle.IsEnabled = Volatile.Read(ref _gyroscopeMutationInProgress) == 0", controllerCode, StringComparison.Ordinal);
+        Assert.Contains("GyroscopeEnabledToggle.IsEnabled = _featureSupport.Motion && Volatile.Read(ref _gyroscopeMutationInProgress) == 0", controllerCode, StringComparison.Ordinal);
         Assert.DoesNotContain("SteamVirtualControllerExpander.IsEnabled", controllerCode, StringComparison.Ordinal);
         Assert.DoesNotContain("SteamVirtualController", settingsXaml, StringComparison.Ordinal);
         foreach (var culture in new[] { "en-US", "ko-KR" })

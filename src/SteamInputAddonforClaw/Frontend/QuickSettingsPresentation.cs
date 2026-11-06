@@ -22,6 +22,7 @@ internal static class QuickSettingsPresentation
         FrontendGamePowerModeConfiguration? PowerMode,
         FrontendGameFpsLimitConfiguration? FpsLimit,
         FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock,
+        FrontendModelFeatureSupport FeatureSupport,
         QuickSettingsProfileTarget ProfileTarget,
         FrontendGameBackButtonMappingConfiguration? BackButtonMapping);
 
@@ -112,15 +113,18 @@ internal static class QuickSettingsPresentation
     /// Charge Limit. One child being unavailable never affects the others.</summary>
     internal static QuickSettingsPageSnapshot BuildDevice(FrontendDeviceQuickSettingsSnapshot snapshot)
     {
-        IReadOnlyList<QuickSettingsSection> sections =
-        [
-            BuildTdpSection(snapshot.Tdp),
-            BuildCpuBoostSection(snapshot.CpuBoost),
-            BuildPowerModeSection(snapshot.PowerMode),
-            BuildBatteryChargeLimitSection(snapshot.BatteryChargeLimit),
-        ];
+        var sections = new List<QuickSettingsSection>();
+        if (snapshot.FeatureSupport.Tdp)
+            sections.Add(BuildTdpSection(snapshot.Tdp));
+        sections.Add(BuildCpuBoostSection(snapshot.CpuBoost));
+        sections.Add(BuildPowerModeSection(snapshot.PowerMode));
+        if (snapshot.FeatureSupport.BatteryChargeLimit)
+            sections.Add(BuildBatteryChargeLimitSection(snapshot.BatteryChargeLimit));
 
-        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, ProfileTarget: null, Available: true, Message: null, sections, BuildDeviceTdpLinkedConstraints(snapshot.Tdp));
+        IReadOnlyList<QuickSettingsLinkedSliderConstraint> linkedConstraints = snapshot.FeatureSupport.Tdp
+            ? BuildDeviceTdpLinkedConstraints(snapshot.Tdp)
+            : [];
+        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, ProfileTarget: null, Available: true, Message: null, sections, linkedConstraints);
     }
 
     private static QuickSettingsSection BuildBatteryChargeLimitSection(FrontendBatteryChargeLimitSnapshot snapshot)
@@ -159,27 +163,38 @@ internal static class QuickSettingsPresentation
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
         string.IsNullOrWhiteSpace(snapshot.DisplayName) ? $"Game {snapshot.AppId}" : snapshot.DisplayName,
         snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
-        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock,
+        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock, snapshot.FeatureSupport,
         QuickSettingsProfileTarget.ForSteam(snapshot.AppId), BackButtonMapping: null));
 
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendXboxGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
         string.IsNullOrWhiteSpace(snapshot.DisplayName) ? "XBOX game" : snapshot.DisplayName,
         snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
-        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock,
+        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock, snapshot.FeatureSupport,
         QuickSettingsProfileTarget.ForXbox(snapshot.Key), snapshot.BackButtonMapping));
 
     private static QuickSettingsPageSnapshot BuildProfile(ProfileQuickSettingsProjection snapshot)
     {
         var sections = new List<QuickSettingsSection> { BuildProfileGeneralSection(snapshot) };
         if (snapshot.BackButtonMapping is not null) sections.Add(BuildProfileControllerSection(snapshot));
-        if (snapshot.Limits is not null) sections.Add(BuildProfileTdpSection(snapshot));
+        if (snapshot.FeatureSupport.Tdp) sections.Add(BuildProfileTdpSection(snapshot));
         sections.Add(BuildProfileCpuBoostSection(snapshot));
         if (snapshot.PowerMode is not null) sections.Add(BuildProfilePowerModeSection(snapshot));
-        if (snapshot.GpuMinimumClock is not null) sections.Add(BuildProfileGpuMinimumClockSection(snapshot));
-        if (snapshot.FpsLimit is not null) sections.Add(BuildProfileFpsLimitSection(snapshot));
+        if (snapshot.FeatureSupport.IntelGpuMinimumClock)
+            sections.Add(BuildProfileGpuMinimumClockSection(snapshot with
+            {
+                GpuMinimumClock = snapshot.GpuMinimumClock ?? new(false, false, false, [], null, null, null,
+                    "Intel GPU minimum-frequency control is unavailable."),
+            }));
+        if (snapshot.FeatureSupport.IntelFpsLimit)
+            sections.Add(BuildProfileFpsLimitSection(snapshot with
+            {
+                FpsLimit = snapshot.FpsLimit ?? new(false, 60, 60, false, "Intel FPS Limit is unavailable."),
+            }));
         sections.Add(BuildProfileResolutionSection(snapshot));
 
-        var linkedConstraints = snapshot.Limits is { } limits ? BuildProfileTdpLinkedConstraints(limits) : [];
+        IReadOnlyList<QuickSettingsLinkedSliderConstraint> linkedConstraints = snapshot.FeatureSupport.Tdp && snapshot.Limits is { } limits
+            ? BuildProfileTdpLinkedConstraints(limits)
+            : [];
         return new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, snapshot.ProfileTarget, Available: true, Message: null, sections, linkedConstraints);
     }
 
@@ -225,7 +240,13 @@ internal static class QuickSettingsPresentation
 
     private static QuickSettingsSection BuildProfileTdpSection(ProfileQuickSettingsProjection snapshot)
     {
-        var limits = snapshot.Limits!;
+        if (snapshot.Limits is not { } limits)
+        {
+            return new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control",
+                [new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle,
+                    Available: false, Writable: false, Value: null, SliderSpec: null, CommitPolicy: QuickSettingsCommitPolicy.Immediate)],
+                "TDP limits are unavailable.");
+        }
         var writable = snapshot.PersistenceWritable && snapshot.Enabled;
         var rows = new List<QuickSettingsRow>
         {

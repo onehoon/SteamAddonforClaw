@@ -37,6 +37,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(Key, snapshot.Key);
         Assert.True(snapshot.PersistenceWritable);
         Assert.Equal(new FrontendTdpLimits(8, 30, 8, 37), snapshot.Limits);
+        Assert.Equal(new FrontendModelFeatureSupport(true, true, true, true, true, true, true), snapshot.FeatureSupport);
         Assert.True(snapshot.FpsLimit!.Available);
         Assert.False(snapshot.Exists);
         await tdp.DisposeAsync();
@@ -497,6 +498,20 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     }
 
     [Fact]
+    public async Task XBOX_mapping_snapshot_omits_saved_mapping_when_the_mapping_owner_is_unavailable()
+    {
+        var mutations = new XboxGameProfileMutations(new ProfileStore(ProfilePath), new ProfileMutationGate(), TdpLimits());
+        var saved = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(Key, saved));
+        var control = CreateControl(mutations, frontButtonMappingAvailable: false);
+
+        var snapshot = await control.CaptureXboxGameProfileAsync(Key);
+
+        Assert.Null(snapshot.BackButtonMapping);
+        Assert.Equal(saved, new ProfileStore(ProfilePath).Load().Document.XboxGames[Key].Controller.BackButtonMapping);
+    }
+
+    [Fact]
     public async Task Active_XBOX_mapping_and_profile_enable_changes_reconcile_only_after_persistence()
     {
         var store = new ProfileStore(ProfilePath);
@@ -564,7 +579,8 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         CpuBoostRuntime? cpu = null,
         PowerModeRuntime? power = null,
         GameDisplayResolutionRuntime? resolution = null,
-        IntelGpuMinimumClockRuntime? gpuMinimumClockRuntime = null)
+        IntelGpuMinimumClockRuntime? gpuMinimumClockRuntime = null,
+        bool frontButtonMappingAvailable = true)
     {
         var settings = new StartupSettingsCoordinator(new AppSettings { BackButtonMapping = globalBackButtonMapping ?? BackButtonMappingSettings.Default },
             new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
@@ -572,6 +588,8 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
             cpuBoostRuntime: cpu, tdpRuntime: tdp, powerModeRuntime: power,
             displayResolutionRuntime: resolution, intelFpsRuntime: fps,
             intelGpuMinimumClockRuntime: gpuMinimumClockRuntime,
+            frontButtonMappingAvailable: frontButtonMappingAvailable,
+            featureSupport: new(true, true, true, true, true, true, true),
             xboxGameProfileMutations: mutations, actualRunningAppIdSource: actualRunningAppIdSource,
             activeProfileTargetSource: activeProfileTargetSource,
             reconcileXboxBackButtonMapping: reconcileXboxBackButtonMapping,

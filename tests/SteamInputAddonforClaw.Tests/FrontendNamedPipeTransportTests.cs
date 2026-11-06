@@ -13,7 +13,10 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class FrontendNamedPipeTransportTests
 {
-    private static readonly FrontendSettingsSnapshot Settings = new(FrontendLogLevel.Debug, false, FrontButtonMappingSettings.Default);
+    private static readonly FrontendSettingsSnapshot Settings = new(FrontendLogLevel.Debug, false, FrontButtonMappingSettings.Default)
+    {
+        FeatureSupport = new(true, true, true, true, true, true, true),
+    };
     private static readonly FrontendStatusSnapshot Status = new(
         new("MSI", "Claw", "Board", ["GPU"]), new(FrontendHardwareStatus.Supported, "Family", "Model", "Ready"),
         new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
@@ -180,7 +183,8 @@ public sealed class FrontendNamedPipeTransportTests
             new(1920, 1200), new(true, WindowsPowerMode.BestPerformance, WindowsPowerMode.Balanced),
             new(true, 90, 60, true), new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1725.125, 1825.375, 1725.125))
         {
-            BackButtonMapping = new(false, new(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y))
+            BackButtonMapping = new(false, new(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y)),
+            FeatureSupport = new(true, true, true, true, true, true, true),
         };
         var fake = new RecordingFrontendControl { XboxGameProfileSnapshot = profile };
         fake.SetXboxMutationResult(profile);
@@ -1407,7 +1411,19 @@ public sealed class FrontendNamedPipeTransportTests
             Assert.Equal(FrontendWireMessageKind.CancelRequest, cancel.Kind);
             await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, request.RequestId, request.Method, Error: new(FrontendRemoteErrorCode.Cancelled, "Operation cancelled.")), writeGate, CancellationToken.None);
             var next = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
-            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method, Payload: FrontendWireCodec.Payload(new FrontendBootstrapSnapshot(new(FrontendLogLevel.Debug, false, FrontButtonMappingSettings.Default), @"C:\Logs", true))), writeGate, CancellationToken.None);
+            var support = new FrontendModelFeatureSupport(true, true, true, true, true, true, true);
+            var settings = new FrontendSettingsSnapshot(FrontendLogLevel.Debug, false, FrontButtonMappingSettings.Default)
+            {
+                FeatureSupport = support,
+            };
+            var bootstrap = new FrontendBootstrapSnapshot(settings, @"C:\Logs", true)
+            {
+                FeatureSupport = support,
+            };
+            await FrontendWireCodec.WriteAsync(server,
+                new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method,
+                    Payload: FrontendWireCodec.Payload(bootstrap)),
+                writeGate, CancellationToken.None);
         });
 
         await using var client = new NamedPipeAddonFrontendClient(pipeName);
@@ -2112,7 +2128,10 @@ public sealed class FrontendNamedPipeTransportTests
     private sealed class RecordingFrontendControl : IAddonFrontendControl
     {
         public event EventHandler? StateInvalidated;
-        public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, @"C:\Logs", true);
+        public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, @"C:\Logs", true)
+        {
+            FeatureSupport = new(true, true, true, true, true, true, true),
+        };
         public FrontendPrerequisiteSetupResult SetupResult { get; } = new(FrontendPrerequisiteSetupResultKind.Installed, Status);
         public FrontendEnvironmentReportResult EnvironmentResult { get; } = new(true, null);
         public FrontendStartupTaskSnapshot StartupTaskRepairSnapshot { get; } =
@@ -2346,7 +2365,8 @@ public sealed class FrontendNamedPipeTransportTests
             new(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), true, true, null),
             new(true, true, new(true, new(20, 30), new(15, 25)), new(8, 30, 8, 40)),
             new(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null),
-            new(true, true, true, true, 70, true, 70, null));
+            new(true, true, true, true, 70, true, 70, null))
+        { FeatureSupport = new(true, true, true, true, true, true, true) };
         public int CaptureDeviceQuickSettingsCount { get; private set; }
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) { TotalCalls++; CaptureDeviceQuickSettingsCount++; return Task.FromResult(DeviceQuickSettingsSnapshot); }
         public FrontendMsiLiveUpdateCatalogSnapshot MsiLiveUpdateCatalogSnapshot { get; set; } = FrontendMsiLiveUpdateCatalogSnapshot.Unavailable();

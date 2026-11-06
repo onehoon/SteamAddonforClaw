@@ -494,6 +494,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var startupComposition = _startupComposition ?? throw new InvalidOperationException("Startup composition is unavailable.");
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
         _modelFeatures = ResolveModelFeatures(startupResult);
+        var frontendFeatureSupport = new FrontendModelFeatureSupport(
+            _modelFeatures.SupportsTdp,
+            _modelFeatures.SupportsBatteryChargeLimit,
+            _modelFeatures.SupportsControllerVibrationStrength,
+            _modelFeatures.SupportsControllerLed,
+            _modelFeatures.SupportsMotion,
+            _modelFeatures.SupportsIntelFpsLimit,
+            _modelFeatures.SupportsIntelGpuMinimumClock);
         AppLog.Info($"Starting runtime. CenterMStartupState={startupResult.CenterMStartupState}; HardwareStatus={startupResult.HardwareStatus}; HardwareDeviceModel={startupResult.HardwareDeviceModel}.");
 
         // PR4: reuse the ONE Center M startup control constructed by the startup composition -- the
@@ -825,7 +833,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 new WindowsTweaksOperatingSystem(),
                 startupResult.HardwareDeviceModel is { } tweaksModel
                     && (tweaksModel.Value is "msi.claw.a2vm.7" or "msi.claw.a2vm.8")),
-            captureControllerFirmwareVersionForMsiUpdate: CaptureOwnedControllerFirmwareVersionForMsiUpdateAsync);
+            captureControllerFirmwareVersionForMsiUpdate: CaptureOwnedControllerFirmwareVersionForMsiUpdateAsync,
+            featureSupport: frontendFeatureSupport);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);

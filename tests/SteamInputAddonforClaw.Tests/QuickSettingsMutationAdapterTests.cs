@@ -101,6 +101,7 @@ public sealed class QuickSettingsMutationAdapterTests
             NextCaptureResult = FrontendDeviceQuickSettingsSnapshot.Unavailable with
             {
                 BatteryChargeLimit = new(true, true, true, false, 70, false, 70, null),
+                FeatureSupport = new(true, true, true, true, true, true, true),
             },
         };
 
@@ -927,7 +928,10 @@ public sealed class QuickSettingsMutationAdapterTests
         PersistenceWritable: true,
         Limits: new FrontendTdpLimits(8, 30, 8, 37),
         Resolution: null,
-        PowerMode: new FrontendGamePowerModeConfiguration(powerModeEnabled, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced));
+        PowerMode: new FrontendGamePowerModeConfiguration(powerModeEnabled, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced))
+    {
+        FeatureSupport = new(true, true, true, true, true, true, true),
+    };
 
     private static QuickSettingsMutationIntent ProfileTdpGroupIntent(QuickSettingsRowId editedRowId, bool enabled, int acPl1, int acPl2, int dcPl1, int dcPl2) => new(
         QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), editedRowId,
@@ -986,7 +990,10 @@ public sealed class QuickSettingsMutationAdapterTests
 
         public List<string> Calls { get; } = [];
         public int CaptureCount { get; private set; }
-        public FrontendDeviceQuickSettingsSnapshot NextCaptureResult { get; set; } = FrontendDeviceQuickSettingsSnapshot.Unavailable;
+        public FrontendDeviceQuickSettingsSnapshot NextCaptureResult { get; set; } = FrontendDeviceQuickSettingsSnapshot.Unavailable with
+        {
+            FeatureSupport = new(true, true, true, true, true, true, true),
+        };
         public FrontendTdpConfiguration? LastTdpConfiguration { get; private set; }
         public FrontendBatteryChargeLimitMutationResult BatteryMutationResult { get; set; } = new(
             FrontendBatteryChargeLimitMutationOutcome.Succeeded, null,
@@ -1121,6 +1128,7 @@ public sealed class QuickSettingsMutationAdapterTests
             FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true))
         {
             BackButtonMapping = new(true, new(Xbox360BackButtonTarget.LeftBumper, Xbox360BackButtonTarget.RightBumper)),
+            FeatureSupport = new(true, true, true, true, true, true, true),
         };
 
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default)

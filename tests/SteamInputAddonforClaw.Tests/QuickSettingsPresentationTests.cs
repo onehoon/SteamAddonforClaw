@@ -17,6 +17,7 @@ public sealed class QuickSettingsPresentationTests
     private static readonly FrontendTdpLimits GapOneLimits = new(8, 30, 8, 37);
     private static readonly FrontendTdpLimits GapTwoLimits = new(8, 35, 8, 45);
     private static readonly FrontendTdpLimits NoGapLimits = new(10, 25, 10, 40);
+    private static readonly FrontendModelFeatureSupport IntelFeatureSupport = new(true, true, true, true, true, true, true);
 
     [Fact]
     public void Exact_device_section_order()
@@ -30,6 +31,42 @@ public sealed class QuickSettingsPresentationTests
             s => Assert.Equal(QuickSettingsSectionId.DeviceBatteryChargeLimit, s.SectionId));
 
         Assert.Equal("TDP Control", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DeviceTdp).Label);
+    }
+
+    [Fact]
+    public void Device_support_filters_tdp_and_battery_independently_and_keeps_windows_sections()
+    {
+        var tdpOnly = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with
+        {
+            FeatureSupport = IntelFeatureSupport with { BatteryChargeLimit = false },
+        });
+        var batteryOnly = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with
+        {
+            FeatureSupport = IntelFeatureSupport with { Tdp = false },
+        });
+
+        Assert.Equal(
+            [QuickSettingsSectionId.DeviceTdp, QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode],
+            tdpOnly.Sections.Select(section => section.SectionId));
+        Assert.Equal(
+            [QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode, QuickSettingsSectionId.DeviceBatteryChargeLimit],
+            batteryOnly.Sections.Select(section => section.SectionId));
+        Assert.Empty(batteryOnly.LinkedSliderConstraints);
+        Assert.True(tdpOnly.Available);
+        Assert.True(batteryOnly.Available);
+    }
+
+    [Fact]
+    public void Unknown_device_support_fails_closed_without_hiding_windows_controls()
+    {
+        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with
+        {
+            FeatureSupport = FrontendModelFeatureSupport.None,
+        });
+
+        Assert.Equal([QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode],
+            page.Sections.Select(section => section.SectionId));
+        Assert.Empty(page.LinkedSliderConstraints);
     }
 
     [Fact]
@@ -102,7 +139,8 @@ public sealed class QuickSettingsPresentationTests
             new FrontendCpuBoostSnapshot(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), Enabled: false, PersistenceWritable: true, LastFailure: null),
             new FrontendTdpSnapshot(true, true, new FrontendTdpConfiguration(false, new(20, 25), new(20, 25)), GapOneLimits),
             new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), Enabled: false, PersistenceWritable: true, LastFailure: null),
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -261,7 +299,8 @@ public sealed class QuickSettingsPresentationTests
             EnabledSnapshot().CpuBoost,
             FrontendTdpSnapshot.Unavailable,
             EnabledSnapshot().PowerMode,
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -277,7 +316,8 @@ public sealed class QuickSettingsPresentationTests
             FrontendCpuBoostSnapshot.Unavailable,
             EnabledSnapshot().Tdp,
             EnabledSnapshot().PowerMode,
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -293,7 +333,8 @@ public sealed class QuickSettingsPresentationTests
             EnabledSnapshot().CpuBoost,
             EnabledSnapshot().Tdp,
             FrontendPowerModeSnapshot.Unavailable,
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -315,7 +356,8 @@ public sealed class QuickSettingsPresentationTests
                 new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.BestPerformance),
                 new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.BestPowerEfficiency),
                 Enabled: true, PersistenceWritable: true, LastFailure: null),
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -335,7 +377,8 @@ public sealed class QuickSettingsPresentationTests
                 Enabled: true, PersistenceWritable: true, LastFailure: null),
             EnabledSnapshot().Tdp,
             EnabledSnapshot().PowerMode,
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -353,7 +396,8 @@ public sealed class QuickSettingsPresentationTests
                 Enabled: true, PersistenceWritable: true, LastFailure: null),
             EnabledSnapshot().Tdp,
             EnabledSnapshot().PowerMode,
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -370,7 +414,8 @@ public sealed class QuickSettingsPresentationTests
             EnabledSnapshot().CpuBoost,
             new FrontendTdpSnapshot(true, true, Configuration: null, Limits: GapOneLimits),
             EnabledSnapshot().PowerMode,
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -387,7 +432,8 @@ public sealed class QuickSettingsPresentationTests
                 new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, null),
                 new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced),
                 Enabled: true, PersistenceWritable: true, LastFailure: null),
-            FrontendBatteryChargeLimitSnapshot.Unavailable);
+            FrontendBatteryChargeLimitSnapshot.Unavailable)
+        { FeatureSupport = IntelFeatureSupport };
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -460,6 +506,7 @@ public sealed class QuickSettingsPresentationTests
             GpuMinimumClock: new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1725.125, 1825.375, 1725.125))
         {
             BackButtonMapping = new(true, new(Xbox360BackButtonTarget.LeftBumper, Xbox360BackButtonTarget.RightBumper)),
+            FeatureSupport = IntelFeatureSupport,
         };
 
         var page = QuickSettingsPresentation.BuildProfile(xbox);
@@ -522,6 +569,7 @@ public sealed class QuickSettingsPresentationTests
             FpsLimit: null)
         {
             BackButtonMapping = new(false, new(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y)),
+            FeatureSupport = IntelFeatureSupport,
         };
 
         var page = QuickSettingsPresentation.BuildProfile(xbox);
@@ -557,6 +605,7 @@ public sealed class QuickSettingsPresentationTests
             FpsLimit: null)
         {
             BackButtonMapping = new(false, new(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.B)),
+            FeatureSupport = IntelFeatureSupport,
         };
 
         var page = QuickSettingsPresentation.BuildProfile(xbox);
@@ -617,12 +666,92 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
-    public void Profile_with_no_limits_omits_the_tdp_section_entirely()
+    public void Supported_profile_tdp_without_limits_keeps_disabled_section_without_fake_ranges()
     {
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { Limits = null });
 
-        Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfileTdp);
+        var tdp = page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp);
+        Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled], tdp.Rows.Select(row => row.RowId));
+        Assert.False(tdp.Rows[0].Available);
+        Assert.False(tdp.Rows[0].Writable);
+        Assert.Null(tdp.Rows[0].Value);
+        Assert.NotNull(tdp.Message);
         Assert.Empty(page.LinkedSliderConstraints);
+    }
+
+    [Fact]
+    public void Profile_static_unsupported_flags_hide_stale_tdp_fps_and_gpu_settings()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with
+        {
+            FeatureSupport = IntelFeatureSupport with
+            {
+                Tdp = false,
+                IntelFpsLimit = false,
+                IntelGpuMinimumClock = false,
+            },
+        });
+
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileTdp);
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileFpsLimit);
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileGpuMinimumClock);
+        Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileCpuBoost);
+        Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfilePowerMode);
+        Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileResolution);
+        Assert.Empty(page.LinkedSliderConstraints);
+    }
+
+    [Fact]
+    public void Xbox_profile_static_unsupported_flags_hide_stale_tdp_fps_and_gpu_settings()
+    {
+        var xbox = new FrontendXboxGameProfileSnapshot(
+            "xbox:unsupported-features", "Future device game", Exists: true, Enabled: true,
+            new FrontendGameCpuBoostConfiguration(true, CpuBoostMode.Aggressive, CpuBoostMode.Disabled),
+            new FrontendGameTdpConfiguration(true, new(15, 20), new(12, 18)),
+            PersistenceWritable: true,
+            Limits: GapOneLimits,
+            Resolution: new FrontendGameResolution(1920, 1080),
+            PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.Balanced, WindowsPowerMode.BestPowerEfficiency),
+            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, Available: true),
+            GpuMinimumClock: new(true, true, true, [1525, 1625], 1525, 1625, 1525))
+        {
+            FeatureSupport = IntelFeatureSupport with
+            {
+                Tdp = false,
+                IntelFpsLimit = false,
+                IntelGpuMinimumClock = false,
+            },
+        };
+
+        var page = QuickSettingsPresentation.BuildProfile(xbox);
+
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileTdp);
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileFpsLimit);
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileGpuMinimumClock);
+        Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileCpuBoost);
+        Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfilePowerMode);
+        Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileResolution);
+        Assert.True(page.Available);
+    }
+
+    [Fact]
+    public void Supported_but_unavailable_profile_features_keep_their_disabled_sections()
+    {
+        const string fpsFailure = "Intel API unavailable";
+        const string gpuFailure = "Driver clock table unavailable";
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with
+        {
+            FpsLimit = new(true, 60, 60, false, fpsFailure),
+            GpuMinimumClock = new(false, true, true, [], 1700, 1800, null, gpuFailure),
+        });
+
+        var fps = page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileFpsLimit);
+        var gpu = page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileGpuMinimumClock);
+        Assert.Equal(fpsFailure, fps.Message);
+        Assert.Equal(gpuFailure, gpu.Message);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileFpsLimitEnabled).Available);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileGpuMinimumClockEnabled).Available);
+        Assert.True(page.Available);
     }
 
     [Fact]
@@ -779,7 +908,10 @@ public sealed class QuickSettingsPresentationTests
         Limits: GapOneLimits,
         Resolution: null,
         PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.BestPerformance, WindowsPowerMode.Balanced),
-        FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, Available: true));
+        FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, Available: true))
+    {
+        FeatureSupport = IntelFeatureSupport,
+    };
 
     private static QuickSettingsRow FindRow(QuickSettingsPageSnapshot page, QuickSettingsRowId rowId) =>
         page.Sections.SelectMany(s => s.Rows).Single(r => r.RowId == rowId);
@@ -794,5 +926,8 @@ public sealed class QuickSettingsPresentationTests
             new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced),
             new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced),
             Enabled: true, PersistenceWritable: true, LastFailure: null),
-        new FrontendBatteryChargeLimitSnapshot(true, true, true, false, 70, true, 70, null));
+        new FrontendBatteryChargeLimitSnapshot(true, true, true, false, 70, true, 70, null))
+    {
+        FeatureSupport = IntelFeatureSupport,
+    };
 }
