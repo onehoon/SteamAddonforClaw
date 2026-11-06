@@ -25,6 +25,31 @@ public sealed class ProfilePagePolicyTests
         Assert.False(ProfilePage.ShouldPreserveDirtyTdpDraft(true, 5, 5));
     }
 
+    [Theory]
+    [InlineData(true, "_acFpsDebounce")]
+    [InlineData(false, "_dcFpsDebounce")]
+    public void Failed_fps_commit_retires_failed_side_before_readback_and_preserves_opposite_pending_draft(
+        bool failedAc,
+        string failedDebounce)
+    {
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var submit = Method(code, "private async Task SubmitFpsAfterDelayAsync", "private void CancelFpsDebounce");
+        var catchIndex = submit.IndexOf("catch (Exception exception)", StringComparison.Ordinal);
+        var generationGuard = submit.IndexOf(
+            "(ac ? generation == _acFpsGeneration : generation == _dcFpsGeneration)",
+            catchIndex,
+            StringComparison.Ordinal);
+        var acReset = submit.IndexOf("if (ac) _acFpsDebounce = null;", catchIndex, StringComparison.Ordinal);
+        var dcReset = submit.IndexOf("else _dcFpsDebounce = null;", acReset, StringComparison.Ordinal);
+        var recovery = submit.IndexOf("await RestoreSelectedAfterMutationFailureAsync(", catchIndex, StringComparison.Ordinal);
+
+        Assert.Equal(failedAc ? "_acFpsDebounce" : "_dcFpsDebounce", failedDebounce);
+        Assert.True(catchIndex >= 0 && generationGuard > catchIndex && acReset > generationGuard && dcReset > acReset && recovery > dcReset);
+        Assert.Contains("var acFpsPending = _acFpsDebounce is { IsCancellationRequested: false } && acFpsDraft.HasValue", code, StringComparison.Ordinal);
+        Assert.Contains("var dcFpsPending = _dcFpsDebounce is { IsCancellationRequested: false } && dcFpsDraft.HasValue", code, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Steam_unknown_favorite_is_neutral_disabled_and_does_not_block_catalog_browsing()
     {
@@ -67,6 +92,26 @@ public sealed class ProfilePagePolicyTests
         Assert.False(ProfilePage.ShouldShowInSteamCatalog(hidden));
         Assert.True(ProfilePage.ShouldShowInSteamCatalog(
             new FrontendProfileGameCatalogEntry(570u, "Ordinary game", FrontendProfileGameSource.Steam)));
+    }
+
+    [Fact]
+    public void Profile_capability_visibility_uses_static_support_and_keeps_runtime_failure_as_status()
+    {
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var initialize = Method(code, "internal void Initialize(IAddonFrontendControl frontend,", "internal void Activate()");
+        var render = Method(code, "private void Render(FrontendGameProfileSnapshot snapshot", "private void SetEditorsEnabled(");
+        var status = Method(code, "private void RenderProfileStatus(", "private void SetEditorsEnabled(");
+
+        Assert.Contains("TdpExpander.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed", initialize);
+        Assert.Contains("IntelFpsExpander.Visibility = _featureSupport.IntelFpsLimit ? Visibility.Visible : Visibility.Collapsed", initialize);
+        Assert.Contains("GpuMinimumClockExpander.Visibility = _featureSupport.IntelGpuMinimumClock ? Visibility.Visible : Visibility.Collapsed", initialize);
+        Assert.Contains("TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && _featureSupport.Tdp && snapshot.Limits is not null", render);
+        Assert.Contains("snapshot.FpsLimit?.Available == true", render);
+        Assert.Contains("_featureSupport.Tdp && snapshot.Exists && snapshot.Enabled && snapshot.Limits is null", status);
+        Assert.Contains("preservePendingFpsDraft: true", code);
+        Assert.Contains("DisableEditorsAfterCaptureFailure();", code);
+        Assert.Contains("preserveUnavailableDraft = preserveDraft && _gpuDraftDirty && gpu?.Available != true", code);
     }
 
     [Theory]

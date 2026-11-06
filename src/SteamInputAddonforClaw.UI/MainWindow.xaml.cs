@@ -149,7 +149,7 @@ public sealed partial class MainWindow : Window
         ApplyDefaultWindowSize();
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
-        DeviceContent.Initialize(_frontend);
+        DeviceContent.Initialize(_frontend, _bootstrap.FeatureSupport);
         _controllerLedMutationTimer = DispatcherQueue.CreateTimer();
         _controllerLedMutationTimer.Interval = TimeSpan.FromMilliseconds(200);
         _controllerLedMutationTimer.IsRepeating = false;
@@ -263,7 +263,7 @@ public sealed partial class MainWindow : Window
         if (_profileContent is not null) return _profileContent;
 
         var page = new ProfilePage();
-        page.Initialize(_frontend);
+        page.Initialize(_frontend, _bootstrap.FeatureSupport);
         page.SetSteamActivity(_latestSystemStatus?.Steam.Active);
         page.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
         ProfilePageHost.Content = page;

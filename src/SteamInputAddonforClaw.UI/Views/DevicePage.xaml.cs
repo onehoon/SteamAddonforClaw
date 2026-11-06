@@ -19,6 +19,7 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class DevicePage : UserControl
 {
     private IAddonFrontendControl? _frontend;
+    private FrontendModelFeatureSupport _featureSupport = FrontendModelFeatureSupport.None;
     private bool _active;
     // Set while a snapshot is being applied to the ComboBoxes programmatically, so
     // SelectionChanged does not treat that render as a user edit and write it back out (work order
@@ -74,7 +75,15 @@ public sealed partial class DevicePage : UserControl
         UpdateMaximumProcessorStateEditability();
     }
 
-    internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
+    internal void Initialize(IAddonFrontendControl frontend, FrontendModelFeatureSupport? featureSupport = null)
+    {
+        _frontend = frontend;
+        _featureSupport = featureSupport ?? FrontendModelFeatureSupport.None;
+        TdpExpander.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed;
+        BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit ? Visibility.Visible : Visibility.Collapsed;
+        if (!_featureSupport.Tdp) SetInfoBarOpen(TdpInfoBar, false);
+        if (!_featureSupport.BatteryChargeLimit) SetInfoBarOpen(BatteryChargeLimitInfoBar, false);
+    }
 
     internal void Activate()
     {
@@ -133,9 +142,9 @@ public sealed partial class DevicePage : UserControl
             AppLog.Warn("Device", "Device Quick Settings snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
             Render(FrontendCpuBoostSnapshot.Unavailable);
             RenderMaximumProcessorState(FrontendMaximumProcessorStateSnapshot.Unavailable);
-            RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: false);
+            RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: true);
             RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);
-            RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot.Unavailable, preserveDirtyDraft: false);
+            RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot.Unavailable, preserveDirtyDraft: true);
             return;
         }
         Render(snapshot.CpuBoost);
@@ -147,6 +156,12 @@ public sealed partial class DevicePage : UserControl
 
     private void RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot snapshot, bool preserveDirtyDraft = true)
     {
+        if (!_featureSupport.BatteryChargeLimit)
+        {
+            SetInfoBarOpen(BatteryChargeLimitInfoBar, false);
+            return;
+        }
+
         _batteryChargeLimitSnapshot = snapshot;
         if (!preserveDirtyDraft || !_batteryChargeLimitDraftDirty)
         {
@@ -567,6 +582,12 @@ public sealed partial class DevicePage : UserControl
 
     private void RenderTdp(FrontendTdpSnapshot snapshot, bool preserveDirtyDraft = true)
     {
+        if (!_featureSupport.Tdp)
+        {
+            SetInfoBarOpen(TdpInfoBar, false);
+            return;
+        }
+
         var keepDraft = preserveDirtyDraft && _tdpDraftDirty;
         _tdpSnapshot = snapshot;
         if (!keepDraft)
@@ -715,7 +736,7 @@ public sealed partial class DevicePage : UserControl
     private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration, long submittedGeneration, bool editedAc)
     {
         try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!newerEditExists && result.HardwareApply is { Attempted: true } hardware && TdpDraftPolicy.ShouldShowHardwareResult(editedAc, hardware)) SetTdpResult(editedAc, MainUiStrings.Get(hardware.Succeeded ? "Device_Tdp_ResultSuccess" : "Device_Tdp_ResultFail", hardware.Succeeded ? "Success" : "Fail")); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? MainUiStrings.Get("Device_Tdp_ChangeFailed", "The TDP change failed."); TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; SetInfoBarOpen(TdpInfoBar, true); } }
-        catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = MainUiStrings.Get("Device_Tdp_RuntimeInterrupted", "TDP could not be updated because the Runtime connection was interrupted."); TdpInfoBar.Severity = InfoBarSeverity.Error; SetInfoBarOpen(TdpInfoBar, true); await RefreshAsync(); }
+        catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = MainUiStrings.Get("Device_Tdp_RuntimeInterrupted", "TDP could not be updated because the Runtime connection was interrupted."); TdpInfoBar.Severity = InfoBarSeverity.Error; SetInfoBarOpen(TdpInfoBar, true); if (submittedGeneration == Volatile.Read(ref _tdpEditGeneration)) _tdpDraftDirty = false; await RefreshAsync(); }
     }
     private void SetTdpResult(bool ac, string? result)
     {

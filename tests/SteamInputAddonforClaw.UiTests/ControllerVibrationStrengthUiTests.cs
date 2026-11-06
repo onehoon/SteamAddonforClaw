@@ -8,6 +8,44 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ControllerVibrationStrengthUiTests
 {
     [Fact]
+    public void Main_controller_visibility_uses_static_feature_support_independently_of_runtime_readback()
+    {
+        var root = FindRepositoryRoot();
+        var controller = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
+        var device = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
+
+        Assert.Contains("_featureSupport.ControllerVibrationStrength ? Visibility.Visible : Visibility.Collapsed", controller);
+        Assert.DoesNotContain("VibrationStrengthExpander.Visibility = _available", controller);
+        Assert.Contains("_featureSupport.ControllerLed && bootstrap.ControllerLedAvailable", controller);
+        Assert.Contains("GyroscopeCard.Visibility = _featureSupport.Motion", controller);
+        Assert.Contains("if (!_featureSupport.Motion", controller);
+        Assert.Contains("x:Name=\"GyroscopeCard\"", xaml);
+        Assert.Contains("DeviceContent.Initialize(_frontend, _bootstrap.FeatureSupport)", mainWindow);
+        Assert.Contains("TdpExpander.Visibility = _featureSupport.Tdp", device);
+        Assert.Contains("BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit", device);
+    }
+
+    [Fact]
+    public void Unsupported_vibration_feature_closes_orphan_runtime_error_and_skips_capture()
+    {
+        var root = FindRepositoryRoot();
+        var controller = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
+        var refresh = ExtractMethod(controller, "private async Task RefreshVibrationStrengthAsync(");
+        var supportGuard = refresh.IndexOf("if (!_featureSupport.ControllerVibrationStrength)", StringComparison.Ordinal);
+        var hideMessage = refresh.IndexOf("HideVibrationMessage();", StringComparison.Ordinal);
+        var returnStatement = refresh.IndexOf("return;", hideMessage, StringComparison.Ordinal);
+        var runtimeCapture = refresh.IndexOf("CaptureControllerVibrationStrengthAsync()", StringComparison.Ordinal);
+
+        Assert.True(supportGuard >= 0 && hideMessage > supportGuard && returnStatement > hideMessage);
+        Assert.True(runtimeCapture > returnStatement);
+        Assert.Contains("if (!snapshot.Available)", refresh, StringComparison.Ordinal);
+        var runtimeFailureMessage = refresh.IndexOf("ShowVibrationMessage(snapshot.Status, InfoBarSeverity.Error)", StringComparison.Ordinal);
+        Assert.True(runtimeFailureMessage > runtimeCapture);
+    }
+
+    [Fact]
     public void Controller_page_exposes_collapsed_icon_vibration_group_with_two_slider_rows_and_compact_recovery_card()
     {
         var root = FindRepositoryRoot();
@@ -438,6 +476,21 @@ public sealed class ControllerVibrationStrengthUiTests
             if (File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
                 return directory.FullName;
         throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+
+    private static string ExtractMethod(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Method signature not found: {signature}");
+        var openBrace = source.IndexOf('{', start);
+        var depth = 0;
+        var index = openBrace;
+        for (; index < source.Length; index++)
+        {
+            if (source[index] == '{') depth++;
+            else if (source[index] == '}' && --depth == 0) break;
+        }
+        return source[start..(index + 1)];
     }
 
     private sealed class ManualDelay

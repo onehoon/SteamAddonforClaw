@@ -34,6 +34,7 @@ public sealed partial class ControllerPage : UserControl
     private FrontButtonMappingSettings _mapping = FrontButtonMappingSettings.Default;
     private BackButtonMappingSettings _backButtonMapping = BackButtonMappingSettings.Default;
     private ControllerLedSettings _controllerLed = ControllerLedSettings.Default;
+    private FrontendModelFeatureSupport _featureSupport = FrontendModelFeatureSupport.None;
     private bool _available;
     private bool _backButtonAvailable;
     private bool _controllerLedAvailable;
@@ -88,17 +89,19 @@ public sealed partial class ControllerPage : UserControl
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         _vibrationPageUnloaded = false;
+        _featureSupport = bootstrap.FeatureSupport;
         _available = bootstrap.FrontButtonMappingAvailable;
         _backButtonAvailable = bootstrap.BackButtonMappingAvailable;
-        _controllerLedAvailable = bootstrap.ControllerLedAvailable;
+        _controllerLedAvailable = _featureSupport.ControllerLed && bootstrap.ControllerLedAvailable;
         ApplyControllerForSteamSettings(bootstrap.Settings);
         FrontButtonMappingContent.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
         BackButtonMappingExpander.Visibility = _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
         ControllerSettingsHeader.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
         ControllerLedExpander.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
+        GyroscopeCard.Visibility = _featureSupport.Motion ? Visibility.Visible : Visibility.Collapsed;
         MappingContent.Visibility = _available || _backButtonAvailable || _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
         MappingUnavailableText.Visibility = _available || _backButtonAvailable || _controllerLedAvailable ? Visibility.Collapsed : Visibility.Visible;
-        VibrationStrengthExpander.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
+        VibrationStrengthExpander.Visibility = _featureSupport.ControllerVibrationStrength ? Visibility.Visible : Visibility.Collapsed;
 
         _editors =
         [
@@ -193,7 +196,7 @@ public sealed partial class ControllerPage : UserControl
             Volatile.Read(ref _steamVirtualControllerMutationInProgress) != 0);
 
     private void UpdateGyroscopeControls() =>
-        GyroscopeEnabledToggle.IsEnabled = Volatile.Read(ref _gyroscopeMutationInProgress) == 0;
+        GyroscopeEnabledToggle.IsEnabled = _featureSupport.Motion && Volatile.Read(ref _gyroscopeMutationInProgress) == 0;
 
     private void OnFrontendStateInvalidated(object? sender, EventArgs args)
     {
@@ -286,7 +289,7 @@ public sealed partial class ControllerPage : UserControl
 
     private async void GyroscopeEnabledToggle_Toggled(object sender, RoutedEventArgs args)
     {
-        if (_applyingGyroscopeState || _frontend is null
+        if (!_featureSupport.Motion || _applyingGyroscopeState || _frontend is null
             || Interlocked.Exchange(ref _gyroscopeMutationInProgress, 1) != 0)
             return;
 
@@ -862,6 +865,12 @@ public sealed partial class ControllerPage : UserControl
 
     private async Task RefreshVibrationStrengthAsync(bool preserveFailure = false)
     {
+        if (!_featureSupport.ControllerVibrationStrength)
+        {
+            HideVibrationMessage();
+            return;
+        }
+
         if (_frontend is null || _vibrationPageUnloaded)
             return;
 
