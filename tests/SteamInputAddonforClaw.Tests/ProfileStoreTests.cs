@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
@@ -343,7 +344,7 @@ public sealed class ProfileStoreTests : IDisposable
     public void TdpValueMutation_PreservesFeatureOwnershipState()
     {
         var store = new ProfileStore(ProfilesPath);
-        var mutations = new GameProfileMutations(store, modelId: new HandheldDeviceModelId("msi.claw.a2vm.7"));
+        var mutations = new GameProfileMutations(store, tdpLimits: new TdpPowerLimits(8, 30, 8, 37));
         Assert.True(mutations.Enable(123, "Game"));
 
         var ac = new TdpPowerPair { Pl1Watts = 21, Pl2Watts = 30 };

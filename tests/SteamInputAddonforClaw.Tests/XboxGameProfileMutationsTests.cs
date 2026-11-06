@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -205,7 +206,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
                 }
             }
         });
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, true, "Game"));
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(StoreKey, mapping));
@@ -226,7 +227,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     public void Minimum_gpu_clock_override_is_persisted_for_canonical_xbox_key_and_disabled_without_losing_values()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         var settings = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1725.125, DcMhz = 1825.375 };
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded,
             mutations.SetEnabled(StoreKey, true, "Game"));
@@ -256,7 +257,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     public void Disable_and_reenable_preserve_values_and_display_name_never_changes_identity()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, true, "First name"));
         mutations.SetCpuBoostAc(StoreKey, CpuBoostMode.Aggressive);
         mutations.SetCpuBoostDc(StoreKey, CpuBoostMode.Disabled);
@@ -338,7 +339,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.InvalidTarget, noModel.SetTdp(StoreKey, Pair(25, 30), Pair(15, 20)));
         Assert.False(File.Exists(PathName));
 
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         mutations.SetEnabled(StoreKey, true, "Game");
         var beforeInvalid = File.ReadAllText(PathName);
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.InvalidTarget, mutations.SetTdp(StoreKey, Pair(7, 30), Pair(15, 20)));
@@ -454,7 +455,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         Assert.True(saved.XboxGames["store:game-0"].Favorite);
     }
 
-    private static HandheldDeviceModelId Model() => new("msi.claw.a2vm.7");
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };
 
     public void Dispose()

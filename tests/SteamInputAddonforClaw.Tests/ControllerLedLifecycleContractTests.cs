@@ -23,7 +23,8 @@ public sealed class ControllerLedLifecycleContractTests
         Assert.True(acquisition >= 0 && ownedGate > acquisition && continuationCall > ownedGate);
         Assert.True(liveSourceCheck >= 0 && suppression > liveSourceCheck && watcher > suppression
             && presentation > watcher && snapshotProvider > presentation && apply > presentation);
-        Assert.Contains("controllerLedAvailable: startupResult.HardwareSupported", host, StringComparison.Ordinal);
+        Assert.Contains("controllerLedAvailable: verifiedMsiClawStartup", host, StringComparison.Ordinal);
+        Assert.Contains("if (!IsVerifiedMsiClawStartup(startupResult)", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled", host, StringComparison.Ordinal);
     }
 

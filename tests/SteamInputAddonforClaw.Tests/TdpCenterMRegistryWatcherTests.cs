@@ -108,7 +108,8 @@ public sealed class TdpCenterMRegistryWatcherTests : IDisposable
     }
 
     private TdpRuntime CreateRuntime(FakeTransport transport, Func<TdpPowerSource?> source) =>
-        new(new ProfileStore(ProfilePath), new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), source);
+        new(new ProfileStore(ProfilePath), new ProfileMutationGate(), new TdpPowerLimits(8, 30, 8, 37),
+            new MsiClawTdpControl(new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport)), source);
     private void Save(DeviceTdpSettings tdp)
     {
         Directory.CreateDirectory(_directory);

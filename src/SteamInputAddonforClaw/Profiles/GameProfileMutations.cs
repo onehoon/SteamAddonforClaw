@@ -1,7 +1,6 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
-using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Profiles.Performance;
 
 namespace SteamInputAddonforClaw.Profiles;
 
@@ -13,15 +12,15 @@ internal sealed class GameProfileMutations
     private readonly ProfileStore _store;
     private readonly ProfileMutationGate _gate;
 
-    private HandheldDeviceModelId? _modelId;
-    internal GameProfileMutations(ProfileStore store, ProfileMutationGate? gate = null, HandheldDeviceModelId? modelId = null)
+    private TdpPowerLimits? _tdpLimits;
+    internal GameProfileMutations(ProfileStore store, ProfileMutationGate? gate = null, TdpPowerLimits? tdpLimits = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _gate = gate ?? new ProfileMutationGate();
-        _modelId = modelId;
+        _tdpLimits = tdpLimits;
     }
 
-    internal void SetModelId(HandheldDeviceModelId modelId) => _modelId = modelId;
+    internal void SetTdpLimits(TdpPowerLimits tdpLimits) => _tdpLimits = tdpLimits ?? throw new ArgumentNullException(nameof(tdpLimits));
 
     internal enum MutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
     internal sealed record Capture(uint AppId, GameProfile Profile, bool Exists, bool PersistenceWritable);
@@ -260,7 +259,7 @@ internal sealed class GameProfileMutations
 
     internal MutationOutcome SetTdp(uint appId, TdpPowerPair ac, TdpPowerPair dc)
     {
-        if (_modelId is not { } model || !MsiClawTdpPolicy.TryResolve(model, out var policy) || !policy.IsValid(ac) || !policy.IsValid(dc)) return MutationOutcome.InvalidTarget;
+        if (_tdpLimits is not { } limits || !limits.IsValid(ac) || !limits.IsValid(dc)) return MutationOutcome.InvalidTarget;
         lock (_gate.Sync)
         {
             var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;

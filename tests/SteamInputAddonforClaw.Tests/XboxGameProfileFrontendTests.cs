@@ -26,8 +26,8 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     {
         var store = new ProfileStore(ProfilePath);
         var gate = new ProfileMutationGate();
-        var mutations = new XboxGameProfileMutations(store, gate, Model());
-        var tdp = new TdpRuntime(store, gate, Model(), new MsiClawTdpHardware(new RecordingTdpTransport()));
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
+        var tdp = new TdpRuntime(store, gate, TdpLimits(), new MsiClawTdpControl(Model(), new MsiClawTdpHardware(new RecordingTdpTransport())));
         var limiter = new RecordingFrameLimiter();
         var fps = new IntelFrameLimiterRuntime(store, gate, limiter, marker: Path.Combine(_directory, "fps-marker.json"));
         var control = CreateControl(mutations, tdp, fps);
@@ -50,7 +50,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
         var store = new ProfileStore(ProfilePath);
         var gate = new ProfileMutationGate();
-        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, true, "Game"));
         var hardware = new RecordingMinimumClockControl();
         using var runtime = new IntelGpuMinimumClockRuntime(
@@ -94,7 +94,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
         var store = new ProfileStore(ProfilePath);
         var gate = new ProfileMutationGate();
-        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, true, "Game"));
         var hardware = new RecordingMinimumClockControl();
         var target = ActiveProfileTarget.ForXbox(Key);
@@ -124,7 +124,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     {
         Directory.CreateDirectory(_directory);
         var store = new ProfileStore(ProfilePath);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         const string liveTitle = "Xbox Live Title";
         var target = QuickSettingsProfileTarget.ForXbox(Key);
         var control = CreateControl(
@@ -167,9 +167,9 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
                 }
             }
         });
-        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
         var transport = new RecordingTdpTransport();
-        var tdp = new TdpRuntime(store, gate, Model(), new MsiClawTdpHardware(transport));
+        var tdp = new TdpRuntime(store, gate, TdpLimits(), new MsiClawTdpControl(Model(), new MsiClawTdpHardware(transport)));
         var limiter = new RecordingFrameLimiter();
         var fps = new IntelFrameLimiterRuntime(store, gate, limiter, marker: Path.Combine(_directory, "fps-marker.json"));
         var control = CreateControl(mutations, tdp, fps, actualRunningAppIdSource: () => throw new InvalidOperationException("XBOX profile edits must not consult the Steam active AppID."));
@@ -259,7 +259,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         var power = new PowerModeRuntime(store, powerPolicy, gate);
         power.SetActiveProfileResolver(resolver);
         var transport = new RecordingTdpTransport();
-        await using var tdp = new TdpRuntime(store, gate, Model(), new MsiClawTdpHardware(transport),
+        await using var tdp = new TdpRuntime(store, gate, TdpLimits(), new MsiClawTdpControl(Model(), new MsiClawTdpHardware(transport)),
             powerSource: () => TdpPowerSource.AC);
         tdp.SetActiveProfileResolver(resolver);
         var limiter = new RecordingFrameLimiter();
@@ -272,7 +272,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         var gpuHardware = new RecordingMinimumClockControl();
         using var gpuRuntime = new IntelGpuMinimumClockRuntime(store, gate, gpuHardware, () => AcDcPowerSource.AC);
         gpuRuntime.SetActiveProfileResolver(resolver);
-        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
         var mappingReconciles = 0;
         var control = CreateControl(mutations, tdp, fps,
             activeProfileTargetSource: () => target,
@@ -390,9 +390,9 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Directory.CreateDirectory(_directory);
         var store = new ProfileStore(ProfilePath);
         var gate = new ProfileMutationGate();
-        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
         var transport = new RecordingTdpTransport();
-        await using var tdp = new TdpRuntime(store, gate, Model(), new MsiClawTdpHardware(transport));
+        await using var tdp = new TdpRuntime(store, gate, TdpLimits(), new MsiClawTdpControl(Model(), new MsiClawTdpHardware(transport)));
         var limiter = new RecordingFrameLimiter();
         var fps = new IntelFrameLimiterRuntime(store, gate, limiter, marker: Path.Combine(_directory, "fps-marker.json"));
         var mappingReconciles = 0;
@@ -437,7 +437,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
                 }
             }
         });
-        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
         var cpuPolicy = new FakeCpuBoostPowerPolicy
         {
             Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled),
@@ -459,7 +459,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     [Fact]
     public async Task Invalid_XBOX_TDP_and_FPS_values_do_not_write_the_profile()
     {
-        var mutations = new XboxGameProfileMutations(new ProfileStore(ProfilePath), new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(new ProfileStore(ProfilePath), new ProfileMutationGate(), TdpLimits());
         mutations.SetEnabled(Key, true, "Game");
         var control = CreateControl(mutations);
         var before = File.ReadAllText(ProfilePath);
@@ -477,7 +477,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     public async Task XBOX_mapping_snapshot_shows_current_global_fallback_and_explicit_override()
     {
         var global = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.B);
-        var mutations = new XboxGameProfileMutations(new ProfileStore(ProfilePath), new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(new ProfileStore(ProfilePath), new ProfileMutationGate(), TdpLimits());
         var control = CreateControl(mutations, globalBackButtonMapping: global);
 
         var initial = await control.CaptureXboxGameProfileAsync(Key);
@@ -500,7 +500,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     public async Task Active_XBOX_mapping_and_profile_enable_changes_reconcile_only_after_persistence()
     {
         var store = new ProfileStore(ProfilePath);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         var target = ActiveProfileTarget.ForXbox(Key);
         var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
         BackButtonMappingSettings? expectedPersistedMapping = mapping;
@@ -540,7 +540,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     public async Task Active_mapping_reconcile_failure_keeps_the_persisted_change_and_reports_apply_failed()
     {
         var store = new ProfileStore(ProfilePath);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         var control = CreateControl(mutations,
             activeProfileTargetSource: () => ActiveProfileTarget.ForXbox(Key),
             reconcileXboxBackButtonMapping: _ => false);
@@ -579,6 +579,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     }
 
     private static HandheldDeviceModelId Model() => new("msi.claw.a2vm.7");
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };
 
     public void Dispose()
