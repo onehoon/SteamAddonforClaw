@@ -1,7 +1,11 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.CenterMStartup;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Hosting;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
+using SteamInputAddonforClaw.Startup;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -408,11 +412,38 @@ public sealed class IntelGpuMinimumClockTests
             testOnlyDataRoot: temp.Root,
             testIntelGpuMinimumClockControlFactory: () => fake,
             testGpuMinimumClockPowerSource: () => AcDcPowerSource.AC);
+        host.TestOnly_SetStartupForInitialization(
+            new AddonStartupComposition(null!, null!, null!, null!, new CenterMStartupControl(available: false)),
+            new StartupResult(
+                true,
+                HardwareSupported: true,
+                HardwareDeviceModel: MsiClawDeviceModels.Claw8ExAiPlus.Id,
+                HardwareStatus: HardwareCompatibilityStatus.Supported,
+                HardwareDeviceFamily: MsiClawDeviceModels.FamilyId));
 
         host.ReconcileIntelGpuMinimumClockForStartup();
 
         Assert.Equal(1, fake.InitializeCalls);
         Assert.Equal(new IntelGpuFrequencyRange(-1, 2100), fake.LastSetRange);
+    }
+
+    [Fact]
+    public async Task Host_skips_GPU_minimum_clock_operations_without_a_verified_model_capability()
+    {
+        using var temp = new TemporaryDirectory();
+        var fake = new FakeControl(new(1850, 2100));
+        await using var host = new AddonProcessHost(
+            testOnlyDataRoot: temp.Root,
+            testIntelGpuMinimumClockControlFactory: () => fake,
+            testGpuMinimumClockPowerSource: () => AcDcPowerSource.AC);
+
+        host.ReconcileIntelGpuMinimumClockForStartup();
+        var result = host.ReconcileGpuMinimumClockForPowerSourceChanged();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("ModelNotEligible", result.FailureReason);
+        Assert.Equal(0, fake.InitializeCalls);
+        Assert.Equal(0, fake.SetCalls);
     }
 
     [Fact]

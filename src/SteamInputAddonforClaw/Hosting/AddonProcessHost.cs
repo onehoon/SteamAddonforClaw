@@ -101,6 +101,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // here rather than inside AddonRuntimeCompositionFactory/AddonRoutingRuntime.
     private readonly ProfileStore _profileStore;
     private readonly ProfileMutationGate _profileMutationGate = new();
+    private HandheldModelFeatures _modelFeatures = HandheldModelFeatures.None;
     private readonly CpuBoostRuntime _cpuBoostRuntime;
     private readonly MaximumProcessorStateRuntime _maximumProcessorStateRuntime;
     private readonly PowerModeRuntime _powerModeRuntime;
@@ -379,7 +380,20 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         _startupComposition = composition;
         _startupResult = result;
+        _modelFeatures = ResolveModelFeatures(result);
         _startupOutcome = AddonProcessStartupOutcome.RuntimeReady;
+    }
+
+    private static HandheldModelFeatures ResolveModelFeatures(StartupResult startupResult)
+    {
+        if (!startupResult.HardwareSupported
+            || startupResult.HardwareStatus != HardwareCompatibilityStatus.Supported
+            || startupResult.HardwareDeviceFamily is not { } family
+            || startupResult.HardwareDeviceModel is not { } model
+            || !MsiClawDeviceModels.TryGetFeatures(family, model, out var features))
+            return HandheldModelFeatures.None;
+
+        return features;
     }
 
     internal async Task<AddonProcessStartupOutcome> RunStartupAsync()
@@ -473,6 +487,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         var startupComposition = _startupComposition ?? throw new InvalidOperationException("Startup composition is unavailable.");
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
+        _modelFeatures = ResolveModelFeatures(startupResult);
         AppLog.Info($"Starting runtime. CenterMStartupState={startupResult.CenterMStartupState}; HardwareStatus={startupResult.HardwareStatus}; HardwareDeviceModel={startupResult.HardwareDeviceModel}.");
 
         // PR4: reuse the ONE Center M startup control constructed by the startup composition -- the
@@ -515,6 +530,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // TDP / game-profile support is a supported-hardware/model capability, not a controller
         // authority state -- it applies in both Center M Enabled and Disabled boots.
         if (!_headlessUninstallPreparation
+            && _modelFeatures.SupportsControllerVibrationStrength
             && startupResult.HardwareDeviceModel is { } vibrationModel)
         {
             _controllerVibrationStrengthClient = new(
@@ -525,6 +541,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
 
         if (!_headlessUninstallPreparation
+            && _modelFeatures.SupportsTdp
             && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
         {
@@ -534,8 +551,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var tdpHardware = new MsiClawTdpHardware(_tdpTransport);
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel, tdpHardware);
             _tdpRuntime.SetActiveProfileResolver(_activeProfileResolver);
-            _batteryChargeLimitHardware = new MsiClawBatteryChargeLimitHardware(_tdpTransport);
-            _batteryChargeLimitRuntime = new(_profileStore, _profileMutationGate, tdpModel, _batteryChargeLimitHardware);
+            if (_modelFeatures.SupportsBatteryChargeLimit)
+            {
+                _batteryChargeLimitHardware = new MsiClawBatteryChargeLimitHardware(_tdpTransport);
+                _batteryChargeLimitRuntime = new(_profileStore, _profileMutationGate, tdpModel, _batteryChargeLimitHardware);
+            }
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
         }
@@ -727,7 +747,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 && string.Equals(activeGame.Key, key, StringComparison.Ordinal)
                     ? activeGame.DisplayName
                     : null,
-            intelFpsRuntime: _intelFpsRuntime, intelGpuMinimumClockRuntime: _intelGpuMinimumClockRuntime,
+            intelFpsRuntime: _modelFeatures.SupportsIntelFpsLimit ? _intelFpsRuntime : null,
+            intelGpuMinimumClockRuntime: _modelFeatures.SupportsIntelGpuMinimumClock ? _intelGpuMinimumClockRuntime : null,
             fanProbeTransport: _tdpTransport,
             batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
             batteryChargeLimitHardware: _batteryChargeLimitHardware,
@@ -752,6 +773,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // This is a presentation capability derived from the existing supported-hardware and
             // startup authority facts. The apply callback re-checks live authority and ownership.
             controllerLedAvailable: startupResult.HardwareSupported
+                && _modelFeatures.SupportsControllerLed
                 && startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled,
             applyControllerLedSettings: ApplyOwnedControllerLedSettingsAsync,
             applyControllerVibrationSettings: (settings, token) =>
@@ -1179,6 +1201,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         if (_motionSource is null
             && context.StartupResult.HardwareDeviceModel is { } motionModel
+            && _modelFeatures.SupportsMotion
             && MsiClawMotionSource.IsSupportedModel(motionModel))
         {
             _motionModel = motionModel;
@@ -1967,6 +1990,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         try
         {
+            if (!_modelFeatures.SupportsControllerLed)
+            {
+                AppLog.Info("ControllerLed", "Static LED apply skipped because the selected model is not eligible.",
+                    ("Event", "ControllerLedApplySkipped"), ("Reason", "ModelNotEligible"));
+                return;
+            }
+
             if (_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled)
             {
                 AppLog.Info("ControllerLed", "Static LED apply skipped because Addon authority is not active.",
@@ -2055,6 +2085,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         string trigger,
         CancellationToken cancellationToken)
     {
+        if (!_modelFeatures.SupportsControllerVibrationStrength)
+        {
+            AppLog.Info("ControllerVibration", "Controller vibration apply skipped because the selected model is not eligible.",
+                ("Event", "ControllerVibrationSettingsApplySkipped"), ("Trigger", trigger), ("Reason", "ModelNotEligible"));
+            return false;
+        }
+
         if (_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled)
         {
             AppLog.Info("ControllerVibration", "Controller vibration apply skipped because Addon authority is not active.",
@@ -3155,13 +3192,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Warn("PowerSource", "AC/DC power notification setup failed.", exception);
         }
 
-        try
-        {
-            _intelFpsRuntime.Initialize();
-            _intelFpsRuntime.StartupRecover();
-            _intelFpsRuntime.StartupReconcile();
-        }
-        catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "Intel FPS startup reconcile failed.", exception); }
+        ReconcileIntelFpsForOrdinaryStartup();
 
         try
         {
@@ -3190,12 +3221,33 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void ReconcileIntelGpuMinimumClockForStartup()
     {
+        if (!_modelFeatures.SupportsIntelGpuMinimumClock) return;
         try { _intelGpuMinimumClockRuntime.StartupReconcile(); }
         catch (Exception exception) { AppLog.Debug("Profiles.IntelGpuMinimumClock", "Startup effective GPU minimum reconcile failed; Addon Runtime remains available.", ("Failure", exception.Message)); }
     }
 
     internal IntelGpuMinimumClockOperationResult ReconcileGpuMinimumClockForPowerSourceChanged() =>
-        _intelGpuMinimumClockRuntime.ReconcileEffective("PowerSourceChanged");
+        _modelFeatures.SupportsIntelGpuMinimumClock
+            ? _intelGpuMinimumClockRuntime.ReconcileEffective("PowerSourceChanged")
+            : new(false, false, "ModelNotEligible", null, null, null, null, null);
+
+    internal void ReconcileIntelFpsForOrdinaryStartup()
+    {
+        if (!_modelFeatures.SupportsIntelFpsLimit) return;
+        try
+        {
+            _intelFpsRuntime.Initialize();
+            _intelFpsRuntime.StartupRecover();
+            _intelFpsRuntime.StartupReconcile();
+        }
+        catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "Intel FPS startup reconcile failed.", exception); }
+    }
+
+    internal void ReconcileIntelFpsForOrdinaryOperation(string trigger)
+    {
+        if (_modelFeatures.SupportsIntelFpsLimit)
+            _intelFpsRuntime.Reconcile(trigger);
+    }
 
     private ActiveProfileTarget CaptureActiveProfileTarget()
     {
@@ -3987,9 +4039,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("Profiles.Tdp", "TDP game-profile reconcile failed.", exception,
                 ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
         }
-        try { _intelFpsRuntime.Reconcile(trigger); }
+        try { ReconcileIntelFpsForOrdinaryOperation(trigger); }
         catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "FPS game-profile reconcile failed.", exception, ("ProfileTarget", target.LogLabel), ("Trigger", trigger)); }
-        try { _intelGpuMinimumClockRuntime.ReconcileEffective(trigger); }
+        try
+        {
+            if (_modelFeatures.SupportsIntelGpuMinimumClock)
+                _intelGpuMinimumClockRuntime.ReconcileEffective(trigger);
+        }
         catch (Exception exception) { AppLog.Error("Profiles.IntelGpuMinimumClock", "Minimum GPU Clock game-profile reconcile failed.", exception, ("ProfileTarget", target.LogLabel), ("Trigger", trigger)); }
     }
 
@@ -4394,7 +4450,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken),
             () => _cpuBoostRuntime.Reconcile(),
             () => _powerModeRuntime.Reconcile(),
-            () => _intelGpuMinimumClockRuntime.ReconcileAfterResume(),
+            _modelFeatures.SupportsIntelGpuMinimumClock
+                ? () => _intelGpuMinimumClockRuntime.ReconcileAfterResume()
+                : null,
             () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"),
             reconcileMaximumProcessorState: () => _maximumProcessorStateRuntime.Reconcile());
     }
@@ -4500,7 +4558,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (Volatile.Read(ref _processShutdownStarted) != 0) return;
             try
             {
-                _intelFpsRuntime.Reconcile("PowerSourceChanged");
+                ReconcileIntelFpsForOrdinaryOperation("PowerSourceChanged");
             }
             catch (Exception exception)
             {
