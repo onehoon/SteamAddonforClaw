@@ -32,6 +32,7 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
         Assert.Equal(FrontendTdpSnapshot.Unavailable, snapshot.Tdp);
         Assert.Equal(FrontendPowerModeSnapshot.Unavailable, snapshot.PowerMode);
         Assert.Equal(FrontendBatteryChargeLimitSnapshot.Unavailable, snapshot.BatteryChargeLimit);
+        Assert.Equal(FrontendModelFeatureSupport.None, snapshot.FeatureSupport);
     }
 
     [Fact]
@@ -152,6 +153,20 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => control.CaptureDeviceQuickSettingsAsync(cts.Token));
     }
 
+    [Fact]
+    public async Task Injected_static_model_support_is_reused_on_bootstrap_settings_and_device_capture()
+    {
+        var support = new FrontendModelFeatureSupport(true, false, true, true, false, true, false);
+        var control = CreateControl(cpuBoostRuntime: null, powerModeRuntime: null, featureSupport: support);
+
+        var bootstrap = await control.GetBootstrapAsync();
+        var device = await control.CaptureDeviceQuickSettingsAsync();
+
+        Assert.Equal(support, bootstrap.FeatureSupport);
+        Assert.Equal(support, bootstrap.Settings.FeatureSupport);
+        Assert.Equal(support, device.FeatureSupport);
+    }
+
     private CpuBoostRuntime CreateReconciledCpuBoostRuntime(ICpuBoostPowerPolicy policy)
     {
         var runtime = new CpuBoostRuntime(new ProfileStore(Path.Combine(_testDirectory, "profiles.json")), policy);
@@ -169,7 +184,8 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
     private InProcessAddonFrontendControl CreateControl(
         CpuBoostRuntime? cpuBoostRuntime,
         PowerModeRuntime? powerModeRuntime,
-        MaximumProcessorStateRuntime? maximumProcessorStateRuntime = null)
+        MaximumProcessorStateRuntime? maximumProcessorStateRuntime = null,
+        FrontendModelFeatureSupport? featureSupport = null)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -180,7 +196,8 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
             null,
             cpuBoostRuntime: cpuBoostRuntime,
             powerModeRuntime: powerModeRuntime,
-            maximumProcessorStateRuntime: maximumProcessorStateRuntime);
+            maximumProcessorStateRuntime: maximumProcessorStateRuntime,
+            featureSupport: featureSupport);
     }
 
     public void Dispose()

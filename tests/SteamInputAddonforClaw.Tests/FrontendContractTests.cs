@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Devices;
@@ -39,6 +40,21 @@ public sealed class FrontendContractTests
         // never satisfy against the original array-backed instance -- this is a value-equality
         // check, not a reference check.
         Assert.Equivalent(SampleStatus, restored, strict: true);
+    }
+
+    [Fact]
+    public void Frontend_model_feature_support_defaults_to_none_for_legacy_snapshots()
+    {
+        var settings = new FrontendSettingsSnapshot(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default);
+        var bootstrap = new FrontendBootstrapSnapshot(settings, string.Empty, false);
+        var profile = new FrontendGameProfileSnapshot(42, null, false, false,
+            new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled),
+            new(false, new(20, 22), new(20, 22)), false, null);
+
+        Assert.Equal(FrontendModelFeatureSupport.None, settings.FeatureSupport);
+        Assert.Equal(FrontendModelFeatureSupport.None, bootstrap.FeatureSupport);
+        Assert.Equal(FrontendModelFeatureSupport.None, profile.FeatureSupport);
+        Assert.Equal(FrontendModelFeatureSupport.None, FrontendDeviceQuickSettingsSnapshot.Unavailable.FeatureSupport);
     }
 
     [Fact]

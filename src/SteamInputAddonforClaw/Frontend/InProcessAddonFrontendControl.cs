@@ -39,6 +39,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<string?> _processPath;
     private readonly bool _frontButtonMappingAvailable;
     private readonly bool _controllerLedAvailable;
+    private readonly FrontendModelFeatureSupport _featureSupport;
     private readonly Func<ControllerLedSettings, CancellationToken, Task>? _applyControllerLedSettings;
     private readonly Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? _applyControllerVibrationSettings;
     private int _shutdownStarted;
@@ -171,10 +172,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         WindowsTweaksRuntime? windowsTweaksRuntime = null,
         MaximumProcessorStateRuntime? maximumProcessorStateRuntime = null,
         Func<CancellationToken, Task<string?>>? captureControllerFirmwareVersionForMsiUpdate = null,
-        IntelDsaCatalogClient? intelDsaCatalogClient = null)
+        IntelDsaCatalogClient? intelDsaCatalogClient = null,
+        FrontendModelFeatureSupport? featureSupport = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
+        _featureSupport = featureSupport ?? FrontendModelFeatureSupport.None;
         _applyControllerLedSettings = applyControllerLedSettings;
         _centerMStartup = centerMStartup;
         _centerMAuthorityTransition = centerMAuthorityTransition;
@@ -583,9 +586,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (captured is null)
             return new(key, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled),
                 new(false, new(20, 22), new(20, 22)), false, null,
-                FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."))
+                FpsLimit: _featureSupport.IntelFpsLimit
+                    ? new(false, 60, 60, false, "Intel FPS Limit is unavailable.")
+                    : null)
             {
-                BackButtonMapping = new(true, _settings.BackButtonMapping)
+                BackButtonMapping = _frontButtonMappingAvailable ? new(true, _settings.BackButtonMapping) : null,
+                FeatureSupport = _featureSupport,
             };
 
         var profile = captured.Profile;
@@ -605,11 +611,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             captured.PersistenceWritable, limits,
             profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
             profile.Performance.PowerMode is { } power ? new(power.Enabled, power.Ac, power.Dc) : null,
-            new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60,
-                profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason),
-            CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock))
+            _featureSupport.IntelFpsLimit
+                ? new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60,
+                    profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason)
+                : null,
+            _featureSupport.IntelGpuMinimumClock
+                ? CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock)
+                : null)
         {
-            BackButtonMapping = new(storedMapping is null, storedMapping ?? _settings.BackButtonMapping)
+            BackButtonMapping = _frontButtonMappingAvailable
+                ? new(storedMapping is null, storedMapping ?? _settings.BackButtonMapping)
+                : null,
+            FeatureSupport = _featureSupport,
         };
     }
 
@@ -802,10 +815,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             new(profile.Performance.Tdp!.Enabled, new(profile.Performance.Tdp.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits,
             profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
             profile.Performance.PowerMode is { } power ? new(power.Enabled, power.Ac, power.Dc) : null,
-            new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60, profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason),
-            CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock))
+            _featureSupport.IntelFpsLimit
+                ? new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60, profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason)
+                : null,
+            _featureSupport.IntelGpuMinimumClock
+                ? CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock)
+                : null)
         {
-            SteamVirtualController = profile.SteamVirtualController
+            SteamVirtualController = profile.SteamVirtualController,
+            FeatureSupport = _featureSupport,
         };
     }
 
@@ -858,10 +876,22 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             : appId != 0 && appId == _actualRunningAppIdSource();
     }
 
-    private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(false, new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
+    private FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(false, new(20, 22), new(20, 22)), false, null,
+        FpsLimit: _featureSupport.IntelFpsLimit ? new(false, 60, 60, false, "Intel FPS Limit is unavailable.") : null,
+        GpuMinimumClock: _featureSupport.IntelGpuMinimumClock
+            ? new(false, false, false, [], null, null, null, "Intel GPU minimum-frequency control is unavailable.")
+            : null)
+    {
+        FeatureSupport = _featureSupport,
+    };
     private FrontendGameProfileMutationResult UnavailableMutation(uint appId, string message) => new(FrontendGameProfileMutationOutcome.Unavailable, message, CaptureGameProfile(appId));
 
-    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), AppLog.DirectoryPath, _frontButtonMappingAvailable) { BackButtonMappingAvailable = _frontButtonMappingAvailable, ControllerLedAvailable = _controllerLedAvailable });
+    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), AppLog.DirectoryPath, _frontButtonMappingAvailable)
+    {
+        BackButtonMappingAvailable = _frontButtonMappingAvailable,
+        ControllerLedAvailable = _controllerLedAvailable,
+        FeatureSupport = _featureSupport,
+    });
 
     public Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default)
     {
@@ -1740,7 +1770,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, YButtonQuickJumpTarget = _settings.YButtonQuickJumpTarget, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, FeatureSupport = _featureSupport, YButtonQuickJumpTarget = _settings.YButtonQuickJumpTarget, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1
@@ -2185,7 +2215,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) { AppLog.Warn("Device", "Maximum Processor State snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
 
-        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, batteryChargeLimit, maximumProcessorState);
+        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, batteryChargeLimit, maximumProcessorState)
+        {
+            FeatureSupport = _featureSupport,
+        };
     }
 
     public async Task<FrontendMsiLiveUpdateCatalogSnapshot> RequestMsiLiveUpdateCatalogAsync(CancellationToken cancellationToken = default)

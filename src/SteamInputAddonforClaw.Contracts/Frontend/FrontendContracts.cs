@@ -7,6 +7,19 @@ using SteamInputAddonforClaw.Contracts.FrontButtons;
 namespace SteamInputAddonforClaw.Contracts.Frontend;
 
 public enum FrontendLogLevel { Off, Info, Debug }
+/// <summary>Static, model-level frontend projection of existing hardware feature eligibility.
+/// This does not describe live availability, writability, initialization, or runtime ownership.</summary>
+public sealed record FrontendModelFeatureSupport(
+    bool Tdp,
+    bool BatteryChargeLimit,
+    bool ControllerVibrationStrength,
+    bool ControllerLed,
+    bool Motion,
+    bool IntelFpsLimit,
+    bool IntelGpuMinimumClock)
+{
+    public static readonly FrontendModelFeatureSupport None = new(false, false, false, false, false, false, false);
+}
 public enum FrontendProfileGameSource { Steam, NonSteam }
 public sealed record FrontendProfileGameCatalogEntry(
     uint AppId,
@@ -39,12 +52,14 @@ public sealed record FrontendGameProfileSnapshot(uint AppId, string? DisplayName
     FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null)
 {
     public SteamVirtualControllerPreference? SteamVirtualController { get; init; }
+    public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
 }
 public sealed record FrontendXboxGameProfileSnapshot(string Key, string? DisplayName, bool Exists, bool Enabled,
     FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits,
     FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null)
 {
     public FrontendGameBackButtonMappingConfiguration? BackButtonMapping { get; init; }
+    public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
 }
 public sealed record FrontendGameBackButtonMappingConfiguration(bool UseGlobalMapping, BackButtonMappingSettings Mapping);
 public enum FrontendPowerModeReadStatus { Known, Unknown, Unavailable }
@@ -188,6 +203,8 @@ public sealed record FrontendDeviceQuickSettingsSnapshot(
     FrontendBatteryChargeLimitSnapshot BatteryChargeLimit,
     FrontendMaximumProcessorStateSnapshot? MaximumProcessorState = null)
 {
+    public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
+
     public static readonly FrontendDeviceQuickSettingsSnapshot Unavailable = new(
         FrontendCpuBoostSnapshot.Unavailable,
         FrontendTdpSnapshot.Unavailable,
@@ -327,6 +344,7 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
     public bool DeveloperMenuEnabled { get; init; }
     public bool ExperimentalVirtualTouchpadEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
+    public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
     public QuickOverlayYButtonTarget YButtonQuickJumpTarget { get; init; } = QuickOverlayYButtonTarget.Profile;
     public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
     public ControllerLedSettings ControllerLed { get; init; } = ControllerLedSettings.Default;
@@ -395,6 +413,9 @@ public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings
 
     /// <summary>Whether static controller LED settings apply on supported hardware under Addon authority.</summary>
     public bool ControllerLedAvailable { get; init; }
+
+    /// <summary>Stable model-level feature eligibility used by Main UI and Overlay projections.</summary>
+    public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
 }
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
