@@ -396,6 +396,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         return features;
     }
 
+    private static bool IsVerifiedMsiClawStartup(StartupResult startupResult)
+        => startupResult.HardwareSupported
+            && startupResult.HardwareStatus == HardwareCompatibilityStatus.Supported
+            && startupResult.HardwareDeviceFamily == MsiClawDeviceModels.FamilyId
+            && startupResult.HardwareDeviceModel is not null;
+
     internal async Task<AddonProcessStartupOutcome> RunStartupAsync()
     {
         if (_startupOutcome is not null) return _startupOutcome.Value;
@@ -493,7 +499,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // PR4: reuse the ONE Center M startup control constructed by the startup composition -- the
         // same instance the authority branch read -- for the mandatory policy, PR3 transition, and
         // Device-page capture. No second Center M startup writer/manager is created.
-        _centerMStartupControl = startupComposition.CenterMStartupControl;
+        var verifiedMsiClawStartup = IsVerifiedMsiClawStartup(startupResult);
+        var centerMStartupControl = verifiedMsiClawStartup
+            ? startupComposition.CenterMStartupControl ?? throw new InvalidOperationException("Verified MSI startup has no shared Center M startup control.")
+            : null;
+        _centerMStartupControl = centerMStartupControl;
 
         var composition = _runtimeCompositionFactory?.Invoke(startupComposition, startupResult)
             ?? AddonRuntimeCompositionFactory.Create(
@@ -502,7 +512,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 // Full1902 A2 section 11: Center M Enabled (stock authority) gates ONLY the stock
                 // PID1901 resume baseline. Derived directly from the sole startup authority fact --
                 // Disabled / Partial / Unavailable all resolve to false.
-                stockCenterMAuthority: startupResult.CenterMStartupState == Contracts.Frontend.FrontendCenterMStartupState.Enabled,
+                stockCenterMAuthority: verifiedMsiClawStartup
+                    && startupResult.CenterMStartupState == Contracts.Frontend.FrontendCenterMStartupState.Enabled,
                 // PR7: forward the raw BPM bool, then request a Full-1902 runtime
                 // presentation reconcile (BPM is half of the X360 <-> SteamDeck policy).
                 bigPictureStateChanged: OnBigPictureStateChanged,
@@ -540,24 +551,38 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawVibrationProfileIo());
         }
 
-        if (!_headlessUninstallPreparation
-            && _modelFeatures.SupportsTdp
-            && startupResult.HardwareDeviceModel is { } tdpModel
-            && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
-        {
-            _gameProfileMutations.SetModelId(tdpModel);
-            _xboxGameProfileMutations.SetModelId(tdpModel);
+        var tdpModel = startupResult.HardwareDeviceModel;
+        var tdpPolicyAvailable = verifiedMsiClawStartup
+            && tdpModel is { } policyModel
+            && MsiClawTdpPolicy.TryResolve(policyModel, out _);
+        TdpPowerLimits? tdpLimits = null;
+        if (tdpPolicyAvailable && tdpModel is { } limitsModel
+            && MsiClawTdpPolicy.TryResolve(limitsModel, out var tdpPolicy))
+            tdpLimits = tdpPolicy.ToPowerLimits();
+        var deviceRuntimePlan = MsiClawDeviceRuntimePlan.Create(
+            verifiedMsiClawStartup,
+            _modelFeatures.SupportsTdp,
+            tdpLimits is not null,
+            _modelFeatures.SupportsBatteryChargeLimit,
+            _headlessUninstallPreparation);
+        if (deviceRuntimePlan.CreateSharedTransport)
             _tdpTransport = new();
-            var tdpHardware = new MsiClawTdpHardware(_tdpTransport);
-            _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel, tdpHardware);
+        if (deviceRuntimePlan.CreateTdpRuntime && tdpModel is { } tdpDeviceModel && tdpLimits is { } selectedTdpLimits)
+        {
+            _gameProfileMutations.SetTdpLimits(selectedTdpLimits);
+            _xboxGameProfileMutations.SetTdpLimits(selectedTdpLimits);
+            var tdpHardware = new MsiClawTdpHardware(_tdpTransport!);
+            var tdpControl = new MsiClawTdpControl(tdpDeviceModel, tdpHardware);
+            _tdpRuntime = new(_profileStore, _profileMutationGate, selectedTdpLimits, tdpControl,
+                centerMManualSeed: () => WindowsTdpCenterMManualSettings.Read(tdpDeviceModel));
             _tdpRuntime.SetActiveProfileResolver(_activeProfileResolver);
-            if (_modelFeatures.SupportsBatteryChargeLimit)
-            {
-                _batteryChargeLimitHardware = new MsiClawBatteryChargeLimitHardware(_tdpTransport);
-                _batteryChargeLimitRuntime = new(_profileStore, _profileMutationGate, tdpModel, _batteryChargeLimitHardware);
-            }
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
+        }
+        if (deviceRuntimePlan.CreateBatteryChargeLimitRuntime && tdpModel is { } batteryDeviceModel)
+        {
+            _batteryChargeLimitHardware = new MsiClawBatteryChargeLimitHardware(_tdpTransport!);
+            _batteryChargeLimitRuntime = new(_profileStore, _profileMutationGate, batteryDeviceModel, _batteryChargeLimitHardware);
         }
         // PR3: the reboot-bound Center M controller-authority transition. Composes the already-merged
         // narrow owners -- the shared CenterMStartupControl, the composition's single
@@ -565,162 +590,173 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // for the first time) -- plus the RAW lower-level Runtime safety decision (not
         // AddonProcessHost.EvaluateUserRestart, whose ordinary-restart-safety rules must never block
         // the official Enable-and-Restart release path).
-        var authorityHidHideBaseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
-            new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
-            Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable."));
-        async Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult> ReleasePhysicalOwnershipAsync(
-            CancellationToken token)
+        SteamInputAddonforClaw.CenterMStartup.ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null;
+        if (verifiedMsiClawStartup)
         {
-            Task inFlightControllerWork;
-            Task admissionRetryTask;
-            CancellationTokenSource? admissionRetryCancellation;
-            lock (_controllerOwnershipOperationSync)
+            var authorityHidHideBaseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
+                new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
+                Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable."));
+            async Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult> ReleasePhysicalOwnershipAsync(
+                CancellationToken token)
             {
-                Volatile.Write(ref _controllerOwnershipReleaseStarted, 1);
-                _initialControllerAcquisition = null;
-                Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0);
-                inFlightControllerWork = _ownedControllerRecovery;
-                admissionRetryTask = _disabledBootAdmissionRetryTask;
-                admissionRetryCancellation = _disabledBootAdmissionRetryCancellation;
-            }
-            admissionRetryCancellation?.Cancel();
-            await admissionRetryTask.ConfigureAwait(false);
-            // Close admission first, then drain the existing single task before retiring VIIPER or
-            // releasing the physical owner. No deferred initial AcquireAsync may outlive Enable.
-            await inFlightControllerWork.ConfigureAwait(false);
-
-            // Full1902 A2 section 14: stop the feature-local front-button owner (WMI observation +
-            // pulse callbacks into the presentation) before the presentation it targets is retired.
-            if (_frontButtonRuntime is { } frontButtons)
-            {
-                await frontButtons.DisposeAsync().ConfigureAwait(false);
-                _frontButtonRuntime = null;
-            }
-
-            if (_presentationOwnership is { } presentation)
-            {
-                var released = await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false);
-                if (!released)
+                Task inFlightControllerWork;
+                Task admissionRetryTask;
+                CancellationTokenSource? admissionRetryCancellation;
+                lock (_controllerOwnershipOperationSync)
                 {
-                    AppLog.Warn("CenterM.Authority", "Controller presentation could not be retired for the requested restart.", null,
-                        ("Event", "StockAuthorityPresentationReleaseFailed"));
-                    return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", []);
+                    Volatile.Write(ref _controllerOwnershipReleaseStarted, 1);
+                    _initialControllerAcquisition = null;
+                    Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0);
+                    inFlightControllerWork = _ownedControllerRecovery;
+                    admissionRetryTask = _disabledBootAdmissionRetryTask;
+                    admissionRetryCancellation = _disabledBootAdmissionRetryCancellation;
                 }
+                admissionRetryCancellation?.Cancel();
+                await admissionRetryTask.ConfigureAwait(false);
+                // Close admission first, then drain the existing single task before retiring VIIPER or
+                // releasing the physical owner. No deferred initial AcquireAsync may outlive Enable.
+                await inFlightControllerWork.ConfigureAwait(false);
+
+                // Full1902 A2 section 14: stop the feature-local front-button owner (WMI observation +
+                // pulse callbacks into the presentation) before the presentation it targets is retired.
+                if (_frontButtonRuntime is { } frontButtons)
+                {
+                    await frontButtons.DisposeAsync().ConfigureAwait(false);
+                    _frontButtonRuntime = null;
+                }
+
+                if (_presentationOwnership is { } presentation)
+                {
+                    var released = await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false);
+                    if (!released)
+                    {
+                        AppLog.Warn("CenterM.Authority", "Controller presentation could not be retired for the requested restart.", null,
+                            ("Event", "StockAuthorityPresentationReleaseFailed"));
+                        return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", []);
+                    }
+                }
+
+                await DisposeMotionSourceAsync("CenterMAuthorityRelease").ConfigureAwait(false);
+
+                if (_physicalOwnership is { } owner)
+                    return await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false);
+
+                return SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
             }
-
-            await DisposeMotionSourceAsync("CenterMAuthorityRelease").ConfigureAwait(false);
-
-            if (_physicalOwnership is { } owner)
-                return await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false);
-
-            return SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
+            static bool IsFileProvenAbsent(string path)
+            {
+                try
+                {
+                    _ = File.GetAttributes(path);
+                    return false;
+                }
+                catch (FileNotFoundException) { return true; }
+                catch (DirectoryNotFoundException) { return true; }
+                catch { return false; }
+            }
+            centerMAuthorityTransition = new SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition(
+                centerMStartupControl!,
+                composition.StartupSettings,
+                authorityHidHideBaseline,
+                // Full1902 Policy B review [BLOCKER]: block the reboot-bound transition while the deferred
+                // Disabled-mode physical acquisition + Win+G arm is still committing, so Enable-and-Restart
+                // never races the physical owner. Otherwise the raw lower-level Runtime safety decision.
+                () => Volatile.Read(ref _disabledControllerStartupPending) != 0
+                    ? new SteamInputAddonforClaw.Lifecycle.UserTerminationDecision(false, SteamInputAddonforClaw.Lifecycle.UserTerminationBlockReason.ControllerAuthorityTransition)
+                    : _runtimeHost.EvaluateUserTermination(),
+                async token =>
+                {
+                    var status = await composition.StatusProvider.CaptureAsync(token).ConfigureAwait(false);
+                    return (status.Prerequisites, status.RecoverySafe);
+                },
+                // PR5/PR6: late-bound -- the owners are created after this transition owner, only for a
+                // Disabled boot. The virtual presentation is retired and canonical VIIPER is torn down
+                // BEFORE PR5 physical release; a virtual-release failure prevents everything downstream
+                // (DirectInput stop, HidHide clear, Center M roots, restart).
+                token => ReleasePhysicalOwnershipAsync(token),
+                // PR12 section 6/7: reuse the composition's existing StockCenterMStartupBaseline (the one
+                // built from the shared MsiClawNativeStateManager). A machine with no MSI Claw fails
+                // closed here rather than assuming stock.
+                startupComposition.StockCenterMBaseline is { } stockBaseline
+                    ? stockBaseline.EstablishAsync
+                    : _ => Task.FromResult(new SteamInputAddonforClaw.Startup.StockCenterMStartupBaselineResult(false, false, "StockBaselineUnavailable")),
+                // PR12 section 8: the one safely provable persisted Addon-owned primary PID1902 target.
+                () => authorityHidHideBaseline.TryGetExistingOwnedTargets(
+                    SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets),
+                // PR12 section 11: startup-task removal routed through the existing registration owner.
+                () => composition.StartupSettings.RemoveStartupRegistrationForUninstall(),
+                // Full1902 Policy B section 8: native Win+G / Xbox Game Bar suppression belongs to Addon
+                // controller authority. It is released ONLY here -- at the verified success boundary of the
+                // shared stock-restoration core, after the independent PID1901 proof, the Enabled-mode
+                // HidHide release, and the Center M root enable/read-back have all passed. Covers both
+                // Enable-and-Restart and PR12 stock-safe uninstall preparation.
+                onStockAuthorityRestored: () =>
+                {
+                    StopMsiQuickSettingsProcessStartWatcher();
+                    _winGSuppressionGuard.Disarm();
+                    AppLog.Info("Wing.Guard", "Full1902 Win+G suppression released; stock controller authority restored.",
+                        ("Authority", "StockCenterM"), ("Event", "Full1902WinGSuppressionReleased"));
+                },
+                new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester(),
+                hasExactPendingPrerequisites: SteamInputAddonforClaw.Prerequisites.PrerequisiteNextBootCommitPolicy.InspectCurrentBoot,
+                hasActiveControllerOwnership: () =>
+                    _physicalOwnership?.LiveInputSource is { IsRunning: true }
+                    || _presentationOwnership?.ActivePresentation is not null,
+                disabledBootPrerequisiteRepairWindow:
+                    verifiedMsiClawStartup && startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
+                    && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady,
+                stockTopologyUnreadyBeforeBaseline: startupResult.StockTopologyUnreadyBeforeBaseline,
+                verifyCurrentStockTopologyAndBaseline: startupComposition.Coordinator is { } startupCoordinator
+                    ? startupCoordinator.VerifyCurrentStockTopologyAndBaselineAsync
+                    : null,
+                hasVerifiedHidHideAbsenceWithoutOwnedState: () =>
+                {
+                    var package = new SteamInputAddonforClaw.HidHide.WindowsHidHidePackageProbe().Inspect();
+                    var driver = new SteamInputAddonforClaw.HidHide.HidHideDriverClient().Inspect();
+                    var receipt = new SteamInputAddonforClaw.HidHide.HidHideProvisioningReceiptStore(
+                        VelopackAppPaths.HidHideProvisioningReceiptPath).Load();
+                    var legacyReceiptAbsent = IsFileProvenAbsent(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
+                    var verified = SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition
+                        .IsVerifiedHidHideAbsenceWithoutOwnedState(package, driver, receipt, legacyReceiptAbsent);
+                    AppLog.Info("Uninstall", "HidHide absence evidence captured for the zero-owned-target release gate.",
+                        ("Event", "UninstallHidHideAbsenceEvidence"),
+                        ("PackageInspectionSucceeded", package.InspectionSucceeded),
+                        ("PackageInstalled", package.Installed),
+                        ("DriverStatus", driver.Status),
+                        ("ReceiptPresent", receipt.Receipt is not null),
+                        ("ReceiptCorrupt", receipt.IsCorrupt),
+                        ("LegacyReceiptAbsent", legacyReceiptAbsent),
+                        ("VerifiedAbsence", verified));
+                    return verified;
+                });
+                _centerMAuthorityTransition = centerMAuthorityTransition;
         }
-        static bool IsFileProvenAbsent(string path)
+        else
         {
-            try
-            {
-                _ = File.GetAttributes(path);
-                return false;
-            }
-            catch (FileNotFoundException) { return true; }
-            catch (DirectoryNotFoundException) { return true; }
-            catch { return false; }
+            _centerMAuthorityTransition = null;
         }
-        var centerMAuthorityTransition = new SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition(
-            _centerMStartupControl,
-            composition.StartupSettings,
-            authorityHidHideBaseline,
-            // Full1902 Policy B review [BLOCKER]: block the reboot-bound transition while the deferred
-            // Disabled-mode physical acquisition + Win+G arm is still committing, so Enable-and-Restart
-            // never races the physical owner. Otherwise the raw lower-level Runtime safety decision.
-            () => Volatile.Read(ref _disabledControllerStartupPending) != 0
-                ? new SteamInputAddonforClaw.Lifecycle.UserTerminationDecision(false, SteamInputAddonforClaw.Lifecycle.UserTerminationBlockReason.ControllerAuthorityTransition)
-                : _runtimeHost.EvaluateUserTermination(),
-            async token =>
-            {
-                var status = await composition.StatusProvider.CaptureAsync(token).ConfigureAwait(false);
-                return (status.Prerequisites, status.RecoverySafe);
-            },
-            // PR5/PR6: late-bound -- the owners are created after this transition owner, only for a
-            // Disabled boot. The virtual presentation is retired and canonical VIIPER is torn down
-            // BEFORE PR5 physical release; a virtual-release failure prevents everything downstream
-            // (DirectInput stop, HidHide clear, Center M roots, restart).
-            token => ReleasePhysicalOwnershipAsync(token),
-            // PR12 section 6/7: reuse the composition's existing StockCenterMStartupBaseline (the one
-            // built from the shared MsiClawNativeStateManager). A machine with no MSI Claw fails
-            // closed here rather than assuming stock.
-            startupComposition.StockCenterMBaseline is { } stockBaseline
-                ? stockBaseline.EstablishAsync
-                : _ => Task.FromResult(new SteamInputAddonforClaw.Startup.StockCenterMStartupBaselineResult(false, false, "StockBaselineUnavailable")),
-            // PR12 section 8: the one safely provable persisted Addon-owned primary PID1902 target.
-            () => authorityHidHideBaseline.TryGetExistingOwnedTargets(
-                SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets),
-            // PR12 section 11: startup-task removal routed through the existing registration owner.
-            () => composition.StartupSettings.RemoveStartupRegistrationForUninstall(),
-            // Full1902 Policy B section 8: native Win+G / Xbox Game Bar suppression belongs to Addon
-            // controller authority. It is released ONLY here -- at the verified success boundary of the
-            // shared stock-restoration core, after the independent PID1901 proof, the Enabled-mode
-            // HidHide release, and the Center M root enable/read-back have all passed. Covers both
-            // Enable-and-Restart and PR12 stock-safe uninstall preparation.
-            onStockAuthorityRestored: () =>
-            {
-                StopMsiQuickSettingsProcessStartWatcher();
-                _winGSuppressionGuard.Disarm();
-                AppLog.Info("Wing.Guard", "Full1902 Win+G suppression released; stock controller authority restored.",
-                    ("Authority", "StockCenterM"), ("Event", "Full1902WinGSuppressionReleased"));
-            },
-            new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester(),
-            hasExactPendingPrerequisites: SteamInputAddonforClaw.Prerequisites.PrerequisiteNextBootCommitPolicy.InspectCurrentBoot,
-            hasActiveControllerOwnership: () =>
-                _physicalOwnership?.LiveInputSource is { IsRunning: true }
-                || _presentationOwnership?.ActivePresentation is not null,
-            disabledBootPrerequisiteRepairWindow:
-                startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
-                && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady,
-            stockTopologyUnreadyBeforeBaseline: startupResult.StockTopologyUnreadyBeforeBaseline,
-            verifyCurrentStockTopologyAndBaseline: startupComposition.Coordinator is { } startupCoordinator
-                ? startupCoordinator.VerifyCurrentStockTopologyAndBaselineAsync
-                : null,
-            hasVerifiedHidHideAbsenceWithoutOwnedState: () =>
-            {
-                var package = new SteamInputAddonforClaw.HidHide.WindowsHidHidePackageProbe().Inspect();
-                var driver = new SteamInputAddonforClaw.HidHide.HidHideDriverClient().Inspect();
-                var receipt = new SteamInputAddonforClaw.HidHide.HidHideProvisioningReceiptStore(
-                    VelopackAppPaths.HidHideProvisioningReceiptPath).Load();
-                var legacyReceiptAbsent = IsFileProvenAbsent(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-                var verified = SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition
-                    .IsVerifiedHidHideAbsenceWithoutOwnedState(package, driver, receipt, legacyReceiptAbsent);
-                AppLog.Info("Uninstall", "HidHide absence evidence captured for the zero-owned-target release gate.",
-                    ("Event", "UninstallHidHideAbsenceEvidence"),
-                    ("PackageInspectionSucceeded", package.InspectionSucceeded),
-                    ("PackageInstalled", package.Installed),
-                    ("DriverStatus", driver.Status),
-                    ("ReceiptPresent", receipt.Receipt is not null),
-                    ("ReceiptCorrupt", receipt.IsCorrupt),
-                    ("LegacyReceiptAbsent", legacyReceiptAbsent),
-                    ("VerifiedAbsence", verified));
-                return verified;
-            });
-        _centerMAuthorityTransition = centerMAuthorityTransition;
         if (_headlessUninstallPreparation)
             return;
 
         if (_runtimeCompositionFactory is null)
             _updateCoordinator = new FrontendUpdateCoordinator(new VelopackUpdateClient(),
                 () => _requestRestart?.Invoke() == true);
+        var qualifiedCenterMStartupState = verifiedMsiClawStartup
+            ? startupResult.CenterMStartupState
+            : FrontendCenterMStartupState.Unavailable;
         var disabledBootPrerequisiteRepairWindow =
-            startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
+            qualifiedCenterMStartupState == FrontendCenterMStartupState.Disabled
             && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady;
         var allowPrerequisiteRepairWhileRecoveryUnsafe =
             SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor.IsStartupPrerequisiteRepairWindow(
-                startupResult.CenterMStartupState,
+                qualifiedCenterMStartupState,
                 disabledBootPrerequisiteRepairWindow,
                 startupResult.StockTopologyUnreadyBeforeBaseline);
         var setupExecutor = new SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor(
             allowPrerequisiteRepairWhileRecoveryUnsafe,
             disabledBootPrerequisiteRepairWindow,
             startupResult.StockTopologyUnreadyBeforeBaseline,
-            startupResult.CenterMStartupState);
+            qualifiedCenterMStartupState);
         _xboxGameSessionRuntime = new XboxGameSessionRuntime();
         _xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;
         _xboxGameSessionRuntime.ObservationReadinessChanged += OnXboxObservationReadinessChanged;
@@ -733,7 +769,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             setupExecutor: setupExecutor,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
             // received -- the UI and the runtime can never disagree about whether OEM1 mapping exists.
-            frontButtonMappingAvailable: startupResult.HardwareSupported,
+            frontButtonMappingAvailable: verifiedMsiClawStartup && startupResult.HardwareSupported,
             // Device/Profile CPU Boost is a sibling capability of Routing/OEM1, not a member of the
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
@@ -749,7 +785,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     : null,
             intelFpsRuntime: _modelFeatures.SupportsIntelFpsLimit ? _intelFpsRuntime : null,
             intelGpuMinimumClockRuntime: _modelFeatures.SupportsIntelGpuMinimumClock ? _intelGpuMinimumClockRuntime : null,
-            fanProbeTransport: _tdpTransport,
+            fanProbeTransport: deviceRuntimePlan.CreateTdpRuntime ? _tdpTransport : null,
             batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
             batteryChargeLimitHardware: _batteryChargeLimitHardware,
             // MSI Center M startup Enable/Disable (work order PR1). The one shared reader -- also
@@ -772,7 +808,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             runDeveloperRumbleRearm: RunDeveloperRumbleRearmAsync,
             // This is a presentation capability derived from the existing supported-hardware and
             // startup authority facts. The apply callback re-checks live authority and ownership.
-            controllerLedAvailable: startupResult.HardwareSupported
+            controllerLedAvailable: verifiedMsiClawStartup
+                && startupResult.HardwareSupported
                 && _modelFeatures.SupportsControllerLed
                 && startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled,
             applyControllerLedSettings: ApplyOwnedControllerLedSettingsAsync,
@@ -801,7 +838,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // cannot request Enable-and-Restart mid-commit -- preserving the old ordering guarantee.
         _runtimeStartupSettings = composition.StartupSettings;
         ReconcileEffectiveBackButtonMapping("Startup");
-        if (startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled)
+        if (verifiedMsiClawStartup && startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled)
             Volatile.Write(ref _disabledControllerStartupPending, 1);
 
         try
@@ -1004,7 +1041,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Settings.StartupSettingsCoordinator startupSettings,
         Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? existingOwner = null)
     {
-        if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)
+        if (!IsVerifiedMsiClawStartup(startupResult)
+            || startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)
             return;
 
         Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? owner = existingOwner;
@@ -1507,6 +1545,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         AddonStartupComposition startupComposition,
         HandheldDeviceModelId? hardwareDeviceModel)
     {
+        if (_centerMStartupControl is null || hardwareDeviceModel is null)
+        {
+            AppLog.Warn("ControllerOwnership", "Physical ownership unavailable without a verified MSI startup and model.", null);
+            return null;
+        }
         if (startupComposition.HandheldDeviceAdapter.NativeState is not Devices.MSI.Claw.MsiClawNativeStateManager nativeState)
         {
             AppLog.Warn("ControllerOwnership", "Physical ownership unavailable; MSI Claw native-state manager is unavailable.", null);
@@ -2969,7 +3012,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             || _startupResult is not { } startupResult
             || _runtimeStartupSettings is not { } startupSettings
             || !startupResult.HardwareSupported
-            || !string.Equals(startupResult.HardwareDeviceFamily?.Value, "msi.claw", StringComparison.OrdinalIgnoreCase)
+            || !IsVerifiedMsiClawStartup(startupResult)
             || startupResult.HardwareDeviceModel is null
             || startupResult.DisabledBootAdmission?.IsEligibleForTransientUsbIpRetry != true)
             return;
@@ -3304,7 +3347,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// Center M configuration and is therefore the expected controller authority. Used only for
     /// log-severity decisions -- authority mutations always re-read the shared Center M startup control.</summary>
     private bool ExpectsFull1902ControllerAuthority() =>
-        _startupResult?.CenterMStartupState == FrontendCenterMStartupState.Disabled;
+        _startupResult is { } startupResult
+        && IsVerifiedMsiClawStartup(startupResult)
+        && startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled;
 
     private AddonStatusSnapshot? TryCaptureFull1902AddonStatus() =>
         Full1902AddonStatusEvaluator.Evaluate(
@@ -3533,7 +3578,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (_startupResult?.HardwareDeviceModel is not { } model
             || !SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawAddonPhysicalOwnership.IsA2vmBootRumblePrimeModel(model))
             return "UnsupportedModel";
-        if (_startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled
+        if (!IsVerifiedMsiClawStartup(_startupResult)
+            || _startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled
             || Volatile.Read(ref _processShutdownStarted) != 0
             || _startupCancellationTokenSource.IsCancellationRequested)
             return "CenterMOrRuntimeAuthorityUnavailable";

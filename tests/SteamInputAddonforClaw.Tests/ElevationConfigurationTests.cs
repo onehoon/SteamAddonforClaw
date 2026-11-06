@@ -253,7 +253,9 @@ public sealed class ElevationConfigurationTests
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs"));
         Assert.Contains("_tdpTransport = new();", source);
-        Assert.Contains("new MsiClawTdpHardware(_tdpTransport)", source);
+        Assert.Contains("new MsiClawTdpHardware(_tdpTransport!)", source);
+        Assert.Contains("new MsiClawTdpControl(tdpDeviceModel, tdpHardware)", source);
+        Assert.Contains("new MsiClawBatteryChargeLimitHardware(_tdpTransport!)", source);
         Assert.Contains("await _tdpTransport.DisposeAsync()", source);
     }
 

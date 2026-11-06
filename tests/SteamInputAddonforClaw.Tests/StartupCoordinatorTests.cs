@@ -113,6 +113,35 @@ public sealed class StartupCoordinatorTests : IDisposable
         Assert.DoesNotContain("UpdateGate", events);
     }
 
+    [Fact]
+    public async Task SupportedForeignFamily_RemainsPassiveWithoutCenterMOrControllerAdmission()
+    {
+        var events = new List<string>();
+        var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
+        var captures = 0;
+        var evaluator = new SequencedHardwareEvaluator([
+            new(HardwareCompatibilityStatus.Supported, new("other.family"), new("other.model"), "test")
+        ]);
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), evaluator,
+            stockCenterMBaseline: new FakeBaseline(events),
+            disabledBootAdmission: admission,
+            captureCenterMStartup: () => { captures++; events.Add("CenterMCapture"); return Roots(FrontendCenterMStartupState.Disabled); });
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.ShouldStartRuntime);
+        Assert.False(result.RecoverySafe);
+        Assert.False(result.HardwareSupported);
+        Assert.Equal(HardwareCompatibilityStatus.Supported, result.HardwareStatus);
+        Assert.Equal(new HandheldDeviceId("other.family"), result.HardwareDeviceFamily);
+        Assert.Equal(new HandheldDeviceModelId("other.model"), result.HardwareDeviceModel);
+        Assert.Equal(FrontendCenterMStartupState.Unavailable, result.CenterMStartupState);
+        Assert.Equal(0, captures);
+        Assert.Equal(0, admission.EvaluateCount);
+        Assert.Empty(events);
+    }
+
     [Theory]
     [InlineData((int)HardwareCompatibilityStatus.Unsupported)]
     [InlineData((int)HardwareCompatibilityStatus.Indeterminate)]
@@ -913,7 +942,7 @@ public sealed class StartupCoordinatorTests : IDisposable
         Assert.DoesNotContain("StartRoutingObservation(", source, StringComparison.Ordinal);
         // Section 11: the stock PID1901 resume baseline is still gated on the Center M Enabled
         // authority state -- independently, not via the removed legacy routing selection.
-        Assert.Contains("!stockCenterMAuthority || stockCenterMBaseline is null", source, StringComparison.Ordinal);
+        Assert.Contains("!verifiedMsiStockAuthority || stockCenterMBaseline is null", source, StringComparison.Ordinal);
     }
 
     private static string RepoRoot()

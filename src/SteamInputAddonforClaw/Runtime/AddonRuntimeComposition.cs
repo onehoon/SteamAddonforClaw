@@ -95,8 +95,13 @@ internal static class AddonRuntimeCompositionFactory
         // Full1902 A2 section 11: sleep/resume while Center M is Disabled must not call the legacy
         // stock XInput baseline; the Enabled (stock authority) state still needs stock PID1901
         // verification on resume. Gated independently of the (now removed) legacy routing selection.
-        Func<CancellationToken, Task<bool>> establishBaseline = (!stockCenterMAuthority || stockCenterMBaseline is null)
-            ? _ => Task.FromResult(!stockCenterMAuthority)
+        var verifiedMsiStockAuthority = stockCenterMAuthority
+            && startupResult.HardwareSupported
+            && startupResult.HardwareStatus == HardwareCompatibilityStatus.Supported
+            && startupResult.HardwareDeviceFamily == MsiClawDeviceModels.FamilyId
+            && startupResult.HardwareDeviceModel is not null;
+        Func<CancellationToken, Task<bool>> establishBaseline = (!verifiedMsiStockAuthority || stockCenterMBaseline is null)
+            ? _ => Task.FromResult(!verifiedMsiStockAuthority)
             : async token => (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
 
         var runtimeHost = new AddonRuntimeHost(

@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -19,6 +20,7 @@ public sealed class MsiClawTdpPolicyTests
         Assert.Equal(8, policy.Pl2MinimumWatts);
         Assert.Equal(pl2Max, policy.Pl2MaximumWatts);
         Assert.Equal(shift, policy.ManualCompatibleShiftSelector);
+        Assert.Equal(new TdpPowerLimits(8, pl1Max, 8, pl2Max), policy.ToPowerLimits());
     }
 
     [Fact]

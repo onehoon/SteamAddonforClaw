@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal sealed class StartupCoordinator
 {
@@ -60,10 +61,9 @@ internal sealed class StartupCoordinator
         var stopwatch = Stopwatch.StartNew();
         var qualification = await EvaluateHardwareCompatibilityWithStabilizationAsync(cancellationToken).ConfigureAwait(false);
         var hardware = qualification.Assessment;
-        // The ONE decision of "is this a supported MSI Claw" for the whole process lifetime. It is
-        // carried on StartupResult so every downstream consumer -- routing, and the OEM1 mapping
-        // hardware-availability gate -- reads the same result instead of re-evaluating hardware.
-        var hardwareSupported = hardware.Status == HardwareCompatibilityStatus.Supported;
+        // Keep the MSI OEM boundary closed even if a future registry recognizes another family.
+        // Every downstream owner reads this one qualified result.
+        var hardwareSupported = IsSupportedMsiClaw(hardware);
         var hardwareDeviceModel = hardwareSupported ? hardware.DeviceModel : null;
         AppLog.Info("Hardware", "Startup hardware compatibility assessment completed.",
             ("Status", hardware.Status), ("DeviceFamily", hardware.DeviceFamily), ("DeviceModel", hardware.DeviceModel), ("Reason", hardware.Reason),
@@ -71,6 +71,15 @@ internal sealed class StartupCoordinator
         if (hardware.Status is HardwareCompatibilityStatus.Unsupported or HardwareCompatibilityStatus.Indeterminate)
             return WithHardwareQualification(
                 new StartupResult(false, HardwareStatus: hardware.Status, HardwareDeviceModel: hardware.DeviceModel), qualification);
+
+        if (!hardwareSupported)
+        {
+            AppLog.Warn("Hardware", "A supported non-MSI handheld family remains passive until its OEM owner is implemented.", null,
+                ("DeviceFamily", hardware.DeviceFamily), ("DeviceModel", hardware.DeviceModel), ("Action", "Passive"));
+            return WithHardwareQualification(new StartupResult(true, RecoverySafe: false,
+                HardwareSupported: false, HardwareStatus: hardware.Status,
+                CenterMStartupState: FrontendCenterMStartupState.Unavailable), qualification);
+        }
 
         // PR4: make startup authority-aware. The actual Center M startup roots decide whether the
         // legacy stock baseline path or the new read-only Addon Disabled-boot admission runs. A
@@ -209,7 +218,7 @@ internal sealed class StartupCoordinator
         var initial = startupResult.DisabledBootAdmission;
         if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled
             || !startupResult.HardwareSupported
-            || !string.Equals(startupResult.HardwareDeviceFamily?.Value, "msi.claw", StringComparison.OrdinalIgnoreCase)
+            || startupResult.HardwareDeviceFamily != MsiClawDeviceModels.FamilyId
             || startupResult.HardwareDeviceModel is null
             || initial?.IsEligibleForTransientUsbIpRetry != true)
             return initial ?? DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionUnavailable");
@@ -387,8 +396,12 @@ internal sealed class StartupCoordinator
         HardwareStatus = qualification.Assessment.Status,
         HardwareReason = qualification.Assessment.Reason,
         HardwareIdentity = qualification.Identity,
-        HardwareSupported = qualification.Assessment.Status == HardwareCompatibilityStatus.Supported,
+        HardwareSupported = IsSupportedMsiClaw(qualification.Assessment),
     };
+
+    private static bool IsSupportedMsiClaw(HardwareCompatibilityAssessment assessment)
+        => assessment.Status == HardwareCompatibilityStatus.Supported
+            && assessment.DeviceFamily == MsiClawDeviceModels.FamilyId;
 
     private static bool IsTransientHardwareProbeResult(HardwareCompatibilityAssessment assessment) =>
         assessment.Status == HardwareCompatibilityStatus.Indeterminate

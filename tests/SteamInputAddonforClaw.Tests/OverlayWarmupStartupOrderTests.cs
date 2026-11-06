@@ -41,7 +41,7 @@ public sealed class OverlayWarmupStartupOrderTests
         var controllerStartup = Method(source,
             "private async Task TryStartDisabledModeControllerAsync(",
             "private async Task RunInitialControllerAcquisitionAsync(");
-        Assert.Contains("if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)\n            return;",
+        Assert.Contains("if (!IsVerifiedMsiClawStartup(startupResult)\n            || startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)\n            return;",
             controllerStartup, StringComparison.Ordinal);
     }
 

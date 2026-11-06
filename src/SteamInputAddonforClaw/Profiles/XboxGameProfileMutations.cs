@@ -1,7 +1,6 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.BackButtons;
-using SteamInputAddonforClaw.Devices.Abstractions;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Profiles.Performance;
 
 namespace SteamInputAddonforClaw.Profiles;
 
@@ -12,13 +11,13 @@ internal sealed class XboxGameProfileMutations
     private const int FallbackPl2Watts = 22;
     private readonly ProfileStore _store;
     private readonly ProfileMutationGate _gate;
-    private HandheldDeviceModelId? _modelId;
+    private TdpPowerLimits? _tdpLimits;
 
-    internal XboxGameProfileMutations(ProfileStore store, ProfileMutationGate gate, HandheldDeviceModelId? modelId = null)
+    internal XboxGameProfileMutations(ProfileStore store, ProfileMutationGate gate, TdpPowerLimits? tdpLimits = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
-        _modelId = modelId;
+        _tdpLimits = tdpLimits;
     }
 
     internal enum MutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
@@ -32,7 +31,7 @@ internal sealed class XboxGameProfileMutations
         internal static MutationChange Unavailable => new(MutationOutcome.Unavailable, false);
     }
 
-    internal void SetModelId(HandheldDeviceModelId modelId) => _modelId = modelId;
+    internal void SetTdpLimits(TdpPowerLimits tdpLimits) => _tdpLimits = tdpLimits ?? throw new ArgumentNullException(nameof(tdpLimits));
 
     internal Capture CaptureProfile(string key)
     {
@@ -109,10 +108,9 @@ internal sealed class XboxGameProfileMutations
     internal MutationOutcome SetTdp(string key, TdpPowerPair ac, TdpPowerPair dc)
     {
         if (ac is null || dc is null
-            || _modelId is not { } model
-            || !MsiClawTdpPolicy.TryResolve(model, out var policy)
-            || !policy.IsValid(ac)
-            || !policy.IsValid(dc))
+            || _tdpLimits is not { } limits
+            || !limits.IsValid(ac)
+            || !limits.IsValid(dc))
             return MutationOutcome.InvalidTarget;
 
         return UpdateTdp(key, current => current with { Ac = ac, Dc = dc });

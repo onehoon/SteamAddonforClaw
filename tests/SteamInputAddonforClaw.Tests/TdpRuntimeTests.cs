@@ -322,8 +322,9 @@ public sealed class TdpRuntimeTests : IDisposable
     {
         var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
         var hardware = new MsiClawTdpHardware(transport);
+        var model = new HandheldDeviceModelId("msi.claw.a2vm.7");
         await using var runtime = new TdpRuntime(new ProfileStore(PathName), new ProfileMutationGate(),
-            new HandheldDeviceModelId("msi.claw.a2vm.7"), hardware, () => TdpPowerSource.AC);
+            new TdpPowerLimits(8, 30, 8, 37), new MsiClawTdpControl(model, hardware), () => TdpPowerSource.AC);
         var pair = Pair(20, 30);
 
         Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = pair, Dc = Pair(10, 20) }).Succeeded);
@@ -509,8 +510,9 @@ public sealed class TdpRuntimeTests : IDisposable
 
     private TdpRuntime Create(ProfileStore store, FakeTransport transport, TdpPowerSource? source, Func<DeviceTdpSettings?>? seed = null, Func<uint>? actualAppIdSource = null)
     {
-        var runtime = new TdpRuntime(store, new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"),
-            new MsiClawTdpHardware(transport), () => source, seed);
+        var model = new HandheldDeviceModelId("msi.claw.a2vm.7");
+        var runtime = new TdpRuntime(store, new ProfileMutationGate(), new TdpPowerLimits(8, 30, 8, 37),
+            new MsiClawTdpControl(model, new MsiClawTdpHardware(transport)), () => source, seed);
         runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(actualAppIdSource ?? (() => 0)));
         return runtime;
     }

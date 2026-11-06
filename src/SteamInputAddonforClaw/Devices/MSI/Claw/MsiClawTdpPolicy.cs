@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -16,6 +17,8 @@ internal sealed record MsiClawTdpPolicy(
     public bool IsValidPl2(int watts) => watts >= Pl2MinimumWatts && watts <= Pl2MaximumWatts;
 
     public bool IsValid(TdpPowerPair pair) => IsValidPl1(pair.Pl1Watts) && IsValidPl2(pair.Pl2Watts);
+
+    internal TdpPowerLimits ToPowerLimits() => new(Pl1MinimumWatts, Pl1MaximumWatts, Pl2MinimumWatts, Pl2MaximumWatts);
 
     public static bool TryResolve(HandheldDeviceModelId modelId, out MsiClawTdpPolicy policy)
     {

@@ -1,6 +1,4 @@
 using System.Runtime.InteropServices;
-using SteamInputAddonforClaw.Devices.Abstractions;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles;
 
@@ -18,7 +16,7 @@ internal readonly record struct TdpCommitResult(TdpCommitOutcome Outcome, string
     public bool Succeeded => Outcome == TdpCommitOutcome.Succeeded;
 }
 
-internal sealed record TdpRuntimeSnapshot(bool Available, bool PersistenceWritable, DeviceTdpSettings? Configuration, MsiClawTdpPolicy? Policy)
+internal sealed record TdpRuntimeSnapshot(bool Available, bool PersistenceWritable, DeviceTdpSettings? Configuration, TdpPowerLimits? Policy)
 {
     internal static readonly TdpRuntimeSnapshot Unavailable = new(false, false, null, null);
 }
@@ -27,8 +25,8 @@ internal sealed class TdpRuntime : IAsyncDisposable
 {
     private readonly ProfileStore _profileStore;
     private readonly ProfileMutationGate _mutationGate;
-    private readonly HandheldDeviceModelId? _modelId;
-    private readonly MsiClawTdpHardware _hardware;
+    private readonly TdpPowerLimits? _limits;
+    private readonly IDeviceTdpControl _hardware;
     private readonly Func<TdpPowerSource?> _powerSource;
     private readonly Func<DeviceTdpSettings?> _centerMManualSeed;
     private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null;
@@ -42,15 +40,15 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private bool _reconcileRequired;
     private bool _accepting = true;
 
-    internal TdpRuntime(ProfileStore profileStore, ProfileMutationGate mutationGate, HandheldDeviceModelId? modelId,
-        MsiClawTdpHardware hardware, Func<TdpPowerSource?>? powerSource = null, Func<DeviceTdpSettings?>? centerMManualSeed = null)
+    internal TdpRuntime(ProfileStore profileStore, ProfileMutationGate mutationGate, TdpPowerLimits? limits,
+        IDeviceTdpControl hardware, Func<TdpPowerSource?>? powerSource = null, Func<DeviceTdpSettings?>? centerMManualSeed = null)
     {
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _mutationGate = mutationGate ?? throw new ArgumentNullException(nameof(mutationGate));
-        _modelId = modelId;
+        _limits = limits;
         _hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
         _powerSource = powerSource ?? WindowsTdpPowerSource.Read;
-        _centerMManualSeed = centerMManualSeed ?? (() => _modelId is { } id ? WindowsTdpCenterMManualSettings.Read(id) : null);
+        _centerMManualSeed = centerMManualSeed ?? (static () => null);
     }
 
     internal void SetActiveProfileResolver(Func<ProfileDocument, ResolvedActiveProfile?> resolver)
@@ -93,7 +91,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
     internal TdpRuntimeSnapshot CaptureSnapshot()
     {
-        if (_modelId is not { } modelId || !MsiClawTdpPolicy.TryResolve(modelId, out var policy))
+        if (_limits is not { } policy)
             return TdpRuntimeSnapshot.Unavailable;
 
         lock (_mutationGate.Sync)
@@ -129,7 +127,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private bool ReconcileCurrentCore(bool forceApply, bool invalidateHardwareCache, string reason,
         TaskCompletionSource<TdpApplyCompletion>? completion)
     {
-        if (_modelId is null) return false;
+        if (_limits is null) return false;
 
         lock (_mutationGate.Sync)
         {
@@ -186,7 +184,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     internal TdpCommitResult CommitGlobalTdp(DeviceTdpSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if (_modelId is not { } modelId || !MsiClawTdpPolicy.TryResolve(modelId, out var policy)
+        if (_limits is not { } policy
             || !policy.IsValid(settings.Ac) || !policy.IsValid(settings.Dc))
             return new(TdpCommitOutcome.InvalidTarget, "TDP target is unsupported or outside the model ranges.");
 
@@ -321,7 +319,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     {
         if (activeProfile?.Performance.Tdp is { Enabled: true } gameTdp)
         {
-            if (!MsiClawTdpPolicy.TryResolve(_modelId!.Value, out var policy)
+            if (_limits is not { } policy
                 || !policy.IsValid(gameTdp.Ac) || !policy.IsValid(gameTdp.Dc))
             {
                 AppLog.Warn("Profiles.Tdp", "Active Game TDP is outside the current model ranges; no target was queued.", null,
@@ -358,14 +356,9 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
         try
         {
-            if (_modelId is not { } modelId)
-            {
-                snapshot.Completion?.TrySetResult(new(snapshot.Source, snapshot.Pl1Watts, snapshot.Pl2Watts, false, false));
-                return;
-            }
             if (invalidateHardwareCache)
                 _hardware.InvalidateCachedPowerLimits(cacheInvalidationReason ?? "Unknown");
-            var result = _hardware.Apply(modelId, new() { Pl1Watts = snapshot.Pl1Watts, Pl2Watts = snapshot.Pl2Watts });
+            var result = _hardware.Apply(new() { Pl1Watts = snapshot.Pl1Watts, Pl2Watts = snapshot.Pl2Watts });
             lock (_sync)
             {
                 if (snapshot.ReconcileVersion == _reconcileVersion)
@@ -413,39 +406,4 @@ internal static class WindowsTdpPowerSource
         if (!GetSystemPowerStatus(out var status)) return null;
         return status.ACLineStatus switch { 1 => TdpPowerSource.AC, 0 => TdpPowerSource.DC, _ => null };
     }
-}
-
-internal static class WindowsTdpCenterMManualSettings
-{
-    private const string UserScenarioPath = @"SOFTWARE\WOW6432Node\MSI\MSI Center M\Component\User Scenario";
-
-    internal static DeviceTdpSettings? Read(HandheldDeviceModelId modelId)
-    {
-        if (!MsiClawTdpPolicy.TryResolve(modelId, out var policy)) return null;
-        try
-        {
-            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(UserScenarioPath, writable: false);
-            if (key is null) return null;
-            var values = new[] { "ManualPL1AC", "ManualPL2AC", "ManualPL1DC", "ManualPL2DC" }
-                .Select(name => ReadInt(key.GetValue(name))).ToArray();
-            if (values.Any(value => value is null)) return null;
-            var ac = new TdpPowerPair { Pl1Watts = values[0]!.Value, Pl2Watts = values[1]!.Value };
-            var dc = new TdpPowerPair { Pl1Watts = values[2]!.Value, Pl2Watts = values[3]!.Value };
-            return policy.IsValid(ac) && policy.IsValid(dc)
-                ? new DeviceTdpSettings { Enabled = true, Ac = ac, Dc = dc }
-                : null;
-        }
-        catch (Exception exception) when (exception is UnauthorizedAccessException or System.Security.SecurityException or IOException)
-        {
-            return null;
-        }
-    }
-
-    private static int? ReadInt(object? value) => value switch
-    {
-        int number => number,
-        long number when number is >= int.MinValue and <= int.MaxValue => (int)number,
-        string text when int.TryParse(text, out var number) => number,
-        _ => null
-    };
 }
