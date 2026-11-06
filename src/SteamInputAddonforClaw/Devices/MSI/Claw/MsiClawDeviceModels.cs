@@ -4,23 +4,43 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal static class MsiClawDeviceModels
 {
+    internal static readonly HandheldDeviceId FamilyId = new("msi.claw");
+
+    private static readonly HandheldModelFeatures ExistingIntelClawFeatures = new(
+        SupportsTdp: true,
+        SupportsBatteryChargeLimit: true,
+        SupportsControllerVibrationStrength: true,
+        SupportsControllerLed: true,
+        SupportsMotion: true,
+        SupportsIntelFpsLimit: true,
+        SupportsIntelGpuMinimumClock: true);
+
     public static readonly HandheldDeviceModelDescriptor Claw7AiPlusA2vm = new(
         new HandheldDeviceModelId("msi.claw.a2vm.7"),
-        new HandheldDeviceId("msi.claw"),
+        FamilyId,
         "MSI Claw 7 AI+ A2VM",
-        "MS-1T42");
+        "MS-1T42")
+    {
+        Features = ExistingIntelClawFeatures
+    };
 
     public static readonly HandheldDeviceModelDescriptor Claw8AiPlusA2vm = new(
         new HandheldDeviceModelId("msi.claw.a2vm.8"),
-        new HandheldDeviceId("msi.claw"),
+        FamilyId,
         "MSI Claw 8 AI+ A2VM",
-        "MS-1T52");
+        "MS-1T52")
+    {
+        Features = ExistingIntelClawFeatures
+    };
 
     public static readonly HandheldDeviceModelDescriptor Claw8ExAiPlus = new(
         new HandheldDeviceModelId("msi.claw.cg3em"),
-        new HandheldDeviceId("msi.claw"),
+        FamilyId,
         "MSI Claw 8 EX AI+ CG3EM",
-        "MS-1T91");
+        "MS-1T91")
+    {
+        Features = ExistingIntelClawFeatures
+    };
 
     // Exact, known-model BaseBoard contract only -- no fuzzy matching, no Contains, no
     // inference from product-name/CPU/GPU text. Each MSI Claw board maps to exactly one
@@ -31,6 +51,16 @@ internal static class MsiClawDeviceModels
         Claw8AiPlusA2vm,
         Claw8ExAiPlus
     ];
+
+    internal static bool TryGetFeatures(
+        HandheldDeviceId familyId,
+        HandheldDeviceModelId modelId,
+        out HandheldModelFeatures features)
+    {
+        var model = All.FirstOrDefault(candidate => candidate.FamilyId == familyId && candidate.Id == modelId);
+        features = model?.Features ?? HandheldModelFeatures.None;
+        return model is not null;
+    }
 }
 
 internal sealed class MsiClawDeviceModelResolver : IHandheldDeviceModelResolver
