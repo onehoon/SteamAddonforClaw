@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System.Collections.ObjectModel;
@@ -26,6 +27,10 @@ public sealed partial class ProfilePage : UserControl
     private SteamPortraitArtworkContext? _portraitArtworkContext;
     private XamlRoot? _observedXamlRoot;
     private double _lastRasterizationScale = double.NaN;
+    private double _lastLayoutAvailableWidthDip = double.NaN;
+    private double _pendingLayoutRasterizationScale = 1.0;
+    private SteamCoverGridLayout? _coverGridLayout;
+    private readonly DispatcherQueueTimer _coverGridResizeTimer;
     private IReadOnlyList<FrontendProfileGameCatalogEntry> _catalog = [];
     private ObservableCollection<GameCardItem> _visibleGameCards = new();
     private FrontendProfileGameCatalogEntry? _selectedGame;
@@ -48,6 +53,10 @@ public sealed partial class ProfilePage : UserControl
     public ProfilePage()
     {
         InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; SetEditorsEnabled(false);
+        _coverGridResizeTimer = DispatcherQueue.CreateTimer();
+        _coverGridResizeTimer.Interval = TimeSpan.FromMilliseconds(180);
+        _coverGridResizeTimer.IsRepeating = false;
+        _coverGridResizeTimer.Tick += CoverGridResizeTimer_Tick;
         Loaded += ProfilePage_Loaded;
         Unloaded += ProfilePage_Unloaded;
 }
@@ -163,12 +172,13 @@ public sealed partial class ProfilePage : UserControl
     private void ProfilePage_Loaded(object sender, RoutedEventArgs e)
     {
         AttachXamlRoot();
-        UpdateCoverCardSize(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
+        ApplyCoverGridLayout(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
         RestartMissingGameCardArtworkLoads();
     }
 
     private void ProfilePage_Unloaded(object sender, RoutedEventArgs e)
     {
+        _coverGridResizeTimer.Stop();
         DetachXamlRoot();
         CancelPendingGameCardArtworkLoads();
     }
@@ -195,65 +205,77 @@ public sealed partial class ProfilePage : UserControl
 
     private void XamlRoot_Changed(XamlRoot sender, XamlRootChangedEventArgs args)
     {
-        UpdateCoverCardSize(sender.RasterizationScale);
-    }
-
-    private void UpdateCoverCardSize(double rasterizationScale)
-    {
-        if (!double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
-            rasterizationScale = 1.0;
-        if (Math.Abs(_lastRasterizationScale - rasterizationScale) < 0.0001)
-        {
-            UpdateCoverGridSpacing(rasterizationScale);
-            return;
-        }
-
-        _lastRasterizationScale = rasterizationScale;
-        var size = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale);
-        if (GameGrid.Layout is UniformGridLayout layout)
-        {
-            layout.MinItemWidth = size.Width;
-            layout.MinItemHeight = size.Height;
-        }
-
-        foreach (var card in _realizedGameCards.Values)
-            SetCardSize(card.Root, size.Width, size.Height);
-
-        UpdateCoverGridSpacing(rasterizationScale);
+        var scale = NormalizeRasterizationScale(sender.RasterizationScale);
+        if (Math.Abs(_lastRasterizationScale - scale) >= 0.0001)
+            ApplyCoverGridLayout(scale);
+        else
+            ScheduleCoverGridLayoutUpdate(scale);
     }
 
     private void GameGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        UpdateCoverGridSpacing(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
+        ScheduleCoverGridLayoutUpdate(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
     }
 
     private void CatalogScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        UpdateCoverGridSpacing(CatalogScrollViewer.XamlRoot?.RasterizationScale ?? 1.0);
+        ScheduleCoverGridLayoutUpdate(CatalogScrollViewer.XamlRoot?.RasterizationScale ?? 1.0);
     }
 
-    private void UpdateCoverGridSpacing(double rasterizationScale)
+    private void ScheduleCoverGridLayoutUpdate(double rasterizationScale)
     {
+        _pendingLayoutRasterizationScale = NormalizeRasterizationScale(rasterizationScale);
+        _coverGridResizeTimer.Stop();
+        _coverGridResizeTimer.Start();
+    }
+
+    private void CoverGridResizeTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        ApplyCoverGridLayout(_pendingLayoutRasterizationScale);
+    }
+
+    private void ApplyCoverGridLayout(double rasterizationScale)
+    {
+        rasterizationScale = NormalizeRasterizationScale(rasterizationScale);
         if (GameGrid.Layout is not UniformGridLayout layout)
             return;
 
-        var coverSize = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale);
-        if (!SteamCoverGridSpacing.TryResolveAvailableWidthDip(
+        if (!SteamCoverGridLayout.TryResolveAvailableWidthDip(
                 CatalogScrollViewer.ViewportWidth, GameGrid.ActualWidth, out var availableWidthDip)
-            || !SteamCoverGridSpacing.TryCalculate(
-                availableWidthDip, coverSize.Width, rasterizationScale, out var spacing))
+            || !SteamCoverGridLayout.TryCalculate(availableWidthDip, out var nextLayout))
             return;
 
-        const double SpacingUpdateToleranceDip = 0.001;
-        if (double.IsFinite(layout.MinColumnSpacing)
-            && double.IsFinite(layout.MinRowSpacing)
-            && Math.Abs(layout.MinColumnSpacing - spacing.GapDip) <= SpacingUpdateToleranceDip
-            && Math.Abs(layout.MinRowSpacing - spacing.GapDip) <= SpacingUpdateToleranceDip)
+        var scaleChanged = Math.Abs(_lastRasterizationScale - rasterizationScale) >= 0.0001;
+        var widthChanged = Math.Abs(_lastLayoutAvailableWidthDip - availableWidthDip) >= 0.5;
+        var snapshotChanged = _coverGridLayout is not { } current || !LayoutsMatch(current, nextLayout);
+        _lastRasterizationScale = rasterizationScale;
+        _lastLayoutAvailableWidthDip = availableWidthDip;
+        if (!scaleChanged && !widthChanged && !snapshotChanged)
             return;
 
-        layout.MinColumnSpacing = spacing.GapDip;
-        layout.MinRowSpacing = spacing.GapDip;
+        // Apply one calculated snapshot together so the repeater and all realized
+        // cards always use the same item size and gap values.
+        _coverGridLayout = nextLayout;
+        layout.MinItemWidth = nextLayout.CoverWidthDip;
+        layout.MinItemHeight = nextLayout.CoverHeightDip;
+        layout.MinColumnSpacing = nextLayout.ColumnGapDip;
+        layout.MinRowSpacing = nextLayout.RowGapDip;
+        layout.MaximumRowsOrColumns = nextLayout.Columns;
+        foreach (var card in _realizedGameCards.Values)
+            SetCardSize(card.Root, nextLayout.CoverWidthDip, nextLayout.CoverHeightDip);
+        GameGrid.Opacity = 1;
     }
+
+    private static bool LayoutsMatch(SteamCoverGridLayout left, SteamCoverGridLayout right) =>
+        left.Columns == right.Columns
+        && Math.Abs(left.CoverWidthDip - right.CoverWidthDip) < 0.01
+        && Math.Abs(left.CoverHeightDip - right.CoverHeightDip) < 0.01
+        && Math.Abs(left.ColumnGapDip - right.ColumnGapDip) < 0.01
+        && Math.Abs(left.RowGapDip - right.RowGapDip) < 0.01;
+
+    private static double NormalizeRasterizationScale(double rasterizationScale) =>
+        double.IsFinite(rasterizationScale) && rasterizationScale > 0 ? rasterizationScale : 1.0;
 
     private void GameGrid_ElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
     {
@@ -262,10 +284,8 @@ public sealed partial class ProfilePage : UserControl
             || root.FindName("FallbackCard") is not FrameworkElement fallbackCard)
             return;
 
-        var scale = GameGrid.XamlRoot?.RasterizationScale ?? 1.0;
-        UpdateCoverCardSize(scale);
-        var size = SteamPortraitArtworkResolver.GetCoverSizeDip(scale);
-        SetCardSize(root, size.Width, size.Height);
+        if (_coverGridLayout is { } layout)
+            SetCardSize(root, layout.CoverWidthDip, layout.CoverHeightDip);
 
         if (_realizedGameCards.TryGetValue(root, out var existing))
         {
