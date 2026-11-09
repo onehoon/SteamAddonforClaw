@@ -674,7 +674,10 @@ public sealed class ProfilePagePolicyTests
         Assert.True(identityCheck >= 0 && imageAssignment > identityCheck);
         Assert.Contains("_observedXamlRoot.Changed += XamlRoot_Changed", code, StringComparison.Ordinal);
         Assert.Contains("_observedXamlRoot.Changed -= XamlRoot_Changed", code, StringComparison.Ordinal);
-        Assert.Contains("Math.Abs(_lastRasterizationScale - rasterizationScale) >= 0.0001", code, StringComparison.Ordinal);
+        var reflow = Method(code, "private void ApplyCoverGridLayout(", "private static bool LayoutsMatch(");
+        Assert.Contains("if (!scaleChanged && !widthChanged && !snapshotChanged)", reflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartGameCardArtworkLoad(", reflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearArtwork(", reflow, StringComparison.Ordinal);
         var prepared = Method(code, "private void GameGrid_ElementPrepared(", "private void GameGrid_ElementClearing(");
         Assert.Contains("if (_coverGridLayout is { } layout)", prepared, StringComparison.Ordinal);
         Assert.Contains("SetCardSize(root, layout.CoverWidthDip, layout.CoverHeightDip)", prepared, StringComparison.Ordinal);
