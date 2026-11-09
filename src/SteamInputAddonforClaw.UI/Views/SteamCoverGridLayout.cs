@@ -7,9 +7,9 @@ internal readonly record struct SteamCoverGridLayout(
     double ColumnGapDip,
     double RowGapDip)
 {
-    internal const double MinimumCoverWidthDip = 120.0;
+    internal const double MinimumCoverWidthDip = 118.0;
     internal const double MaximumCoverWidthDip = 180.0;
-    internal const double MinimumGapDip = 10.0;
+    internal const double MinimumGapDip = 8.0;
     internal const double MaximumGapDip = 24.0;
 
     internal static bool TryResolveAvailableWidthDip(

@@ -212,8 +212,8 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("<ItemsRepeater x:Name=\"GameGrid\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinColumnSpacing=\"10\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinRowSpacing=\"10\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinColumnSpacing=\"8\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinRowSpacing=\"8\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("MaximumRowsOrColumns", catalog, StringComparison.Ordinal);
         Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"262.5\"", catalog, StringComparison.Ordinal);
         Assert.Contains("Width=\"175\" Height=\"262.5\"", catalog, StringComparison.Ordinal);
@@ -237,11 +237,11 @@ public sealed class ProfilePagePolicyTests
     [InlineData(1200, 6, 180, 24)]
     [InlineData(980, 5, 180, 20)]
     [InlineData(380, 2, 180, 20)]
-    [InlineData(300, 2, 145, 10)]
-    [InlineData(1000, 6, 158.33, 10)]
-    [InlineData(1210, 7, 164.28, 10)]
-    [InlineData(709, 4, 169.75, 10)]
-    [InlineData(240, 1, 180, 10)]
+    [InlineData(300, 2, 146, 8)]
+    [InlineData(1000, 6, 160, 8)]
+    [InlineData(1210, 7, 166, 8)]
+    [InlineData(709, 4, 171.25, 8)]
+    [InlineData(240, 1, 180, 8)]
     public void Steam_cover_grid_layout_matches_reference_width_breakpoints(
         double availableWidthDip,
         int expectedColumns,
@@ -346,6 +346,8 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Theory]
+    [InlineData(118, 1, 118)]
+    [InlineData(119, 1, 119)]
     [InlineData(120, 1, 120)]
     [InlineData(50, 1, 50)]
     [InlineData(0.5, 1, 0.5)]
@@ -369,8 +371,8 @@ public sealed class ProfilePagePolicyTests
         Assert.True(result);
         Assert.Equal(expectedColumns, layout.Columns);
         Assert.Equal(expectedCoverWidthDip, layout.CoverWidthDip, 2);
-        Assert.Equal(10, layout.ColumnGapDip);
-        Assert.Equal(10, layout.RowGapDip);
+        Assert.Equal(8, layout.ColumnGapDip);
+        Assert.Equal(8, layout.RowGapDip);
     }
 
     [Theory]
@@ -437,7 +439,7 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", catalog, StringComparison.Ordinal);
         Assert.Contains("VerticalScrollMode=\"Enabled\"", catalog, StringComparison.Ordinal);
         Assert.Contains("VerticalScrollBarVisibility=\"Hidden\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"262.5\" MinColumnSpacing=\"10\" MinRowSpacing=\"10\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"262.5\" MinColumnSpacing=\"8\" MinRowSpacing=\"8\"", catalog, StringComparison.Ordinal);
         Assert.Contains("Width=\"175\" Height=\"262.5\"", catalog, StringComparison.Ordinal);
         Assert.Contains("TimeSpan.FromMilliseconds(180)", code, StringComparison.Ordinal);
         Assert.Contains("_coverGridResizeTimer.Stop()", resize, StringComparison.Ordinal);
