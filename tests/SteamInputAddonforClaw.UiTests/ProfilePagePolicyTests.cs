@@ -212,11 +212,11 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("<ItemsRepeater x:Name=\"GameGrid\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinColumnSpacing=\"2\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinRowSpacing=\"2\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinColumnSpacing=\"10\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinRowSpacing=\"10\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("MaximumRowsOrColumns", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"264\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Width=\"175\" Height=\"264\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"262.5\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Width=\"175\" Height=\"262.5\"", catalog, StringComparison.Ordinal);
         Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(catalog, "CornerRadius=\"0\"").Count);
         Assert.DoesNotContain("CornerRadius=\"8\"", catalog, StringComparison.Ordinal);
         var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
@@ -233,90 +233,65 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Theory]
-    [InlineData(800, 176, 4, 30)]
-    [InlineData(722, 176, 4, 4)]
-    [InlineData(721, 176, 4, 4)]
-    [InlineData(710, 176, 4, 2)]
-    [InlineData(709, 176, 3, 89)]
-    [InlineData(550, 176, 3, 9)]
-    [InlineData(540, 176, 3, 4)]
-    [InlineData(539, 176, 3, 4)]
-    [InlineData(176, 176, 1, 2)]
-    [InlineData(175, 176, 1, 2)]
-    public void Steam_cover_grid_spacing_uses_available_width_and_a_shared_minimum_gap(
+    [InlineData(1130, 6, 180, 10)]
+    [InlineData(1200, 6, 180, 24)]
+    [InlineData(980, 5, 180, 20)]
+    [InlineData(380, 2, 180, 20)]
+    [InlineData(300, 2, 145, 10)]
+    [InlineData(1000, 6, 158.33, 10)]
+    [InlineData(1210, 7, 164.28, 10)]
+    [InlineData(709, 4, 169.75, 10)]
+    [InlineData(240, 1, 180, 10)]
+    public void Steam_cover_grid_layout_matches_reference_width_breakpoints(
         double availableWidthDip,
-        double coverWidthDip,
         int expectedColumns,
+        double expectedCoverWidthDip,
         double expectedGapDip)
     {
-        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, 1.0, out var spacing));
-        Assert.Equal(expectedColumns, spacing.Columns);
-        Assert.Equal(expectedGapDip, spacing.GapDip, 8);
-        Assert.True(double.IsFinite(spacing.GapDip));
-        Assert.True(spacing.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
+        Assert.True(SteamCoverGridLayout.TryCalculate(availableWidthDip, out var layout));
+
+        Assert.Equal(expectedColumns, layout.Columns);
+        Assert.Equal(expectedCoverWidthDip, layout.CoverWidthDip, 2);
+        Assert.Equal(Math.Round(layout.CoverWidthDip * 1.5, 2), layout.CoverHeightDip);
+        Assert.Equal(expectedGapDip, layout.ColumnGapDip, 2);
+        Assert.Equal(layout.ColumnGapDip, layout.RowGapDip);
+        Assert.InRange(layout.CoverWidthDip, SteamCoverGridLayout.MinimumCoverWidthDip, SteamCoverGridLayout.MaximumCoverWidthDip);
+        Assert.InRange(layout.ColumnGapDip, SteamCoverGridLayout.MinimumGapDip, SteamCoverGridLayout.MaximumGapDip);
+
+        var occupiedWidthDip = layout.Columns * layout.CoverWidthDip
+            + (layout.Columns - 1) * layout.ColumnGapDip;
+        Assert.True(occupiedWidthDip <= availableWidthDip + 0.01);
+
+        var uniformGridColumns = Math.Max(1, (int)(((float)availableWidthDip + (float)layout.ColumnGapDip)
+            / (float)(layout.CoverWidthDip + layout.ColumnGapDip)));
+        Assert.Equal(layout.Columns, uniformGridColumns);
     }
 
     [Theory]
-    [InlineData(0, 176)]
-    [InlineData(-1, 176)]
-    [InlineData(double.NaN, 176)]
-    [InlineData(double.PositiveInfinity, 176)]
-    [InlineData(800, 0)]
-    [InlineData(800, double.NaN)]
-    [InlineData(800, double.NegativeInfinity)]
-    public void Steam_cover_grid_spacing_rejects_unmeasured_or_invalid_dimensions(
+    [InlineData(120, 1, 120)]
+    [InlineData(50, 1, 50)]
+    [InlineData(0, 0, 0)]
+    [InlineData(-1, 0, 0)]
+    [InlineData(double.NaN, 0, 0)]
+    [InlineData(double.PositiveInfinity, 0, 0)]
+    [InlineData(double.MaxValue, 0, 0)]
+    public void Steam_cover_grid_layout_handles_narrow_widths_and_rejects_invalid_widths(
         double availableWidthDip,
-        double coverWidthDip)
+        int expectedColumns,
+        double expectedCoverWidthDip)
     {
-        Assert.False(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, 1.0, out _));
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(double.NaN)]
-    [InlineData(double.PositiveInfinity)]
-    public void Steam_cover_grid_spacing_rejects_invalid_rasterization_scales(double rasterizationScale)
-    {
-        Assert.False(SteamCoverGridSpacing.TryCalculate(800, 176, rasterizationScale, out _));
-    }
-
-    [Fact]
-    public void Steam_cover_grid_spacing_tracks_fixed_physical_cover_dimensions_at_common_DPI_scales()
-    {
-        foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+        var result = SteamCoverGridLayout.TryCalculate(availableWidthDip, out var layout);
+        if (expectedColumns == 0)
         {
-            var coverSize = SteamPortraitArtworkResolver.GetCoverSizeDip(scale);
-            Assert.Equal(175.0, coverSize.Width * scale, 8);
-            Assert.Equal(264.0, coverSize.Height * scale, 8);
-
-            var coverWidthDip = coverSize.Width;
-            Assert.True(SteamCoverGridSpacing.TryCalculate(800, coverWidthDip, scale, out var spacing));
-            Assert.True(spacing.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
-            Assert.True(double.IsFinite(spacing.GapDip));
-
-            var physicalGap = spacing.GapDip * scale;
-            Assert.Equal(Math.Round(physicalGap), physicalGap, 8);
-            var occupiedWidthPx = spacing.Columns * coverSize.Width * scale
-                + (spacing.Columns - 1) * physicalGap;
-            Assert.True(occupiedWidthPx <= 800 * scale + 1e-7);
+            Assert.False(result);
+            return;
         }
 
-        Assert.Equal(175.0 / 1.5, SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width, 8);
-    }
-
-    [Theory]
-    [InlineData(945, 951, 945)]
-    [InlineData(800, 700, 800)]
-    public void Steam_cover_grid_width_prefers_the_measured_viewport_over_the_repeater_width(
-        double viewportWidthDip,
-        double repeaterWidthDip,
-        double expectedWidthDip)
-    {
-        Assert.True(SteamCoverGridSpacing.TryResolveAvailableWidthDip(
-            viewportWidthDip, repeaterWidthDip, out var availableWidthDip));
-
-        Assert.Equal(expectedWidthDip, availableWidthDip, 8);
+        Assert.True(result);
+        Assert.Equal(expectedColumns, layout.Columns);
+        Assert.Equal(expectedCoverWidthDip, layout.CoverWidthDip, 2);
+        Assert.Equal(10, layout.ColumnGapDip);
+        Assert.Equal(10, layout.RowGapDip);
     }
 
     [Theory]
@@ -324,15 +299,14 @@ public sealed class ProfilePagePolicyTests
     [InlineData(-1, 957, 957)]
     [InlineData(double.NaN, 957, 957)]
     [InlineData(double.PositiveInfinity, 957, 957)]
-    public void Steam_cover_grid_width_uses_the_repeater_only_until_viewport_width_is_valid(
+    public void Steam_cover_grid_width_uses_repeater_until_viewport_width_is_measured(
         double viewportWidthDip,
         double repeaterWidthDip,
         double expectedWidthDip)
     {
-        Assert.True(SteamCoverGridSpacing.TryResolveAvailableWidthDip(
+        Assert.True(SteamCoverGridLayout.TryResolveAvailableWidthDip(
             viewportWidthDip, repeaterWidthDip, out var availableWidthDip));
-
-        Assert.Equal(expectedWidthDip, availableWidthDip, 8);
+        Assert.Equal(expectedWidthDip, availableWidthDip);
     }
 
     [Theory]
@@ -344,196 +318,58 @@ public sealed class ProfilePagePolicyTests
         double viewportWidthDip,
         double repeaterWidthDip)
     {
-        Assert.False(SteamCoverGridSpacing.TryResolveAvailableWidthDip(
+        Assert.False(SteamCoverGridLayout.TryResolveAvailableWidthDip(
             viewportWidthDip, repeaterWidthDip, out _));
     }
 
     [Fact]
-    public void Steam_cover_grid_width_divergence_uses_viewport_columns_not_stale_repeater_columns()
+    public void Steam_cover_grid_layout_keeps_viewport_authoritative_over_repeater_width()
     {
-        var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width;
+        Assert.True(SteamCoverGridLayout.TryResolveAvailableWidthDip(1130, 1210, out var availableWidthDip));
+        Assert.True(SteamCoverGridLayout.TryCalculate(availableWidthDip, out var layout));
+        Assert.True(SteamCoverGridLayout.TryCalculate(1210, out var staleRepeaterLayout));
 
-        Assert.True(SteamCoverGridSpacing.TryResolveAvailableWidthDip(945, 951, out var availableWidthDip));
-        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, 1.5, out var viewportSpacing));
-        Assert.True(SteamCoverGridSpacing.TryCalculate(951, coverWidthDip, 1.5, out var repeaterSpacing));
-
-        Assert.Equal(945, availableWidthDip);
-        Assert.Equal(7, viewportSpacing.Columns);
-        Assert.Equal(8, repeaterSpacing.Columns);
-        Assert.Equal(viewportSpacing.Columns, GetUniformGridLayoutColumnCount(
-            availableWidthDip, coverWidthDip, viewportSpacing.GapDip));
-    }
-
-    [Theory]
-    [InlineData(1.0, 800, 4)]
-    [InlineData(1.5, 800, 6)]
-    [InlineData(2.0, 800, 8)]
-    public void Steam_cover_spacing_preserves_columns_after_UniformGridLayout_float_rounding(
-        double rasterizationScale,
-        double availableWidthDip,
-        int expectedColumns)
-    {
-        var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale).Width;
-        Assert.True(SteamCoverGridSpacing.TryCalculate(availableWidthDip, coverWidthDip, rasterizationScale, out var spacing));
-
-        Assert.Equal(expectedColumns, spacing.Columns);
-        Assert.Equal(expectedColumns, GetUniformGridLayoutColumnCount(
-            availableWidthDip,
-            coverWidthDip,
-            spacing.GapDip));
+        Assert.Equal(1130, availableWidthDip);
+        Assert.Equal(6, layout.Columns);
+        Assert.Equal(7, staleRepeaterLayout.Columns);
+        Assert.NotEqual(layout.CoverWidthDip, staleRepeaterLayout.CoverWidthDip);
     }
 
     [Fact]
-    public void Steam_cover_spacing_matches_UniformGridLayout_float_columns_around_column_boundaries()
-    {
-        foreach (var rasterizationScale in new[] { 1.0, 1.25, 1.5, 2.0 })
-        {
-            var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(rasterizationScale).Width;
-            foreach (var targetColumns in new[] { 2, 3, 4, 7, 8, 12 })
-            {
-                var alignedMinimumGapDip = Math.Ceiling(
-                    SteamCoverGridSpacing.MinimumGapDip * rasterizationScale) / rasterizationScale;
-                var boundaryWidthDip = targetColumns * coverWidthDip
-                    + (targetColumns - 1) * alignedMinimumGapDip;
-                foreach (var offsetDip in new[] { -0.001, 0.0, 0.001 })
-                {
-                    var availableWidthDip = boundaryWidthDip + offsetDip;
-                    Assert.True(SteamCoverGridSpacing.TryCalculate(
-                        availableWidthDip, coverWidthDip, rasterizationScale, out var spacing));
-                    Assert.Equal(spacing.Columns, GetUniformGridLayoutColumnCount(
-                        availableWidthDip, coverWidthDip, spacing.GapDip));
-                }
-            }
-        }
-
-        var scaledCoverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(1.5).Width;
-        Assert.True(SteamCoverGridSpacing.TryCalculate(1000, scaledCoverWidthDip, 1.5, out var spacingAt1000Dip));
-        Assert.Equal(spacingAt1000Dip.Columns, GetUniformGridLayoutColumnCount(
-            1000, scaledCoverWidthDip, spacingAt1000Dip.GapDip));
-    }
-
-    [Theory]
-    [InlineData(984.667, 8, 9, 14)]
-    [InlineData(982.667, 8, 9, 11)]
-    [InlineData(1000, 8, 13, 9)]
-    [InlineData(1024, 8, 18, 10)]
-    [InlineData(1079.333, 9, 4, 12)]
-    public void Steam_cover_grid_spacing_reserves_one_physical_pixel_per_gap_for_log_derived_widths(
-        double availableWidthDip,
-        int expectedColumns,
-        int expectedGapPixels,
-        double expectedUnusedWidthPixels)
-    {
-        const double scale = 1.5;
-        var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(scale).Width;
-
-        Assert.True(SteamCoverGridSpacing.TryCalculate(
-            availableWidthDip, coverWidthDip, scale, out var spacing));
-
-        Assert.Equal(expectedColumns, spacing.Columns);
-        Assert.True(double.IsFinite(spacing.GapDip));
-        var gapPixels = spacing.GapDip * scale;
-        Assert.True(gapPixels > 0);
-        Assert.Equal(expectedGapPixels, gapPixels, 8);
-        Assert.Equal(Math.Round(gapPixels), gapPixels, 8);
-        Assert.True(spacing.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
-        var occupiedWidthPx = spacing.Columns * coverWidthDip * scale
-            + (spacing.Columns - 1) * gapPixels;
-        Assert.True(occupiedWidthPx <= availableWidthDip * scale + 1e-7);
-        Assert.Equal(expectedUnusedWidthPixels, availableWidthDip * scale - occupiedWidthPx, 2);
-    }
-
-    [Fact]
-    public void Steam_cover_grid_spacing_aligns_the_two_DIP_minimum_up_to_a_whole_pixel_at_125_percent()
-    {
-        const double scale = 1.25;
-        var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(scale).Width;
-        var widthThatOnlyFitsTwoAndAHalfGapPixels = 2 * coverWidthDip + SteamCoverGridSpacing.MinimumGapDip;
-        var widthThatFitsTheAlignedThreePixelGap = 2 * coverWidthDip + 3 / scale;
-
-        Assert.True(SteamCoverGridSpacing.TryCalculate(
-            widthThatOnlyFitsTwoAndAHalfGapPixels, coverWidthDip, scale, out var tooNarrow));
-        Assert.Equal(1, tooNarrow.Columns);
-        Assert.Equal(3, tooNarrow.GapDip * scale, 8);
-
-        Assert.True(SteamCoverGridSpacing.TryCalculate(
-            widthThatFitsTheAlignedThreePixelGap, coverWidthDip, scale, out var aligned));
-        Assert.Equal(2, aligned.Columns);
-        Assert.Equal(3, aligned.GapDip * scale, 8);
-        Assert.True(aligned.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
-        Assert.True(2 * coverWidthDip * scale + aligned.GapDip * scale
-            <= widthThatFitsTheAlignedThreePixelGap * scale + 1e-7);
-    }
-
-    [Fact]
-    public void Steam_cover_grid_spacing_keeps_one_column_and_near_integer_gaps_finite_and_aligned()
-    {
-        const double scale = 1.5;
-        var coverWidthDip = SteamPortraitArtworkResolver.GetCoverSizeDip(scale).Width;
-
-        Assert.True(SteamCoverGridSpacing.TryCalculate(100, coverWidthDip, scale, out var oneColumn));
-        Assert.Equal(1, oneColumn.Columns);
-        Assert.Equal(3, oneColumn.GapDip * scale, 8);
-        Assert.True(double.IsFinite(oneColumn.GapDip));
-
-        var nearlyExactWidthDip = (4 * 175.0 + 3 * 10.0) / scale;
-        Assert.True(SteamCoverGridSpacing.TryCalculate(
-            nearlyExactWidthDip, coverWidthDip, scale, out var nearIntegerGap));
-        Assert.Equal(4, nearIntegerGap.Columns);
-        Assert.Equal(8, nearIntegerGap.GapDip * scale, 8);
-        Assert.True(double.IsFinite(nearIntegerGap.GapDip));
-        Assert.True(nearIntegerGap.GapDip >= SteamCoverGridSpacing.MinimumGapDip);
-    }
-
-    private static int GetUniformGridLayoutColumnCount(
-        double availableWidthDip,
-        double coverWidthDip,
-        double spacingDip)
-    {
-        var availableWidth = (float)availableWidthDip;
-        var itemStride = (float)(coverWidthDip + spacingDip);
-        return Math.Max(1, (int)((availableWidth + spacingDip) / itemStride));
-    }
-
-    [Fact]
-    public void Steam_cover_grid_spacing_is_grid_level_and_recalculates_only_on_measurement_or_DPI_changes()
+    public void Steam_cover_grid_layout_recalculates_after_debounced_resize_and_DPI_change()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
         var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
         var catalog = xaml[..xaml.IndexOf("<Grid x:Name=\"DetailPanel\"", StringComparison.Ordinal)];
-        var updateSpacing = Method(code, "private void UpdateCoverGridSpacing(", "private void GameGrid_ElementPrepared(");
-        var updateCardSize = Method(code, "private void UpdateCoverCardSize(", "private void GameGrid_SizeChanged(");
-        var gridSizeChanged = Method(code, "private void GameGrid_SizeChanged(", "private void CatalogScrollViewer_SizeChanged(");
-        var viewportSizeChanged = Method(code, "private void CatalogScrollViewer_SizeChanged(", "private void UpdateCoverGridSpacing(");
-        var rootChanged = Method(code, "private void XamlRoot_Changed(", "private void UpdateCoverCardSize(");
+        var updateLayout = Method(code, "private void ApplyCoverGridLayout(", "private static bool LayoutsMatch(");
+        var rootChanged = Method(code, "private void XamlRoot_Changed(", "private void GameGrid_SizeChanged(");
+        var resize = Method(code, "private void ScheduleCoverGridLayoutUpdate(", "private void CoverGridResizeTimer_Tick(");
+        var prepared = Method(code, "private void GameGrid_ElementPrepared(", "private void GameGrid_ElementClearing(");
 
-        Assert.Contains("<ScrollViewer x:Name=\"CatalogScrollViewer\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("SizeChanged=\"CatalogScrollViewer_SizeChanged\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("VerticalScrollMode=\"Enabled\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("VerticalScrollBarVisibility=\"Hidden\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("SizeChanged=\"GameGrid_SizeChanged\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("UpdateCoverGridSpacing(GameGrid.XamlRoot?.RasterizationScale ?? 1.0)", gridSizeChanged, StringComparison.Ordinal);
-        Assert.Contains("UpdateCoverGridSpacing(CatalogScrollViewer.XamlRoot?.RasterizationScale ?? 1.0)", viewportSizeChanged, StringComparison.Ordinal);
-        Assert.Contains("UpdateCoverCardSize(sender.RasterizationScale)", rootChanged, StringComparison.Ordinal);
-        Assert.Contains("CatalogScrollViewer.ViewportWidth", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("GameGrid.ActualWidth", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("TryResolveAvailableWidthDip", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("availableWidthDip, coverSize.Width, rasterizationScale, out var spacing", updateSpacing, StringComparison.Ordinal);
-        Assert.DoesNotContain("_visibleGameCards", updateSpacing, StringComparison.Ordinal);
-        Assert.DoesNotContain("GameSearchBox", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("GetCoverSizeDip(rasterizationScale)", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("layout.MinColumnSpacing = spacing.GapDip", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("layout.MinRowSpacing = spacing.GapDip", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("Math.Abs(layout.MinColumnSpacing - spacing.GapDip) <= SpacingUpdateToleranceDip", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("Math.Abs(layout.MinRowSpacing - spacing.GapDip) <= SpacingUpdateToleranceDip", updateSpacing, StringComparison.Ordinal);
-        Assert.Contains("UpdateCoverGridSpacing(rasterizationScale)", updateCardSize, StringComparison.Ordinal);
-        Assert.Contains("_observedXamlRoot.Changed += XamlRoot_Changed", code, StringComparison.Ordinal);
-        Assert.Single(System.Text.RegularExpressions.Regex.Matches(code, "_observedXamlRoot\\.Changed \\+= XamlRoot_Changed"));
+        Assert.Contains("<ItemsRepeater x:Name=\"GameGrid\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"264\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Width=\"175\" Height=\"264\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("SizeChanged=\"CatalogScrollViewer_SizeChanged\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("SizeChanged=\"GameGrid_SizeChanged\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"262.5\" MinColumnSpacing=\"10\" MinRowSpacing=\"10\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Width=\"175\" Height=\"262.5\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromMilliseconds(180)", code, StringComparison.Ordinal);
+        Assert.Contains("_coverGridResizeTimer.Stop()", resize, StringComparison.Ordinal);
+        Assert.Contains("_coverGridResizeTimer.Start()", resize, StringComparison.Ordinal);
+        Assert.Contains("ApplyCoverGridLayout(scale)", rootChanged, StringComparison.Ordinal);
+        Assert.Contains("ScheduleCoverGridLayoutUpdate(scale)", rootChanged, StringComparison.Ordinal);
+        Assert.Contains("CatalogScrollViewer.ViewportWidth", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("GameGrid.ActualWidth", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("layout.MinItemWidth = nextLayout.CoverWidthDip", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("layout.MinItemHeight = nextLayout.CoverHeightDip", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("layout.MinColumnSpacing = nextLayout.ColumnGapDip", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("layout.MinRowSpacing = nextLayout.RowGapDip", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("SetCardSize(card.Root, nextLayout.CoverWidthDip, nextLayout.CoverHeightDip)", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("SetCardSize(root, layout.CoverWidthDip, layout.CoverHeightDip)", prepared, StringComparison.Ordinal);
+        Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("<GridView", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("HomeCoverGridPanel", code, StringComparison.Ordinal);
     }
 
     [Fact]
