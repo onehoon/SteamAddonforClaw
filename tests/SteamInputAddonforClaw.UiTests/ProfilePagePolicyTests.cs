@@ -674,7 +674,11 @@ public sealed class ProfilePagePolicyTests
         Assert.True(identityCheck >= 0 && imageAssignment > identityCheck);
         Assert.Contains("_observedXamlRoot.Changed += XamlRoot_Changed", code, StringComparison.Ordinal);
         Assert.Contains("_observedXamlRoot.Changed -= XamlRoot_Changed", code, StringComparison.Ordinal);
-        Assert.Contains("Math.Abs(_lastRasterizationScale - rasterizationScale) < 0.0001", code, StringComparison.Ordinal);
+        Assert.Contains("Math.Abs(_lastRasterizationScale - rasterizationScale) >= 0.0001", code, StringComparison.Ordinal);
+        var prepared = Method(code, "private void GameGrid_ElementPrepared(", "private void GameGrid_ElementClearing(");
+        Assert.Contains("if (_coverGridLayout is { } layout)", prepared, StringComparison.Ordinal);
+        Assert.Contains("SetCardSize(root, layout.CoverWidthDip, layout.CoverHeightDip)", prepared, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyCoverGridLayout", prepared, StringComparison.Ordinal);
         var activate = Method(code, "internal void Activate()", "internal static bool ShouldStartCatalogScan(");
         Assert.DoesNotContain("ApplyCatalogFilter()", activate, StringComparison.Ordinal);
         var invalidation = Method(code, "private void OnStateInvalidated(", "private async void RefreshGamesButton_Click(");

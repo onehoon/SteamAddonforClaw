@@ -284,9 +284,6 @@ public sealed partial class ProfilePage : UserControl
             || root.FindName("FallbackCard") is not FrameworkElement fallbackCard)
             return;
 
-        var scale = GameGrid.XamlRoot?.RasterizationScale ?? 1.0;
-        if (_coverGridLayout is null)
-            ApplyCoverGridLayout(scale);
         if (_coverGridLayout is { } layout)
             SetCardSize(root, layout.CoverWidthDip, layout.CoverHeightDip);
 
