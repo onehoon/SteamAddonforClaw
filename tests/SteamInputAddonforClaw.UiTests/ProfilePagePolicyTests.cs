@@ -296,6 +296,7 @@ public sealed class ProfilePagePolicyTests
     [Theory]
     [InlineData(120, 1, 120)]
     [InlineData(50, 1, 50)]
+    [InlineData(0.5, 1, 0.5)]
     [InlineData(0, 0, 0)]
     [InlineData(-1, 0, 0)]
     [InlineData(double.NaN, 0, 0)]

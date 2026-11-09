@@ -31,7 +31,7 @@ internal readonly record struct SteamCoverGridLayout(
 
         if (availableWidthDip <= MaximumCoverWidthDip)
         {
-            var narrowCoverWidth = Math.Max(1.0, availableWidthDip);
+            var narrowCoverWidth = availableWidthDip;
             layout = Create(1, narrowCoverWidth, MinimumGapDip);
             return IsValid(layout);
         }
@@ -75,7 +75,9 @@ internal readonly record struct SteamCoverGridLayout(
             && gapAtMaximumWidth <= MaximumGapDip)
         {
             coverWidthDip = MaximumCoverWidthDip;
-            gapDip = Math.Round(gapAtMaximumWidth, 2);
+            // Round down so fractional DIP precision cannot push the last card
+            // beyond the viewport or make UniformGridLayout lose a column.
+            gapDip = Math.Floor(gapAtMaximumWidth * 100.0) / 100.0;
         }
         else if (columns == 1)
         {
@@ -102,8 +104,59 @@ internal readonly record struct SteamCoverGridLayout(
             }
         }
 
+        if (!TryFitUniformGridColumns(availableWidthDip, columns, ref coverWidthDip, ref gapDip))
+            return false;
+
         layout = Create(columns, coverWidthDip, gapDip);
         return IsValid(layout);
+    }
+
+    private static bool TryFitUniformGridColumns(
+        double availableWidthDip,
+        int columns,
+        ref double coverWidthDip,
+        ref double gapDip)
+    {
+        // UniformGridLayout performs its item-stride calculation with floats.
+        // Leave a small logical-DIP fit margin when fractional arithmetic would
+        // otherwise make it silently choose one fewer column.
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            if (GetUniformGridColumnCount(availableWidthDip, coverWidthDip, gapDip) >= columns)
+                return true;
+
+            if (gapDip > MinimumGapDip)
+            {
+                gapDip = Math.Max(MinimumGapDip, gapDip - 0.01);
+                continue;
+            }
+
+            if (columns > 1 && coverWidthDip > MinimumCoverWidthDip)
+            {
+                coverWidthDip = Math.Max(
+                    MinimumCoverWidthDip,
+                    Math.Floor((coverWidthDip - 0.01) * 100.0) / 100.0);
+                continue;
+            }
+
+            return false;
+        }
+
+        return GetUniformGridColumnCount(availableWidthDip, coverWidthDip, gapDip) >= columns;
+    }
+
+    private static int GetUniformGridColumnCount(double availableWidthDip, double coverWidthDip, double gapDip)
+    {
+        var availableWidth = (float)availableWidthDip;
+        var itemStride = (float)(coverWidthDip + gapDip);
+        var columnCount = (availableWidth + (float)gapDip) / itemStride;
+        if (!float.IsFinite(availableWidth) || !float.IsFinite(itemStride)
+            || !float.IsFinite(columnCount) || itemStride <= 0 || columnCount > int.MaxValue)
+        {
+            return 0;
+        }
+
+        return Math.Max(1, (int)columnCount);
     }
 
     private static int GetMaximumColumns(double availableWidthDip, double coverWidthDip, double gapDip)
