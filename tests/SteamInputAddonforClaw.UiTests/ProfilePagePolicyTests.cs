@@ -346,7 +346,9 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Theory]
-    [InlineData(118, 1, 118)]\n    [InlineData(119, 1, 119)]\n    [InlineData(120, 1, 120)]
+    [InlineData(118, 1, 118)]
+    [InlineData(119, 1, 119)]
+    [InlineData(120, 1, 120)]
     [InlineData(50, 1, 50)]
     [InlineData(0.5, 1, 0.5)]
     [InlineData(0, 0, 0)]
