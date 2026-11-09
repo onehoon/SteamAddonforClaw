@@ -111,6 +111,131 @@ internal readonly record struct SteamCoverGridLayout(
         return IsValid(layout);
     }
 
+    internal static bool TryCalculate(
+        double availableWidthDip,
+        double rasterizationScale,
+        out SteamCoverGridLayout layout)
+    {
+        if (!TryCalculate(availableWidthDip, out layout))
+            return false;
+
+        if (!double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
+            rasterizationScale = 1.0;
+
+        return TryFitPhysicalPixels(availableWidthDip, rasterizationScale, ref layout);
+    }
+
+    internal static bool HasMeaningfulWidthChange(double previousWidthDip, double newWidthDip) =>
+        double.IsFinite(newWidthDip)
+        && newWidthDip > 0
+        && (!double.IsFinite(previousWidthDip)
+            || previousWidthDip <= 0
+            || Math.Abs(newWidthDip - previousWidthDip) >= 0.5);
+
+    private static bool TryFitPhysicalPixels(
+        double availableWidthDip,
+        double rasterizationScale,
+        ref SteamCoverGridLayout layout)
+    {
+        var scaledWidth = availableWidthDip * rasterizationScale;
+        var scaledMaximumCover = MaximumCoverWidthDip * rasterizationScale;
+        if (!double.IsFinite(scaledWidth)
+            || scaledWidth > long.MaxValue
+            || !double.IsFinite(scaledMaximumCover)
+            || scaledMaximumCover > long.MaxValue)
+        {
+            return false;
+        }
+
+        var availablePixels = (long)Math.Floor(scaledWidth + 1e-9);
+        var minimumGap = (long)Math.Ceiling(MinimumGapDip * rasterizationScale - 1e-9);
+        var maximumGap = (long)Math.Floor(MaximumGapDip * rasterizationScale + 1e-9);
+        var minimumCover = (long)Math.Ceiling(MinimumCoverWidthDip * rasterizationScale - 1e-9);
+        var maximumCover = (long)Math.Floor(MaximumCoverWidthDip * rasterizationScale + 1e-9);
+        if (availablePixels <= 0 || minimumGap > maximumGap || minimumCover > maximumCover)
+            return false;
+
+        var columns = layout.Columns;
+        var gapPixels = Math.Clamp(
+            (long)Math.Round(layout.ColumnGapDip * rasterizationScale, MidpointRounding.AwayFromZero),
+            minimumGap,
+            maximumGap);
+        var coverPixels = (long)Math.Floor(layout.CoverWidthDip * rasterizationScale + 1e-9);
+
+        while (columns > 0)
+        {
+            var minimumCoverForLayout = columns == 1 && layout.CoverWidthDip < MinimumCoverWidthDip
+                ? Math.Max(1, (long)Math.Ceiling(layout.CoverWidthDip * rasterizationScale - 1e-9))
+                : minimumCover;
+            coverPixels = Math.Clamp(coverPixels, minimumCoverForLayout, maximumCover);
+
+            if (FitsPhysicalPixels(availablePixels, columns, coverPixels, gapPixels, rasterizationScale))
+            {
+                layout = Create(columns, coverPixels / rasterizationScale, gapPixels / rasterizationScale);
+                return IsValid(layout);
+            }
+
+            if (gapPixels > minimumGap)
+            {
+                gapPixels--;
+                continue;
+            }
+
+            if (coverPixels > minimumCoverForLayout)
+            {
+                coverPixels--;
+                continue;
+            }
+
+            columns--;
+            if (columns <= 0)
+                return false;
+
+            gapPixels = minimumGap;
+            if (columns == 1)
+            {
+                coverPixels = Math.Min(maximumCover, availablePixels);
+                if (coverPixels <= 0)
+                    return false;
+                continue;
+            }
+
+            var maxCoverGap = (availablePixels - (maximumCover * columns)) / (columns - 1.0);
+            if (maxCoverGap >= minimumGap && maxCoverGap <= maximumGap)
+            {
+                coverPixels = maximumCover;
+                gapPixels = (long)Math.Floor(maxCoverGap + 1e-9);
+                gapPixels = Math.Clamp(gapPixels, minimumGap, maximumGap);
+            }
+            else
+            {
+                coverPixels = (long)Math.Floor(
+                    (availablePixels - (minimumGap * (columns - 1.0))) / columns);
+            }
+        }
+
+        return false;
+    }
+
+    private static bool FitsPhysicalPixels(
+        long availablePixels,
+        int columns,
+        long coverPixels,
+        long gapPixels,
+        double rasterizationScale)
+    {
+        if (coverPixels <= 0 || coverPixels > availablePixels / columns)
+            return false;
+
+        var remainingPixels = availablePixels - (columns * coverPixels);
+        if (columns > 1 && gapPixels > remainingPixels / (columns - 1L))
+            return false;
+
+        var coverWidthDip = coverPixels / rasterizationScale;
+        var gapDip = gapPixels / rasterizationScale;
+        return GetUniformGridColumnCount(availablePixels / rasterizationScale, coverWidthDip, gapDip) >= columns;
+    }
+
     private static bool TryFitUniformGridColumns(
         double availableWidthDip,
         int columns,

@@ -27,7 +27,6 @@ public sealed partial class ProfilePage : UserControl
     private SteamPortraitArtworkContext? _portraitArtworkContext;
     private XamlRoot? _observedXamlRoot;
     private double _lastRasterizationScale = double.NaN;
-    private double _lastLayoutAvailableWidthDip = double.NaN;
     private double _pendingLayoutRasterizationScale = 1.0;
     private SteamCoverGridLayout? _coverGridLayout;
     private readonly DispatcherQueueTimer _coverGridResizeTimer;
@@ -208,17 +207,21 @@ public sealed partial class ProfilePage : UserControl
         var scale = NormalizeRasterizationScale(sender.RasterizationScale);
         if (Math.Abs(_lastRasterizationScale - scale) >= 0.0001)
             ApplyCoverGridLayout(scale);
-        else
-            ScheduleCoverGridLayoutUpdate(scale);
     }
 
     private void GameGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (!SteamCoverGridLayout.HasMeaningfulWidthChange(e.PreviousSize.Width, e.NewSize.Width))
+            return;
+
         ScheduleCoverGridLayoutUpdate(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
     }
 
     private void CatalogScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (!SteamCoverGridLayout.HasMeaningfulWidthChange(e.PreviousSize.Width, e.NewSize.Width))
+            return;
+
         ScheduleCoverGridLayoutUpdate(CatalogScrollViewer.XamlRoot?.RasterizationScale ?? 1.0);
     }
 
@@ -243,16 +246,16 @@ public sealed partial class ProfilePage : UserControl
 
         if (!SteamCoverGridLayout.TryResolveAvailableWidthDip(
                 CatalogScrollViewer.ViewportWidth, GameGrid.ActualWidth, out var availableWidthDip)
-            || !SteamCoverGridLayout.TryCalculate(availableWidthDip, out var nextLayout))
+            || !SteamCoverGridLayout.TryCalculate(availableWidthDip, rasterizationScale, out var nextLayout))
             return;
 
-        var scaleChanged = Math.Abs(_lastRasterizationScale - rasterizationScale) >= 0.0001;
-        var widthChanged = Math.Abs(_lastLayoutAvailableWidthDip - availableWidthDip) >= 0.5;
         var snapshotChanged = _coverGridLayout is not { } current || !LayoutsMatch(current, nextLayout);
         _lastRasterizationScale = rasterizationScale;
-        _lastLayoutAvailableWidthDip = availableWidthDip;
-        if (!scaleChanged && !widthChanged && !snapshotChanged)
+        if (!snapshotChanged)
+        {
+            GameGrid.Opacity = 1;
             return;
+        }
 
         // Apply one calculated snapshot together so the repeater and all realized
         // cards always use the same item size and gap values.
