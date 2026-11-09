@@ -261,8 +261,10 @@ public sealed partial class ProfilePage : UserControl
         layout.MinItemHeight = nextLayout.CoverHeightDip;
         layout.MinColumnSpacing = nextLayout.ColumnGapDip;
         layout.MinRowSpacing = nextLayout.RowGapDip;
+        layout.MaximumRowsOrColumns = nextLayout.Columns;
         foreach (var card in _realizedGameCards.Values)
             SetCardSize(card.Root, nextLayout.CoverWidthDip, nextLayout.CoverHeightDip);
+        GameGrid.Opacity = 1;
     }
 
     private static bool LayoutsMatch(SteamCoverGridLayout left, SteamCoverGridLayout right) =>

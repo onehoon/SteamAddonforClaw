@@ -268,6 +268,32 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Theory]
+    [InlineData(250.0)]
+    [InlineData(384.0)]
+    [InlineData(588.0)]
+    [InlineData(996.0)]
+    public void Steam_cover_grid_layout_keeps_columns_and_fit_at_fractional_DPI_scales(double transitionWidthDip)
+    {
+        foreach (var rasterizationScale in new[] { 1.0, 1.25, 1.5 })
+        foreach (var offsetDip in new[] { -0.01, 0.0, 0.01 })
+        {
+            var availableWidthDip = transitionWidthDip + offsetDip;
+            Assert.True(SteamCoverGridLayout.TryCalculate(availableWidthDip, out var layout));
+
+            var uniformGridColumns = Math.Max(1, (int)(((float)availableWidthDip + (float)layout.ColumnGapDip)
+                / (float)(layout.CoverWidthDip + layout.ColumnGapDip)));
+            Assert.Equal(layout.Columns, uniformGridColumns);
+
+            var occupiedWidthPixels = (layout.Columns * layout.CoverWidthDip
+                + (layout.Columns - 1) * layout.ColumnGapDip) * rasterizationScale;
+            Assert.True(occupiedWidthPixels <= availableWidthDip * rasterizationScale + 0.01);
+            Assert.InRange(layout.CoverWidthDip, 1, SteamCoverGridLayout.MaximumCoverWidthDip);
+            Assert.InRange(layout.ColumnGapDip, SteamCoverGridLayout.MinimumGapDip, SteamCoverGridLayout.MaximumGapDip);
+            Assert.Equal(layout.ColumnGapDip, layout.RowGapDip);
+        }
+    }
+
+    [Theory]
     [InlineData(120, 1, 120)]
     [InlineData(50, 1, 50)]
     [InlineData(0, 0, 0)]
@@ -350,8 +376,12 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("<ItemsRepeater x:Name=\"GameGrid\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.Contains("ItemsStretch=\"None\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("Opacity=\"0\"", catalog, StringComparison.Ordinal);
         Assert.Contains("SizeChanged=\"CatalogScrollViewer_SizeChanged\"", catalog, StringComparison.Ordinal);
         Assert.Contains("SizeChanged=\"GameGrid_SizeChanged\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("VerticalScrollMode=\"Enabled\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("VerticalScrollBarVisibility=\"Hidden\"", catalog, StringComparison.Ordinal);
         Assert.Contains("MinItemWidth=\"175\" MinItemHeight=\"262.5\" MinColumnSpacing=\"10\" MinRowSpacing=\"10\"", catalog, StringComparison.Ordinal);
         Assert.Contains("Width=\"175\" Height=\"262.5\"", catalog, StringComparison.Ordinal);
         Assert.Contains("TimeSpan.FromMilliseconds(180)", code, StringComparison.Ordinal);
@@ -365,7 +395,9 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("layout.MinItemHeight = nextLayout.CoverHeightDip", updateLayout, StringComparison.Ordinal);
         Assert.Contains("layout.MinColumnSpacing = nextLayout.ColumnGapDip", updateLayout, StringComparison.Ordinal);
         Assert.Contains("layout.MinRowSpacing = nextLayout.RowGapDip", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("layout.MaximumRowsOrColumns = nextLayout.Columns", updateLayout, StringComparison.Ordinal);
         Assert.Contains("SetCardSize(card.Root, nextLayout.CoverWidthDip, nextLayout.CoverHeightDip)", updateLayout, StringComparison.Ordinal);
+        Assert.Contains("GameGrid.Opacity = 1", updateLayout, StringComparison.Ordinal);
         Assert.Contains("SetCardSize(root, layout.CoverWidthDip, layout.CoverHeightDip)", prepared, StringComparison.Ordinal);
         Assert.Contains("ItemsJustification=\"Start\"", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("<GridView", catalog, StringComparison.Ordinal);
@@ -403,7 +435,7 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
-    public void Steam_cover_card_DIP_dimensions_preserve_physical_size_at_common_scales()
+    public void Steam_portrait_artwork_resolver_keeps_legacy_physical_size_helper()
     {
         Assert.Equal((175, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(1.0));
 
