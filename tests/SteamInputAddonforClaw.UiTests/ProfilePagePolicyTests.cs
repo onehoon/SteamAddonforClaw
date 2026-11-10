@@ -832,24 +832,25 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
-    public void Steam_cover_click_uses_the_current_card_context_for_steam_and_non_steam_games()
+    public void Steam_cover_and_favorite_resolve_the_current_grid_item_for_steam_and_non_steam_games()
     {
         var steamGame = new FrontendProfileGameCatalogEntry(100u, "Steam game", FrontendProfileGameSource.Steam);
         var nonSteamGame = new FrontendProfileGameCatalogEntry(200u, "Non-Steam game", FrontendProfileGameSource.NonSteam);
         var staleGame = new FrontendProfileGameCatalogEntry(1u, "Previously realized game", FrontendProfileGameSource.Steam);
 
-        Assert.Same(steamGame, ProfilePage.ResolveGameCardEntry(new ProfilePage.GameCardItem(steamGame), staleGame));
-        Assert.Same(nonSteamGame, ProfilePage.ResolveGameCardEntry(new ProfilePage.GameCardItem(nonSteamGame), null));
+        var steamCard = new ProfilePage.GameCardItem(steamGame);
+        var nonSteamCard = new ProfilePage.GameCardItem(nonSteamGame);
+
+        Assert.Same(steamGame, ProfilePage.ResolveGameCardItem(steamCard));
+        Assert.Same(nonSteamGame, ProfilePage.ResolveGameCardItem(nonSteamCard));
+        Assert.NotSame(staleGame, ProfilePage.ResolveGameCardItem(steamCard));
     }
 
     [Fact]
-    public void Steam_cover_click_falls_back_to_tag_and_rejects_invalid_context()
+    public void Steam_grid_item_resolution_rejects_missing_or_unexpected_items()
     {
-        var taggedGame = new FrontendProfileGameCatalogEntry(300u, "Tagged game", FrontendProfileGameSource.Steam);
-
-        Assert.Same(taggedGame, ProfilePage.ResolveGameCardEntry(new object(), taggedGame));
-        Assert.Null(ProfilePage.ResolveGameCardEntry(null, null));
-        Assert.Null(ProfilePage.ResolveGameCardEntry(new object(), "not a game"));
+        Assert.Null(ProfilePage.ResolveGameCardItem(null));
+        Assert.Null(ProfilePage.ResolveGameCardItem(new object()));
     }
 
     [Fact]
@@ -857,21 +858,45 @@ public sealed class ProfilePagePolicyTests
     {
         var root = FindRepositoryRoot();
         var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var resolve = Method(code, "private FrontendProfileGameCatalogEntry? ResolveClickedGame(", "private async void GameCardButton_Click(");
         var click = Method(code, "private async void GameCardButton_Click(", "private void BackButton_Click(");
         var select = Method(code, "private async Task SelectGameAsync(", "private void BeginProfileLoad(");
         var invalidContext = click.IndexOf("if (game is null)", StringComparison.Ordinal);
-        var warning = click.IndexOf("AppLog.Warn(\"Profiles.Catalog\", \"Steam cover click has no game context.\")", StringComparison.Ordinal);
+        var warning = click.IndexOf("AppLog.Warn(\"Profiles.Catalog\", \"Steam cover click could not resolve its GridView item.\")", StringComparison.Ordinal);
         var invalidReturn = click.IndexOf("return;", warning, StringComparison.Ordinal);
         var profileUiMutation = click.IndexOf("CancelTdpDebounce()", StringComparison.Ordinal);
 
+        var containerLookup = resolve.IndexOf("node is GridViewItem itemContainer", StringComparison.Ordinal);
+        var gridBoundary = resolve.IndexOf("ReferenceEquals(node, GameGrid)", StringComparison.Ordinal);
+        var itemLookup = resolve.IndexOf("GameGrid.ItemFromContainer(container)", StringComparison.Ordinal);
+        Assert.True(containerLookup >= 0 && gridBoundary > containerLookup && itemLookup > gridBoundary);
+        Assert.Contains("VisualTreeHelper.GetParent(node)", resolve, StringComparison.Ordinal);
+        Assert.DoesNotContain("button.Tag", resolve, StringComparison.Ordinal);
+        Assert.DoesNotContain("button.DataContext", resolve, StringComparison.Ordinal);
         Assert.Contains("if (sender is not Button button)", click, StringComparison.Ordinal);
-        Assert.Contains("ResolveGameCardEntry(button.DataContext, button.Tag)", click, StringComparison.Ordinal);
+        Assert.Contains("ResolveClickedGame(button)", click, StringComparison.Ordinal);
         Assert.True(invalidContext >= 0 && warning > invalidContext && invalidReturn > warning && profileUiMutation > invalidReturn);
         Assert.Contains("DetailPanel.Visibility = Visibility.Visible", click, StringComparison.Ordinal);
         Assert.Contains("await SelectGameAsync(game)", click, StringComparison.Ordinal);
         Assert.Contains("_selectedGame = game", select, StringComparison.Ordinal);
         Assert.Contains("await CaptureSelectedAsync(game.AppId", select, StringComparison.Ordinal);
-        Assert.DoesNotContain("GameCardButton_Click", Method(code, "private async void FavoriteButton_Click(", "private async Task SelectGameAsync("), StringComparison.Ordinal);
+
+        var favorite = Method(code, "private async void FavoriteButton_Click(", "private async Task SelectGameAsync(");
+        Assert.Contains("ResolveClickedGame(button)", favorite, StringComparison.Ordinal);
+        Assert.Contains("SetGameProfileFavoriteAsync(game.AppId, !game.Favorite, game.Name)", favorite, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectGameAsync", favorite, StringComparison.Ordinal);
+        Assert.DoesNotContain("button.Tag", favorite, StringComparison.Ordinal);
+        Assert.DoesNotContain("button.DataContext", favorite, StringComparison.Ordinal);
+
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var openButton = xaml.IndexOf("x:Name=\"OpenGameButton\"", StringComparison.Ordinal);
+        var favoriteButton = xaml.IndexOf("x:Name=\"FavoriteButton\"", StringComparison.Ordinal);
+        var gridEnd = xaml.IndexOf("</GridView>", favoriteButton, StringComparison.Ordinal);
+        var cardTemplate = xaml[openButton..gridEnd];
+        Assert.DoesNotContain("Tag=\"{Binding Game}\"", cardTemplate, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", cardTemplate, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"{Binding FavoriteAutomationName}\"", cardTemplate, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding FavoriteGlyph}\"", cardTemplate, StringComparison.Ordinal);
     }
 
     [Fact]
