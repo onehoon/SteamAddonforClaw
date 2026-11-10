@@ -832,6 +832,49 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
+    public void Steam_cover_click_uses_the_current_card_context_for_steam_and_non_steam_games()
+    {
+        var steamGame = new FrontendProfileGameCatalogEntry(100u, "Steam game", FrontendProfileGameSource.Steam);
+        var nonSteamGame = new FrontendProfileGameCatalogEntry(200u, "Non-Steam game", FrontendProfileGameSource.NonSteam);
+        var staleGame = new FrontendProfileGameCatalogEntry(1u, "Previously realized game", FrontendProfileGameSource.Steam);
+
+        Assert.Same(steamGame, ProfilePage.ResolveGameCardEntry(new ProfilePage.GameCardItem(steamGame), staleGame));
+        Assert.Same(nonSteamGame, ProfilePage.ResolveGameCardEntry(new ProfilePage.GameCardItem(nonSteamGame), null));
+    }
+
+    [Fact]
+    public void Steam_cover_click_falls_back_to_tag_and_rejects_invalid_context()
+    {
+        var taggedGame = new FrontendProfileGameCatalogEntry(300u, "Tagged game", FrontendProfileGameSource.Steam);
+
+        Assert.Same(taggedGame, ProfilePage.ResolveGameCardEntry(new object(), taggedGame));
+        Assert.Null(ProfilePage.ResolveGameCardEntry(null, null));
+        Assert.Null(ProfilePage.ResolveGameCardEntry(new object(), "not a game"));
+    }
+
+    [Fact]
+    public void Steam_cover_click_resolves_identity_before_opening_detail_and_capturing_profile()
+    {
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var click = Method(code, "private async void GameCardButton_Click(", "private void BackButton_Click(");
+        var select = Method(code, "private async Task SelectGameAsync(", "private void BeginProfileLoad(");
+        var invalidContext = click.IndexOf("if (game is null)", StringComparison.Ordinal);
+        var warning = click.IndexOf("AppLog.Warn(\"Profiles.Catalog\", \"Steam cover click has no game context.\")", StringComparison.Ordinal);
+        var invalidReturn = click.IndexOf("return;", warning, StringComparison.Ordinal);
+        var profileUiMutation = click.IndexOf("CancelTdpDebounce()", StringComparison.Ordinal);
+
+        Assert.Contains("if (sender is not Button button)", click, StringComparison.Ordinal);
+        Assert.Contains("ResolveGameCardEntry(button.DataContext, button.Tag)", click, StringComparison.Ordinal);
+        Assert.True(invalidContext >= 0 && warning > invalidContext && invalidReturn > warning && profileUiMutation > invalidReturn);
+        Assert.Contains("DetailPanel.Visibility = Visibility.Visible", click, StringComparison.Ordinal);
+        Assert.Contains("await SelectGameAsync(game)", click, StringComparison.Ordinal);
+        Assert.Contains("_selectedGame = game", select, StringComparison.Ordinal);
+        Assert.Contains("await CaptureSelectedAsync(game.AppId", select, StringComparison.Ordinal);
+        Assert.DoesNotContain("GameCardButton_Click", Method(code, "private async void FavoriteButton_Click(", "private async Task SelectGameAsync("), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Favorite_toggle_does_not_replace_the_visible_game_collection()
     {
         var root = FindRepositoryRoot();
