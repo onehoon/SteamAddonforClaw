@@ -193,7 +193,7 @@ public sealed class ProfilePagePolicyTests
         var loadedFlag = refresh.IndexOf("_catalogLoaded = true", StringComparison.Ordinal);
         var favoriteWarning = refresh.IndexOf("FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown)", StringComparison.Ordinal);
         var applyFilter = refresh.IndexOf("ApplyCatalogFilter()", StringComparison.Ordinal);
-        var failure = refresh.IndexOf("catch (Exception exception)", StringComparison.Ordinal);
+        var failure = refresh.IndexOf("catch (Exception exception)", loadedFlag, StringComparison.Ordinal);
         Assert.True(scan >= 0 && successfulCache > scan && loadedFlag > successfulCache);
         Assert.True(favoriteWarning > loadedFlag && applyFilter > favoriteWarning);
         Assert.True(failure > loadedFlag);
@@ -754,11 +754,14 @@ public sealed class ProfilePagePolicyTests
         var recycleBranch = handler.IndexOf("if (args.InRecycleQueue)", StringComparison.Ordinal);
         var itemValidation = handler.IndexOf("args.Item is not GameCardItem item", StringComparison.Ordinal);
         var templateRoot = handler.IndexOf("container.ContentTemplateRoot is not Border root", StringComparison.Ordinal);
+        var rootContextAssignment = handler.IndexOf("root.DataContext = item", StringComparison.Ordinal);
+        var namedElementLookup = handler.IndexOf("root.FindName(\"CoverImageFrame\")", StringComparison.Ordinal);
         var phaseZeroFallback = handler.IndexOf("if (args.Phase == 0)", StringComparison.Ordinal);
         var deferredCallback = handler.IndexOf("args.RegisterUpdateCallback(GameGrid_ContainerContentChanging)", StringComparison.Ordinal);
         var layoutApplication = handler.IndexOf("SetCardLayout(root, layout)", StringComparison.Ordinal);
         var cardLookup = handler.IndexOf("_realizedGameCards.TryGetValue(container, out var existing)", StringComparison.Ordinal);
         Assert.True(recycleBranch >= 0 && itemValidation > recycleBranch && templateRoot > itemValidation);
+        Assert.True(rootContextAssignment > templateRoot && namedElementLookup > rootContextAssignment);
         Assert.True(phaseZeroFallback > templateRoot && deferredCallback > phaseZeroFallback);
         Assert.True(layoutApplication > deferredCallback && cardLookup > layoutApplication);
         Assert.DoesNotContain("if (args.Phase < 1", handler, StringComparison.Ordinal);
@@ -767,9 +770,9 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("recycledCard.ClearArtwork()", handler, StringComparison.Ordinal);
         Assert.Contains("recycledCard.FallbackCard.Visibility = Visibility.Visible", handler, StringComparison.Ordinal);
         Assert.Contains("args.RegisterUpdateCallback(GameGrid_ContainerContentChanging)", handler, StringComparison.Ordinal);
-        Assert.Contains("args.Handled = true", handler, StringComparison.Ordinal);
+        Assert.DoesNotContain("args.Handled = true", handler, StringComparison.Ordinal);
         Assert.Contains("args.Item is not GameCardItem item", handler, StringComparison.Ordinal);
-        Assert.Contains("ReferenceEquals(item, dataContextItem)", handler, StringComparison.Ordinal);
+        Assert.Contains("ShouldSetGameCardDataContext(root.DataContext, item)", handler, StringComparison.Ordinal);
         Assert.Contains("new RealizedGameCard(container, root", handler, StringComparison.Ordinal);
         Assert.Contains("StartGameCardArtworkLoad(existing)", handler, StringComparison.Ordinal);
 
@@ -808,6 +811,60 @@ public sealed class ProfilePagePolicyTests
         Assert.True(artworkStart > identityInitialization);
         Assert.DoesNotContain("if (args.Phase < 1", handler, StringComparison.Ordinal);
         Assert.Contains("existing.FallbackCard.Visibility = Visibility.Visible", handler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Steam_grid_rebinds_null_or_stale_item_context_before_artwork_initialization()
+    {
+        var current = new ProfilePage.GameCardItem(
+            new FrontendProfileGameCatalogEntry(100u, "Current game", FrontendProfileGameSource.Steam));
+        var stale = new ProfilePage.GameCardItem(
+            new FrontendProfileGameCatalogEntry(99u, "Previously recycled game", FrontendProfileGameSource.Steam));
+
+        Assert.True(ProfilePage.ShouldSetGameCardDataContext(null, current));
+        Assert.True(ProfilePage.ShouldSetGameCardDataContext(stale, current));
+        Assert.False(ProfilePage.ShouldSetGameCardDataContext(current, current));
+
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var handler = Method(code, "private void GameGrid_ContainerContentChanging(", "private void StartGameCardArtworkLoad(");
+        var rootContextAssignment = handler.IndexOf("root.DataContext = item", StringComparison.Ordinal);
+        var favoriteAssignment = handler.IndexOf("favoriteButton.DataContext = item", StringComparison.Ordinal);
+        var openAssignment = handler.IndexOf("openButton.DataContext = item", StringComparison.Ordinal);
+        var artworkStart = handler.IndexOf("StartGameCardArtworkLoad(existing)", StringComparison.Ordinal);
+
+        Assert.True(rootContextAssignment >= 0);
+        Assert.True(favoriteAssignment > rootContextAssignment && openAssignment > rootContextAssignment);
+        Assert.True(artworkStart > openAssignment);
+        Assert.DoesNotContain("args.Handled = true", handler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Steam_artwork_initialization_diagnostics_are_bounded_and_distinguish_failure_paths()
+    {
+        var loggedFlags = 0;
+        Assert.True(ProfilePage.TryMarkArtworkDiagnostic(ref loggedFlags, 1));
+        Assert.False(ProfilePage.TryMarkArtworkDiagnostic(ref loggedFlags, 1));
+        Assert.True(ProfilePage.TryMarkArtworkDiagnostic(ref loggedFlags, 2));
+        Assert.False(ProfilePage.TryMarkArtworkDiagnostic(ref loggedFlags, 2));
+
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var refresh = Method(code, "private async Task RefreshGamesAsync(", "private void GameSearchBox_TextChanged(");
+        var load = Method(code, "private async Task LoadGameCardArtworkAsync(", "private static Task<BitmapImage?> TryLoadProfileArtworkAsync(");
+        var logger = Method(code, "private void LogArtworkDiagnosticOnce(", "private FrontendProfileGameCatalogEntry? ResolveClickedGame(");
+
+        Assert.Contains("SteamRootUnavailable", refresh, StringComparison.Ordinal);
+        Assert.Contains("ContextCreationFailed", refresh, StringComparison.Ordinal);
+        Assert.Contains("exception.GetType().Name", refresh, StringComparison.Ordinal);
+        Assert.Contains("NoArtworkCandidate", load, StringComparison.Ordinal);
+        Assert.Contains("CandidatesUnreadableOrUnsupported", load, StringComparison.Ordinal);
+        Assert.Contains("StaleArtworkCompletion", load, StringComparison.Ordinal);
+        Assert.Contains("ArtworkLoadCanceled", load, StringComparison.Ordinal);
+        Assert.Contains("TryMarkArtworkDiagnostic(ref _artworkDiagnosticFlags, diagnosticFlag)", logger, StringComparison.Ordinal);
+        Assert.DoesNotContain("exception.Message", logger, StringComparison.Ordinal);
+        Assert.DoesNotContain("SteamRoot", logger, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppId", logger, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -861,13 +918,13 @@ public sealed class ProfilePagePolicyTests
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
         var contentChanging = Method(code, "private void GameGrid_ContainerContentChanging(", "private void StartGameCardArtworkLoad(");
         var currentItemValidation = contentChanging.IndexOf("args.Item is not GameCardItem item", StringComparison.Ordinal);
-        var rootItemValidation = contentChanging.IndexOf("!ReferenceEquals(item, dataContextItem)", StringComparison.Ordinal);
+        var rootContextAssignment = contentChanging.IndexOf("root.DataContext = item", StringComparison.Ordinal);
         var favoriteAssignment = contentChanging.IndexOf("favoriteButton.DataContext = item", StringComparison.Ordinal);
         var openAssignment = contentChanging.IndexOf("openButton.DataContext = item", StringComparison.Ordinal);
         var reuseFastPath = contentChanging.IndexOf("if (existing.Matches(item))", StringComparison.Ordinal);
 
-        Assert.True(currentItemValidation >= 0 && rootItemValidation > currentItemValidation);
-        Assert.True(favoriteAssignment > rootItemValidation && openAssignment > rootItemValidation);
+        Assert.True(currentItemValidation >= 0 && rootContextAssignment > currentItemValidation);
+        Assert.True(favoriteAssignment > rootContextAssignment && openAssignment > rootContextAssignment);
         Assert.True(reuseFastPath > favoriteAssignment && reuseFastPath > openAssignment);
         Assert.Contains("!ReferenceEquals(favoriteButton.DataContext, item)", contentChanging, StringComparison.Ordinal);
         Assert.Contains("!ReferenceEquals(openButton.DataContext, item)", contentChanging, StringComparison.Ordinal);

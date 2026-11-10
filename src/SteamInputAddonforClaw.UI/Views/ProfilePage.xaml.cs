@@ -17,12 +17,18 @@ namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class ProfilePage : UserControl
 {
+    private const int TemplatePendingDiagnostic = 1;
+    private const int NoArtworkCandidateDiagnostic = 2;
+    private const int ArtworkReadFailureDiagnostic = 4;
+    private const int StaleArtworkCompletionDiagnostic = 8;
+    private const int CanceledArtworkLoadDiagnostic = 16;
     private IAddonFrontendControl? _frontend;
     private FrontendModelFeatureSupport _featureSupport = FrontendModelFeatureSupport.None;
     private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents, _suppressGpuEvents;
     private bool _catalogLoaded, _catalogScanInProgress;
     private bool? _steamActive;
     private int _steamVirtualControllerMutationInProgress;
+    private int _artworkDiagnosticFlags;
     private readonly Dictionary<SelectorItem, RealizedGameCard> _realizedGameCards = [];
     private ItemsWrapGrid? _coverItemsPanel;
     private SteamPortraitArtworkContext? _portraitArtworkContext;
@@ -99,6 +105,7 @@ public sealed partial class ProfilePage : UserControl
     {
         if (_frontend is null || _catalogScanInProgress) return;
         _catalogScanInProgress = true;
+        Interlocked.Exchange(ref _artworkDiagnosticFlags, 0);
         RefreshGamesButton.IsEnabled = false;
         var trigger = explicitRefresh ? "ManualRefresh" : "FirstTabEntry";
         var scanTimer = Stopwatch.StartNew();
@@ -109,8 +116,19 @@ public sealed partial class ProfilePage : UserControl
             var scannedCatalog = await _frontend.ScanProfileGamesAsync();
             if (scannedCatalog.Count > 0)
             {
-                try { _portraitArtworkContext = await Task.Run(SteamPortraitArtworkResolver.CreateContext); }
-                catch (Exception) { _portraitArtworkContext = null; }
+                try
+                {
+                    _portraitArtworkContext = await Task.Run(SteamPortraitArtworkResolver.CreateContext);
+                    if (_portraitArtworkContext is null)
+                        AppLog.Warn("Profiles.Catalog", "Steam cover artwork context is unavailable.", null,
+                            ("Reason", "SteamRootUnavailable"));
+                }
+                catch (Exception exception)
+                {
+                    _portraitArtworkContext = null;
+                    AppLog.Warn("Profiles.Catalog", "Steam cover artwork context creation failed.", null,
+                        ("Reason", "ContextCreationFailed"), ("ExceptionType", exception.GetType().Name));
+                }
             }
             else
             {
@@ -321,16 +339,26 @@ public sealed partial class ProfilePage : UserControl
         if (args.Item is not GameCardItem item)
             return;
 
-        if (container.ContentTemplateRoot is not Border root
-            || root.DataContext is not GameCardItem dataContextItem
-            || !ReferenceEquals(item, dataContextItem)
-            || root.FindName("CoverImageFrame") is not Border coverImageFrame
+        if (container.ContentTemplateRoot is not Border root)
+        {
+            if (args.Phase == 0)
+            {
+                LogArtworkDiagnosticOnce(TemplatePendingDiagnostic, "TemplatePending");
+                args.RegisterUpdateCallback(GameGrid_ContainerContentChanging);
+            }
+            return;
+        }
+
+        if (ShouldSetGameCardDataContext(root.DataContext, item))
+            root.DataContext = item;
+
+        if (root.FindName("CoverImageFrame") is not Border coverImageFrame
             || root.FindName("FallbackCard") is not FrameworkElement fallbackCard)
         {
             if (args.Phase == 0)
             {
+                LogArtworkDiagnosticOnce(TemplatePendingDiagnostic, "TemplatePartsPending");
                 args.RegisterUpdateCallback(GameGrid_ContainerContentChanging);
-                args.Handled = true;
             }
             return;
         }
@@ -394,10 +422,24 @@ public sealed partial class ProfilePage : UserControl
             var paths = await Task.Run(
                 () => SteamPortraitArtworkResolver.ResolveCandidates(artworkContext, game),
                 cancellationToken);
+            if (paths.Count == 0)
+            {
+                LogArtworkDiagnosticOnce(NoArtworkCandidateDiagnostic, "NoArtworkCandidate");
+                return;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
             var bitmap = await TryLoadProfileArtworkAsync(paths, cancellationToken);
-            if (bitmap is null || !IsCurrentGameCard(card, generation))
+            if (!IsCurrentGameCard(card, generation))
+            {
+                LogArtworkDiagnosticOnce(StaleArtworkCompletionDiagnostic, "StaleArtworkCompletion");
                 return;
+            }
+            if (bitmap is null)
+            {
+                LogArtworkDiagnosticOnce(ArtworkReadFailureDiagnostic, "CandidatesUnreadableOrUnsupported");
+                return;
+            }
 
             card.CoverImageFrame.Background = new ImageBrush
             {
@@ -406,10 +448,13 @@ public sealed partial class ProfilePage : UserControl
             };
             card.FallbackCard.Visibility = Visibility.Collapsed;
         }
-        catch (OperationCanceledException) { }
-        catch (Exception)
+        catch (OperationCanceledException)
         {
-            // Artwork is optional; keep the named fallback card available.
+            LogArtworkDiagnosticOnce(CanceledArtworkLoadDiagnostic, "ArtworkLoadCanceled");
+        }
+        catch (Exception exception)
+        {
+            LogArtworkDiagnosticOnce(ArtworkReadFailureDiagnostic, "ArtworkLoadFailed", exception.GetType().Name);
         }
         finally
         {
@@ -559,6 +604,24 @@ public sealed partial class ProfilePage : UserControl
 
     internal static FrontendProfileGameCatalogEntry? ResolveGameCardItem(object? item) =>
         item is GameCardItem card ? card.Game : null;
+
+    internal static bool ShouldSetGameCardDataContext(object? currentContext, GameCardItem item) =>
+        !ReferenceEquals(currentContext, item);
+
+    internal static bool TryMarkArtworkDiagnostic(ref int loggedFlags, int diagnosticFlag)
+    {
+        var previousFlags = Interlocked.Or(ref loggedFlags, diagnosticFlag);
+        return (previousFlags & diagnosticFlag) == 0;
+    }
+
+    private void LogArtworkDiagnosticOnce(int diagnosticFlag, string reason, string? exceptionType = null)
+    {
+        if (!TryMarkArtworkDiagnostic(ref _artworkDiagnosticFlags, diagnosticFlag))
+            return;
+
+        AppLog.Debug("Profiles.Catalog", "Steam cover artwork initialization detail.",
+            ("Reason", reason), ("ExceptionType", exceptionType ?? "None"));
+    }
 
     private FrontendProfileGameCatalogEntry? ResolveClickedGame(Button button)
     {
