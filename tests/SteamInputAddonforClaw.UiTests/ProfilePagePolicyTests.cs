@@ -222,7 +222,7 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("ItemContainerTransitions=\"{x:Null}\"", catalog, StringComparison.Ordinal);
         Assert.Contains("UseLayoutRounding=\"False\"", catalog, StringComparison.Ordinal);
         Assert.Contains("<GridView.ItemsPanel>", catalog, StringComparison.Ordinal);
-        Assert.Contains("<ItemsWrapGrid Orientation=\"Horizontal\" ItemWidth=\"183\" ItemHeight=\"270.5\" Margin=\"0\"/>", catalog, StringComparison.Ordinal);
+        Assert.Contains("<ItemsWrapGrid Orientation=\"Horizontal\" ItemWidth=\"183\" ItemHeight=\"270.5\" Margin=\"0\" Loaded=\"CoverItemsPanel_Loaded\"/>", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("MaximumRowsOrColumns", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("<ScrollViewer", catalog, StringComparison.Ordinal);
         Assert.DoesNotContain("ItemsRepeater", catalog, StringComparison.Ordinal);
@@ -423,19 +423,21 @@ public sealed class ProfilePagePolicyTests
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
         var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
         var catalog = xaml[..xaml.IndexOf("<Grid x:Name=\"DetailPanel\"", StringComparison.Ordinal)];
-        var gridLoaded = Method(code, "private void GameGrid_Loaded(", "private void AttachCoverItemsPanel(");
-        var attach = Method(code, "private void AttachCoverItemsPanel(", "private void ProfilePage_Unloaded(");
+        var panelLoaded = Method(code, "private void CoverItemsPanel_Loaded(", "private void AttachCoverItemsPanel(");
+        var attach = Method(code, "private void AttachCoverItemsPanel(", "private void DetachCoverItemsPanel(");
         var updateLayout = Method(code, "private void ApplyCoverGridLayout(", "private static bool LayoutsMatch(");
         var rootChanged = Method(code, "private void XamlRoot_Changed(", "private void GameGrid_SizeChanged(");
         var gridSizeChanged = Method(code, "private void GameGrid_SizeChanged(", "private void GameGridItemsPanel_SizeChanged(");
         var itemsPanelSizeChanged = Method(code, "private void GameGridItemsPanel_SizeChanged(", "private void ScheduleCoverGridLayoutUpdate(");
         var resize = Method(code, "private void ScheduleCoverGridLayoutUpdate(", "private void CoverGridResizeTimer_Tick(");
 
-        Assert.Contains("Loaded=\"GameGrid_Loaded\"", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("Loaded=\"GameGrid_Loaded\"", catalog, StringComparison.Ordinal);
         Assert.Contains("SizeChanged=\"GameGrid_SizeChanged\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("AttachCoverItemsPanel()", gridLoaded, StringComparison.Ordinal);
-        Assert.Contains("GameGrid.ItemsPanelRoot is not ItemsWrapGrid itemsPanel", attach, StringComparison.Ordinal);
+        Assert.Contains("sender is ItemsWrapGrid itemsPanel", panelLoaded, StringComparison.Ordinal);
+        Assert.Contains("AttachCoverItemsPanel(itemsPanel)", panelLoaded, StringComparison.Ordinal);
+        Assert.Contains("ItemsWrapGrid itemsPanel", attach, StringComparison.Ordinal);
         Assert.Contains("_coverItemsPanel.SizeChanged += GameGridItemsPanel_SizeChanged", attach, StringComparison.Ordinal);
+        Assert.Contains("_coverGridLayout = null", attach, StringComparison.Ordinal);
         Assert.Contains("itemsPanel.ActualWidth", updateLayout, StringComparison.Ordinal);
         Assert.DoesNotContain("GameGrid.ActualWidth", updateLayout, StringComparison.Ordinal);
         Assert.DoesNotContain("CatalogScrollViewer", code, StringComparison.Ordinal);
@@ -453,6 +455,32 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("_coverGridResizeTimer.Stop()", resize, StringComparison.Ordinal);
         Assert.Contains("_coverGridResizeTimer.Start()", resize, StringComparison.Ordinal);
         Assert.DoesNotContain("ChangeView(", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Steam_cover_grid_attaches_when_items_are_created_after_the_initial_page_load()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var refresh = Method(code, "private async Task RefreshGamesAsync(", "private void GameSearchBox_TextChanged(");
+        var applyFilter = Method(code, "private void ApplyCatalogFilter(", "private void ProfilePage_Loaded(");
+        var pageLoaded = Method(code, "private void ProfilePage_Loaded(", "private void CoverItemsPanel_Loaded(");
+        var panelLoaded = Method(code, "private void CoverItemsPanel_Loaded(", "private void AttachCoverItemsPanel(");
+        var attach = Method(code, "private void AttachCoverItemsPanel(", "private void DetachCoverItemsPanel(");
+        var applyLayout = Method(code, "private void ApplyCoverGridLayout(", "private static bool LayoutsMatch(");
+        var scanIndex = refresh.IndexOf("await _frontend.ScanProfileGamesAsync()", StringComparison.Ordinal);
+        var filterIndex = refresh.IndexOf("ApplyCatalogFilter()", StringComparison.Ordinal);
+
+        Assert.Contains("Loaded=\"CoverItemsPanel_Loaded\"", xaml, StringComparison.Ordinal);
+        Assert.True(scanIndex >= 0 && filterIndex > scanIndex);
+        Assert.Contains("GameGrid.ItemsSource = _visibleGameCards", applyFilter, StringComparison.Ordinal);
+        Assert.DoesNotContain("AttachCoverItemsPanel", pageLoaded, StringComparison.Ordinal);
+        Assert.Contains("if (sender is ItemsWrapGrid itemsPanel)", panelLoaded, StringComparison.Ordinal);
+        Assert.Contains("AttachCoverItemsPanel(itemsPanel)", panelLoaded, StringComparison.Ordinal);
+        Assert.Contains("_coverGridLayout = null", attach, StringComparison.Ordinal);
+        Assert.Contains("ApplyCoverGridLayout(GameGrid.XamlRoot?.RasterizationScale ?? 1.0)", attach, StringComparison.Ordinal);
+        Assert.Contains("GameGrid.Opacity = 1", applyLayout, StringComparison.Ordinal);
     }
 
     [Fact]

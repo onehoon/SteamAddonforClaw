@@ -172,22 +172,23 @@ public sealed partial class ProfilePage : UserControl
     private void ProfilePage_Loaded(object sender, RoutedEventArgs e)
     {
         AttachXamlRoot();
-        AttachCoverItemsPanel();
         RestartMissingGameCardArtworkLoads();
     }
 
-    private void GameGrid_Loaded(object sender, RoutedEventArgs e) => AttachCoverItemsPanel();
-
-    private void AttachCoverItemsPanel()
+    private void CoverItemsPanel_Loaded(object sender, RoutedEventArgs e)
     {
-        if (GameGrid.ItemsPanelRoot is not ItemsWrapGrid itemsPanel)
-            return;
+        if (sender is ItemsWrapGrid itemsPanel)
+            AttachCoverItemsPanel(itemsPanel);
+    }
 
+    private void AttachCoverItemsPanel(ItemsWrapGrid itemsPanel)
+    {
         if (!ReferenceEquals(_coverItemsPanel, itemsPanel))
         {
             DetachCoverItemsPanel();
             _coverItemsPanel = itemsPanel;
             _coverItemsPanel.SizeChanged += GameGridItemsPanel_SizeChanged;
+            _coverGridLayout = null;
         }
 
         ApplyCoverGridLayout(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
