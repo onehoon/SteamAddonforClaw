@@ -318,21 +318,22 @@ public sealed partial class ProfilePage : UserControl
             return;
         }
 
-        if (args.Phase == 0)
-        {
-            args.RegisterUpdateCallback(GameGrid_ContainerContentChanging);
-            args.Handled = true;
+        if (args.Item is not GameCardItem item)
             return;
-        }
 
-        if (args.Phase < 1
-            || args.Item is not GameCardItem item
-            || container.ContentTemplateRoot is not Border root
+        if (container.ContentTemplateRoot is not Border root
             || root.DataContext is not GameCardItem dataContextItem
             || !ReferenceEquals(item, dataContextItem)
             || root.FindName("CoverImageFrame") is not Border coverImageFrame
             || root.FindName("FallbackCard") is not FrameworkElement fallbackCard)
+        {
+            if (args.Phase == 0)
+            {
+                args.RegisterUpdateCallback(GameGrid_ContainerContentChanging);
+                args.Handled = true;
+            }
             return;
+        }
 
         if (_coverGridLayout is { } layout)
             SetCardLayout(root, layout);

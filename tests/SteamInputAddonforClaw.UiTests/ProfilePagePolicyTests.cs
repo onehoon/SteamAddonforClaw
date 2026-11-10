@@ -752,12 +752,20 @@ public sealed class ProfilePagePolicyTests
 
         var handler = Method(code, "private void GameGrid_ContainerContentChanging(", "private void StartGameCardArtworkLoad(");
         var recycleBranch = handler.IndexOf("if (args.InRecycleQueue)", StringComparison.Ordinal);
-        var phaseZero = handler.IndexOf("if (args.Phase == 0)", StringComparison.Ordinal);
+        var itemValidation = handler.IndexOf("args.Item is not GameCardItem item", StringComparison.Ordinal);
         var templateRoot = handler.IndexOf("container.ContentTemplateRoot is not Border root", StringComparison.Ordinal);
-        Assert.True(recycleBranch >= 0 && phaseZero > recycleBranch && templateRoot > phaseZero);
+        var phaseZeroFallback = handler.IndexOf("if (args.Phase == 0)", StringComparison.Ordinal);
+        var deferredCallback = handler.IndexOf("args.RegisterUpdateCallback(GameGrid_ContainerContentChanging)", StringComparison.Ordinal);
+        var layoutApplication = handler.IndexOf("SetCardLayout(root, layout)", StringComparison.Ordinal);
+        var cardLookup = handler.IndexOf("_realizedGameCards.TryGetValue(container, out var existing)", StringComparison.Ordinal);
+        Assert.True(recycleBranch >= 0 && itemValidation > recycleBranch && templateRoot > itemValidation);
+        Assert.True(phaseZeroFallback > templateRoot && deferredCallback > phaseZeroFallback);
+        Assert.True(layoutApplication > deferredCallback && cardLookup > layoutApplication);
+        Assert.DoesNotContain("if (args.Phase < 1", handler, StringComparison.Ordinal);
         Assert.Contains("_realizedGameCards.Remove(container, out var recycledCard)", handler, StringComparison.Ordinal);
         Assert.Contains("recycledCard.CancelLoad()", handler, StringComparison.Ordinal);
         Assert.Contains("recycledCard.ClearArtwork()", handler, StringComparison.Ordinal);
+        Assert.Contains("recycledCard.FallbackCard.Visibility = Visibility.Visible", handler, StringComparison.Ordinal);
         Assert.Contains("args.RegisterUpdateCallback(GameGrid_ContainerContentChanging)", handler, StringComparison.Ordinal);
         Assert.Contains("args.Handled = true", handler, StringComparison.Ordinal);
         Assert.Contains("args.Item is not GameCardItem item", handler, StringComparison.Ordinal);
@@ -775,6 +783,31 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("_coverItemsPanel.SizeChanged -= GameGridItemsPanel_SizeChanged", code, StringComparison.Ordinal);
         Assert.DoesNotContain("ApplyCoverGridLayout", handler, StringComparison.Ordinal);
         Assert.Contains("RestartMissingGameCardArtworkLoads()", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Steam_grid_initializes_six_column_card_slots_before_artwork_loading()
+    {
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var handler = Method(code, "private void GameGrid_ContainerContentChanging(", "private void StartGameCardArtworkLoad(");
+
+        Assert.True(SteamCoverGridLayout.TryCalculate(980, out var layout));
+        Assert.Equal(6, layout.Columns);
+        Assert.Equal(155, layout.CoverWidthDip, 2);
+        Assert.Equal(163, layout.SlotWidthDip, 2);
+
+        var templateReadyValidation = handler.IndexOf("container.ContentTemplateRoot is not Border root", StringComparison.Ordinal);
+        var layoutApplication = handler.IndexOf("SetCardLayout(root, layout)", StringComparison.Ordinal);
+        var identityInitialization = handler.IndexOf("existing = new RealizedGameCard(container, root", StringComparison.Ordinal);
+        var artworkStart = handler.IndexOf("StartGameCardArtworkLoad(existing)", StringComparison.Ordinal);
+
+        Assert.True(templateReadyValidation >= 0);
+        Assert.True(layoutApplication > templateReadyValidation);
+        Assert.True(identityInitialization > layoutApplication);
+        Assert.True(artworkStart > identityInitialization);
+        Assert.DoesNotContain("if (args.Phase < 1", handler, StringComparison.Ordinal);
+        Assert.Contains("existing.FallbackCard.Visibility = Visibility.Visible", handler, StringComparison.Ordinal);
     }
 
     [Fact]
