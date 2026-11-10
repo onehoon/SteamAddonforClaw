@@ -854,6 +854,39 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
+    public void Steam_grid_rebinds_open_and_favorite_buttons_to_the_current_recycled_item()
+    {
+        var root = FindRepositoryRoot();
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var contentChanging = Method(code, "private void GameGrid_ContainerContentChanging(", "private void StartGameCardArtworkLoad(");
+        var currentItemValidation = contentChanging.IndexOf("args.Item is not GameCardItem item", StringComparison.Ordinal);
+        var rootItemValidation = contentChanging.IndexOf("!ReferenceEquals(item, dataContextItem)", StringComparison.Ordinal);
+        var favoriteAssignment = contentChanging.IndexOf("favoriteButton.DataContext = item", StringComparison.Ordinal);
+        var openAssignment = contentChanging.IndexOf("openButton.DataContext = item", StringComparison.Ordinal);
+        var reuseFastPath = contentChanging.IndexOf("if (existing.Matches(item))", StringComparison.Ordinal);
+
+        Assert.True(currentItemValidation >= 0 && rootItemValidation > currentItemValidation);
+        Assert.True(favoriteAssignment > rootItemValidation && openAssignment > rootItemValidation);
+        Assert.True(reuseFastPath > favoriteAssignment && reuseFastPath > openAssignment);
+        Assert.Contains("!ReferenceEquals(favoriteButton.DataContext, item)", contentChanging, StringComparison.Ordinal);
+        Assert.Contains("!ReferenceEquals(openButton.DataContext, item)", contentChanging, StringComparison.Ordinal);
+
+        var cardTemplate = xaml[xaml.IndexOf("x:Name=\"OpenGameButton\"", StringComparison.Ordinal)..xaml.IndexOf("</GridView>", StringComparison.Ordinal)];
+        Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", cardTemplate, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"{Binding FavoriteAutomationName}\"", cardTemplate, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.ToolTip=\"{Binding FavoriteAutomationName}\"", cardTemplate, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding FavoriteGlyph}\"", cardTemplate, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"{Binding Name}\"", cardTemplate, StringComparison.Ordinal);
+
+        var cardItem = Method(code, "internal sealed class GameCardItem", "private sealed class RealizedGameCard(");
+        Assert.Contains("public bool FavoriteStateKnown => Game.FavoriteStateKnown", cardItem, StringComparison.Ordinal);
+        Assert.Contains("public string FavoriteGlyph => GetFavoriteGlyph(Game.Favorite, Game.FavoriteStateKnown)", cardItem, StringComparison.Ordinal);
+        Assert.Contains("PropertyChanged?.Invoke(this, new(nameof(FavoriteGlyph)))", cardItem, StringComparison.Ordinal);
+        Assert.Contains("PropertyChanged?.Invoke(this, new(nameof(FavoriteAutomationName)))", cardItem, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Steam_cover_click_resolves_identity_before_opening_detail_and_capturing_profile()
     {
         var root = FindRepositoryRoot();

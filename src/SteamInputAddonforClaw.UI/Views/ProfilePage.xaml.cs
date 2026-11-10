@@ -335,6 +335,14 @@ public sealed partial class ProfilePage : UserControl
             return;
         }
 
+        // Give nested action buttons the live item explicitly, including when their inherited context is stale.
+        if (root.FindName("FavoriteButton") is Button favoriteButton
+            && !ReferenceEquals(favoriteButton.DataContext, item))
+            favoriteButton.DataContext = item;
+        if (root.FindName("OpenGameButton") is Button openButton
+            && !ReferenceEquals(openButton.DataContext, item))
+            openButton.DataContext = item;
+
         if (_coverGridLayout is { } layout)
             SetCardLayout(root, layout);
 
