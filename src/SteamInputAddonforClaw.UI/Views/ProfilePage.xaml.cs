@@ -23,7 +23,8 @@ public sealed partial class ProfilePage : UserControl
     private bool _catalogLoaded, _catalogScanInProgress;
     private bool? _steamActive;
     private int _steamVirtualControllerMutationInProgress;
-    private readonly Dictionary<Border, RealizedGameCard> _realizedGameCards = [];
+    private readonly Dictionary<SelectorItem, RealizedGameCard> _realizedGameCards = [];
+    private ItemsWrapGrid? _coverItemsPanel;
     private SteamPortraitArtworkContext? _portraitArtworkContext;
     private XamlRoot? _observedXamlRoot;
     private double _lastRasterizationScale = double.NaN;
@@ -171,15 +172,41 @@ public sealed partial class ProfilePage : UserControl
     private void ProfilePage_Loaded(object sender, RoutedEventArgs e)
     {
         AttachXamlRoot();
-        ApplyCoverGridLayout(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
         RestartMissingGameCardArtworkLoads();
+    }
+
+    private void CoverItemsPanel_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ItemsWrapGrid itemsPanel)
+            AttachCoverItemsPanel(itemsPanel);
+    }
+
+    private void AttachCoverItemsPanel(ItemsWrapGrid itemsPanel)
+    {
+        if (!ReferenceEquals(_coverItemsPanel, itemsPanel))
+        {
+            DetachCoverItemsPanel();
+            _coverItemsPanel = itemsPanel;
+            _coverItemsPanel.SizeChanged += GameGridItemsPanel_SizeChanged;
+            _coverGridLayout = null;
+        }
+
+        ApplyCoverGridLayout(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
     }
 
     private void ProfilePage_Unloaded(object sender, RoutedEventArgs e)
     {
         _coverGridResizeTimer.Stop();
         DetachXamlRoot();
+        DetachCoverItemsPanel();
         CancelPendingGameCardArtworkLoads();
+    }
+
+    private void DetachCoverItemsPanel()
+    {
+        if (_coverItemsPanel is not null)
+            _coverItemsPanel.SizeChanged -= GameGridItemsPanel_SizeChanged;
+        _coverItemsPanel = null;
     }
 
     private void AttachXamlRoot()
@@ -217,16 +244,19 @@ public sealed partial class ProfilePage : UserControl
         ScheduleCoverGridLayoutUpdate(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
     }
 
-    private void CatalogScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    private void GameGridItemsPanel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (!SteamCoverGridLayout.HasMeaningfulWidthChange(e.PreviousSize.Width, e.NewSize.Width))
             return;
 
-        ScheduleCoverGridLayoutUpdate(CatalogScrollViewer.XamlRoot?.RasterizationScale ?? 1.0);
+        ScheduleCoverGridLayoutUpdate(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
     }
 
     private void ScheduleCoverGridLayoutUpdate(double rasterizationScale)
     {
+        if (_coverItemsPanel is null)
+            return;
+
         _pendingLayoutRasterizationScale = NormalizeRasterizationScale(rasterizationScale);
         _coverGridResizeTimer.Stop();
         _coverGridResizeTimer.Start();
@@ -241,12 +271,10 @@ public sealed partial class ProfilePage : UserControl
     private void ApplyCoverGridLayout(double rasterizationScale)
     {
         rasterizationScale = NormalizeRasterizationScale(rasterizationScale);
-        if (GameGrid.Layout is not UniformGridLayout layout)
+        if (_coverItemsPanel is not { } itemsPanel)
             return;
 
-        if (!SteamCoverGridLayout.TryResolveAvailableWidthDip(
-                CatalogScrollViewer.ViewportWidth, GameGrid.ActualWidth, out var availableWidthDip)
-            || !SteamCoverGridLayout.TryCalculate(availableWidthDip, rasterizationScale, out var nextLayout))
+        if (!SteamCoverGridLayout.TryCalculate(itemsPanel.ActualWidth, rasterizationScale, out var nextLayout))
             return;
 
         var snapshotChanged = _coverGridLayout is not { } current || !LayoutsMatch(current, nextLayout);
@@ -257,16 +285,12 @@ public sealed partial class ProfilePage : UserControl
             return;
         }
 
-        // Apply one calculated snapshot together so the repeater and all realized
-        // cards always use the same item size and gap values.
+        // The panel slot and card dimensions come from the same measured snapshot.
         _coverGridLayout = nextLayout;
-        layout.MinItemWidth = nextLayout.CoverWidthDip;
-        layout.MinItemHeight = nextLayout.CoverHeightDip;
-        layout.MinColumnSpacing = nextLayout.ColumnGapDip;
-        layout.MinRowSpacing = nextLayout.RowGapDip;
-        layout.MaximumRowsOrColumns = nextLayout.Columns;
+        itemsPanel.ItemWidth = nextLayout.SlotWidthDip;
+        itemsPanel.ItemHeight = nextLayout.SlotHeightDip;
         foreach (var card in _realizedGameCards.Values)
-            SetCardSize(card.Root, nextLayout.CoverWidthDip, nextLayout.CoverHeightDip);
+            SetCardLayout(card.Root, nextLayout);
         GameGrid.Opacity = 1;
     }
 
@@ -280,17 +304,41 @@ public sealed partial class ProfilePage : UserControl
     private static double NormalizeRasterizationScale(double rasterizationScale) =>
         double.IsFinite(rasterizationScale) && rasterizationScale > 0 ? rasterizationScale : 1.0;
 
-    private void GameGrid_ElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
+    private void GameGrid_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
-        if (args.Element is not Border root || root.DataContext is not GameCardItem item
-            || root.FindName("CoverImageFrame") is not Border coverImageFrame
-            || root.FindName("FallbackCard") is not FrameworkElement fallbackCard)
+        var container = args.ItemContainer;
+        if (args.InRecycleQueue)
+        {
+            if (_realizedGameCards.Remove(container, out var recycledCard))
+            {
+                recycledCard.CancelLoad();
+                recycledCard.ClearArtwork();
+                recycledCard.FallbackCard.Visibility = Visibility.Visible;
+            }
+            return;
+        }
+
+        if (args.Item is not GameCardItem item)
             return;
 
-        if (_coverGridLayout is { } layout)
-            SetCardSize(root, layout.CoverWidthDip, layout.CoverHeightDip);
+        if (container.ContentTemplateRoot is not Border root
+            || root.DataContext is not GameCardItem dataContextItem
+            || !ReferenceEquals(item, dataContextItem)
+            || root.FindName("CoverImageFrame") is not Border coverImageFrame
+            || root.FindName("FallbackCard") is not FrameworkElement fallbackCard)
+        {
+            if (args.Phase == 0)
+            {
+                args.RegisterUpdateCallback(GameGrid_ContainerContentChanging);
+                args.Handled = true;
+            }
+            return;
+        }
 
-        if (_realizedGameCards.TryGetValue(root, out var existing))
+        if (_coverGridLayout is { } layout)
+            SetCardLayout(root, layout);
+
+        if (_realizedGameCards.TryGetValue(container, out var existing))
         {
             if (existing.Matches(item))
             {
@@ -306,21 +354,13 @@ public sealed partial class ProfilePage : UserControl
         }
         else
         {
-            existing = new RealizedGameCard(root, coverImageFrame, fallbackCard, item);
-            _realizedGameCards.Add(root, existing);
+            existing = new RealizedGameCard(container, root, coverImageFrame, fallbackCard, item, coverImageFrame.Background);
+            existing.ClearArtwork();
+            existing.FallbackCard.Visibility = Visibility.Visible;
+            _realizedGameCards.Add(container, existing);
         }
 
         StartGameCardArtworkLoad(existing);
-    }
-
-    private void GameGrid_ElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
-    {
-        if (args.Element is not Border root || !_realizedGameCards.Remove(root, out var card))
-            return;
-
-        card.CancelLoad();
-        card.ClearArtwork();
-        card.FallbackCard.Visibility = Visibility.Visible;
     }
 
     private void StartGameCardArtworkLoad(RealizedGameCard card)
@@ -416,7 +456,7 @@ public sealed partial class ProfilePage : UserControl
     }
 
     private bool IsCurrentGameCard(RealizedGameCard card, long generation) =>
-        _realizedGameCards.TryGetValue(card.Root, out var current)
+        _realizedGameCards.TryGetValue(card.Container, out var current)
         && ReferenceEquals(current, card)
         && card.Generation == generation
         && card.Root.DataContext is GameCardItem item
@@ -439,12 +479,16 @@ public sealed partial class ProfilePage : UserControl
         }
     }
 
-    private static void SetCardSize(FrameworkElement card, double width, double height)
+    private static void SetCardLayout(FrameworkElement card, SteamCoverGridLayout layout)
     {
-        if (Math.Abs(card.Width - width) >= 0.0001)
-            card.Width = width;
-        if (Math.Abs(card.Height - height) >= 0.0001)
-            card.Height = height;
+        if (Math.Abs(card.Width - layout.CoverWidthDip) >= 0.0001)
+            card.Width = layout.CoverWidthDip;
+        if (Math.Abs(card.Height - layout.CoverHeightDip) >= 0.0001)
+            card.Height = layout.CoverHeightDip;
+
+        var margin = new Thickness(0, 0, layout.ColumnGapDip, layout.RowGapDip);
+        if (!card.Margin.Equals(margin))
+            card.Margin = margin;
     }
 
     internal static IReadOnlyList<FrontendProfileGameCatalogEntry> FilterAndSort(
@@ -979,12 +1023,19 @@ public sealed partial class ProfilePage : UserControl
         }
     }
 
-    private sealed class RealizedGameCard(Border root, Border coverImageFrame, FrameworkElement fallbackCard, GameCardItem item)
+    private sealed class RealizedGameCard(
+        SelectorItem container,
+        Border root,
+        Border coverImageFrame,
+        FrameworkElement fallbackCard,
+        GameCardItem item,
+        Brush? fallbackBrush)
     {
+        public SelectorItem Container { get; } = container;
         public Border Root { get; } = root;
         public Border CoverImageFrame { get; } = coverImageFrame;
         public FrameworkElement FallbackCard { get; } = fallbackCard;
-        public Brush FallbackBrush { get; } = coverImageFrame.Background;
+        public Brush? FallbackBrush { get; } = fallbackBrush;
         public GameCardItem Item { get; set; } = item;
         public long Generation { get; set; }
         public bool LoadAttempted { get; set; }

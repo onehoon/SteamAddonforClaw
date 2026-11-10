@@ -30,6 +30,17 @@
 </Setter.Value>
 </Setter>
 </Style>
+<Style x:Key="SteamCoverGridViewItemStyle" TargetType="GridViewItem">
+<Setter Property="Margin" Value="0"/>
+<Setter Property="Padding" Value="0"/>
+<Setter Property="MinWidth" Value="0"/>
+<Setter Property="MinHeight" Value="0"/>
+<Setter Property="Background" Value="Transparent"/>
+<Setter Property="BorderBrush" Value="Transparent"/>
+<Setter Property="BorderThickness" Value="0"/>
+<Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+<Setter Property="VerticalContentAlignment" Value="Stretch"/>
+</Style>
 </UserControl.Resources>
 <Grid Padding="20,16" RowSpacing="16">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
@@ -40,12 +51,13 @@
 <Grid Grid.Row="0" ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock FontSize="24" FontWeight="SemiBold" x:Uid="Steam_CatalogTitle" Text="Steam"/><Button x:Name="RefreshGamesButton" Grid.Column="1" x:Uid="Steam_RefreshGamesButton" Content="↻ Refresh" Style="{StaticResource AccentButtonStyle}" Click="RefreshGamesButton_Click"/></Grid>
 <TextBox x:Name="GameSearchBox" Grid.Row="1" x:Uid="Steam_GameSearchBox" PlaceholderText="Search games..." TextChanged="GameSearchBox_TextChanged" Margin="0,16,0,0"/>
 <InfoBar x:Name="FavoriteStateInfoBar" x:Uid="Steam_FavoriteStateUnavailableInfoBar" Grid.Row="2" IsClosable="False" IsOpen="False" Severity="Informational" Message="Favorite state is unavailable because profile settings could not be read."/>
-<ScrollViewer x:Name="CatalogScrollViewer" Grid.Row="3" Margin="0,16,0,0" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollMode="Enabled" VerticalScrollBarVisibility="Hidden" SizeChanged="CatalogScrollViewer_SizeChanged">
-<ItemsRepeater x:Name="GameGrid" HorizontalAlignment="Stretch" Opacity="0" SizeChanged="GameGrid_SizeChanged" ElementPrepared="GameGrid_ElementPrepared" ElementClearing="GameGrid_ElementClearing">
-<ItemsRepeater.Layout><UniformGridLayout Orientation="Horizontal" MinItemWidth="175" MinItemHeight="262.5" MinColumnSpacing="8" MinRowSpacing="8" ItemsStretch="None" ItemsJustification="Start"/></ItemsRepeater.Layout>
-<ItemsRepeater.ItemTemplate>
+<GridView x:Name="GameGrid" Grid.Row="3" Margin="0,16,0,0" HorizontalAlignment="Stretch" Padding="0" BorderThickness="0" Opacity="0" SelectionMode="None" IsItemClickEnabled="False" CanDragItems="False" CanReorderItems="False" UseLayoutRounding="False" ItemContainerTransitions="{x:Null}" ItemContainerStyle="{StaticResource SteamCoverGridViewItemStyle}" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollMode="Enabled" ScrollViewer.VerticalScrollBarVisibility="Hidden" SizeChanged="GameGrid_SizeChanged" ContainerContentChanging="GameGrid_ContainerContentChanging">
+<GridView.ItemsPanel>
+<ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" ItemWidth="183" ItemHeight="270.5" Margin="0" Loaded="CoverItemsPanel_Loaded"/></ItemsPanelTemplate>
+</GridView.ItemsPanel>
+<GridView.ItemTemplate>
 <DataTemplate>
-<Border x:Name="GameCardRoot" Width="175" Height="262.5" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+<Border x:Name="GameCardRoot" Width="175" Height="262.5" Margin="0,0,8,8" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
 <Grid>
 <Border x:Name="CoverImageFrame" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" IsHitTestVisible="False"/>
 <Border x:Name="FallbackCard" CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" IsHitTestVisible="False">
@@ -61,9 +73,8 @@
 </Grid>
 </Border>
 </DataTemplate>
-</ItemsRepeater.ItemTemplate>
-</ItemsRepeater>
-</ScrollViewer>
+</GridView.ItemTemplate>
+</GridView>
 </Grid>
 <Grid x:Name="DetailPanel" Visibility="Collapsed" RowSpacing="16">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
