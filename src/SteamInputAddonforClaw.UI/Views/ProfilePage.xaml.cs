@@ -549,9 +549,20 @@ public sealed partial class ProfilePage : UserControl
         return updatedCatalog;
     }
 
+    internal static FrontendProfileGameCatalogEntry? ResolveGameCardEntry(object? dataContext, object? tag) =>
+        dataContext is GameCardItem card
+            ? card.Game
+            : tag as FrontendProfileGameCatalogEntry;
+
     private async void GameCardButton_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as Button)?.Tag is not FrontendProfileGameCatalogEntry game) return;
+        if (sender is not Button button) return;
+        var game = ResolveGameCardEntry(button.DataContext, button.Tag);
+        if (game is null)
+        {
+            AppLog.Warn("Profiles.Catalog", "Steam cover click has no game context.");
+            return;
+        }
         CancelTdpDebounce(); CancelGpuMinimumClockDebounce(); SelectedGameNameText.Text = game.Name; CatalogPanel.Visibility = Visibility.Collapsed; DetailPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Collapsed;
         await SelectGameAsync(game);
     }
