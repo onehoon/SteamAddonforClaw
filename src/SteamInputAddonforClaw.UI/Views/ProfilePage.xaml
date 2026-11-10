@@ -66,8 +66,8 @@
 <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextAlignment="Center" TextWrapping="WrapWholeWords" TextTrimming="CharacterEllipsis" MaxLines="3"/>
 </StackPanel>
 </Border>
-<Button x:Name="OpenGameButton" Tag="{Binding Game}" Click="GameCardButton_Click" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" Padding="0" AutomationProperties.Name="{Binding Name}" ToolTipService.ToolTip="{Binding Name}"/>
-<Button x:Name="FavoriteButton" Style="{StaticResource SteamCoverFavoriteStarButtonStyle}" Width="32" Height="32" MinWidth="0" MinHeight="0" Padding="0" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" IsEnabled="{Binding FavoriteStateKnown}" Tag="{Binding Game}" Click="FavoriteButton_Click" AutomationProperties.Name="{Binding FavoriteAutomationName}" ToolTipService.ToolTip="{Binding FavoriteAutomationName}">
+<Button x:Name="OpenGameButton" Click="GameCardButton_Click" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" Padding="0" AutomationProperties.Name="{Binding Name}" ToolTipService.ToolTip="{Binding Name}"/>
+<Button x:Name="FavoriteButton" Style="{StaticResource SteamCoverFavoriteStarButtonStyle}" Width="32" Height="32" MinWidth="0" MinHeight="0" Padding="0" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" IsEnabled="{Binding FavoriteStateKnown}" Click="FavoriteButton_Click" AutomationProperties.Name="{Binding FavoriteAutomationName}" ToolTipService.ToolTip="{Binding FavoriteAutomationName}">
 <TextBlock Text="{Binding FavoriteGlyph}" FontSize="24" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
 </Button>
 </Grid>

@@ -335,6 +335,14 @@ public sealed partial class ProfilePage : UserControl
             return;
         }
 
+        // Give nested action buttons the live item explicitly, including when their inherited context is stale.
+        if (root.FindName("FavoriteButton") is Button favoriteButton
+            && !ReferenceEquals(favoriteButton.DataContext, item))
+            favoriteButton.DataContext = item;
+        if (root.FindName("OpenGameButton") is Button openButton
+            && !ReferenceEquals(openButton.DataContext, item))
+            openButton.DataContext = item;
+
         if (_coverGridLayout is { } layout)
             SetCardLayout(root, layout);
 
@@ -549,18 +557,33 @@ public sealed partial class ProfilePage : UserControl
         return updatedCatalog;
     }
 
-    internal static FrontendProfileGameCatalogEntry? ResolveGameCardEntry(object? dataContext, object? tag) =>
-        dataContext is GameCardItem card
-            ? card.Game
-            : tag as FrontendProfileGameCatalogEntry;
+    internal static FrontendProfileGameCatalogEntry? ResolveGameCardItem(object? item) =>
+        item is GameCardItem card ? card.Game : null;
+
+    private FrontendProfileGameCatalogEntry? ResolveClickedGame(Button button)
+    {
+        GridViewItem? container = null;
+        for (DependencyObject? node = button; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (container is null && node is GridViewItem itemContainer)
+                container = itemContainer;
+
+            if (ReferenceEquals(node, GameGrid))
+                return container is null
+                    ? null
+                    : ResolveGameCardItem(GameGrid.ItemFromContainer(container));
+        }
+
+        return null;
+    }
 
     private async void GameCardButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button) return;
-        var game = ResolveGameCardEntry(button.DataContext, button.Tag);
+        var game = ResolveClickedGame(button);
         if (game is null)
         {
-            AppLog.Warn("Profiles.Catalog", "Steam cover click has no game context.");
+            AppLog.Warn("Profiles.Catalog", "Steam cover click could not resolve its GridView item.");
             return;
         }
         CancelTdpDebounce(); CancelGpuMinimumClockDebounce(); SelectedGameNameText.Text = game.Name; CatalogPanel.Visibility = Visibility.Collapsed; DetailPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Collapsed;
@@ -575,7 +598,8 @@ public sealed partial class ProfilePage : UserControl
     }
     private async void FavoriteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_frontend is null || (sender as Button)?.Tag is not FrontendProfileGameCatalogEntry { FavoriteStateKnown: true } game) return;
+        if (_frontend is null || sender is not Button button) return;
+        if (ResolveClickedGame(button) is not { FavoriteStateKnown: true } game) return;
         try
         {
             var result = await _frontend.SetGameProfileFavoriteAsync(game.AppId, !game.Favorite, game.Name);
