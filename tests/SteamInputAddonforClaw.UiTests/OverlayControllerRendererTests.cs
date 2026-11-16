@@ -15,7 +15,7 @@ public sealed class OverlayControllerRendererTests
 
         Assert.Contains("AddonQuickSettingsTabId.Controller => BuildControllerPage(rows)", shell);
         Assert.DoesNotContain("AddonQuickSettingsTabId.Controller => CreatePlaceholderPage", shell);
-        Assert.Equal(5, CountOccurrences(controller, "CreateOverlaySectionCard("));
+        Assert.Equal(4, CountOccurrences(controller, "CreateOverlaySectionCard("));
         Assert.Contains("CreateControllerSection(\"Controller for Steam\")", controller);
         Assert.Contains("CreateControllerSection(\"M1 / M2\")", controller);
         Assert.Contains("CreateControllerSection(\"Vibration Strength\")", controller);
@@ -271,18 +271,25 @@ public sealed class OverlayControllerRendererTests
     public void Controller_shared_LED_and_vibration_use_existing_authority_without_test_operations()
     {
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var chromeStart = clawHud.IndexOf("private static (Border Container, Button Button) CreateDetailMenuChrome", StringComparison.Ordinal);
+        var chromeEnd = clawHud.IndexOf("private void OpenSettingDetail", chromeStart, StringComparison.Ordinal);
+        var menuChrome = clawHud[chromeStart..chromeEnd];
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
 
         Assert.Contains("new OverlayToggleRow(\"Enable LED\", RequestControllerLedEnabled)", controller);
         Assert.DoesNotContain("new OverlayToggleRow(\"Joystick LED\", RequestControllerLedEnabled", controller);
         Assert.Contains("rootRows.Add(new(_controllerLedSectionCard,", controller);
+        Assert.Contains("var (container, headerButton) = CreateDetailMenuChrome(\"Joystick LED\", \"Open Joystick LED settings\");", controller);
+        Assert.Contains("_controllerLedSectionCard = container;", controller);
         Assert.Contains("IsSelectable: () => _controllerLedAvailable && !_controllerLedMutationInFlight", controller);
         Assert.DoesNotContain("IsSelectable: () => _controllerLed.Enabled", controller);
         Assert.Contains("headerButton.Click += (_, _) => OpenControllerLedDetail();", controller);
         Assert.Contains("Activate: OpenControllerLedDetail", controller);
         Assert.Contains("RegisterRowPointerSelection(_controllerLedSectionCard);", controller);
-        Assert.Contains("AutomationProperties.SetName(headerButton, \"Open Joystick LED settings\")", controller);
-        Assert.Contains("IsTabStop = false", controller);
+        Assert.Contains("AutomationProperties.SetName(button, automationName)", menuChrome);
+        Assert.Contains("IsTabStop = false", menuChrome);
+        Assert.Contains("AllowFocusOnInteraction = false", menuChrome);
         Assert.Contains("EnterDetailPage(", controller);
         Assert.Contains("ControllerDetailId.JoystickLed", controller);
         Assert.Contains("_controllerLedDetailRows,", controller);

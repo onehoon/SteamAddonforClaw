@@ -91,7 +91,18 @@ public sealed partial class OverlayWindow
         FrameworkElement detailView,
         Func<IReadOnlyList<OverlayRow>> detailRows)
     {
-        var titleText = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap };
+        var (container, headerButton) = CreateDetailMenuChrome(title, $"Open {title} settings");
+        var row = new OverlayRow(container, new OverlayRowCapabilities(
+            IsSelectable: () => true,
+            Activate: () => OpenSettingDetail(id, detailView, detailRows, container, title)));
+        headerButton.Click += (_, _) => OpenSettingDetail(id, detailView, detailRows, container, title);
+        RegisterRowPointerSelection(container);
+        return row;
+    }
+
+    private static (Border Container, Button Button) CreateDetailMenuChrome(string label, string automationName)
+    {
+        var titleText = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap };
         OverlayQamResources.ApplyTextStyle(titleText, "QamBodyStrongTextStyle");
 
         var chevron = new TextBlock
@@ -114,7 +125,7 @@ public sealed partial class OverlayWindow
         Grid.SetColumn(chevron, 1);
         headerGrid.Children.Add(chevron);
 
-        var headerButton = new Button
+        var button = new Button
         {
             Content = headerGrid,
             Style = OverlayQamResources.Style("QamFlatButtonStyle"),
@@ -124,19 +135,15 @@ public sealed partial class OverlayWindow
             MinHeight = OverlayQamResources.Get("QamRowMinHeight", 42.0),
             BorderThickness = new Thickness(0),
             Background = new SolidColorBrush(Colors.Transparent),
+            IsTabStop = false,
+            AllowFocusOnInteraction = false,
         };
-        AutomationProperties.SetName(headerButton, $"Open {title} settings");
+        AutomationProperties.SetName(button, automationName);
 
-        var header = OverlayRowChrome.Create(headerButton);
+        var header = OverlayRowChrome.Create(button);
         header.Padding = new Thickness(0);
         header.Background = new SolidColorBrush(Colors.Transparent);
-        var container = CreateOverlaySectionCard(header);
-        var row = new OverlayRow(container, new OverlayRowCapabilities(
-            IsSelectable: () => true,
-            Activate: () => OpenSettingDetail(id, detailView, detailRows, container, title)));
-        headerButton.Click += (_, _) => OpenSettingDetail(id, detailView, detailRows, container, title);
-        RegisterRowPointerSelection(container);
-        return row;
+        return (CreateOverlaySectionCard(header), button);
     }
 
     private void OpenSettingDetail(

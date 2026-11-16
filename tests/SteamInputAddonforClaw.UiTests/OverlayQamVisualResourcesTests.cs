@@ -214,7 +214,8 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("var steamCard = CreateOverlaySectionCard(steamSection)", controller);
         Assert.Contains("SetOverlaySectionSeparator(steamCard, visible: false)", controller);
         Assert.Contains("CreateOverlaySectionCard(mappingSection)", controller);
-        Assert.Contains("_controllerLedSectionCard = CreateOverlaySectionCard(header)", controller);
+        Assert.Contains("return (CreateOverlaySectionCard(header), button);", clawHud);
+        Assert.Contains("_controllerLedSectionCard = container;", controller);
         Assert.Contains("_controllerLedDetailView = CreateOverlaySectionCard(details)", controller);
         Assert.Contains("SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true)", controller);
         Assert.Contains("SetOverlaySectionSeparator(_controllerLedDetailView, visible: false)", controller);
@@ -382,6 +383,9 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("Style = OverlayQamResources.Style(\"QamRailButtonStyle\")", shell);
         Assert.DoesNotContain("QamTileButtonStyle", profile);
         Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", setting);
+        Assert.Contains("AutomationProperties.SetName(button, automationName)", setting);
+        Assert.Contains("IsTabStop = false", setting);
+        Assert.Contains("AllowFocusOnInteraction = false", setting);
 
         Assert.Contains("x:Key=\"QamValueButtonStyle\" TargetType=\"primitives:ButtonBase\"", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml")));
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", valueRow);
