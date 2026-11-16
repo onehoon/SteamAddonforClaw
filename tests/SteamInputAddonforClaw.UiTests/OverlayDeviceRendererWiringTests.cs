@@ -1055,7 +1055,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[0].Container, visible: false)", settingPage);
         Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[1].Container, visible: true)", settingPage);
         Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[2].Container, visible: true)", settingPage);
-        Assert.Contains("CreateOverlaySectionCard(header)", createRootRow);
+        Assert.Contains("CreateDetailMenuChrome(title, $\"Open {title} settings\")", createRootRow);
         Assert.DoesNotContain("SetOverlaySectionSeparator", createRootRow);
         Assert.DoesNotContain("CreateOverlayDetailStack", createRootRow);
     }
@@ -1067,11 +1067,17 @@ public sealed class OverlayDeviceRendererWiringTests
         var rootRowStart = clawHud.IndexOf("private OverlayRow CreateSettingRootRow", StringComparison.Ordinal);
         var rootRowEnd = clawHud.IndexOf("private void OpenSettingDetail", rootRowStart, StringComparison.Ordinal);
         var rootRow = clawHud[rootRowStart..rootRowEnd];
+        var chromeStart = clawHud.IndexOf("private static (Border Container, Button Button) CreateDetailMenuChrome", StringComparison.Ordinal);
+        var chromeEnd = clawHud.IndexOf("private void OpenSettingDetail", chromeStart, StringComparison.Ordinal);
+        var chrome = clawHud[chromeStart..chromeEnd];
 
-        Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", rootRow);
-        Assert.Contains("Padding = OverlayQamResources.Get(\"QamRowPadding\", new Thickness(16, 10, 16, 10))", rootRow);
-        Assert.Contains("MinHeight = OverlayQamResources.Get(\"QamRowMinHeight\", 42.0)", rootRow);
-        Assert.Contains("var container = CreateOverlaySectionCard(header);", rootRow);
+        Assert.Contains("var (container, headerButton) = CreateDetailMenuChrome(title, $\"Open {title} settings\");", rootRow);
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", chrome);
+        Assert.Contains("Padding = OverlayQamResources.Get(\"QamRowPadding\", new Thickness(16, 10, 16, 10))", chrome);
+        Assert.Contains("MinHeight = OverlayQamResources.Get(\"QamRowMinHeight\", 42.0)", chrome);
+        Assert.Contains("return (CreateOverlaySectionCard(header), button);", chrome);
+        Assert.Contains("IsTabStop = false", chrome);
+        Assert.Contains("AllowFocusOnInteraction = false", chrome);
         Assert.Contains("headerButton.Click += (_, _) => OpenSettingDetail(id, detailView, detailRows, container, title);", rootRow);
         Assert.Contains("Activate: () => OpenSettingDetail(id, detailView, detailRows, container, title)", rootRow);
         Assert.Contains("RegisterRowPointerSelection(container);", rootRow);

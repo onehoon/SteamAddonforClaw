@@ -1,5 +1,4 @@
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI;
@@ -255,47 +254,10 @@ public sealed partial class OverlayWindow
         SetOverlaySectionSeparator(_controllerLedDetailView, visible: false);
         _controllerLedDetailView.Visibility = Visibility.Collapsed;
 
-        var titleText = new TextBlock { Text = "Joystick LED", TextWrapping = TextWrapping.Wrap };
-        OverlayQamResources.ApplyTextStyle(titleText, "QamBodyStrongTextStyle");
-        var chevron = new TextBlock
-        {
-            Text = "›",
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(12, 0, 4, 0),
-        };
-        OverlayQamResources.ApplyTextStyle(chevron, "QamBodyStrongTextStyle");
-        var headerGrid = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                new ColumnDefinition { Width = GridLength.Auto },
-            },
-        };
-        headerGrid.Children.Add(titleText);
-        Grid.SetColumn(chevron, 1);
-        headerGrid.Children.Add(chevron);
-        var headerButton = new Button
-        {
-            Content = headerGrid,
-            Style = OverlayQamResources.Style("QamFlatButtonStyle"),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Padding = OverlayQamResources.Get("QamRowPadding", new Thickness(16, 10, 16, 10)),
-            MinHeight = OverlayQamResources.Get("QamRowMinHeight", 42.0),
-            BorderThickness = new Thickness(0),
-            Background = new SolidColorBrush(Colors.Transparent),
-            IsTabStop = false,
-            AllowFocusOnInteraction = false,
-        };
-        AutomationProperties.SetName(headerButton, "Open Joystick LED settings");
+        var (container, headerButton) = CreateDetailMenuChrome("Joystick LED", "Open Joystick LED settings");
         headerButton.Click += (_, _) => OpenControllerLedDetail();
         _controllerLedRootButton = headerButton;
-
-        var header = OverlayRowChrome.Create(headerButton);
-        header.Padding = new Thickness(0);
-        header.Background = new SolidColorBrush(Colors.Transparent);
-        _controllerLedSectionCard = CreateOverlaySectionCard(header);
+        _controllerLedSectionCard = container;
         SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true);
         var rootCapabilities = new OverlayRowCapabilities(
             IsSelectable: () => _controllerLedAvailable && !_controllerLedMutationInFlight,

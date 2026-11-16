@@ -457,8 +457,8 @@ public partial class App : Application
 
     // OQ4: semantic navigation from the Runtime capture path. Marshal UI work through the existing
     // DispatcherQueue only -- no HWND activation/focus, no SendInput synthesis, no local controller
-    // reads. B/Back stays Runtime-owned through the existing DismissRequested path; the shell does
-    // not consume it locally (OQ5-UI-01 keeps B close authority where OQ4 put it).
+    // reads. The shell consumes Back to return from an active detail; at Root, it uses the existing
+    // DismissRequested path.
     private Task HandleNavigationAsync(OverlayNavigationAction action)
     {
         OverlayLog.Debug("Navigation", $"{action} received.");
