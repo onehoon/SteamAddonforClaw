@@ -2,44 +2,61 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'release-metadata.ps1')
 
 function Assert-Equal {
-    param(
-        [Parameter(Mandatory)]
-        $Expected,
-
-        [Parameter(Mandatory)]
-        $Actual,
-
-        [Parameter(Mandatory)]
-        [string]$Message
-    )
-
+    param($Expected, $Actual, [string]$Message)
     if ($Expected -ne $Actual) {
         throw "$Message Expected '$Expected', actual '$Actual'."
     }
 }
 
-$firstRelease = Get-NextReleaseMetadata -Tags @()
-Assert-Equal -Expected '0.1.0' -Actual $firstRelease.Version -Message 'First release version'
-Assert-Equal -Expected '' -Actual $firstRelease.PreviousTag -Message 'First release previous tag'
+$firstStable = Get-NextReleaseMetadata -Tags @() -Channel stable
+Assert-Equal '0.1.0' $firstStable.Version 'First stable release version'
+Assert-Equal 'v0.1.0' $firstStable.Tag 'First stable release tag'
+Assert-Equal '' $firstStable.PreviousTag 'First stable release previous tag'
+Assert-Equal 'win' $firstStable.VelopackChannel 'Stable Velopack channel'
 
-$afterFirstRelease = Get-NextReleaseMetadata -Tags @('v0.1.0')
-Assert-Equal -Expected '0.1.1' -Actual $afterFirstRelease.Version -Message 'Patch increment'
-Assert-Equal -Expected 'v0.1.0' -Actual $afterFirstRelease.PreviousTag -Message 'Previous tag'
+$firstPre = Get-NextReleaseMetadata -Tags @() -Channel pre
+Assert-Equal '0.1.0-pre' $firstPre.Version 'First pre-release version'
+Assert-Equal 'v0.1.0-pre' $firstPre.Tag 'First pre-release tag'
+Assert-Equal '' $firstPre.PreviousTag 'First pre-release previous tag'
+Assert-Equal 'win-pre' $firstPre.VelopackChannel 'Pre-release Velopack channel'
 
-$doubleDigitPatch = Get-NextReleaseMetadata -Tags @('v0.1.9')
-Assert-Equal -Expected '0.1.10' -Actual $doubleDigitPatch.Version -Message 'Double-digit patch increment'
+$stableThenPre = Get-NextReleaseMetadata -Tags @('v0.1.465') -Channel pre
+Assert-Equal '0.1.466-pre' $stableThenPre.Version 'Pre after stable'
+Assert-Equal '' $stableThenPre.PreviousTag 'First pre-release has no pre-release base'
 
-$largePatch = Get-NextReleaseMetadata -Tags @('v0.9.99')
-Assert-Equal -Expected '0.9.100' -Actual $largePatch.Version -Message 'Large patch increment'
+$repeatedPre = Get-NextReleaseMetadata -Tags @('v0.1.465', 'v0.1.466-pre') -Channel pre
+Assert-Equal '0.1.467-pre' $repeatedPre.Version 'Second pre-release increments the shared sequence'
+Assert-Equal 'v0.1.466-pre' $repeatedPre.PreviousTag 'Pre-release selects previous pre-release'
 
-$fourDigitPatch = Get-NextReleaseMetadata -Tags @('v0.1.9999')
-Assert-Equal -Expected '0.1.10000' -Actual $fourDigitPatch.Version -Message 'Four-digit patch increment'
+$stableAfterPre = Get-NextReleaseMetadata -Tags @('v0.1.465', 'v0.1.466-pre', 'v0.1.467-pre') -Channel stable
+Assert-Equal '0.1.468' $stableAfterPre.Version 'Stable after pre-release'
+Assert-Equal 'v0.1.465' $stableAfterPre.PreviousTag 'Stable selects previous stable release'
 
-$doubleDigitBoundary = Get-NextReleaseMetadata -Tags @('v0.1.99')
-Assert-Equal -Expected '0.1.100' -Actual $doubleDigitBoundary.Version -Message 'Double-digit patch boundary'
+$prunedHistory = Get-NextReleaseMetadata -Tags @('v0.1.465', 'v0.1.467-pre') -Channel pre
+Assert-Equal '0.1.468-pre' $prunedHistory.Version 'Retained newest pre-release preserves the shared sequence after pruning'
+Assert-Equal 'v0.1.467-pre' $prunedHistory.PreviousTag 'Newest retained pre-release remains the delta base'
 
-$invalidTagsIgnored = Get-NextReleaseMetadata -Tags @('not-a-version', 'v0.1', 'release-4', 'v0.1.7')
-Assert-Equal -Expected '0.1.8' -Actual $invalidTagsIgnored.Version -Message 'Invalid tags ignored'
-Assert-Equal -Expected 'v0.1.7' -Actual $invalidTagsIgnored.PreviousTag -Message 'v prefix handling'
+$numericOrdering = Get-NextReleaseMetadata -Tags @('v0.1.9', 'v0.1.99', 'v0.1.10000') -Channel stable
+Assert-Equal '0.1.10001' $numericOrdering.Version 'Versions are ordered numerically'
+Assert-Equal 'v0.1.10000' $numericOrdering.PreviousTag 'Numeric latest stable tag'
+
+$invalidTagsIgnored = Get-NextReleaseMetadata -Tags @('not-a-version', 'v0.1', 'release-4', 'v0.1.7-preview', 'v0.1.8-pre.1', 'v0.1.7') -Channel stable
+Assert-Equal '0.1.8' $invalidTagsIgnored.Version 'Malformed tags are ignored'
+Assert-Equal 'v0.1.7' $invalidTagsIgnored.PreviousTag 'Stable tag parsing'
+
+$largePatch = Get-NextReleaseMetadata -Tags @('v0.9.9999') -Channel stable
+Assert-Equal '0.9.10000' $largePatch.Version 'Large patch increment'
+
+$output = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+    & (Join-Path (Split-Path -Parent $PSScriptRoot) 'release-metadata.ps1') -PublishedReleaseTags @('v0.1.465') -Channel pre -OutputFile $output | Out-Null
+    $outputText = Get-Content -LiteralPath $output -Raw
+    Assert-Equal $true ($outputText.Contains("VERSION=0.1.466-pre")) 'Workflow version output'
+    Assert-Equal $true ($outputText.Contains("PREVIOUS_TAG=")) 'Workflow previous tag output'
+    Assert-Equal $true ($outputText.Contains("VELOPACK_CHANNEL=win-pre")) 'Workflow feed output'
+}
+finally {
+    Remove-Item -LiteralPath $output -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host 'Release metadata tests passed.'

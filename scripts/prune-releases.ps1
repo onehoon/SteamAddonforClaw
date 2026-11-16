@@ -3,15 +3,32 @@ function Get-ReleasesToPrune {
         [Parameter(Mandatory)]
         [array] $Releases,
 
-        [int] $RetainCount = 5
+        [int] $StableRetainCount = 5,
+
+        [int] $PreReleaseRetainCount = 1
     )
 
-    $publishedReleases = @($Releases | Where-Object { -not $_.draft -and -not $_.prerelease })
-    if ($publishedReleases.Count -le $RetainCount) {
-        return @()
+    $publishedReleases = @($Releases | Where-Object { -not $_.draft })
+    $stableReleases = @($publishedReleases | Where-Object { -not $_.prerelease })
+    $preReleases = @($publishedReleases | Where-Object { $_.prerelease })
+
+    $stableToPrune = @()
+    if ($stableReleases.Count -gt $StableRetainCount) {
+        $stableToPrune = @(
+            $stableReleases |
+                Sort-Object { [DateTimeOffset]$_.published_at } -Descending |
+                Select-Object -Skip $StableRetainCount
+        )
     }
 
-    return $publishedReleases |
-        Sort-Object { [DateTimeOffset]$_.created_at } -Descending |
-        Select-Object -Skip $RetainCount
+    $preToPrune = @()
+    if ($preReleases.Count -gt $PreReleaseRetainCount) {
+        $preToPrune = @(
+            $preReleases |
+                Sort-Object { [DateTimeOffset]$_.published_at } -Descending |
+                Select-Object -Skip $PreReleaseRetainCount
+        )
+    }
+
+    return @($stableToPrune) + @($preToPrune)
 }

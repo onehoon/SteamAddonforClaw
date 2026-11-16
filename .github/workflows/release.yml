@@ -2,6 +2,15 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        type: choice
+        options:
+          - stable
+          - pre
+        default: stable
 
 permissions:
   contents: write
@@ -14,6 +23,8 @@ jobs:
   release:
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      CHANNEL: ${{ inputs.channel || 'stable' }}
 
     steps:
       - name: Verify main branch
@@ -37,21 +48,51 @@ jobs:
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-viiper.ps1
 
       - name: Test VIIPER verification script
+        if: ${{ inputs.channel != 'pre' }}
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/verify-viiper.tests.ps1
 
-      - name: Restore
+      - name: Restore solution and test dependencies
+        if: ${{ inputs.channel != 'pre' }}
         run: dotnet restore SteamInputAddonforClaw.slnx
 
       - name: Restore UI and Overlay tests
+        if: ${{ inputs.channel != 'pre' }}
         run: dotnet restore tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj
 
-      - name: Build
+      - name: Build solution and test projects
+        if: ${{ inputs.channel != 'pre' }}
         run: dotnet build SteamInputAddonforClaw.slnx -c Release --no-restore
 
       - name: Build UI and Overlay tests
+        if: ${{ inputs.channel != 'pre' }}
         run: dotnet build tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj -c Release --no-restore
 
+      - name: Restore production projects
+        if: ${{ inputs.channel == 'pre' }}
+        shell: pwsh
+        run: |
+          $projects = @(Get-ChildItem -Path src -Filter *.csproj -Recurse -File | Sort-Object FullName)
+          foreach ($project in $projects) {
+            dotnet restore $project.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Restore failed for production project $($project.Name)."
+            }
+          }
+
+      - name: Build production projects
+        if: ${{ inputs.channel == 'pre' }}
+        shell: pwsh
+        run: |
+          $projects = @(Get-ChildItem -Path src -Filter *.csproj -Recurse -File | Sort-Object FullName)
+          foreach ($project in $projects) {
+            dotnet build $project.FullName -c Release --no-restore
+            if ($LASTEXITCODE -ne 0) {
+              throw "Build failed for production project $($project.Name)."
+            }
+          }
+
       - name: Test
+        if: ${{ inputs.channel != 'pre' }}
         shell: pwsh
         run: |
           $testProjects = @(Get-ChildItem -Path tests -Filter *.csproj -Recurse -File)
@@ -65,7 +106,7 @@ jobs:
           }
 
       - name: Upload test hang diagnostics
-        if: failure()
+        if: ${{ failure() && inputs.channel != 'pre' }}
         uses: actions/upload-artifact@v4
         with:
           name: test-hang-diagnostics
@@ -74,9 +115,11 @@ jobs:
           retention-days: 1
 
       - name: Test release metadata
+        if: ${{ inputs.channel != 'pre' }}
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/release-metadata.tests.ps1
 
       - name: Test release pruning
+        if: ${{ inputs.channel != 'pre' }}
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/prune-releases.tests.ps1
 
       - name: Calculate release metadata
@@ -87,16 +130,15 @@ jobs:
         run: |
           $releaseJson = gh release list --repo $env:GITHUB_REPOSITORY --limit 100 --json tagName,isDraft,isPrerelease
           if ($LASTEXITCODE -ne 0) {
-            throw "Unable to enumerate GitHub releases."
+            throw 'Unable to enumerate GitHub releases.'
           }
 
-          $releases = @($releaseJson | ConvertFrom-Json)
           $publishedTags = @(
-            $releases |
-              Where-Object { -not $_.isDraft -and -not $_.isPrerelease } |
+            @($releaseJson | ConvertFrom-Json) |
+              Where-Object { -not $_.isDraft } |
               ForEach-Object tagName
           )
-          & ./scripts/release-metadata.ps1 -PublishedReleaseTags $publishedTags -OutputFile $env:GITHUB_OUTPUT
+          & ./scripts/release-metadata.ps1 -PublishedReleaseTags $publishedTags -Channel $env:CHANNEL -OutputFile $env:GITHUB_OUTPUT | Out-Null
 
       - name: Verify release does not already exist
         shell: pwsh
@@ -105,6 +147,9 @@ jobs:
           TAG: ${{ steps.metadata.outputs.TAG }}
         run: |
           $existingTag = git tag --list $env:TAG
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to enumerate local Git tags.'
+          }
           if ($existingTag) {
             throw "Tag $env:TAG already exists."
           }
@@ -128,41 +173,109 @@ jobs:
           -CurrentSha "${{ github.sha }}"
           -OutputFile artifacts/release-notes.md
 
-      - name: Download previous Velopack release
+      - name: Download previous channel package
         if: steps.metadata.outputs.PREVIOUS_TAG != ''
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          dnx vpk --version 1.2.158 download github
-          --repoUrl https://github.com/${{ github.repository }}
-          --token $env:GITHUB_TOKEN
-          --outputDir artifacts/Releases
+          PREVIOUS_TAG: ${{ steps.metadata.outputs.PREVIOUS_TAG }}
+          VELOPACK_CHANNEL: ${{ steps.metadata.outputs.VELOPACK_CHANNEL }}
+        run: |
+          $arguments = @(
+            'vpk', '--version', '1.2.158', 'download', 'github',
+            '--repoUrl', "https://github.com/$env:GITHUB_REPOSITORY",
+            '--token', $env:GITHUB_TOKEN,
+            '--outputDir', 'artifacts/Releases',
+            '--channel', $env:VELOPACK_CHANNEL
+          )
+          if ($env:CHANNEL -eq 'pre') {
+            $arguments += '--pre'
+          }
+
+          dnx @arguments
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to download the previous channel package.'
+          }
+
+          $previousVersion = $env:PREVIOUS_TAG.Substring(1)
+          $channelSuffix = if ($env:VELOPACK_CHANNEL -eq 'win') { '' } else { "-$env:VELOPACK_CHANNEL" }
+          $previousFullPackage = Join-Path 'artifacts/Releases' "SteamInputAddonforClaw-$previousVersion$channelSuffix-full.nupkg"
+          if (-not (Test-Path -LiteralPath $previousFullPackage -PathType Leaf)) {
+            throw "The downloaded package does not match previous channel tag $env:PREVIOUS_TAG."
+          }
 
       - name: Package release
         shell: pwsh
         env:
           VERSION: ${{ steps.metadata.outputs.VERSION }}
+          VELOPACK_CHANNEL: ${{ steps.metadata.outputs.VELOPACK_CHANNEL }}
         run: |
           & ./scripts/pack.ps1 `
             -Version $env:VERSION `
+            -Channel $env:VELOPACK_CHANNEL `
             -PreserveReleases `
             -ReleaseNotesPath artifacts/release-notes.md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify channel packages and feed
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.metadata.outputs.VERSION }}
+          PREVIOUS_TAG: ${{ steps.metadata.outputs.PREVIOUS_TAG }}
+          VELOPACK_CHANNEL: ${{ steps.metadata.outputs.VELOPACK_CHANNEL }}
+        run: |
+          $releasesDirectory = 'artifacts/Releases'
+          $channelSuffix = if ($env:VELOPACK_CHANNEL -eq 'win') { '' } else { "-$env:VELOPACK_CHANNEL" }
+          $fullPackage = Join-Path $releasesDirectory "SteamInputAddonforClaw-$env:VERSION$channelSuffix-full.nupkg"
+          $deltaPackage = Join-Path $releasesDirectory "SteamInputAddonforClaw-$env:VERSION$channelSuffix-delta.nupkg"
+          $feed = Join-Path $releasesDirectory "releases.$env:VELOPACK_CHANNEL.json"
+
+          if (-not (Test-Path -LiteralPath $fullPackage -PathType Leaf)) {
+            throw "Full package was not produced for $env:VERSION."
+          }
+          if (-not (Test-Path -LiteralPath $feed -PathType Leaf)) {
+            throw "Channel feed $feed was not produced."
+          }
+          if (-not (Get-Content -LiteralPath $feed -Raw).Contains($env:VERSION)) {
+            throw "Channel feed $feed does not list $env:VERSION."
+          }
+
+          if ($env:PREVIOUS_TAG) {
+            if (-not (Test-Path -LiteralPath $deltaPackage -PathType Leaf)) {
+              throw "Delta package was not produced from the previous $env:CHANNEL release."
+            }
+          }
+          elseif (Test-Path -LiteralPath $deltaPackage) {
+            throw 'A Delta package was produced without a prior release in this channel.'
+          }
+
       - name: Publish GitHub release
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.metadata.outputs.VERSION }}
           TAG: ${{ steps.metadata.outputs.TAG }}
-        run: >-
-          dnx vpk --version 1.2.158 upload github
-          --repoUrl https://github.com/${{ github.repository }}
-          --token $env:GITHUB_TOKEN
-          --outputDir artifacts/Releases
-          --publish
-          --releaseName $env:TAG
-          --tag $env:TAG
-          --targetCommitish ${{ github.sha }}
+          VELOPACK_CHANNEL: ${{ steps.metadata.outputs.VELOPACK_CHANNEL }}
+        run: |
+          $arguments = @(
+            'vpk', '--version', '1.2.158', 'upload', 'github',
+            '--repoUrl', "https://github.com/$env:GITHUB_REPOSITORY",
+            '--token', $env:GITHUB_TOKEN,
+            '--outputDir', 'artifacts/Releases',
+            '--channel', $env:VELOPACK_CHANNEL,
+            '--publish',
+            '--releaseName', $env:TAG,
+            '--tag', $env:TAG,
+            '--targetCommitish', '${{ github.sha }}'
+          )
+          if ($env:CHANNEL -eq 'pre') {
+            $arguments += '--pre'
+          }
+
+          dnx @arguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to publish GitHub release $env:TAG."
+          }
 
       - name: Apply release notes
         env:
@@ -183,7 +296,7 @@ jobs:
 
           $releasePages = $releaseJson | ConvertFrom-Json
           $releases = @($releasePages | ForEach-Object { $_ })
-          $releasesToPrune = @(Get-ReleasesToPrune -Releases $releases)
+          $releasesToPrune = @(Get-ReleasesToPrune -Releases $releases -StableRetainCount 5 -PreReleaseRetainCount 1)
           foreach ($release in $releasesToPrune) {
             Write-Host "Deleting published release and tag: $($release.tag_name)"
             gh release delete $release.tag_name --yes --cleanup-tag

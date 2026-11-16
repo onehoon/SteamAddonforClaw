@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Velopack;
+using Velopack.Sources;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Updates;
 using Xunit;
@@ -8,6 +9,20 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class VelopackUpdateClientTests
 {
+    [Theory]
+    [InlineData("0.1.468", "win", false)]
+    [InlineData("0.1.467-pre", "win-pre", true)]
+    [InlineData("0.1.467-pre+build.42", "win-pre", true)]
+    [InlineData("0.1.467-preview", "win", false)]
+    public void Update_source_uses_the_installed_build_version_channel(string version, string expectedChannel, bool expectedPreRelease)
+    {
+        var configuration = VelopackUpdateClient.CreateUpdateSource(version);
+
+        Assert.Equal(new Uri("https://github.com/onehoon/SteamAddonforClaw"), configuration.Source.RepoUri);
+        Assert.Equal(expectedPreRelease, configuration.Source.Prerelease);
+        Assert.Equal(expectedChannel, configuration.Options.ExplicitChannel);
+    }
+
     [Fact]
     public async Task Download_forwards_the_caller_cancellation_token_to_Velopack()
     {

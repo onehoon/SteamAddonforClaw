@@ -1,3 +1,4 @@
+using System.Reflection;
 using Velopack;
 using Velopack.Sources;
 using SteamInputAddonforClaw.Diagnostics;
@@ -16,11 +17,34 @@ internal interface IVelopackUpdateOperations
 internal sealed class VelopackUpdateClient : IUpdateClient
 {
     private const string RepositoryUrl = "https://github.com/onehoon/SteamAddonforClaw";
+    private const string StableChannel = "win";
+    private const string PreReleaseChannel = "win-pre";
     private readonly IVelopackUpdateOperations _operations;
     private UpdateInfo? _availableUpdate;
 
-    public VelopackUpdateClient() : this(new VelopackUpdateOperations(new UpdateManager(new GithubSource(RepositoryUrl, accessToken: null, prerelease: false)))) { }
+    public VelopackUpdateClient() : this(new VelopackUpdateOperations(CreateUpdateManager())) { }
     internal VelopackUpdateClient(IVelopackUpdateOperations operations) => _operations = operations ?? throw new ArgumentNullException(nameof(operations));
+
+    internal static (GithubSource Source, UpdateOptions Options) CreateUpdateSource(string? informationalVersion)
+    {
+        var normalizedVersion = informationalVersion?.Split('+', 2)[0].Trim();
+        var isPreRelease = normalizedVersion?.EndsWith("-pre", StringComparison.OrdinalIgnoreCase) == true;
+        var channel = isPreRelease ? PreReleaseChannel : StableChannel;
+
+        return (
+            new GithubSource(RepositoryUrl, accessToken: null, prerelease: isPreRelease),
+            new UpdateOptions { ExplicitChannel = channel });
+    }
+
+    private static UpdateManager CreateUpdateManager()
+    {
+        var assembly = typeof(VelopackUpdateClient).Assembly;
+        var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString(3)
+            ?? "0.1.0";
+        var updateSource = CreateUpdateSource(informationalVersion);
+        return new UpdateManager(updateSource.Source, updateSource.Options);
+    }
 
     public bool IsInstalled => _operations.IsInstalled;
 

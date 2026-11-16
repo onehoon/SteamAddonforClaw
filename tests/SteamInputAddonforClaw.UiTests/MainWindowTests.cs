@@ -12,12 +12,28 @@ public sealed class MainWindowTests
         Assert.Equal("Steam Addon for Claw v0.1.20", MainWindow.FormatWindowTitle("0.1.20"));
     }
 
-    [Theory]
-    [InlineData(false, "Steam Addon for Claw v0.1.20")]
-    [InlineData(true, "Steam Addon for Claw v0.1.20 — Update Available")]
-    public void FormatWindowTitle_PreservesTheVersionPrefixAndOptionallyShowsUpdateReady(bool updateReady, string expected)
+    [Fact]
+    public void FormatDisplayVersion_preserves_pre_release_suffix_and_strips_build_metadata()
     {
-        Assert.Equal(expected, MainWindow.FormatWindowTitle("0.1.20", updateReady));
+        Assert.Equal("0.1.467-pre", MainWindow.FormatDisplayVersion("0.1.467-pre+build.42", new Version(0, 1, 0)));
+        Assert.Equal("0.1.468", MainWindow.FormatDisplayVersion("0.1.468+build.43", new Version(0, 1, 0)));
+    }
+
+    [Fact]
+    public void FormatDisplayVersion_falls_back_to_assembly_version_when_informational_version_is_missing()
+    {
+        Assert.Equal("0.1.20", MainWindow.FormatDisplayVersion(null, new Version(0, 1, 20)));
+        Assert.Equal("0.1.0", MainWindow.FormatDisplayVersion(string.Empty, null));
+    }
+
+    [Theory]
+    [InlineData("0.1.20", false, "Steam Addon for Claw v0.1.20")]
+    [InlineData("0.1.20", true, "Steam Addon for Claw v0.1.20 — Update Available")]
+    [InlineData("0.1.467-pre", false, "Steam Addon for Claw v0.1.467-pre")]
+    [InlineData("0.1.467-pre", true, "Steam Addon for Claw v0.1.467-pre — Update Available")]
+    public void FormatWindowTitle_PreservesTheVersionPrefixAndOptionallyShowsUpdateReady(string version, bool updateReady, string expected)
+    {
+        Assert.Equal(expected, MainWindow.FormatWindowTitle(version, updateReady));
     }
 
     [Fact]
