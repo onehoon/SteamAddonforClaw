@@ -105,6 +105,38 @@ public sealed class OverlayDelayedCommitNavigationTests
     }
 
     [Fact]
+    public void Controller_LED_detail_reuses_shared_back_tab_change_and_fresh_show_navigation()
+    {
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var detail = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.DetailNavigation.cs");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+
+        var openStart = controller.IndexOf("private void OpenControllerLedDetail()", StringComparison.Ordinal);
+        var openEnd = controller.IndexOf("private void BuildControllerVibrationRows", openStart, StringComparison.Ordinal);
+        Assert.True(openStart >= 0 && openEnd > openStart);
+        var open = controller[openStart..openEnd];
+        Assert.Contains("EnterDetailPage(", open);
+        Assert.Contains("ControllerDetailId.JoystickLed", open);
+        Assert.Contains("_controllerLedDetailRows", open);
+        Assert.Contains("_controllerLedSectionCard", open);
+        Assert.DoesNotContain("TryReturnFromControllerLedDetail", controller);
+        Assert.Contains("private bool TryReturnFromDetailPage()", detail);
+        Assert.Contains("OnDetailBackButtonClick", detail);
+
+        var resetForShowStart = shell.IndexOf("private void ResetUiForShow()", StringComparison.Ordinal);
+        var resetForShowEnd = shell.IndexOf("// OQ5-UI-02", resetForShowStart, StringComparison.Ordinal);
+        Assert.True(resetForShowStart >= 0 && resetForShowEnd > resetForShowStart);
+        Assert.Contains("ResetDetailForTabChangeOrShow();", shell[resetForShowStart..resetForShowEnd]);
+
+        var selectedTabStart = shell.IndexOf("private void ApplySelectedTabVisualState()", StringComparison.Ordinal);
+        Assert.True(selectedTabStart >= 0);
+        Assert.Contains("ResetDetailForTabChangeOrShow();", shell[selectedTabStart..]);
+        Assert.True(presentation.IndexOf("ResetUiForShow();", StringComparison.Ordinal)
+            < presentation.IndexOf("WindowInterop.ShowWithoutActivation(this);", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Forced_hide_cancels_local_drafts_and_vibration_flush_is_not_duplicated()
     {
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");

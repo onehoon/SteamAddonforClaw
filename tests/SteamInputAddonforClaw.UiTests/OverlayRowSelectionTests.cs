@@ -82,6 +82,91 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
+    public void Controller_LED_menu_enters_an_off_detail_and_back_restores_the_menu_row()
+    {
+        var supported = true;
+        var available = true;
+        var enabled = false;
+        var rootRows = new[]
+        {
+            Row(),
+            new OverlayRowCapabilities(() => supported && available),
+            Row(),
+        };
+        var detailRows = new[]
+        {
+            new OverlayRowCapabilities(() => available),
+            new OverlayRowCapabilities(() => available && enabled),
+            new OverlayRowCapabilities(() => available && enabled),
+        };
+        var selection = new OverlayRowSelection();
+
+        selection.SetRows(rootRows);
+        Assert.True(selection.TrySelect(1));
+        selection.SetRows(detailRows);
+
+        Assert.Equal(0, selection.SelectedIndex); // Enable LED remains selectable while Off.
+        Assert.False(selection.MoveNext()); // Hidden child options are not navigable.
+
+        enabled = true;
+        selection.SetRows(detailRows, preferredIndex: 0);
+        Assert.True(selection.MoveNext());
+        Assert.Equal(1, selection.SelectedIndex);
+
+        selection.SetRows(rootRows, preferredIndex: 1);
+        Assert.Equal(1, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Controller_LED_children_collapse_to_the_enable_row_when_authoritative_state_turns_off()
+    {
+        var available = true;
+        var enabled = true;
+        var detailRows = new[]
+        {
+            new OverlayRowCapabilities(() => available),
+            new OverlayRowCapabilities(() => available && enabled),
+            new OverlayRowCapabilities(() => available && enabled),
+            new OverlayRowCapabilities(() => available && enabled),
+        };
+        var selection = new OverlayRowSelection();
+
+        selection.SetRows(detailRows);
+        Assert.True(selection.TrySelect(3));
+        enabled = false;
+        selection.SetRows(detailRows, preferredIndex: 3);
+
+        Assert.Equal(0, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Controller_LED_support_loss_hides_the_menu_and_returns_selection_to_a_visible_root_row()
+    {
+        var ledEligible = true;
+        var rootRows = new[]
+        {
+            Row(),
+            new OverlayRowCapabilities(() => ledEligible),
+            Row(),
+        };
+        var detailRows = new[]
+        {
+            new OverlayRowCapabilities(() => ledEligible),
+            new OverlayRowCapabilities(() => ledEligible),
+        };
+        var selection = new OverlayRowSelection();
+
+        selection.SetRows(rootRows);
+        Assert.True(selection.TrySelect(1));
+        selection.SetRows(detailRows);
+        ledEligible = false;
+        selection.SetRows(rootRows, preferredIndex: 1);
+
+        Assert.Equal(0, selection.SelectedIndex);
+        Assert.NotEqual(1, selection.SelectedIndex);
+    }
+
+    [Fact]
     public void SelectedSecondRowSurvivesTemporaryMutationDisableAndAuthoritativeRefresh()
     {
         var mutationPending = false;

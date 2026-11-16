@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI;
@@ -22,6 +23,11 @@ internal sealed record OverlayControllerLedPendingEdit(ControllerLedSettings Bas
 
 public sealed partial class OverlayWindow
 {
+    private enum ControllerDetailId { JoystickLed }
+
+    private readonly List<OverlayRow> _controllerLedDetailRows = new();
+    private FrameworkElement? _controllerRootView;
+    private Border? _controllerLedDetailView;
     private BackButtonMappingSettings _backButtonMapping = BackButtonMappingSettings.Default;
     private bool _backButtonMappingAvailable;
     private bool _backButtonMutationInFlight;
@@ -51,7 +57,8 @@ public sealed partial class OverlayWindow
     private OverlayValueRow? _controllerLedGreenRow;
     private OverlayValueRow? _controllerLedBlueRow;
     private Border? _controllerLedColorSwatch;
-    private StackPanel? _controllerLedDetailStack;
+    private StackPanel? _controllerLedOptionsStack;
+    private Button? _controllerLedRootButton;
     private Border? _controllerLedSectionCard;
     private Border? _controllerVibrationSectionCard;
     private bool _controllerVibrationSupported;
@@ -70,13 +77,13 @@ public sealed partial class OverlayWindow
 
     private FrameworkElement BuildControllerPage(List<OverlayRow> rows)
     {
-        var page = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
+        var root = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
+        _controllerRootView = root;
         var steamSection = CreateControllerSection("Controller for Steam");
         var steamDetails = CreateOverlayDetailStack();
         var mappingSection = CreateControllerSection("M1 / M2");
         var mappingDetails = CreateOverlayDetailStack();
         mappingSection.Children.Add(mappingDetails);
-        var ledSection = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         var vibrationSection = CreateControllerSection("Vibration Strength");
 
         _steamControllerRow = new OverlayValueRow("Controller", FormatSteamController,
@@ -107,24 +114,27 @@ public sealed partial class OverlayWindow
         AddBackButtonMappingRow(mappingDetails, rows, m2Row);
         RenderBackButtonMappingRows();
 
-        BuildControllerLedRows(ledSection, rows);
+        _controllerLedDetailRows.Clear();
+        BuildControllerLedRows(rows, _controllerLedDetailRows);
         BuildControllerVibrationRows(vibrationSection, rows);
         var steamCard = CreateOverlaySectionCard(steamSection);
         SetOverlaySectionSeparator(steamCard, visible: false);
-        page.Children.Add(steamCard);
+        root.Children.Add(steamCard);
         var mappingCard = CreateOverlaySectionCard(mappingSection);
         SetOverlaySectionSeparator(mappingCard, visible: true);
-        page.Children.Add(mappingCard);
-        _controllerLedSectionCard = CreateOverlaySectionCard(ledSection);
-        SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true);
-        page.Children.Add(_controllerLedSectionCard);
+        root.Children.Add(mappingCard);
+        root.Children.Add(_controllerLedSectionCard!);
         _controllerVibrationSectionCard = CreateOverlaySectionCard(vibrationSection);
         SetOverlaySectionSeparator(_controllerVibrationSectionCard, visible: true);
-        page.Children.Add(_controllerVibrationSectionCard);
+        root.Children.Add(_controllerVibrationSectionCard);
+
+        var host = new Grid();
+        host.Children.Add(root);
+        host.Children.Add(_controllerLedDetailView!);
         RenderControllerLedRows();
         RenderControllerForSteamRows();
         RenderControllerVibrationRows();
-        return page;
+        return host;
     }
 
     private static string FormatSteamController(double value) => (int)Math.Round(value) switch
@@ -187,18 +197,19 @@ public sealed partial class OverlayWindow
         return section;
     }
 
-    private void BuildControllerLedRows(StackPanel section, List<OverlayRow> rows)
+    private void BuildControllerLedRows(List<OverlayRow> rootRows, List<OverlayRow> detailRows)
     {
-        _controllerLedEnabledRow = new OverlayToggleRow("Joystick LED", RequestControllerLedEnabled, strongLabel: true);
-        AddControllerRow(section, rows, _controllerLedEnabledRow.Container, _controllerLedEnabledRow.Capabilities,
-            () => _controllerLedMutationInFlight && _controllerLedAvailable, isDetail: false);
+        _controllerLedEnabledRow = new OverlayToggleRow("Enable LED", RequestControllerLedEnabled);
+        var details = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
+        AddControllerRow(details, detailRows, _controllerLedEnabledRow.Container, _controllerLedEnabledRow.Capabilities,
+            () => _controllerLedMutationInFlight && _controllerLedAvailable);
 
-        var details = CreateOverlayDetailStack();
-        _controllerLedDetailStack = details;
+        var options = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
+        _controllerLedOptionsStack = options;
 
         _controllerLedBrightnessRow = new OverlayValueRow("Brightness", OverlayValueRow.FormatInteger,
             value => RequestControllerLedBrightness((int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
-        AddControllerRow(details, rows, _controllerLedBrightnessRow.Container, _controllerLedBrightnessRow.Capabilities,
+        AddControllerRow(options, detailRows, _controllerLedBrightnessRow.Container, _controllerLedBrightnessRow.Capabilities,
             () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
 
         var colorPreview = new StackPanel
@@ -220,7 +231,12 @@ public sealed partial class OverlayWindow
         };
         _controllerLedColorSwatch = swatch;
         colorPreview.Children.Add(swatch);
-        details.Children.Add(colorPreview);
+        options.Children.Add(new Border
+        {
+            Child = colorPreview,
+            Padding = OverlayQamResources.Get("QamDetailRowPadding", new Thickness(16, 5, 16, 5)),
+            MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0),
+        });
 
         _controllerLedRedRow = new OverlayValueRow("Red", OverlayValueRow.FormatInteger,
             value => RequestControllerLedRgb(red: (int)Math.Round(value), green: null, blue: null), OverlayValueButtonKind.NumericStepper);
@@ -228,14 +244,82 @@ public sealed partial class OverlayWindow
             value => RequestControllerLedRgb(red: null, green: (int)Math.Round(value), blue: null), OverlayValueButtonKind.NumericStepper);
         _controllerLedBlueRow = new OverlayValueRow("Blue", OverlayValueRow.FormatInteger,
             value => RequestControllerLedRgb(red: null, green: null, blue: (int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
-        AddControllerRow(details, rows, _controllerLedRedRow.Container, _controllerLedRedRow.Capabilities,
+        AddControllerRow(options, detailRows, _controllerLedRedRow.Container, _controllerLedRedRow.Capabilities,
             () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
-        AddControllerRow(details, rows, _controllerLedGreenRow.Container, _controllerLedGreenRow.Capabilities,
+        AddControllerRow(options, detailRows, _controllerLedGreenRow.Container, _controllerLedGreenRow.Capabilities,
             () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
-        AddControllerRow(details, rows, _controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities,
+        AddControllerRow(options, detailRows, _controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities,
             () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
-        section.Children.Add(details);
+        details.Children.Add(options);
+        _controllerLedDetailView = CreateOverlaySectionCard(details);
+        SetOverlaySectionSeparator(_controllerLedDetailView, visible: false);
+        _controllerLedDetailView.Visibility = Visibility.Collapsed;
+
+        var titleText = new TextBlock { Text = "Joystick LED", TextWrapping = TextWrapping.Wrap };
+        OverlayQamResources.ApplyTextStyle(titleText, "QamBodyStrongTextStyle");
+        var chevron = new TextBlock
+        {
+            Text = "›",
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(12, 0, 4, 0),
+        };
+        OverlayQamResources.ApplyTextStyle(chevron, "QamBodyStrongTextStyle");
+        var headerGrid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = GridLength.Auto },
+            },
+        };
+        headerGrid.Children.Add(titleText);
+        Grid.SetColumn(chevron, 1);
+        headerGrid.Children.Add(chevron);
+        var headerButton = new Button
+        {
+            Content = headerGrid,
+            Style = OverlayQamResources.Style("QamFlatButtonStyle"),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = OverlayQamResources.Get("QamRowPadding", new Thickness(16, 10, 16, 10)),
+            MinHeight = OverlayQamResources.Get("QamRowMinHeight", 42.0),
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            IsTabStop = false,
+            AllowFocusOnInteraction = false,
+        };
+        AutomationProperties.SetName(headerButton, "Open Joystick LED settings");
+        headerButton.Click += (_, _) => OpenControllerLedDetail();
+        _controllerLedRootButton = headerButton;
+
+        var header = OverlayRowChrome.Create(headerButton);
+        header.Padding = new Thickness(0);
+        header.Background = new SolidColorBrush(Colors.Transparent);
+        _controllerLedSectionCard = CreateOverlaySectionCard(header);
+        SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true);
+        var rootCapabilities = new OverlayRowCapabilities(
+            IsSelectable: () => _controllerLedAvailable && !_controllerLedMutationInFlight,
+            Activate: OpenControllerLedDetail);
+        rootRows.Add(new(_controllerLedSectionCard,
+            PreserveControllerPendingSelection(rootCapabilities, () => _controllerLedMutationInFlight && _controllerLedAvailable)));
+        RegisterRowPointerSelection(_controllerLedSectionCard);
         RenderControllerLedRows();
+    }
+
+    private void OpenControllerLedDetail()
+    {
+        if (_controllerRootView is null || _controllerLedDetailView is null ||
+            _controllerLedSectionCard is null || !_controllerLedVisibilityEligible || !_controllerLedAvailable)
+            return;
+
+        EnterDetailPage(
+            AddonQuickSettingsTabId.Controller,
+            ControllerDetailId.JoystickLed,
+            _controllerRootView,
+            _controllerLedDetailView,
+            _controllerLedDetailRows,
+            _controllerLedSectionCard,
+            "Joystick LED");
     }
 
     private void BuildControllerVibrationRows(StackPanel section, List<OverlayRow> rows)
@@ -378,8 +462,17 @@ public sealed partial class OverlayWindow
         ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
         ApplyQuickSettingsYButtonQuickJumpTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
         ApplyYButtonQuickJumpFooterTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
+        if (settingsAvailable && !_controllerLedVisibilityEligible && IsControllerLedDetailActive())
+        {
+            TryReturnFromDetailPage();
+            selectedContainer = SelectedRowContainer(activeTab);
+        }
         ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);
     }
+
+    private bool IsControllerLedDetailActive() =>
+        _activeDetailPage is { Tab: AddonQuickSettingsTabId.Controller } detail &&
+        detail.Identity.Equals(ControllerDetailId.JoystickLed);
 
     internal void ApplyFrontendSettingsMutationResult(
         OverlayFrontendSettingsMutationResponse response,
@@ -479,10 +572,14 @@ public sealed partial class OverlayWindow
     private void RenderControllerLedRows()
     {
         var displaySettings = ProjectControllerLedPendingEdit(_controllerLed, _pendingControllerLedEdit);
-        if (_controllerLedSectionCard is not null)
-            _controllerLedSectionCard.Visibility = _controllerLedVisibilityEligible ? Visibility.Visible : Visibility.Collapsed;
-        if (_controllerLedDetailStack is not null)
-            _controllerLedDetailStack.Visibility = _controllerLed.Enabled ? Visibility.Visible : Visibility.Collapsed;
+        var menuVisibility = _controllerLedVisibilityEligible ? Visibility.Visible : Visibility.Collapsed;
+        if (_controllerLedSectionCard is not null && _controllerLedSectionCard.Visibility != menuVisibility)
+            _controllerLedSectionCard.Visibility = menuVisibility;
+        if (_controllerLedRootButton is not null && _controllerLedRootButton.IsEnabled != _controllerLedAvailable)
+            _controllerLedRootButton.IsEnabled = _controllerLedAvailable;
+        var optionsVisibility = _controllerLed.Enabled ? Visibility.Visible : Visibility.Collapsed;
+        if (_controllerLedOptionsStack is not null && _controllerLedOptionsStack.Visibility != optionsVisibility)
+            _controllerLedOptionsStack.Visibility = optionsVisibility;
         var available = _controllerLedAvailable && !_controllerLedMutationInFlight;
         _controllerLedEnabledRow?.ApplyState(available, displaySettings.Enabled);
         _controllerLedBrightnessRow?.ApplyState(available && _controllerLed.Enabled, 0, 100, 1, displaySettings.Brightness);
@@ -496,7 +593,8 @@ public sealed partial class OverlayWindow
 
     private void RenderControllerLedColor(Color color)
     {
-        if (_controllerLedColorSwatch is not null)
+        if (_controllerLedColorSwatch is not null &&
+            (_controllerLedColorSwatch.Background is not SolidColorBrush current || current.Color != color))
             _controllerLedColorSwatch.Background = new SolidColorBrush(color);
     }
 

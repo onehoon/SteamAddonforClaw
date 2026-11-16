@@ -15,11 +15,15 @@ public sealed class OverlayControllerRendererTests
 
         Assert.Contains("AddonQuickSettingsTabId.Controller => BuildControllerPage(rows)", shell);
         Assert.DoesNotContain("AddonQuickSettingsTabId.Controller => CreatePlaceholderPage", shell);
-        Assert.Equal(4, CountOccurrences(controller, "CreateOverlaySectionCard("));
+        Assert.Equal(5, CountOccurrences(controller, "CreateOverlaySectionCard("));
         Assert.Contains("CreateControllerSection(\"Controller for Steam\")", controller);
         Assert.Contains("CreateControllerSection(\"M1 / M2\")", controller);
         Assert.Contains("CreateControllerSection(\"Vibration Strength\")", controller);
         Assert.DoesNotContain("CreateControllerSection(\"Joystick LED\")", controller);
+        Assert.Contains("BuildControllerLedRows(rows, _controllerLedDetailRows);", controller);
+        Assert.Contains("host.Children.Add(root);", controller);
+        Assert.Contains("host.Children.Add(_controllerLedDetailView!);", controller);
+        Assert.Contains("root.Children.Add(_controllerLedSectionCard!);", controller);
         Assert.Contains("var steamDetails = CreateOverlayDetailStack();", controller);
         Assert.Contains("AddControllerRow(steamDetails, rows, _steamControllerRow.Container, _steamControllerRow.Capabilities,", controller);
         Assert.Contains("AddControllerRow(steamDetails, rows, gyroscopeRow.Container, gyroscopeRow.Capabilities with", controller);
@@ -102,6 +106,13 @@ public sealed class OverlayControllerRendererTests
         Assert.True(settingsState.IndexOf("RenderControllerLedRows();", StringComparison.Ordinal)
             < settingsState.IndexOf("ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);", StringComparison.Ordinal));
         Assert.True(settingsState.IndexOf("RenderControllerVibrationRows();", StringComparison.Ordinal)
+            < settingsState.IndexOf("ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);", StringComparison.Ordinal));
+        Assert.Contains("settingsAvailable && !_controllerLedVisibilityEligible && IsControllerLedDetailActive()", settingsState);
+        var returnFromLedDetail = settingsState.IndexOf("TryReturnFromDetailPage();", StringComparison.Ordinal);
+        var recapturedRootSelection = settingsState.IndexOf("selectedContainer = SelectedRowContainer(activeTab);",
+            returnFromLedDetail, StringComparison.Ordinal);
+        Assert.True(returnFromLedDetail >= 0 && recapturedRootSelection > returnFromLedDetail);
+        Assert.True(recapturedRootSelection
             < settingsState.IndexOf("ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);", StringComparison.Ordinal));
         Assert.True(settingsState.IndexOf("ApplyQuickSettingsYButtonQuickJumpTarget(", StringComparison.Ordinal)
             < settingsState.IndexOf("ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);", StringComparison.Ordinal));
@@ -245,7 +256,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("mappingSection.Children.Add(mappingDetails);", build);
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m1Row)", build);
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m2Row)", build);
-        Assert.Contains("var ledSection = new StackPanel { Spacing = OverlayQamResources.Get(\"QamRowSpacing\", 0.0) }", build);
+        Assert.Contains("root.Children.Add(_controllerLedSectionCard!);", build);
         Assert.DoesNotContain("AddBackButtonMappingRow(mappingSection, rows,", build);
         Assert.Contains("SetOverlaySectionSeparator(mappingCard, visible: true)", build);
         Assert.Contains("SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true)", build);
@@ -262,22 +273,52 @@ public sealed class OverlayControllerRendererTests
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
 
-        Assert.Contains("new OverlayToggleRow(\"Joystick LED\", RequestControllerLedEnabled, strongLabel: true)", controller);
-        Assert.Contains("() => _controllerLedMutationInFlight && _controllerLedAvailable, isDetail: false)", controller);
+        Assert.Contains("new OverlayToggleRow(\"Enable LED\", RequestControllerLedEnabled)", controller);
+        Assert.DoesNotContain("new OverlayToggleRow(\"Joystick LED\", RequestControllerLedEnabled", controller);
+        Assert.Contains("rootRows.Add(new(_controllerLedSectionCard,", controller);
+        Assert.Contains("IsSelectable: () => _controllerLedAvailable && !_controllerLedMutationInFlight", controller);
+        Assert.DoesNotContain("IsSelectable: () => _controllerLed.Enabled", controller);
+        Assert.Contains("headerButton.Click += (_, _) => OpenControllerLedDetail();", controller);
+        Assert.Contains("Activate: OpenControllerLedDetail", controller);
+        Assert.Contains("RegisterRowPointerSelection(_controllerLedSectionCard);", controller);
+        Assert.Contains("AutomationProperties.SetName(headerButton, \"Open Joystick LED settings\")", controller);
+        Assert.Contains("IsTabStop = false", controller);
+        Assert.Contains("EnterDetailPage(", controller);
+        Assert.Contains("ControllerDetailId.JoystickLed", controller);
+        Assert.Contains("_controllerLedDetailRows,", controller);
         Assert.Contains("if (isDetail)", controller);
         Assert.Contains("OverlayRowChrome.ApplyDetailPadding(container);", controller);
         Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container);", controller);
-        Assert.DoesNotContain("new OverlayToggleRow(\"Enabled\", RequestControllerLedEnabled)", controller);
-        Assert.Contains("private StackPanel? _controllerLedDetailStack", controller);
-        Assert.Contains("_controllerLedDetailStack = details;", controller);
+        Assert.Contains("private StackPanel? _controllerLedOptionsStack", controller);
+        Assert.Contains("_controllerLedOptionsStack = options;", controller);
         Assert.Contains("var details = CreateOverlayDetailStack();", controller);
-        Assert.Equal(2, CountOccurrences(controller, "var details = CreateOverlayDetailStack();"));
-        Assert.Contains("_controllerLedDetailStack.Visibility = _controllerLed.Enabled ? Visibility.Visible : Visibility.Collapsed", controller);
+        Assert.DoesNotContain("CreateOverlayDetailStack();", controller[
+            controller.IndexOf("private void BuildControllerLedRows", StringComparison.Ordinal)..
+            controller.IndexOf("private void OpenControllerLedDetail", StringComparison.Ordinal)]);
+        Assert.Contains("details.Children.Add(options);", controller);
+        Assert.Contains("var optionsVisibility = _controllerLed.Enabled ? Visibility.Visible : Visibility.Collapsed", controller);
+        Assert.Contains("_controllerLedOptionsStack.Visibility != optionsVisibility", controller);
+        Assert.Contains("_controllerLedOptionsStack.Visibility = optionsVisibility", controller);
+        Assert.Contains("options.Children.Add(new Border", controller);
+        Assert.DoesNotContain("detailRows.Add", controller[
+            controller.IndexOf("var colorPreview =", StringComparison.Ordinal)..
+            controller.IndexOf("_controllerLedRedRow =", StringComparison.Ordinal)]);
         Assert.Contains("new OverlayValueRow(\"Brightness\"", controller);
         Assert.Contains("new TextBlock { Text = \"Color\"", controller);
         Assert.Contains("new OverlayValueRow(\"Red\"", controller);
         Assert.Contains("new OverlayValueRow(\"Green\"", controller);
         Assert.Contains("new OverlayValueRow(\"Blue\"", controller);
+        Assert.Equal(1, CountOccurrences(controller, "new OverlayToggleRow(\"Enable LED\""));
+        Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"Brightness\""));
+        Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"Red\""));
+        Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"Green\""));
+        Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"Blue\""));
+        var ledRenderStart = controller.IndexOf("private void RenderControllerLedRows()", StringComparison.Ordinal);
+        var ledRenderEnd = controller.IndexOf("private void RenderControllerLedColor(", ledRenderStart, StringComparison.Ordinal);
+        var ledRender = controller[ledRenderStart..ledRenderEnd];
+        Assert.DoesNotContain("BuildControllerLedRows", ledRender);
+        Assert.DoesNotContain("new OverlayToggleRow", ledRender);
+        Assert.DoesNotContain("new OverlayValueRow", ledRender);
         Assert.Contains("_controllerLedRedRow.Container, _controllerLedRedRow.Capabilities", controller);
         Assert.Contains("_controllerLedGreenRow.Container, _controllerLedGreenRow.Capabilities", controller);
         Assert.Contains("_controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities", controller);
@@ -328,7 +369,10 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("_controllerLedSupported = settings.FeatureSupport.ControllerLed", settingsState);
         Assert.Contains("_controllerLedVisibilityEligible = _controllerLedSupported && controllerLedAvailable", settingsState);
         Assert.Contains("_controllerLedAvailable = settingsAvailable && _controllerLedSupported && controllerLedAvailable", settingsState);
-        Assert.Contains("_controllerLedSectionCard.Visibility = _controllerLedVisibilityEligible", controller);
+        Assert.Contains("_controllerLedSectionCard.Visibility != menuVisibility", controller);
+        Assert.Contains("_controllerLedSectionCard.Visibility = menuVisibility", controller);
+        Assert.Contains("private bool IsControllerLedDetailActive()", controller);
+        Assert.Contains("detail.Identity.Equals(ControllerDetailId.JoystickLed)", controller);
         Assert.Contains("_controllerVibrationSectionCard.Visibility = _controllerVibrationSupported", controller);
         Assert.Contains("IsSelectable = () => _controllerMotionSupported", controller);
         Assert.Contains("IsSelectable = () => _controllerVibrationSupported", controller);
