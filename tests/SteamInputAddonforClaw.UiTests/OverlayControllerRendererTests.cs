@@ -201,6 +201,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("mappingSection.Children.Add(mappingDetails);", build);
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m1Row)", build);
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m2Row)", build);
+        Assert.Contains("var ledSection = new StackPanel { Spacing = OverlayQamResources.Get(\"QamRowSpacing\", 0.0) }", build);
         Assert.DoesNotContain("AddBackButtonMappingRow(mappingSection, rows,", build);
         Assert.Contains("SetOverlaySectionSeparator(mappingCard, visible: true)", build);
         Assert.Contains("SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true)", build);
@@ -218,6 +219,10 @@ public sealed class OverlayControllerRendererTests
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
 
         Assert.Contains("new OverlayToggleRow(\"Joystick LED\", RequestControllerLedEnabled, strongLabel: true)", controller);
+        Assert.Contains("() => _controllerLedMutationInFlight && _controllerLedAvailable, isDetail: false)", controller);
+        Assert.Contains("if (isDetail)", controller);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(container);", controller);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container);", controller);
         Assert.DoesNotContain("new OverlayToggleRow(\"Enabled\", RequestControllerLedEnabled)", controller);
         Assert.Contains("private StackPanel? _controllerLedDetailStack", controller);
         Assert.Contains("_controllerLedDetailStack = details;", controller);

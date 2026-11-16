@@ -584,6 +584,8 @@ public sealed partial class OverlayWindow
                 descriptor.IsFeatureHeader ? descriptor.DisplayLabel : null,
                 descriptor.StrongLabel))
             throw new InvalidOperationException("A malformed Quick Settings row reached the Overlay renderer.");
+        if (!descriptor.IsFeatureHeader)
+            OverlayRowChrome.ApplyDetailPadding(row.Container);
         RegisterRowPointerSelection(row.Container);
         return new RenderedQuickSettingsRow { Descriptor = descriptor, Row = row };
     }
@@ -708,7 +710,7 @@ public sealed partial class OverlayWindow
         {
             Child = child,
             Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
-            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 10, 16, 10)),
+            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 0, 16, 0)),
             BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush"),
             BorderThickness = new Thickness(0),
             CornerRadius = OverlayQamResources.Get("QamSectionCornerRadius", new CornerRadius(0)),

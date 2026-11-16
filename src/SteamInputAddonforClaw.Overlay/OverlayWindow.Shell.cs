@@ -102,7 +102,7 @@ public sealed partial class OverlayWindow
 
     private StackPanel BuildTabOrderEditorPage()
     {
-        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
+        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
         var grid = new Grid { RowSpacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         var order = _tabState.Order;
         for (var i = 0; i < order.Count; i++)

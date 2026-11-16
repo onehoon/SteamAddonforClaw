@@ -76,7 +76,7 @@ public sealed partial class OverlayWindow
         var mappingSection = CreateControllerSection("M1 / M2");
         var mappingDetails = CreateOverlayDetailStack();
         mappingSection.Children.Add(mappingDetails);
-        var ledSection = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
+        var ledSection = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         var vibrationSection = CreateControllerSection("Vibration Strength");
 
         _steamControllerRow = new OverlayValueRow("Controller", FormatSteamController,
@@ -197,7 +197,7 @@ public sealed partial class OverlayWindow
     {
         _controllerLedEnabledRow = new OverlayToggleRow("Joystick LED", RequestControllerLedEnabled, strongLabel: true);
         AddControllerRow(section, rows, _controllerLedEnabledRow.Container, _controllerLedEnabledRow.Capabilities,
-            () => _controllerLedMutationInFlight && _controllerLedAvailable);
+            () => _controllerLedMutationInFlight && _controllerLedAvailable, isDetail: false);
 
         var details = CreateOverlayDetailStack();
         _controllerLedDetailStack = details;
@@ -274,8 +274,11 @@ public sealed partial class OverlayWindow
         List<OverlayRow> rows,
         Border container,
         OverlayRowCapabilities capabilities,
-        Func<bool> selectableDuringPendingMutation)
+        Func<bool> selectableDuringPendingMutation,
+        bool isDetail = true)
     {
+        if (isDetail)
+            OverlayRowChrome.ApplyDetailPadding(container);
         section.Children.Add(container);
         rows.Add(new(container, PreserveControllerPendingSelection(capabilities, selectableDuringPendingMutation)));
         RegisterRowPointerSelection(container);
@@ -283,6 +286,7 @@ public sealed partial class OverlayWindow
 
     private void AddBackButtonMappingRow(StackPanel section, List<OverlayRow> rows, OverlayValueRow row)
     {
+        OverlayRowChrome.ApplyDetailPadding(row.Container);
         section.Children.Add(row.Container);
         rows.Add(new(row.Container, PreserveControllerPendingSelection(row.Capabilities,
             () => _backButtonMutationInFlight && _backButtonMappingAvailable)));

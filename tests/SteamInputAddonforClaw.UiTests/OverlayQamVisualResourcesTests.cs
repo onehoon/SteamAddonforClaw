@@ -133,7 +133,8 @@ public sealed class OverlayQamVisualResourcesTests
         AssertResourceValue(resources, "QamRowCornerRadius", "2");
         Assert.Equal("#1AFFFFFF", Resource(resources, "QamSeparatorBrush").Attribute("Color")?.Value);
         AssertResourceValue(resources, "QamSectionSeparatorThickness", "0,1,0,0");
-        AssertResourceValue(resources, "QamSectionPadding", "16,10,16,10");
+        AssertResourceValue(resources, "QamSectionPadding", "16,0,16,0");
+        AssertResourceValue(resources, "QamDetailRowPadding", "16,5,16,5");
         Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value == "QamRowSeparatorThickness");
         Assert.Contains("BorderThickness = OverlayQamResources.Get(\"QamSelectionBorderThickness\", new Thickness(0))", rowChrome);
         Assert.DoesNotContain("QamSeparatorBrush", rowChrome);
@@ -145,6 +146,8 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("BorderBrush = OverlayQamResources.Brush(\"QamSeparatorBrush\")", sectionCard);
         Assert.Contains("BorderThickness = new Thickness(0)", sectionCard);
         Assert.Contains("QamRowPadding", rowChrome);
+        Assert.Contains("ApplyDetailPadding(Border container)", rowChrome);
+        Assert.Contains("OverlayQamResources.Get(\"QamDetailRowPadding\", new Thickness(16, 5, 16, 5))", rowChrome);
         Assert.Contains("QamRowMinHeight", rowChrome);
         Assert.Contains("QamRowCornerRadius", rowChrome);
         AssertResourceValue(resources, "QamRailButtonSize", "52");
@@ -154,7 +157,7 @@ public sealed class OverlayQamVisualResourcesTests
         AssertResourceValue(resources, "QamRailHintGap", "6");
         Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value == "QamRailHintMargin");
         AssertResourceValue(resources, "QamSectionSpacing", "0");
-        AssertResourceValue(resources, "QamSectionHeaderSpacing", "4");
+        Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value is "QamSectionHeaderSpacing" or "QamDetailMargin");
         AssertResourceValue(resources, "QamRowSpacing", "0");
         AssertResourceValue(resources, "QamSliderHeight", "22");
         AssertResourceValue(resources, "QamSliderTrackHeight", "4");
@@ -179,6 +182,7 @@ public sealed class OverlayQamVisualResourcesTests
         var quickSettings = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
         var controller = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs"));
         var clawHud = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs"));
+        var shell = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"));
         var sectionCardStart = quickSettings.IndexOf("private static Border CreateOverlaySectionCard", StringComparison.Ordinal);
         var sectionCardEnd = quickSettings.IndexOf("private bool TryCreateQuickSettingsRow", sectionCardStart, StringComparison.Ordinal);
         var sectionCard = quickSettings[sectionCardStart..sectionCardEnd];
@@ -187,11 +191,17 @@ public sealed class OverlayQamVisualResourcesTests
         var separator = quickSettings[separatorStart..separatorEnd];
 
         AssertResourceValue(resources, "QamSectionSpacing", "0");
-        AssertResourceValue(resources, "QamSectionPadding", "16,10,16,10");
+        AssertResourceValue(resources, "QamSectionPadding", "16,0,16,0");
+        AssertResourceValue(resources, "QamDetailRowPadding", "16,5,16,5");
+        AssertResourceValue(resources, "QamDetailIndent", "16,0,0,0");
         Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", quickSettings);
         Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", controller);
         Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", clawHud);
-        Assert.Contains("Padding = OverlayQamResources.Get(\"QamSectionPadding\", new Thickness(16, 10, 16, 10))", sectionCard);
+        Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionSpacing\", 0.0)", shell);
+        Assert.DoesNotContain("QamSectionHeaderSpacing", shell);
+        Assert.Contains("Padding = OverlayQamResources.Get(\"QamSectionPadding\", new Thickness(16, 0, 16, 0))", sectionCard);
+        Assert.Contains("if (!descriptor.IsFeatureHeader)", quickSettings);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container)", quickSettings);
         Assert.Contains("SetOverlaySectionSeparator(rendered.Card, hasFeature)", quickSettings);
         Assert.Contains("SetOverlaySectionSeparator(_clawHudCard.Container, visible: false)", clawHud);
         Assert.Contains("SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true)", clawHud);
@@ -235,6 +245,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("QamRowPadding", rowChrome);
         Assert.Contains("QamRowMinHeight", rowChrome);
         Assert.Contains("QamRowCornerRadius", rowChrome);
+        Assert.DoesNotContain("ApplyDetailPadding", heading);
     }
 
     [Fact]
@@ -259,7 +270,9 @@ public sealed class OverlayQamVisualResourcesTests
         var rowChrome = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs"));
 
         Assert.Contains("<Thickness x:Key=\"QamRowPadding\">16,10,16,10</Thickness>", resources);
+        Assert.Contains("<Thickness x:Key=\"QamDetailRowPadding\">16,5,16,5</Thickness>", resources);
         Assert.Contains("new Thickness(16, 10, 16, 10)", rowChrome);
+        Assert.Contains("new Thickness(16, 5, 16, 5)", rowChrome);
     }
 
     [Fact]
