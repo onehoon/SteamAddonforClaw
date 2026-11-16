@@ -131,7 +131,7 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
-    public void SelectedControllerRowCanBeRestoredAfterAnIntermediateFallbackDuringRefresh()
+    public void Controller_selection_waits_for_capabilities_to_settle_before_final_fallback()
     {
         var ledAvailable = true;
         var rows = new[]
@@ -147,13 +147,14 @@ public sealed class OverlayRowSelectionTests
 
         var preferredIndex = selection.SelectedIndex;
         ledAvailable = false;
-        selection.SetRows(rows, preferredIndex); // An earlier sibling renderer sees the stale LED availability.
-        Assert.Equal(0, selection.SelectedIndex);
-
+        // The aggregate projection does not rebind selection between sibling row updates.
         ledAvailable = true;
-        selection.SetRows(rows, preferredIndex); // Final Controller reconciliation restores the saved row.
-
         Assert.Equal(3, selection.SelectedIndex);
+
+        // A genuinely unavailable settled state receives one final selection reconcile.
+        ledAvailable = false;
+        selection.SetRows(rows, preferredIndex);
+        Assert.Equal(0, selection.SelectedIndex);
     }
 
     [Fact]

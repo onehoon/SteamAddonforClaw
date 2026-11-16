@@ -178,12 +178,6 @@ public sealed partial class OverlayWindow
         if (_gyroscopeRow is not null)
             _gyroscopeRow.Container.Visibility = _controllerMotionSupported ? Visibility.Visible : Visibility.Collapsed;
 
-        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
-        {
-            var preferredIndex = _rowSelection.SelectedIndex;
-            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
-            ApplyRowSelectionVisual();
-        }
     }
 
     private static StackPanel CreateControllerSection(string title)
@@ -328,6 +322,7 @@ public sealed partial class OverlayWindow
         // A StateInvalidated snapshot may arrive before the correlated mutation result. Keep the
         // controls disabled until that result settles the one outstanding whole-record request.
         RenderBackButtonMappingRows();
+        ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Controller);
     }
 
     internal void ApplyBackButtonMappingMutationResult(OverlayBackButtonMappingMutationResponse response)
@@ -347,6 +342,7 @@ public sealed partial class OverlayWindow
         _backButtonMutationInFlight = false;
         _pendingBackButtonMappingPreview = null;
         RenderBackButtonMappingRows();
+        ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Controller);
     }
 
     private void RenderBackButtonMappingRows()
@@ -358,19 +354,12 @@ public sealed partial class OverlayWindow
         _m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)displayMapping.M1);
         _m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)displayMapping.M2);
 
-        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
-        {
-            var preferredIndex = _rowSelection.SelectedIndex;
-            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
-            ApplyRowSelectionVisual();
-        }
     }
 
     internal void ApplyFrontendSettingsState(FrontendSettingsSnapshot settings, bool controllerLedAvailable, bool settingsAvailable)
     {
-        var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller
-            ? _rowSelection.SelectedIndex
-            : null;
+        var activeTab = _tabState.SelectedTab;
+        var selectedContainer = SelectedRowContainer(activeTab);
         _frontendSettingsSnapshot = settings;
         _frontendSettingsAvailable = settingsAvailable;
         _controllerForSteam = settings.ControllerForSteam;
@@ -389,7 +378,7 @@ public sealed partial class OverlayWindow
         ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
         ApplyQuickSettingsYButtonQuickJumpTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
         ApplyYButtonQuickJumpFooterTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
-        RestoreControllerRowSelection(preferredControllerIndex);
+        ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);
     }
 
     internal void ApplyFrontendSettingsMutationResult(
@@ -426,9 +415,6 @@ public sealed partial class OverlayWindow
         ControllerForSteamMutationKind? controllerForSteamMutation = null,
         bool yButtonQuickJumpMutation = false)
     {
-        var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller
-            ? _rowSelection.SelectedIndex
-            : null;
         if (led)
         {
             _controllerLedMutationInFlight = false;
@@ -447,6 +433,7 @@ public sealed partial class OverlayWindow
         else if (yButtonQuickJumpMutation)
         {
             SetYButtonQuickJumpMutationInFlight(false);
+            ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Setting);
             return;
         }
         else SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
@@ -454,18 +441,7 @@ public sealed partial class OverlayWindow
         RenderControllerLedRows();
         RenderQuickSettingsCurrentPowerSourceRow();
         RenderQuickSettingsYButtonQuickJumpRow();
-        RestoreControllerRowSelection(preferredControllerIndex);
-    }
-
-    private void RestoreControllerRowSelection(int? preferredIndex)
-    {
-        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Controller)
-            return;
-
-        // Pending-row capabilities preserve legitimate in-flight selections while this pass still
-        // applies genuine availability and visibility changes from the completed snapshot.
-        _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
-        ApplyRowSelectionVisual();
+        ReconcileRowSelectionIfNeeded(_tabState.SelectedTab);
     }
 
     private void RequestControllerLedEnabled(bool enabled)
@@ -516,12 +492,6 @@ public sealed partial class OverlayWindow
         _controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, displaySettings.Blue);
         if (_controllerLedColorSwatch is not null)
             RenderControllerLedColor(Color.FromArgb(255, displaySettings.Red, displaySettings.Green, displaySettings.Blue));
-        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
-        {
-            var preferredIndex = _rowSelection.SelectedIndex;
-            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
-            ApplyRowSelectionVisual();
-        }
     }
 
     private void RenderControllerLedColor(Color color)
@@ -620,6 +590,7 @@ public sealed partial class OverlayWindow
             _vibrationDraftRight = snapshot.RightPercent;
         }
         RenderControllerVibrationRows();
+        ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Controller);
     }
 
     internal void ApplyControllerVibrationMutationResult(FrontendControllerVibrationStrengthMutationResult result)
@@ -630,6 +601,7 @@ public sealed partial class OverlayWindow
         _vibrationDraftLeft = result.Snapshot.LeftPercent;
         _vibrationDraftRight = result.Snapshot.RightPercent;
         RenderControllerVibrationRows();
+        ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Controller);
     }
 
     internal void ApplyControllerVibrationMutationFailure()
@@ -639,6 +611,7 @@ public sealed partial class OverlayWindow
         _vibrationDraftLeft = _vibrationSnapshot.LeftPercent;
         _vibrationDraftRight = _vibrationSnapshot.RightPercent;
         RenderControllerVibrationRows();
+        ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Controller);
     }
 
     private void RenderControllerVibrationRows()
@@ -650,12 +623,6 @@ public sealed partial class OverlayWindow
         var right = _vibrationDraftRight ?? _vibrationSnapshot.RightPercent;
         _leftVibrationRow?.ApplyState(enabled && left is not null, 0, 100, 1, left ?? double.NaN);
         _rightVibrationRow?.ApplyState(enabled && right is not null, 0, 100, 1, right ?? double.NaN);
-        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
-        {
-            var preferredIndex = _rowSelection.SelectedIndex;
-            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
-            ApplyRowSelectionVisual();
-        }
     }
 
     internal static BackButtonMappingSettings CreateBackButtonMappingCandidate(

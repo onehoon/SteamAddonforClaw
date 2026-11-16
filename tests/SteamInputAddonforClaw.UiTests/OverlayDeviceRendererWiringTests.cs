@@ -1047,7 +1047,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("var quickSettingsMutation = !led && controllerForSteamMutation is null && !yButtonQuickJumpMutation", controller);
         Assert.Contains("if (quickSettingsMutation)", controller);
         var failureStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", StringComparison.Ordinal);
-        var failureEnd = controller.IndexOf("private void RestoreControllerRowSelection", failureStart, StringComparison.Ordinal);
+        var failureEnd = controller.IndexOf("private void RequestControllerLedEnabled", failureStart, StringComparison.Ordinal);
         var failure = controller[failureStart..failureEnd];
         var yFailureStart = failure.IndexOf("else if (yButtonQuickJumpMutation)", StringComparison.Ordinal);
         var yFailureEnd = failure.IndexOf("else SetQuickSettingsCurrentPowerSourceMutationInFlight(false)", yFailureStart, StringComparison.Ordinal);

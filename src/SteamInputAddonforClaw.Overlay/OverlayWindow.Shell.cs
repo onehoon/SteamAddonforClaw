@@ -198,6 +198,10 @@ public sealed partial class OverlayWindow
         var selectedSettingIndex = settingVisible ? _rowSelection.SelectedIndex : null;
         var previousOrder = _tabState.Order;
         var previousSettingRows = _pageRows.TryGetValue(AddonQuickSettingsTabId.Setting, out var currentSettingRows) ? currentSettingRows : [];
+        var selectedSettingContainer = selectedSettingIndex is { } selectedIndex &&
+            selectedIndex >= 0 && selectedIndex < previousSettingRows.Count
+                ? previousSettingRows[selectedIndex].Container
+                : null;
         var tabOrderEditorStartIndex = previousOrder.Count > 0 && _tabOrderRows.TryGetValue(previousOrder[0], out var firstPreviousEditor)
             ? FindSettingRowIndex(previousSettingRows, firstPreviousEditor.Container)
             : null;
@@ -256,8 +260,11 @@ public sealed partial class OverlayWindow
                 tabOrderEditorStartIndex,
                 previousOrder,
                 applied);
-            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
-            ApplyRowSelectionVisual();
+            ReconcileRowSelection(
+                AddonQuickSettingsTabId.Setting,
+                selectedSettingContainer,
+                preferredIndex,
+                bringIntoViewOnChange: false);
         }
 
         OverlayLog.Debug("Shell", "Authoritative Overlay tab order applied.", ("SelectedTab", _tabState.SelectedTab));

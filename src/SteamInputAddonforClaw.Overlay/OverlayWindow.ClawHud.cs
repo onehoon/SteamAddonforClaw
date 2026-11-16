@@ -370,12 +370,6 @@ public sealed partial class OverlayWindow
             1,
             (double)displayedTarget,
             canInteract: _quickSettingsYButtonQuickJumpAvailable && !_yButtonQuickJumpMutationInFlight);
-        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Setting && !_yButtonQuickJumpMutationInFlight)
-        {
-            var preferredIndex = _rowSelection.SelectedIndex;
-            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
-            ApplyRowSelectionVisual();
-        }
     }
 
     private void RequestQuickSettingsCurrentPowerSourceOnly(bool enabled)
@@ -404,13 +398,6 @@ public sealed partial class OverlayWindow
         _quickSettingsCurrentPowerSourceOnlyRow?.ApplyState(
             _quickSettingsSettingsAvailable && !_quickSettingsMutationInFlight,
             _pendingQuickSettingsCurrentPowerSourceOnly ?? _quickSettingsCurrentPowerSourceOnly);
-        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Setting)
-        {
-            var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_quickSettingsMutationInFlight)
-                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
-            ApplyRowSelectionVisual();
-        }
     }
 
     private StackPanel BuildClawHudPage()
@@ -487,6 +474,7 @@ public sealed partial class OverlayWindow
         var previousTopInsetPx = CurrentClawHudTopInsetPx();
         _clawHudMutation.ApplyState(snapshot);
         RenderClawHudControls();
+        ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Setting);
         ReconcileClawHudTopInsetIfChanged(previousTopInsetPx);
     }
 
@@ -495,6 +483,7 @@ public sealed partial class OverlayWindow
         var previousTopInsetPx = CurrentClawHudTopInsetPx();
         _clawHudMutation.Complete(result);
         RenderClawHudControls();
+        ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Setting);
         ReconcileClawHudTopInsetIfChanged(previousTopInsetPx);
     }
 
@@ -503,6 +492,7 @@ public sealed partial class OverlayWindow
         var previousTopInsetPx = CurrentClawHudTopInsetPx();
         _clawHudMutation.Fail();
         RenderClawHudControls();
+        ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Setting);
         ReconcileClawHudTopInsetIfChanged(previousTopInsetPx);
     }
 

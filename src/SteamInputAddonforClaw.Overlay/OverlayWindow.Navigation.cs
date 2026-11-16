@@ -172,14 +172,79 @@ public sealed partial class OverlayWindow
             ? rows.Select(row => row.Capabilities).ToArray()
             : [];
 
+    private Border? SelectedRowContainer(AddonQuickSettingsTabId tab)
+    {
+        if (!_pageRows.TryGetValue(tab, out var rows) ||
+            _rowSelection.SelectedIndex is not { } index || index < 0 || index >= rows.Count)
+            return null;
+
+        return rows[index].Container;
+    }
+
+    private void ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId tab, Border? preferredContainer = null)
+    {
+        if (_tabState.SelectedTab != tab || tab == AddonQuickSettingsTabId.Shortcut ||
+            !_pageRows.TryGetValue(tab, out var rows))
+            return;
+
+        var selectedIndex = _rowSelection.SelectedIndex;
+        var selectedContainer = SelectedRowContainer(tab);
+        if (selectedIndex is { } index && index >= 0 && index < rows.Count &&
+            rows[index].Capabilities.IsSelectable() &&
+            (preferredContainer is null || ReferenceEquals(selectedContainer, preferredContainer)))
+            return;
+        if (selectedIndex is null && !rows.Any(row => row.Capabilities.IsSelectable()))
+            return;
+
+        ReconcileRowSelection(
+            tab,
+            preferredContainer ?? selectedContainer,
+            selectedIndex,
+            bringIntoViewOnChange: true);
+    }
+
+    private void ReconcileRowSelection(
+        AddonQuickSettingsTabId tab,
+        Border? preferredContainer,
+        int? preferredIndex,
+        bool bringIntoViewOnChange)
+    {
+        if (_tabState.SelectedTab != tab || tab == AddonQuickSettingsTabId.Shortcut ||
+            !_pageRows.TryGetValue(tab, out var rows))
+            return;
+
+        var previousContainer = preferredContainer ?? SelectedRowContainer(tab);
+        var resolvedIndex = preferredIndex;
+        if (preferredContainer is not null)
+        {
+            for (var index = 0; index < rows.Count; index++)
+            {
+                if (!ReferenceEquals(rows[index].Container, preferredContainer)) continue;
+                resolvedIndex = index;
+                break;
+            }
+        }
+
+        _rowSelection.SetRows(CapabilitiesFor(tab), resolvedIndex);
+        var selectedContainer = SelectedRowContainer(tab);
+        if (ReferenceEquals(previousContainer, selectedContainer))
+            return;
+
+        _numericSliderRepeatTarget.Clear();
+        ApplyRowSelectionVisual();
+        if (bringIntoViewOnChange && selectedContainer is not null)
+            BringSelectedRowIntoView();
+    }
+
     private void ApplyRowSelectionVisual()
     {
         if (!_pageRows.TryGetValue(_tabState.SelectedTab, out var rows)) return;
         var selectedIndex = _rowSelection.SelectedIndex;
         for (var i = 0; i < rows.Count; i++)
         {
-            var selected = i == selectedIndex;
-            rows[i].Container.Background = selected ? _rowSelectedFillBrush : RowUnselectedFillBrush;
+            var brush = i == selectedIndex ? _rowSelectedFillBrush : RowUnselectedFillBrush;
+            if (!ReferenceEquals(rows[i].Container.Background, brush))
+                rows[i].Container.Background = brush;
         }
     }
 

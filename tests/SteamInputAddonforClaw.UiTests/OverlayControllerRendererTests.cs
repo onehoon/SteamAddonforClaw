@@ -41,7 +41,10 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("CreateOverlayDetailStack()", controller);
         Assert.Contains("RegisterRowPointerSelection(row.Container)", controller);
         Assert.Contains("PreserveControllerPendingSelection(row.Capabilities,", controller);
-        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+        Assert.Contains("ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Controller);", controller);
+        Assert.Contains("ReconcileRowSelection(", navigation);
+        Assert.Contains("SelectedRowContainer(tab)", navigation);
     }
 
     [Fact]
@@ -83,7 +86,7 @@ public sealed class OverlayControllerRendererTests
     }
 
     [Fact]
-    public void Controller_frontend_settings_success_and_failure_restore_selection_after_LED_state_is_applied()
+    public void Controller_frontend_settings_reconcile_selection_once_after_all_rows_are_projected()
     {
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
 
@@ -91,26 +94,68 @@ public sealed class OverlayControllerRendererTests
         var resultStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationResult(", stateStart, StringComparison.Ordinal);
         var failureStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", resultStart, StringComparison.Ordinal);
         var settingsState = controller[stateStart..resultStart];
-        Assert.Contains("var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller", settingsState);
+        Assert.Contains("var selectedContainer = SelectedRowContainer(activeTab);", settingsState);
+        Assert.True(settingsState.IndexOf("var selectedContainer = SelectedRowContainer(activeTab);", StringComparison.Ordinal)
+            < settingsState.IndexOf("_frontendSettingsSnapshot = settings;", StringComparison.Ordinal));
         Assert.True(settingsState.IndexOf("RenderControllerForSteamRows();", StringComparison.Ordinal)
             < settingsState.IndexOf("RenderControllerLedRows();", StringComparison.Ordinal));
         Assert.True(settingsState.IndexOf("RenderControllerLedRows();", StringComparison.Ordinal)
-            < settingsState.IndexOf("RestoreControllerRowSelection(preferredControllerIndex);", StringComparison.Ordinal));
+            < settingsState.IndexOf("ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);", StringComparison.Ordinal));
+        Assert.True(settingsState.IndexOf("RenderControllerVibrationRows();", StringComparison.Ordinal)
+            < settingsState.IndexOf("ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);", StringComparison.Ordinal));
+        Assert.True(settingsState.IndexOf("ApplyQuickSettingsYButtonQuickJumpTarget(", StringComparison.Ordinal)
+            < settingsState.IndexOf("ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);", StringComparison.Ordinal));
+        Assert.Equal(1, CountOccurrences(settingsState, "ReconcileRowSelectionIfNeeded(activeTab, selectedContainer);"));
 
         var mutationResult = controller[resultStart..failureStart];
         Assert.Contains("ApplyFrontendSettingsState(response.Settings, response.ControllerLedAvailable, response.SettingsAvailable);", mutationResult);
 
         var ledRequestStart = controller.IndexOf("private void RequestControllerLedEnabled(", failureStart, StringComparison.Ordinal);
         var failure = controller[failureStart..ledRequestStart];
-        Assert.Contains("var preferredControllerIndex = _tabState.SelectedTab == AddonQuickSettingsTabId.Controller", failure);
         Assert.True(failure.IndexOf("RenderControllerLedRows();", StringComparison.Ordinal)
-            < failure.IndexOf("RestoreControllerRowSelection(preferredControllerIndex);", StringComparison.Ordinal));
+            < failure.LastIndexOf("ReconcileRowSelectionIfNeeded(_tabState.SelectedTab);", StringComparison.Ordinal));
+        Assert.True(failure.IndexOf("RenderQuickSettingsYButtonQuickJumpRow();", StringComparison.Ordinal)
+            < failure.LastIndexOf("ReconcileRowSelectionIfNeeded(_tabState.SelectedTab);", StringComparison.Ordinal));
+        Assert.DoesNotContain("RestoreControllerRowSelection", controller);
+    }
 
-        var restoreStart = controller.IndexOf("private void RestoreControllerRowSelection(", StringComparison.Ordinal);
-        var restoreEnd = controller.IndexOf("private void RequestControllerLedEnabled(", restoreStart, StringComparison.Ordinal);
-        var restore = controller[restoreStart..restoreEnd];
-        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", restore);
-        Assert.DoesNotContain("BringSelectedRowIntoView", restore);
+    [Fact]
+    public void Controller_and_setting_renderers_only_project_controls_and_share_selection_reconciliation()
+    {
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+
+        foreach (var (source, start, end) in new[]
+        {
+            (controller, "private void RenderControllerForSteamRows()", "private static StackPanel CreateControllerSection("),
+            (controller, "private void RenderBackButtonMappingRows()", "internal void ApplyFrontendSettingsState("),
+            (controller, "private void RenderControllerLedRows()", "private void RenderControllerLedColor("),
+            (controller, "private void RenderControllerVibrationRows()", "internal static BackButtonMappingSettings CreateBackButtonMappingCandidate("),
+            (clawHud, "internal void RenderQuickSettingsYButtonQuickJumpRow()", "private void RequestQuickSettingsCurrentPowerSourceOnly("),
+            (clawHud, "internal void RenderQuickSettingsCurrentPowerSourceRow()", "private StackPanel BuildClawHudPage("),
+        })
+        {
+            var render = source[source.IndexOf(start, StringComparison.Ordinal)..source.IndexOf(end,
+                source.IndexOf(start, StringComparison.Ordinal), StringComparison.Ordinal)];
+            Assert.DoesNotContain("SetRows(", render);
+            Assert.DoesNotContain("ApplyRowSelectionVisual", render);
+        }
+
+        var activeReconcile = navigation[navigation.IndexOf("private void ReconcileRowSelectionIfNeeded(", StringComparison.Ordinal)..
+            navigation.IndexOf("private void ReconcileRowSelection(", navigation.IndexOf("private void ReconcileRowSelectionIfNeeded(", StringComparison.Ordinal), StringComparison.Ordinal)];
+        var reconcile = navigation[navigation.IndexOf("private void ReconcileRowSelection(", StringComparison.Ordinal)..
+            navigation.IndexOf("private void ApplyRowSelectionVisual()", StringComparison.Ordinal)];
+        Assert.Contains("rows[index].Capabilities.IsSelectable()", activeReconcile);
+        Assert.Contains("preferredContainer is null || ReferenceEquals(selectedContainer, preferredContainer)", activeReconcile);
+        Assert.Contains("rows.Any(row => row.Capabilities.IsSelectable())", activeReconcile);
+        Assert.True(activeReconcile.IndexOf("ReferenceEquals(selectedContainer, preferredContainer)", StringComparison.Ordinal)
+            < activeReconcile.IndexOf("ReconcileRowSelection(", StringComparison.Ordinal));
+        Assert.Contains("preferredContainer", reconcile);
+        Assert.Contains("var previousContainer = preferredContainer ?? SelectedRowContainer(tab);", reconcile);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(tab), resolvedIndex);", reconcile);
+        Assert.Contains("if (ReferenceEquals(previousContainer, selectedContainer))", reconcile);
+        Assert.Contains("BringSelectedRowIntoView();", reconcile);
     }
 
     [Fact]
@@ -130,9 +175,8 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("var displayMapping = ProjectBackButtonMappingPreview(_backButtonMapping, _pendingBackButtonMappingPreview)", controller);
         Assert.Contains("_m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)displayMapping.M1)", controller);
         Assert.Contains("_m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)displayMapping.M2)", controller);
-        Assert.Contains("var preferredIndex = _rowSelection.SelectedIndex;", controller);
         Assert.Contains("IsSelectable = () => capabilities.IsSelectable() || selectableDuringPendingMutation()", controller);
-        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
+        Assert.Contains("ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Controller);", controller);
         Assert.Contains("HandleBackButtonMappingStateAsync", app);
         Assert.Contains("BackButtonMappingEditRequested", app);
         Assert.Contains("_backButtonMappingAvailable = state.Available", controller);
