@@ -78,7 +78,7 @@ public sealed partial class OverlayWindow
         return root;
     }
 
-    internal bool TryHandleBack() => TryHandleSettingBack();
+    internal bool TryHandleBack() => TryReturnFromDetailPage();
 
     private void OnProfileTabSelectionChanged(bool selected)
     {

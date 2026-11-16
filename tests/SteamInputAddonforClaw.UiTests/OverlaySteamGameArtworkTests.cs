@@ -193,16 +193,17 @@ public sealed class OverlaySteamGameArtworkTests
         var rightColumn = xaml.Descendants().Single(element => element.Name.LocalName == "Grid"
             && Attribute(element, "Grid.Column") == "1" && Attribute(element, "Grid.Row") == "0");
         var visualChildren = rightColumn.Elements().Where(element => element.Name.LocalName != "RowDefinitions").ToArray();
-        var title = visualChildren.Single(element => Attribute(element, "Name") == "PageTitle");
+        var header = visualChildren.Single(element => element.Name.LocalName == "Grid" && Attribute(element, "Grid.Row") == "0");
+        var title = header.Elements().Single(element => Attribute(element, "Name") == "PageTitle");
         var host = visualChildren.Single(element => Attribute(element, "Name") == "ProfileArtworkHost");
         var scroll = visualChildren.Single(element => Attribute(element, "Name") == "BodyScroll");
 
-        Assert.True(Array.IndexOf(visualChildren, title) < Array.IndexOf(visualChildren, host));
+        Assert.True(Array.IndexOf(visualChildren, header) < Array.IndexOf(visualChildren, host));
         Assert.True(Array.IndexOf(visualChildren, host) < Array.IndexOf(visualChildren, scroll));
         Assert.Equal(["Auto", "Auto", "*"], rightColumn.Elements().Single(element => element.Name.LocalName == "Grid.RowDefinitions")
             .Elements().Select(element => Attribute(element, "Height")));
         Assert.Equal("Visible", Attribute(title, "Visibility"));
-        Assert.Equal("0", Attribute(title, "Grid.Row"));
+        Assert.Equal("0", Attribute(header, "Grid.Row"));
         Assert.Equal("1", Attribute(host, "Grid.Row"));
         Assert.Null(Attribute(host, "Grid.RowSpan"));
         Assert.Null(Attribute(host, "Margin"));

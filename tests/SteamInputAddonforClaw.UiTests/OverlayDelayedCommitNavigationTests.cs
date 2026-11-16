@@ -74,13 +74,34 @@ public sealed class OverlayDelayedCommitNavigationTests
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
 
-        Assert.Contains("internal bool TryHandleBack() => TryHandleSettingBack();", profile, StringComparison.Ordinal);
+        Assert.Contains("internal bool TryHandleBack() => TryReturnFromDetailPage();", profile, StringComparison.Ordinal);
         Assert.Contains("private void OnProfileTabSelectionChanged(bool selected)", profile, StringComparison.Ordinal);
         Assert.DoesNotContain("ProfileSelectedDetail", profile, StringComparison.Ordinal);
         Assert.DoesNotContain("ProfileSelectedDetail", app, StringComparison.Ordinal);
         Assert.DoesNotContain("ProfileCatalog", app, StringComparison.Ordinal);
         Assert.Contains("OnProfileTabSelectionChanged(selected == AddonQuickSettingsTabId.Profile);", shell, StringComparison.Ordinal);
         Assert.Contains("FlushPendingUserEditsAsync()", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Detail_back_is_consumed_locally_while_root_back_keeps_the_existing_dismiss_path()
+    {
+        var detail = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.DetailNavigation.cs");
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var returnStart = detail.IndexOf("private bool TryReturnFromDetailPage()", StringComparison.Ordinal);
+        var returnEnd = detail.IndexOf("private void ResetDetailForTabChangeOrShow()", returnStart, StringComparison.Ordinal);
+        Assert.True(returnStart >= 0 && returnEnd > returnStart);
+        var returnMethod = detail[returnStart..returnEnd];
+
+        Assert.Contains("_activeDetailPage is not { } detail", returnMethod);
+        Assert.Contains("_tabState.SelectedTab != detail.Tab", returnMethod);
+        Assert.Contains("return false;", returnMethod);
+        Assert.Contains("return true;", returnMethod);
+        Assert.Contains("internal bool TryHandleBack() => TryReturnFromDetailPage();", profile);
+        Assert.Contains("if (_window?.TryHandleBack() != true)", app);
+        Assert.DoesNotContain("SendUserDismissAsync", returnMethod);
+        Assert.DoesNotContain("FlushPendingUserEditsAsync", returnMethod);
     }
 
     [Fact]

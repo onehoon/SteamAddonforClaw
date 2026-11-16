@@ -106,8 +106,10 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Same(shell, rightContentHost.Parent);
         Assert.Same(shell, footer.Parent);
         Assert.Same(shell, tabRail.Parent);
-        Assert.Same(rightContentHost, pageTitle.Parent);
-        Assert.Equal("0", (string?)pageTitle.Attribute("Grid.Row"));
+        Assert.Same(rightContentHost, pageTitle.Parent!.Parent);
+        Assert.Equal("Grid", pageTitle.Parent.Name.LocalName);
+        Assert.Equal("0", (string?)pageTitle.Parent.Attribute("Grid.Row"));
+        Assert.Equal("1", (string?)pageTitle.Attribute("Grid.Column"));
         Assert.Equal("2", (string?)bodyScroll.Attribute("Grid.Row"));
         Assert.Equal(new[] { "Auto", "Auto", "*" }, rightRows);
         Assert.Same(rightContentHost, bodyScroll.Parent);
@@ -203,9 +205,9 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("if (!descriptor.IsFeatureHeader)", quickSettings);
         Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container)", quickSettings);
         Assert.Contains("SetOverlaySectionSeparator(rendered.Card, hasFeature)", quickSettings);
-        Assert.Contains("SetOverlaySectionSeparator(_clawHudCard.Container, visible: false)", clawHud);
-        Assert.Contains("SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true)", clawHud);
-        Assert.Contains("SetOverlaySectionSeparator(_tabOrderCard.Container, visible: true)", clawHud);
+        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[0].Container, visible: false)", clawHud);
+        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[1].Container, visible: true)", clawHud);
+        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[2].Container, visible: true)", clawHud);
         Assert.Contains("card.BorderThickness = visible", separator);
         Assert.Contains("QamSectionSeparatorThickness", separator);
         Assert.Contains("new Thickness(0, 1, 0, 0)", separator);
@@ -289,6 +291,9 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.True(selectedStateStart >= 0);
         var selectedState = shell[selectedStateStart..];
         var titleElement = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "PageTitle");
+        var backButton = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "DetailBackButton");
+        var header = titleElement.Parent!;
+        var detailNavigation = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.DetailNavigation.cs"));
 
         Assert.Equal("{StaticResource QamSectionHeaderTextStyle}", (string?)pageTitle.Attribute("BasedOn"));
         Assert.Contains("var content = id switch", buildPage);
@@ -301,7 +306,22 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.DoesNotContain("CreateQamPage", shell);
         Assert.Equal("{StaticResource QamPageTitleTextStyle}", (string?)titleElement.Attribute("Style"));
         Assert.Equal("{StaticResource QamPageTitleMargin}", (string?)titleElement.Attribute("Margin"));
+        Assert.Equal("Grid", header.Name.LocalName);
+        Assert.Equal("1", (string?)titleElement.Attribute("Grid.Column"));
+        Assert.Equal("Collapsed", (string?)backButton.Attribute("Visibility"));
+        Assert.Equal("False", (string?)backButton.Attribute("IsTabStop"));
+        Assert.Equal("False", (string?)backButton.Attribute("AllowFocusOnInteraction"));
+        Assert.Equal("OnDetailBackButtonClick", (string?)backButton.Attribute("Click"));
+        Assert.Equal("{StaticResource QamFlatButtonStyle}", (string?)backButton.Attribute("Style"));
+        Assert.Contains(backButton.Attributes(), attribute =>
+            attribute.Name.LocalName == "AutomationProperties.Name" && attribute.Value == "Back to the previous page");
+        Assert.Contains("DetailBackButton.Visibility = Visibility.Visible;", detailNavigation);
+        Assert.Contains("PageTitle.Text = title;", detailNavigation);
+        Assert.Contains("PageTitle.Visibility = Visibility.Visible;", detailNavigation);
+        Assert.Contains("PageTitle.Visibility = Visibility.Visible;", File.ReadAllText(Path.Combine(root,
+            "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs")));
         Assert.Contains("PageTitle.Text = LabelFor(selected);", selectedState);
+        Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "ScrollViewer");
         Assert.Equal(1, CountOccurrences(xaml.ToString(), "x:Name=\"PageTitle\""));
     }
 

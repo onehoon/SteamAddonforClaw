@@ -42,6 +42,46 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
+    public void Root_detail_root_navigation_switches_the_active_rows_and_restores_the_origin()
+    {
+        var selection = new OverlayRowSelection();
+        var rootRows = new[] { Row(), Row(), Row() };
+        var detailRows = new[] { Row(selectable: false), Row(), Row(), Row() };
+
+        selection.SetRows(rootRows);
+        Assert.True(selection.TrySelect(1)); // Quick Settings root row.
+        var originIndex = selection.SelectedIndex;
+
+        selection.SetRows(detailRows); // Only the visible detail rows participate in navigation.
+        Assert.Equal(1, selection.SelectedIndex); // First selectable detail row.
+        Assert.False(selection.TrySelect(4)); // No hidden root or adjacent-detail row is addressable.
+
+        selection.SetRows(rootRows, originIndex);
+        Assert.Equal(1, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Returning_from_detail_falls_back_when_the_original_root_row_is_unavailable()
+    {
+        var originAvailable = true;
+        var rootRows = new[]
+        {
+            Row(),
+            new OverlayRowCapabilities(() => originAvailable),
+            Row(),
+        };
+        var selection = new OverlayRowSelection();
+        selection.SetRows(rootRows);
+        Assert.True(selection.TrySelect(1));
+
+        selection.SetRows([Row()]); // Detail entry selects its first available row.
+        originAvailable = false;
+        selection.SetRows(rootRows, preferredIndex: 1);
+
+        Assert.Equal(0, selection.SelectedIndex);
+    }
+
+    [Fact]
     public void SelectedSecondRowSurvivesTemporaryMutationDisableAndAuthoritativeRefresh()
     {
         var mutationPending = false;
@@ -67,11 +107,10 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
-    public void ClawHud_siblings_remain_navigable_during_single_flight_but_not_when_runtime_is_not_ready()
+    public void ClawHud_detail_rows_remain_navigable_during_single_flight_but_not_when_runtime_is_not_ready()
     {
         var mutationPending = false;
         var runtimeReady = true;
-        var cardExpanded = true;
         var blockedRequests = 0;
         OverlayRowCapabilities ClawHudDetailRow()
         {
@@ -89,45 +128,36 @@ public sealed class OverlayRowSelectionTests
                     model.RequestAdjust(delta);
                 });
             return new OverlayRowCapabilities(
-                () => cardExpanded && (nativeCapabilities.IsSelectable() ||
-                    mutationPending && runtimeReady),
+                () => nativeCapabilities.IsSelectable() || mutationPending && runtimeReady,
                 Adjust: nativeCapabilities.Adjust);
         }
 
-        // Setting order: ClawHUD header, Enable HUD, Display Mode, HUD Size, Font,
-        // Alignment, then the next card header.
+        // The ClawHUD detail selection set contains its options only; root rows and other details
+        // are absent while this view is active.
         var rows = new[]
         {
-            Row(),
             ClawHudDetailRow(),
             ClawHudDetailRow(),
             ClawHudDetailRow(),
             ClawHudDetailRow(),
             ClawHudDetailRow(),
-            Row(),
         };
         var selection = new OverlayRowSelection();
         selection.SetRows(rows);
-        Assert.True(selection.TrySelect(3)); // HUD Size.
+        Assert.True(selection.TrySelect(2)); // HUD Size.
 
         mutationPending = true;
         Assert.True(selection.MoveNext());
-        Assert.Equal(4, selection.SelectedIndex); // Font, not the next card header.
+        Assert.Equal(3, selection.SelectedIndex); // Font remains a navigable detail sibling.
         Assert.True(selection.MoveNext());
-        Assert.Equal(5, selection.SelectedIndex); // Alignment remains a logical sibling too.
+        Assert.Equal(4, selection.SelectedIndex); // Alignment remains a logical sibling too.
         Assert.False(selection.AdjustSelected(+1));
         Assert.Equal(0, blockedRequests); // The underlying disabled control model rejects edits.
 
         runtimeReady = false;
-        selection.SetRows(rows, preferredIndex: 5);
-        Assert.Equal(0, selection.SelectedIndex);
-        Assert.False(selection.TrySelect(4));
-
-        runtimeReady = true;
-        cardExpanded = false;
         selection.SetRows(rows, preferredIndex: 4);
-        Assert.Equal(0, selection.SelectedIndex);
-        Assert.False(selection.TrySelect(4));
+        Assert.Null(selection.SelectedIndex);
+        Assert.False(selection.TrySelect(3));
     }
 
     [Fact]

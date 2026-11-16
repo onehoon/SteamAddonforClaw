@@ -944,7 +944,7 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Setting_cards_expand_inline_and_render_the_claw_hud_rows()
+    public void Setting_root_and_detail_pages_reuse_the_existing_settings_controls()
     {
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
@@ -957,9 +957,21 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("QamDetailRowPadding", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs"));
         Assert.Contains("QamSectionCornerRadius", quickSettings);
         Assert.Contains("QamSectionBrush", quickSettings);
-        Assert.Contains("CreateSettingCard(SettingCardId.ClawHud", clawHud);
-        Assert.Contains("CreateSettingCard(SettingCardId.QuickSettings", clawHud);
-        Assert.Contains("CreateSettingCard(SettingCardId.TabOrder, \"Quick Overlay Tab Order\", tabOrderDetails)", clawHud);
+        var settingPageStart = clawHud.IndexOf("private FrameworkElement BuildSettingPage", StringComparison.Ordinal);
+        var settingPageEnd = clawHud.IndexOf("private FrameworkElement CreateSettingDetailPage", settingPageStart, StringComparison.Ordinal);
+        var settingPage = clawHud[settingPageStart..settingPageEnd];
+        Assert.Equal(1, CountOccurrences(settingPage, "BuildClawHudPage()"));
+        Assert.Equal(1, CountOccurrences(settingPage, "BuildQuickSettingsPage()"));
+        Assert.Equal(1, CountOccurrences(settingPage, "BuildTabOrderEditorPage()"));
+        Assert.Equal(3, CountOccurrences(settingPage, "_settingRootRows.Add(CreateSettingRootRow("));
+        Assert.Contains("rows.AddRange(_settingRootRows);", settingPage);
+        Assert.DoesNotContain("rows.AddRange(_clawHudRows)", settingPage);
+        Assert.DoesNotContain("rows.AddRange(_quickSettingsRows)", settingPage);
+        Assert.Contains("host.Children.Add(clawHudDetailView);", settingPage);
+        Assert.Contains("host.Children.Add(quickSettingsDetailView);", settingPage);
+        Assert.Contains("host.Children.Add(tabOrderDetailView);", settingPage);
+        Assert.DoesNotContain("CreateOverlayDetailStack", clawHud);
+        Assert.DoesNotContain("SettingCardId", clawHud);
         Assert.Contains("Quick Settings", clawHud);
         Assert.Contains("Show only current power source", clawHud);
         Assert.Contains("ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable)",
@@ -968,10 +980,9 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container);", clawHud);
         Assert.Contains("OverlayRowChrome.ApplyDetailPadding(_quickSettingsYButtonQuickJumpRow.Container);", clawHud);
         Assert.Contains("OverlayRowChrome.ApplyDetailPadding(_quickSettingsCurrentPowerSourceOnlyRow.Container);", clawHud);
-        Assert.Contains("_expandedSettingCard == card", clawHud);
-        Assert.Contains("ToggleSettingCard", clawHud);
-        Assert.Contains("ResetSettingCardsForShow();", shell);
-        Assert.Contains("TryHandleSettingBack()", profile);
+        Assert.Contains("IsSettingDetailActive(detail)", clawHud);
+        Assert.Contains("ResetDetailForTabChangeOrShow();", shell);
+        Assert.Contains("TryReturnFromDetailPage()", profile);
         Assert.Contains("RegisterRowPointerSelection(row.Container);", quickSettings);
         Assert.Contains("OverlayRowChrome.Create(grid)", valueRow);
         Assert.DoesNotContain("CreateOverlaySectionCard(BuildShortcutPage())", shell);
@@ -979,50 +990,98 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Setting_cards_use_the_shared_separator_only_on_outer_sections()
+    public void Setting_detail_navigation_binds_only_visible_rows_and_restores_root_selection_and_scroll()
+    {
+        var detail = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.DetailNavigation.cs");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+
+        var enter = ExtractMethod(detail, "private bool EnterDetailPage(");
+        Assert.Contains("BodyScroll.VerticalOffset", enter);
+        Assert.Contains("_activeDetailPage = new ActiveDetailPage", enter);
+        Assert.Contains("rootView.Visibility = Visibility.Collapsed", enter);
+        Assert.Contains("detailView.Visibility = Visibility.Visible", enter);
+        Assert.Contains("_pageRows[tab] = detailRows;", enter);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(tab));", enter);
+        Assert.Contains("ScrollActivePageToTop();", enter);
+        Assert.DoesNotContain("BuildClawHudPage()", enter);
+        Assert.DoesNotContain("Focus()", detail);
+
+        var back = ExtractMethod(detail, "private bool TryReturnFromDetailPage(");
+        Assert.Contains("FindRowIndex(detail.RootRows, detail.OriginContainer)", back);
+        Assert.Contains("_pageRows[detail.Tab] = detail.RootRows;", back);
+        Assert.Contains("PageTitle.Visibility = Visibility.Visible;", back);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(detail.Tab), originIndex);", back);
+        Assert.Contains("ApplyRowSelectionVisual();", back);
+        Assert.Contains("RestoreBodyScroll(detail.RootScrollOffset);", back);
+        Assert.DoesNotContain("SendDismiss", back);
+        Assert.Contains("BodyScroll.UpdateLayout();", detail);
+
+        var reset = ExtractMethod(shell, "private void ResetUiForShow()");
+        Assert.True(reset.IndexOf("ResetDetailForTabChangeOrShow();", StringComparison.Ordinal)
+            < reset.IndexOf("_tabState.ResetForShow();", StringComparison.Ordinal));
+        Assert.Contains("ResetUiForShow();", presentation);
+        Assert.True(presentation.IndexOf("ResetUiForShow();", StringComparison.Ordinal)
+            < presentation.IndexOf("WindowInterop.ShowWithoutActivation(this)", StringComparison.Ordinal));
+
+        Assert.Contains("if (!_pageRows.TryGetValue(_tabState.SelectedTab, out var rows)) return;", navigation);
+        Assert.Contains("ReferenceEquals(rows[index].Container, container)", navigation);
+        Assert.Contains("private void SelectRenderedRow(Border container)", navigation);
+    }
+
+    [Fact]
+    public void Tab_change_resets_detail_only_when_leaving_its_owner_tab()
+    {
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var selectedState = ExtractMethod(shell, "private void ApplySelectedTabVisualState()");
+
+        Assert.Contains("activeDetail.Tab != _tabState.SelectedTab", selectedState);
+        Assert.Contains("ResetDetailForTabChangeOrShow();", selectedState);
+        Assert.Contains("if (_activeDetailPage is null)", selectedState);
+        Assert.Contains("DetailBackButton.Visibility = Visibility.Collapsed;", selectedState);
+        Assert.Contains("PageTitle.Text = LabelFor(selected);", selectedState);
+    }
+
+    [Fact]
+    public void Setting_root_rows_use_the_shared_section_separator_policy()
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
         var settingPage = clawHud[clawHud.IndexOf("private FrameworkElement BuildSettingPage", StringComparison.Ordinal)..
-            clawHud.IndexOf("private SettingCardView CreateSettingCard", StringComparison.Ordinal)];
-        var createCard = clawHud[clawHud.IndexOf("private SettingCardView CreateSettingCard", StringComparison.Ordinal)..
-            clawHud.IndexOf("private List<OverlayRow> BuildSettingRows", StringComparison.Ordinal)];
+            clawHud.IndexOf("private FrameworkElement CreateSettingDetailPage", StringComparison.Ordinal)];
+        var createRootRow = clawHud[clawHud.IndexOf("private OverlayRow CreateSettingRootRow", StringComparison.Ordinal)..
+            clawHud.IndexOf("private void OpenSettingDetail", StringComparison.Ordinal)];
 
-        Assert.Contains("SetOverlaySectionSeparator(_clawHudCard.Container, visible: false)", settingPage);
-        Assert.Contains("SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true)", settingPage);
-        Assert.Contains("SetOverlaySectionSeparator(_tabOrderCard.Container, visible: true)", settingPage);
-        Assert.Contains("CreateOverlaySectionCard(content)", createCard);
-        Assert.DoesNotContain("SetOverlaySectionSeparator", createCard);
-        Assert.DoesNotContain("QamSeparatorBrush", createCard);
+        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[0].Container, visible: false)", settingPage);
+        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[1].Container, visible: true)", settingPage);
+        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[2].Container, visible: true)", settingPage);
+        Assert.Contains("CreateOverlaySectionCard(header)", createRootRow);
+        Assert.DoesNotContain("SetOverlaySectionSeparator", createRootRow);
+        Assert.DoesNotContain("CreateOverlayDetailStack", createRootRow);
     }
 
     [Fact]
-    public void Setting_expandable_headers_use_a_full_height_button_hover_surface()
+    public void Setting_root_rows_open_prebuilt_details_through_controller_and_pointer_activation()
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
-        var createCardStart = clawHud.IndexOf("private SettingCardView CreateSettingCard", StringComparison.Ordinal);
-        var createCardEnd = clawHud.IndexOf("private List<OverlayRow> BuildSettingRows", createCardStart, StringComparison.Ordinal);
-        var createCard = clawHud[createCardStart..createCardEnd];
-        var headerButtonStart = createCard.IndexOf("var headerButton = new Button", StringComparison.Ordinal);
-        var headerChromeStart = createCard.IndexOf("var header = OverlayRowChrome.Create(headerButton);", headerButtonStart, StringComparison.Ordinal);
-        var headerButton = createCard[headerButtonStart..headerChromeStart];
+        var rootRowStart = clawHud.IndexOf("private OverlayRow CreateSettingRootRow", StringComparison.Ordinal);
+        var rootRowEnd = clawHud.IndexOf("private void OpenSettingDetail", rootRowStart, StringComparison.Ordinal);
+        var rootRow = clawHud[rootRowStart..rootRowEnd];
 
-        Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", headerButton);
-        Assert.Contains("Padding = OverlayQamResources.Get(\"QamRowPadding\", new Thickness(16, 10, 16, 10))", headerButton);
-        Assert.Contains("MinHeight = OverlayQamResources.Get(\"QamRowMinHeight\", 42.0)", headerButton);
-        Assert.DoesNotContain("Padding = new Thickness(0)", headerButton);
-        Assert.Contains("var header = OverlayRowChrome.Create(headerButton);", createCard);
-        Assert.Contains("header.Padding = new Thickness(0);", createCard);
-        Assert.Contains("headerButton.Click += (_, _) => ToggleSettingCard(id);", createCard);
-        Assert.Contains("AutomationProperties.SetName(headerButton, $\"{title}, expand settings\")", createCard);
-        Assert.Contains("RegisterRowPointerSelection(header);", createCard);
-        Assert.Contains("var details = CreateOverlayDetailStack();", createCard);
-        Assert.DoesNotContain("QamDetailMargin", createCard);
-        Assert.DoesNotContain("PointerEntered", createCard);
-        Assert.DoesNotContain("PointerExited", createCard);
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", rootRow);
+        Assert.Contains("Padding = OverlayQamResources.Get(\"QamRowPadding\", new Thickness(16, 10, 16, 10))", rootRow);
+        Assert.Contains("MinHeight = OverlayQamResources.Get(\"QamRowMinHeight\", 42.0)", rootRow);
+        Assert.Contains("var container = CreateOverlaySectionCard(header);", rootRow);
+        Assert.Contains("headerButton.Click += (_, _) => OpenSettingDetail(id, detailView, detailRows, container, title);", rootRow);
+        Assert.Contains("Activate: () => OpenSettingDetail(id, detailView, detailRows, container, title)", rootRow);
+        Assert.Contains("RegisterRowPointerSelection(container);", rootRow);
+        Assert.Contains("IsSelectable: () => true", rootRow);
+        Assert.DoesNotContain("Focus()", rootRow);
+        Assert.DoesNotContain("CreateOverlayDetailStack", rootRow);
     }
 
     [Fact]
-    public void Quick_settings_setting_card_uses_the_existing_runtime_preference_and_dynamic_row_remap()
+    public void Quick_settings_detail_uses_existing_runtime_preferences_and_tab_order_reconciles_only_when_visible()
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
@@ -1030,10 +1089,10 @@ public sealed class OverlayDeviceRendererWiringTests
         var overlayApp = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
         var host = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
 
-        Assert.True(clawHud.IndexOf("CreateSettingCard(SettingCardId.ClawHud", StringComparison.Ordinal)
-            < clawHud.IndexOf("CreateSettingCard(SettingCardId.QuickSettings", StringComparison.Ordinal));
-        Assert.True(clawHud.IndexOf("CreateSettingCard(SettingCardId.QuickSettings", StringComparison.Ordinal)
-            < clawHud.IndexOf("CreateSettingCard(SettingCardId.TabOrder", StringComparison.Ordinal));
+        Assert.True(clawHud.IndexOf("SettingDetailId.ClawHud, \"ClawHUD\"", StringComparison.Ordinal)
+            < clawHud.IndexOf("SettingDetailId.QuickSettings, \"Quick Settings\"", StringComparison.Ordinal));
+        Assert.True(clawHud.IndexOf("SettingDetailId.QuickSettings, \"Quick Settings\"", StringComparison.Ordinal)
+            < clawHud.IndexOf("SettingDetailId.TabOrder, \"Quick Overlay Tab Order\"", StringComparison.Ordinal));
         Assert.Contains("SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value", host);
         Assert.Contains("SetQuickOverlayYButtonTargetAsync(target", host);
         Assert.Contains("SendCurrentPowerSourceMutationAsync", overlayApp);
@@ -1056,10 +1115,12 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("return;", yFailure);
         Assert.DoesNotContain("SetQuickSettingsCurrentPowerSourceMutationInFlight(false)", yFailure);
         Assert.Contains("request.CurrentPowerSourceOnly!.Value", host);
-        Assert.Contains("FindSettingRowIndex(previousSettingRows, firstPreviousEditor.Container)", shell);
-        Assert.DoesNotContain("_clawHudRows.Count + 2", shell);
-        Assert.Contains("GetSettingCard(expanded).Row.Container", clawHud);
-        Assert.Contains("UpdateSettingCardVisual(_quickSettingsCard)", clawHud);
+        Assert.Contains("Identity: SettingDetailId.TabOrder", shell);
+        Assert.Contains("BuildTabOrderDetailRows(applied)", shell);
+        Assert.Contains("ReconcileRowSelection(", shell);
+        Assert.DoesNotContain("ResolvePreferredSettingRowIndex", shell);
+        Assert.DoesNotContain("_clawHudRows.Count +", shell);
+        Assert.DoesNotContain("SettingCard", clawHud);
     }
 
     [Fact]
@@ -1162,14 +1223,15 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.True(completion.IndexOf("ApplyFrontendSettingsState(response.Settings", StringComparison.Ordinal)
             < completion.IndexOf("SetQuickSettingsCurrentPowerSourceMutationInFlight(false)", StringComparison.Ordinal));
 
-        Assert.Contains("capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(card, row.Container)", clawHud);
+        Assert.Contains("IsSettingDetailActive(detail) &&", clawHud);
+        Assert.Contains("capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(detail, row.Container)", clawHud);
         Assert.Contains("ReferenceEquals(rows[selectedIndex].Container, container)", clawHud);
         Assert.Contains("snapshot?.RuntimeState == FrontendClawHudRuntimeState.Ready &&", clawHud);
         Assert.Contains("snapshot.Settings is not null &&", clawHud);
         Assert.Contains("_clawHudRows.Any(row => ReferenceEquals(row.Container, container))", clawHud);
         Assert.DoesNotContain("GetPendingClawHudRowContainer", clawHud);
         Assert.Contains("_quickSettingsSettingsAvailable &&", clawHud);
-        Assert.Contains("_expandedSettingCard == card &&", clawHud);
+        Assert.Contains("detail == SettingDetailId.QuickSettings && _quickSettingsMutationInFlight", clawHud);
 
         var clawHudRenderStart = clawHud.IndexOf("private void RenderClawHudControls()", StringComparison.Ordinal);
         var clawHudRender = clawHud[clawHudRenderStart..];
@@ -1182,11 +1244,11 @@ public sealed class OverlayDeviceRendererWiringTests
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
         var wrapperStart = clawHud.IndexOf("private OverlayRow CreateSettingDetailRow(", StringComparison.Ordinal);
-        var wrapperEnd = clawHud.IndexOf("private void ToggleSettingCard(", wrapperStart, StringComparison.Ordinal);
+        var wrapperEnd = clawHud.IndexOf("private bool IsSettingDetailActive", wrapperStart, StringComparison.Ordinal);
         var wrapper = clawHud[wrapperStart..wrapperEnd];
 
-        Assert.Contains("IsSelectable: () => _expandedSettingCard == card &&", wrapper);
-        Assert.Contains("capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(card, row.Container)", wrapper);
+        Assert.Contains("IsSelectable: () => IsSettingDetailActive(detail) &&", wrapper);
+        Assert.Contains("capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(detail, row.Container)", wrapper);
         Assert.Contains("Activate: capabilities.Activate", wrapper);
         Assert.Contains("Adjust: capabilities.Adjust", wrapper);
         Assert.DoesNotContain("rowIndex", clawHud);
@@ -1266,7 +1328,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Null(nextHint.Attribute("Margin"));
         Assert.DoesNotContain("QamRailHintMargin", xaml);
         Assert.DoesNotContain("ColumnDefinitions", tabRail);
-        Assert.DoesNotContain("Grid.ColumnDefinitions", bodyColumn);
+        Assert.Equal(1, CountOccurrences(bodyColumn, "<Grid.ColumnDefinitions>"));
         Assert.Contains("Grid.Column=\"1\"", bodyColumn);
         Assert.DoesNotContain("Margin=\"{StaticResource QamBodyContentPadding}\"", bodyColumn);
         Assert.Contains("Padding=\"{StaticResource QamBodyContentPadding}\"", bodyColumn);

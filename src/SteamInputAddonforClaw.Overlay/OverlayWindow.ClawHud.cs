@@ -1,6 +1,8 @@
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -8,19 +10,12 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow
 {
-    private enum SettingCardId { ClawHud, QuickSettings, TabOrder }
+    private enum SettingDetailId { ClawHud, QuickSettings, TabOrder }
 
-    private sealed record SettingCardView(
-        SettingCardId Id,
-        string Title,
-        Border Container,
-        StackPanel Details,
-        Button HeaderButton,
-        TextBlock Chevron,
-        OverlayRow Row);
-
+    private readonly List<OverlayRow> _settingRootRows = new();
     private readonly List<OverlayRow> _clawHudRows = new();
     private readonly List<OverlayRow> _quickSettingsRows = new();
+    private FrameworkElement? _settingRootView;
     private OverlayToggleRow? _clawHudEnabledRow;
     private OverlayValueRow? _clawHudDisplayModeRow;
     private OverlayValueRow? _clawHudSizeRow;
@@ -29,9 +24,6 @@ public sealed partial class OverlayWindow
     private OverlayValueRow? _clawHudBackgroundRow;
     private OverlayValueRow? _clawHudOpacityRow;
     private OverlayToggleRow? _clawHudVrrRow;
-    private SettingCardView? _clawHudCard;
-    private SettingCardView? _tabOrderCard;
-    private SettingCardView? _quickSettingsCard;
     private OverlayValueRow? _quickSettingsYButtonQuickJumpRow;
     private QuickOverlayYButtonTarget _quickSettingsYButtonQuickJumpTarget;
     private QuickOverlayYButtonTarget? _pendingYButtonQuickJumpTarget;
@@ -42,7 +34,6 @@ public sealed partial class OverlayWindow
     private bool? _pendingQuickSettingsCurrentPowerSourceOnly;
     private bool _quickSettingsSettingsAvailable;
     private bool _quickSettingsMutationInFlight;
-    private SettingCardId? _expandedSettingCard;
     private readonly OverlayClawHudMutationState _clawHudMutation = new();
 
     internal event Action<bool>? ClawHudEnabledRequested;
@@ -52,29 +43,53 @@ public sealed partial class OverlayWindow
 
     private FrameworkElement BuildSettingPage(List<OverlayRow> rows)
     {
+        _settingRootRows.Clear();
         _clawHudRows.Clear();
         _quickSettingsRows.Clear();
 
-        var clawHudDetails = BuildClawHudPage();
-        var quickSettingsDetails = BuildQuickSettingsPage();
-        var tabOrderDetails = BuildTabOrderEditorPage();
+        var clawHudDetailView = CreateSettingDetailPage(BuildClawHudPage());
+        var quickSettingsDetailView = CreateSettingDetailPage(BuildQuickSettingsPage());
+        var tabOrderDetailView = CreateSettingDetailPage(BuildTabOrderEditorPage());
 
-        _clawHudCard = CreateSettingCard(SettingCardId.ClawHud, "ClawHUD", clawHudDetails);
-        _quickSettingsCard = CreateSettingCard(SettingCardId.QuickSettings, "Quick Settings", quickSettingsDetails);
-        _tabOrderCard = CreateSettingCard(SettingCardId.TabOrder, "Quick Overlay Tab Order", tabOrderDetails);
-        SetOverlaySectionSeparator(_clawHudCard.Container, visible: false);
-        SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true);
-        SetOverlaySectionSeparator(_tabOrderCard.Container, visible: true);
+        var settingRootView = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
+        _settingRootView = settingRootView;
+        _settingRootRows.Add(CreateSettingRootRow(
+            SettingDetailId.ClawHud, "ClawHUD", clawHudDetailView, () => _clawHudRows));
+        _settingRootRows.Add(CreateSettingRootRow(
+            SettingDetailId.QuickSettings, "Quick Settings", quickSettingsDetailView, () => _quickSettingsRows));
+        _settingRootRows.Add(CreateSettingRootRow(
+            SettingDetailId.TabOrder, "Quick Overlay Tab Order", tabOrderDetailView,
+            () => BuildTabOrderDetailRows(_tabState.Order)));
 
-        var root = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
-        root.Children.Add(_clawHudCard.Container);
-        root.Children.Add(_quickSettingsCard.Container);
-        root.Children.Add(_tabOrderCard.Container);
-        rows.AddRange(BuildSettingRows(_tabState.Order));
-        return root;
+        SetOverlaySectionSeparator(_settingRootRows[0].Container, visible: false);
+        SetOverlaySectionSeparator(_settingRootRows[1].Container, visible: true);
+        SetOverlaySectionSeparator(_settingRootRows[2].Container, visible: true);
+
+        foreach (var row in _settingRootRows)
+            settingRootView.Children.Add(row.Container);
+
+        var host = new Grid();
+        host.Children.Add(settingRootView);
+        host.Children.Add(clawHudDetailView);
+        host.Children.Add(quickSettingsDetailView);
+        host.Children.Add(tabOrderDetailView);
+        rows.AddRange(_settingRootRows);
+        return host;
     }
 
-    private SettingCardView CreateSettingCard(SettingCardId id, string title, FrameworkElement detailsContent)
+    private FrameworkElement CreateSettingDetailPage(FrameworkElement content)
+    {
+        var detailPage = CreateOverlaySectionCard(content);
+        SetOverlaySectionSeparator((Border)detailPage, visible: false);
+        detailPage.Visibility = Visibility.Collapsed;
+        return detailPage;
+    }
+
+    private OverlayRow CreateSettingRootRow(
+        SettingDetailId id,
+        string title,
+        FrameworkElement detailView,
+        Func<IReadOnlyList<OverlayRow>> detailRows)
     {
         var titleText = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap };
         OverlayQamResources.ApplyTextStyle(titleText, "QamBodyStrongTextStyle");
@@ -108,70 +123,70 @@ public sealed partial class OverlayWindow
             Padding = OverlayQamResources.Get("QamRowPadding", new Thickness(16, 10, 16, 10)),
             MinHeight = OverlayQamResources.Get("QamRowMinHeight", 42.0),
             BorderThickness = new Thickness(0),
-            Background = OverlayQamResources.Brush("QamSectionBrush"),
+            Background = new SolidColorBrush(Colors.Transparent),
         };
-        AutomationProperties.SetName(headerButton, $"{title}, expand settings");
-        headerButton.Click += (_, _) => ToggleSettingCard(id);
+        AutomationProperties.SetName(headerButton, $"Open {title} settings");
 
         var header = OverlayRowChrome.Create(headerButton);
         header.Padding = new Thickness(0);
-        var row = new OverlayRow(header, new OverlayRowCapabilities(
+        header.Background = new SolidColorBrush(Colors.Transparent);
+        var container = CreateOverlaySectionCard(header);
+        var row = new OverlayRow(container, new OverlayRowCapabilities(
             IsSelectable: () => true,
-            Activate: () => ToggleSettingCard(id)));
-        RegisterRowPointerSelection(header);
-
-        var details = CreateOverlayDetailStack();
-        details.Visibility = Visibility.Collapsed;
-        details.Children.Add(detailsContent);
-
-        var content = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
-        content.Children.Add(header);
-        content.Children.Add(details);
-
-        return new SettingCardView(id, title, CreateOverlaySectionCard(content), details, headerButton, chevron, row);
+            Activate: () => OpenSettingDetail(id, detailView, detailRows, container, title)));
+        headerButton.Click += (_, _) => OpenSettingDetail(id, detailView, detailRows, container, title);
+        RegisterRowPointerSelection(container);
+        return row;
     }
 
-    private List<OverlayRow> BuildSettingRows(IReadOnlyList<AddonQuickSettingsTabId> tabOrder)
+    private void OpenSettingDetail(
+        SettingDetailId id,
+        FrameworkElement detailView,
+        Func<IReadOnlyList<OverlayRow>> detailRows,
+        Border originContainer,
+        string title)
     {
-        var rows = new List<OverlayRow>();
-        if (_clawHudCard is not null)
-            rows.Add(_clawHudCard.Row);
-        rows.AddRange(_clawHudRows);
-        if (_quickSettingsCard is not null)
-            rows.Add(_quickSettingsCard.Row);
-        rows.AddRange(_quickSettingsRows);
-        if (_tabOrderCard is not null)
-            rows.Add(_tabOrderCard.Row);
+        if (_settingRootView is null) return;
+        EnterDetailPage(
+            AddonQuickSettingsTabId.Setting,
+            id,
+            _settingRootView,
+            detailView,
+            detailRows(),
+            originContainer,
+            title);
+    }
 
-        foreach (var id in tabOrder)
+    private List<OverlayRow> BuildTabOrderDetailRows(IReadOnlyList<AddonQuickSettingsTabId> order)
+    {
+        var rows = new List<OverlayRow>(order.Count);
+        foreach (var tab in order)
         {
-            if (_tabOrderRows.TryGetValue(id, out var row))
-            {
-                rows.Add(CreateSettingDetailRow(
-                    new OverlayRow(row.Container, row.Capabilities),
-                    SettingCardId.TabOrder));
-            }
+            if (_tabOrderRows.TryGetValue(tab, out var row))
+                rows.Add(CreateSettingDetailRow(new OverlayRow(row.Container, row.Capabilities), SettingDetailId.TabOrder));
         }
-
         return rows;
     }
 
-    private OverlayRow CreateSettingDetailRow(OverlayRow row, SettingCardId card)
+    private OverlayRow CreateSettingDetailRow(OverlayRow row, SettingDetailId detail)
     {
         var capabilities = row.Capabilities;
         return new OverlayRow(row.Container, new OverlayRowCapabilities(
-            IsSelectable: () => _expandedSettingCard == card &&
-                (capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(card, row.Container)),
+            IsSelectable: () => IsSettingDetailActive(detail) &&
+                (capabilities.IsSelectable() || IsNavigableDuringPendingSettingMutation(detail, row.Container)),
             Activate: capabilities.Activate,
             Adjust: capabilities.Adjust));
     }
 
-    private bool IsNavigableDuringPendingSettingMutation(SettingCardId card, Border container)
+    private bool IsSettingDetailActive(SettingDetailId detail) =>
+        _activeDetailPage is { Tab: AddonQuickSettingsTabId.Setting } active && active.Identity.Equals(detail);
+
+    private bool IsNavigableDuringPendingSettingMutation(SettingDetailId detail, Border container)
     {
-        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Setting)
+        if (!IsSettingDetailActive(detail))
             return false;
 
-        if (card == SettingCardId.ClawHud && _clawHudMutation.IsInFlight)
+        if (detail == SettingDetailId.ClawHud && _clawHudMutation.IsInFlight)
         {
             var snapshot = _clawHudMutation.Snapshot;
             return ReferenceEquals(container, _clawHudEnabledRow?.Container)
@@ -187,81 +202,9 @@ public sealed partial class OverlayWindow
             !ReferenceEquals(rows[selectedIndex].Container, container))
             return false;
 
-        return card == SettingCardId.QuickSettings && _quickSettingsMutationInFlight &&
+        return detail == SettingDetailId.QuickSettings && _quickSettingsMutationInFlight &&
             _quickSettingsSettingsAvailable &&
             ReferenceEquals(container, _quickSettingsCurrentPowerSourceOnlyRow?.Container);
-    }
-
-    private void ToggleSettingCard(SettingCardId id)
-    {
-        SettingCardId? expanded = _expandedSettingCard == id ? null : id;
-        SetExpandedSettingCard(expanded, GetSettingCard(id).Row.Container);
-    }
-
-    private void SetExpandedSettingCard(SettingCardId? id, Border? preferredContainer)
-    {
-        _expandedSettingCard = id;
-        UpdateSettingCardVisual(_clawHudCard);
-        UpdateSettingCardVisual(_quickSettingsCard);
-        UpdateSettingCardVisual(_tabOrderCard);
-
-        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Setting)
-            return;
-
-        var rows = _pageRows.TryGetValue(AddonQuickSettingsTabId.Setting, out var pageRows) ? pageRows : [];
-        int? preferredIndex = preferredContainer is null
-            ? null
-            : FindSettingRowIndex(rows, preferredContainer);
-        _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
-        ApplyRowSelectionVisual();
-        BringSelectedRowIntoView();
-    }
-
-    private void UpdateSettingCardVisual(SettingCardView? card)
-    {
-        if (card is null)
-            return;
-
-        var expanded = _expandedSettingCard == card.Id;
-        card.Details.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        card.Chevron.Text = expanded ? "⌄" : "›";
-        AutomationProperties.SetName(card.HeaderButton,
-            $"{card.Title}, {(expanded ? "collapse" : "expand")} settings");
-    }
-
-    private SettingCardView GetSettingCard(SettingCardId id) => id switch
-    {
-        SettingCardId.ClawHud => _clawHudCard ?? throw new InvalidOperationException("ClawHUD settings card has not been built."),
-        SettingCardId.QuickSettings => _quickSettingsCard ?? throw new InvalidOperationException("Quick Settings card has not been built."),
-        _ => _tabOrderCard ?? throw new InvalidOperationException("Tab Order settings card has not been built."),
-    };
-
-    private int? FindSettingRowIndex(IReadOnlyList<OverlayRow> rows, Border container)
-    {
-        for (var index = 0; index < rows.Count; index++)
-            if (ReferenceEquals(rows[index].Container, container))
-                return index;
-        return null;
-    }
-
-    internal bool TryHandleSettingBack()
-    {
-        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Setting || _expandedSettingCard is not { } expanded)
-            return false;
-
-        SetExpandedSettingCard(null, GetSettingCard(expanded).Row.Container);
-        return true;
-    }
-
-    private void ResetSettingCardsForShow()
-    {
-        if (_expandedSettingCard is null)
-            return;
-
-        _expandedSettingCard = null;
-        UpdateSettingCardVisual(_clawHudCard);
-        UpdateSettingCardVisual(_quickSettingsCard);
-        UpdateSettingCardVisual(_tabOrderCard);
     }
 
     private StackPanel BuildQuickSettingsPage()
@@ -276,7 +219,7 @@ public sealed partial class OverlayWindow
         section.Children.Add(_quickSettingsYButtonQuickJumpRow.Container);
         _quickSettingsRows.Add(CreateSettingDetailRow(
             new OverlayRow(_quickSettingsYButtonQuickJumpRow.Container, _quickSettingsYButtonQuickJumpRow.Capabilities),
-            SettingCardId.QuickSettings));
+            SettingDetailId.QuickSettings));
         RegisterRowPointerSelection(_quickSettingsYButtonQuickJumpRow.Container);
 
         _quickSettingsCurrentPowerSourceOnlyRow = new OverlayToggleRow(
@@ -285,7 +228,7 @@ public sealed partial class OverlayWindow
         section.Children.Add(_quickSettingsCurrentPowerSourceOnlyRow.Container);
         _quickSettingsRows.Add(CreateSettingDetailRow(
             new OverlayRow(_quickSettingsCurrentPowerSourceOnlyRow.Container, _quickSettingsCurrentPowerSourceOnlyRow.Capabilities),
-            SettingCardId.QuickSettings));
+            SettingDetailId.QuickSettings));
         RegisterRowPointerSelection(_quickSettingsCurrentPowerSourceOnlyRow.Container);
         return section;
     }
@@ -446,7 +389,7 @@ public sealed partial class OverlayWindow
         section.Children.Add(row.Container);
         _clawHudRows.Add(CreateSettingDetailRow(
             new OverlayRow(row.Container, row.Capabilities),
-            SettingCardId.ClawHud));
+            SettingDetailId.ClawHud));
         RegisterRowPointerSelection(row.Container);
     }
 
@@ -456,7 +399,7 @@ public sealed partial class OverlayWindow
         section.Children.Add(row.Container);
         _clawHudRows.Add(CreateSettingDetailRow(
             new OverlayRow(row.Container, row.Capabilities),
-            SettingCardId.ClawHud));
+            SettingDetailId.ClawHud));
         RegisterRowPointerSelection(row.Container);
     }
 
