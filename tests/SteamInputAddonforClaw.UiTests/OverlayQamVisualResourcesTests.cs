@@ -318,8 +318,9 @@ public sealed class OverlayQamVisualResourcesTests
             "// Resolve against the current page order at interaction time.");
 
         Assert.Contains("_rowSelectedFillBrush = OverlayQamResources.Brush(\"QamSelectedFillBrush\")", window);
-        Assert.Contains("selected ? _rowSelectedFillBrush : RowUnselectedFillBrush", selectionVisual);
+        Assert.Contains("i == selectedIndex ? _rowSelectedFillBrush : RowUnselectedFillBrush", selectionVisual);
         Assert.Contains("rows[i].Container.Background", selectionVisual);
+        Assert.Contains("if (!ReferenceEquals(rows[i].Container.Background, brush))", selectionVisual);
         Assert.DoesNotContain("rows[i].Container.BorderBrush", selectionVisual);
 
         Assert.Contains("tile.Border.BorderBrush = _rowSelectedBrush", navigation);

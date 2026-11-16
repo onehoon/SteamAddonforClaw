@@ -124,6 +124,21 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
     }
 
     [Fact]
+    public void Live_tab_order_apply_reconciles_from_the_selected_container_identity()
+    {
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var applyStart = shell.IndexOf("internal void ApplyTabOrderState(", StringComparison.Ordinal);
+        var applyEnd = shell.IndexOf("internal static int? ResolvePreferredSettingRowIndex(", applyStart, StringComparison.Ordinal);
+        var apply = shell[applyStart..applyEnd];
+
+        Assert.Contains("var selectedSettingContainer =", apply);
+        Assert.Contains("ResolvePreferredSettingRowIndex(", apply);
+        Assert.Contains("ReconcileRowSelection(", apply);
+        Assert.Contains("selectedSettingContainer", apply);
+        Assert.DoesNotContain("_rowSelection.SetRows", apply);
+    }
+
+    [Fact]
     public void Collapsed_setting_card_skips_its_hidden_detail_rows()
     {
         var expanded = false;
@@ -178,5 +193,15 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
         for (var i = 0; i < order.Count; i++)
             if (order[i] == tab) return i;
         return -1;
+    }
+
+    private static string ReadSource(params string[] parts)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "README.md")))
+            directory = directory.Parent;
+
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine([directory!.FullName, .. parts]));
     }
 }

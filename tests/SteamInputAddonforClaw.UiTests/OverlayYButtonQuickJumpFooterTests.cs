@@ -43,7 +43,7 @@ public sealed class OverlayYButtonQuickJumpFooterTests
         var mutationResult = SliceMethod(controller,
             "internal void ApplyFrontendSettingsMutationResult(", "internal void ApplyFrontendSettingsMutationFailure(");
         var mutationFailure = SliceMethod(controller,
-            "internal void ApplyFrontendSettingsMutationFailure(", "private void RestoreControllerRowSelection(");
+            "internal void ApplyFrontendSettingsMutationFailure(", "private void RequestControllerLedEnabled(");
         var pendingMutation = SliceMethod(clawHud,
             "private void RequestYButtonQuickJumpChange(", "private void SetYButtonQuickJumpMutationInFlight(");
 
