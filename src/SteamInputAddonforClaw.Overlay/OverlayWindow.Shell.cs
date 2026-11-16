@@ -145,8 +145,8 @@ public sealed partial class OverlayWindow
     private void ResetUiForShow()
     {
         PrepareActiveProfileFirstShow();
+        ResetDetailForTabChangeOrShow();
         _tabState.ResetForShow();
-        ResetSettingCardsForShow();
         ApplySelectedTabVisualState();
     }
 
@@ -192,19 +192,12 @@ public sealed partial class OverlayWindow
     // (s.11.1) -- the new first tab only takes effect on the next Show via ResetForShow().
     internal void ApplyTabOrderState(AddonQuickSettingsTabOrderSnapshot state)
     {
-        // Capture the Setting-editor row identity selected right now (before the order changes) so a
-        // live reorder preserves the selected tab rather than the old numeric row slot.
-        var settingVisible = _tabState.SelectedTab == AddonQuickSettingsTabId.Setting;
-        var selectedSettingIndex = settingVisible ? _rowSelection.SelectedIndex : null;
-        var previousOrder = _tabState.Order;
-        var previousSettingRows = _pageRows.TryGetValue(AddonQuickSettingsTabId.Setting, out var currentSettingRows) ? currentSettingRows : [];
-        var selectedSettingContainer = selectedSettingIndex is { } selectedIndex &&
-            selectedIndex >= 0 && selectedIndex < previousSettingRows.Count
-                ? previousSettingRows[selectedIndex].Container
-                : null;
-        var tabOrderEditorStartIndex = previousOrder.Count > 0 && _tabOrderRows.TryGetValue(previousOrder[0], out var firstPreviousEditor)
-            ? FindSettingRowIndex(previousSettingRows, firstPreviousEditor.Container)
+        var tabOrderDetailActive = _activeDetailPage is
+            { Tab: AddonQuickSettingsTabId.Setting, Identity: SettingDetailId.TabOrder };
+        var selectedSettingContainer = tabOrderDetailActive
+            ? SelectedRowContainer(AddonQuickSettingsTabId.Setting)
             : null;
+        var selectedSettingIndex = tabOrderDetailActive ? _rowSelection.SelectedIndex : null;
 
         if (!state.Available || state.Rows.Count != 5)
         {
@@ -241,71 +234,21 @@ public sealed partial class OverlayWindow
             if (_tabOrderRows.TryGetValue(rowState.TabId, out var editorRow))
                 editorRow.ApplyState(rowState);
 
-        // Rebuild the Setting page's ordered row list so CapabilitiesFor(Setting) / the selection
-        // model see the authoritative order. The AddonQuickSettingsTabOrderRow instances are reused.
-        if (_tabOrderRows.Count == applied.Count)
+        // Only the visible Tab Order detail needs a new row projection. Its five native row controls
+        // remain the same instances, and a selected Border is resolved in the authoritative order.
+        if (tabOrderDetailActive && _tabOrderRows.Count == applied.Count)
         {
-            _pageRows[AddonQuickSettingsTabId.Setting] = BuildSettingRows(applied);
+            _pageRows[AddonQuickSettingsTabId.Setting] = BuildTabOrderDetailRows(applied);
+            ReconcileRowSelection(
+                AddonQuickSettingsTabId.Setting,
+                selectedSettingContainer,
+                selectedSettingIndex,
+                bringIntoViewOnChange: false);
         }
 
         ApplySelectedHeaderVisual();
 
-        // s.8.2/8.4: if the Setting editor is what the user is looking at, re-point selection at the
-        // same identity and refresh just the row highlight -- do NOT run the full tab-change path
-        // (which would reset body scroll and selection).
-        if (settingVisible)
-        {
-            var preferredIndex = ResolvePreferredSettingRowIndex(
-                selectedSettingIndex,
-                tabOrderEditorStartIndex,
-                previousOrder,
-                applied);
-            ReconcileRowSelection(
-                AddonQuickSettingsTabId.Setting,
-                selectedSettingContainer,
-                preferredIndex,
-                bringIntoViewOnChange: false);
-        }
-
         OverlayLog.Debug("Shell", "Authoritative Overlay tab order applied.", ("SelectedTab", _tabState.SelectedTab));
-    }
-
-    // Keep the fixed Setting rows anchored by their local index and remap only tab-order rows by
-    // identity. The caller finds the actual first editor row from its retained row container, so
-    // adding a card cannot silently shift an arithmetic header offset.
-    internal static int? ResolvePreferredSettingRowIndex(
-        int? selectedSettingIndex,
-        int? editorRowStart,
-        IReadOnlyList<AddonQuickSettingsTabId> previousOrder,
-        IReadOnlyList<AddonQuickSettingsTabId> appliedOrder)
-    {
-        if (editorRowStart is not { } start)
-            return selectedSettingIndex;
-        AddonQuickSettingsTabId? selectedEditorTab = null;
-        if (selectedSettingIndex is { } selected &&
-            selected >= start &&
-            selected - start < previousOrder.Count)
-        {
-            selectedEditorTab = previousOrder[selected - start];
-        }
-
-        int? preferredIndex = selectedSettingIndex is { } index && index >= 0 && index < start
-            ? index
-            : null;
-
-        if (selectedEditorTab is { } tab)
-        {
-            for (var i = 0; i < appliedOrder.Count; i++)
-            {
-                if (appliedOrder[i] == tab)
-                {
-                    preferredIndex = start + i;
-                    break;
-                }
-            }
-        }
-
-        return preferredIndex;
     }
 
     private void ApplySelectedHeaderVisual()
@@ -328,9 +271,16 @@ public sealed partial class OverlayWindow
     // then apply the row-selection visual.
     private void ApplySelectedTabVisualState()
     {
+        if (_activeDetailPage is { } activeDetail && activeDetail.Tab != _tabState.SelectedTab)
+            ResetDetailForTabChangeOrShow();
+
         _numericSliderRepeatTarget.Clear();
         var selected = _tabState.SelectedTab;
-        PageTitle.Text = LabelFor(selected);
+        if (_activeDetailPage is null)
+        {
+            DetailBackButton.Visibility = Visibility.Collapsed;
+            PageTitle.Text = LabelFor(selected);
+        }
         ApplySelectedHeaderVisual();
         foreach (var (id, page) in _tabPages)
             page.Visibility = id == selected ? Visibility.Visible : Visibility.Collapsed;

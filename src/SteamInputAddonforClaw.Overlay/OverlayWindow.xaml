@@ -76,12 +76,39 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <TextBlock
-                                x:Name="PageTitle"
-                                Grid.Row="0"
-                                Visibility="Visible"
-                                Style="{StaticResource QamPageTitleTextStyle}"
-                                Margin="{StaticResource QamPageTitleMargin}" />
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button
+                                    x:Name="DetailBackButton"
+                                    Grid.Column="0"
+                                    Visibility="Collapsed"
+                                    Style="{StaticResource QamFlatButtonStyle}"
+                                    Padding="8,0"
+                                    MinWidth="0"
+                                    MinHeight="42"
+                                    IsTabStop="False"
+                                    AllowFocusOnInteraction="False"
+                                    Click="OnDetailBackButtonClick"
+                                    AutomationProperties.Name="Back to the previous page">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <FontIcon
+                                            Glyph="&#xE72B;"
+                                            FontFamily="Segoe Fluent Icons"
+                                            FontSize="16"
+                                            IsHitTestVisible="False" />
+                                        <TextBlock Text="Back" Style="{StaticResource QamBodyTextStyle}" />
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock
+                                    x:Name="PageTitle"
+                                    Grid.Column="1"
+                                    Visibility="Visible"
+                                    Style="{StaticResource QamPageTitleTextStyle}"
+                                    Margin="{StaticResource QamPageTitleMargin}" />
+                            </Grid>
                             <Grid
                                 x:Name="ProfileArtworkHost"
                                 Grid.Row="1"

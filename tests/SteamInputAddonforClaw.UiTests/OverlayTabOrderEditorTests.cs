@@ -5,23 +5,16 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-// OQ5-UI-10: the Setting-page tab-order editor is WinUI, but its non-visual contract is the pure
-// composition of the shared tab-order product (intent + authoritative apply) and OverlayRowSelection
-// (identity-preserving reselection). These cover that composition without a XAML host.
+// The editor is WinUI, so verify its wiring through source contracts and exercise the shared
+// selection model with the stable row identities used by the renderer.
 public sealed class AddonQuickSettingsTabOrderEditorTests
 {
     private static OverlayRowCapabilities Selectable() => new(() => true);
 
     [Fact]
-    public void Tab_order_rows_use_shared_detail_padding_and_keep_the_existing_row_contract()
+    public void Tab_order_rows_keep_the_existing_detail_padding_and_mutation_contract()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
-            directory = directory.Parent;
-
-        Assert.NotNull(directory);
-        var source = File.ReadAllText(Path.Combine(directory!.FullName,
-            "src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs");
 
         Assert.Contains("Container = OverlayRowChrome.Create(grid);", source);
         Assert.Contains("OverlayRowChrome.ApplyDetailPadding(Container);", source);
@@ -30,17 +23,14 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
     }
 
     [Fact]
-    public void LiveReorderKeepsTheSelectedEditorRowIdentityNotItsOldSlot()
+    public void Authoritative_reorder_preserves_the_selected_tab_row_identity()
     {
-        var state = new OverlayTabState(); // Shortcut, Device, Controller, Setting, Profile
+        var state = new OverlayTabState();
+        var rowByTab = state.Order.ToDictionary(tab => tab, _ => Selectable());
         var selection = new OverlayRowSelection();
-        selection.SetRows([Selectable(), Selectable(), Selectable(), Selectable(), Selectable()]);
-
-        // User selects the "Controller" editor row (index 2) and presses Left.
-        selection.MoveNext();
-        selection.MoveNext();
-        var selectedId = state.Order[selection.SelectedIndex!.Value];
-        Assert.Equal(AddonQuickSettingsTabId.Controller, selectedId);
+        selection.SetRows(state.Order.Select(tab => rowByTab[tab]).ToArray());
+        Assert.True(selection.TrySelect(IndexOf(state.Order, AddonQuickSettingsTabId.Controller)));
+        var selectedRow = rowByTab[AddonQuickSettingsTabId.Controller];
 
         IReadOnlyList<AddonQuickSettingsTabId> proposed =
         [
@@ -51,125 +41,71 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
             AddonQuickSettingsTabId.Setting,
         ];
 
-        // Runtime accepts and republishes; OverlayWindow.ApplyTabOrder re-points selection at the
-        // same identity's new index.
         Assert.True(state.TryApplyOrder(proposed));
-        var newIndex = IndexOf(state.Order, selectedId);
-        selection.SetRows([Selectable(), Selectable(), Selectable(), Selectable(), Selectable()], preferredIndex: newIndex);
+        var reorderedRows = state.Order.Select(tab => rowByTab[tab]).ToArray();
+        var selectedIndex = Array.FindIndex(reorderedRows, row => ReferenceEquals(row, selectedRow));
+        selection.SetRows(reorderedRows, selectedIndex);
 
-        Assert.Equal(1, newIndex);
-        Assert.Equal(1, selection.SelectedIndex);
-        Assert.Equal(AddonQuickSettingsTabId.Controller, state.Order[selection.SelectedIndex!.Value]); // still Controller, not Profile
+        Assert.Equal(1, selectedIndex);
+        Assert.Equal(selectedIndex, selection.SelectedIndex);
+        Assert.Same(selectedRow, selection.SelectedCapabilities);
     }
 
     [Fact]
-    public void AuthoritativeRefreshKeepsTheSelectedClawHudRow()
-    {
-        var state = new OverlayTabState();
-        const int clawHudRowCount = 3;
-        const int alignmentRowIndex = 2; // ClawHUD card header precedes its detail rows.
-        var rows = Enumerable.Range(0, clawHudRowCount + state.Order.Count)
-            .Select(_ => Selectable())
-            .ToArray();
-        var selection = new OverlayRowSelection();
-        selection.SetRows(rows, preferredIndex: alignmentRowIndex);
-
-        var previousOrder = state.Order.ToArray();
-        IReadOnlyList<AddonQuickSettingsTabId> proposed =
-        [
-            AddonQuickSettingsTabId.Profile,
-            AddonQuickSettingsTabId.Device,
-            AddonQuickSettingsTabId.Controller,
-            AddonQuickSettingsTabId.Shortcut,
-            AddonQuickSettingsTabId.Setting,
-        ];
-
-        Assert.True(state.TryApplyOrder(proposed));
-
-        var preferredIndex = OverlayWindow.ResolvePreferredSettingRowIndex(
-            selection.SelectedIndex,
-            clawHudRowCount + 4,
-            previousOrder,
-            state.Order);
-        selection.SetRows(rows, preferredIndex);
-
-        Assert.Equal(alignmentRowIndex, selection.SelectedIndex);
-    }
-
-    [Fact]
-    public void AuthoritativeRefreshKeepsTheSelectedTabOrderRowIdentityAfterCardHeaders()
-    {
-        var state = new OverlayTabState();
-        const int clawHudRowCount = 3;
-        var previousOrder = state.Order.ToArray();
-        var editorRowStart = clawHudRowCount + 4; // Three Setting card headers and the Quick Settings detail row.
-        var selectedIndex = editorRowStart + 2; // Controller editor row.
-        IReadOnlyList<AddonQuickSettingsTabId> appliedOrder =
-        [
-            AddonQuickSettingsTabId.Device,
-            AddonQuickSettingsTabId.Shortcut,
-            AddonQuickSettingsTabId.Profile,
-            AddonQuickSettingsTabId.Controller,
-            AddonQuickSettingsTabId.Setting,
-        ];
-
-        var preferredIndex = OverlayWindow.ResolvePreferredSettingRowIndex(
-            selectedIndex,
-            editorRowStart,
-            previousOrder,
-            appliedOrder);
-
-        Assert.Equal(editorRowStart + 3, preferredIndex);
-        Assert.Equal(AddonQuickSettingsTabId.Controller, appliedOrder[preferredIndex!.Value - editorRowStart]);
-    }
-
-    [Fact]
-    public void Live_tab_order_apply_reconciles_from_the_selected_container_identity()
+    public void Runtime_reorder_reconciles_only_the_visible_tab_order_detail_without_scrolling()
     {
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
-        var applyStart = shell.IndexOf("internal void ApplyTabOrderState(", StringComparison.Ordinal);
-        var applyEnd = shell.IndexOf("internal static int? ResolvePreferredSettingRowIndex(", applyStart, StringComparison.Ordinal);
-        var apply = shell[applyStart..applyEnd];
+        var apply = ExtractMethod(shell, "internal void ApplyTabOrderState(");
+        var activeDetailBlockStart = apply.IndexOf("if (tabOrderDetailActive && _tabOrderRows.Count == applied.Count)", StringComparison.Ordinal);
+        var activeDetailBlockEnd = apply.IndexOf("ApplySelectedHeaderVisual();", activeDetailBlockStart, StringComparison.Ordinal);
+        Assert.True(activeDetailBlockStart >= 0 && activeDetailBlockEnd > activeDetailBlockStart);
+        var activeDetailBlock = apply[activeDetailBlockStart..activeDetailBlockEnd];
 
-        Assert.Contains("var selectedSettingContainer =", apply);
-        Assert.Contains("ResolvePreferredSettingRowIndex(", apply);
-        Assert.Contains("ReconcileRowSelection(", apply);
-        Assert.Contains("selectedSettingContainer", apply);
+        Assert.Contains("Identity: SettingDetailId.TabOrder", apply);
+        Assert.Contains("SelectedRowContainer(AddonQuickSettingsTabId.Setting)", apply);
+        Assert.True(apply.IndexOf("selectedSettingContainer", StringComparison.Ordinal)
+            < apply.IndexOf("_tabState.TryApplyOrder(normalized)", StringComparison.Ordinal));
+        Assert.Contains("Grid.SetRow(editorRow.Container, position);", apply);
+        Assert.Contains("BuildTabOrderDetailRows(applied)", activeDetailBlock);
+        Assert.Contains("ReconcileRowSelection(", activeDetailBlock);
+        Assert.Contains("bringIntoViewOnChange: false", activeDetailBlock);
         Assert.DoesNotContain("_rowSelection.SetRows", apply);
+        Assert.DoesNotContain("ChangeView(", apply);
+        Assert.DoesNotContain("StartBringIntoView", apply);
+        Assert.DoesNotContain("ResolvePreferredSettingRowIndex", shell);
     }
 
     [Fact]
-    public void Collapsed_setting_card_skips_its_hidden_detail_rows()
+    public void Reorder_while_root_or_another_detail_is_active_does_not_replace_its_selection_set()
     {
-        var expanded = false;
-        var rows = new OverlayRowSelection();
-        rows.SetRows(
-        [
-            Selectable(),
-            new OverlayRowCapabilities(() => expanded),
-            Selectable(),
-        ]);
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var apply = ExtractMethod(shell, "internal void ApplyTabOrderState(");
+        var conditionalStart = apply.IndexOf("if (tabOrderDetailActive && _tabOrderRows.Count == applied.Count)", StringComparison.Ordinal);
+        var conditionalEnd = apply.IndexOf("ApplySelectedHeaderVisual();", conditionalStart, StringComparison.Ordinal);
+        Assert.True(conditionalStart >= 0 && conditionalEnd > conditionalStart);
+        var afterConditional = apply[conditionalEnd..];
 
-        Assert.True(rows.MoveNext());
-        Assert.Equal(2, rows.SelectedIndex);
-
-        expanded = true;
-        rows.SetRows(
-        [
-            Selectable(),
-            new OverlayRowCapabilities(() => expanded),
-            Selectable(),
-        ], preferredIndex: 0);
-        Assert.True(rows.MoveNext());
-        Assert.Equal(1, rows.SelectedIndex);
-
-        expanded = false;
-        Assert.True(rows.MoveNext());
-        Assert.Equal(2, rows.SelectedIndex);
+        Assert.Equal(1, CountOccurrences(apply, "_pageRows[AddonQuickSettingsTabId.Setting] = BuildTabOrderDetailRows(applied);"));
+        Assert.Contains("_pageRows[AddonQuickSettingsTabId.Setting] = BuildTabOrderDetailRows(applied);", apply[conditionalStart..conditionalEnd]);
+        Assert.DoesNotContain("ReconcileRowSelection(", afterConditional);
+        Assert.DoesNotContain("_rowSelection.SetRows", afterConditional);
+        Assert.DoesNotContain("ChangeView(", afterConditional);
     }
 
     [Fact]
-    public void NextShowStillSelectsTheNewFirstAuthoritativeTab()
+    public void Tab_order_moves_remain_one_position_runtime_authoritative_intents()
+    {
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var request = ExtractMethod(shell, "private void RequestTabOrderMove(");
+
+        Assert.Contains("if (delta is not (-1 or 1)) return;", request);
+        Assert.Contains("TabOrderMoveRequested?.Invoke(new(tab, delta));", request);
+        Assert.DoesNotContain("TryApplyOrder", request);
+        Assert.DoesNotContain("_tabState.Order", request);
+    }
+
+    [Fact]
+    public void Next_show_selects_the_first_tab_from_the_latest_authoritative_order()
     {
         var state = new OverlayTabState();
         state.Select(AddonQuickSettingsTabId.Setting);
@@ -183,9 +119,9 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
         ];
         Assert.True(state.TryApplyOrder(proposed));
 
-        Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab); // preserved during live reorder
+        Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab);
         state.ResetForShow();
-        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab); // new first tab on the next Show
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
     }
 
     private static int IndexOf(IReadOnlyList<AddonQuickSettingsTabId> order, AddonQuickSettingsTabId tab)
@@ -195,13 +131,26 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
         return -1;
     }
 
+    private static int CountOccurrences(string source, string value) =>
+        source.Split(value, StringSplitOptions.None).Length - 1;
+
+    private static string ExtractMethod(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing method: {signature}");
+        var nextMethod = source.IndexOf("\n    private ", start + signature.Length, StringComparison.Ordinal);
+        var nextInternal = source.IndexOf("\n    internal ", start + signature.Length, StringComparison.Ordinal);
+        var end = new[] { nextMethod, nextInternal }.Where(index => index >= 0).DefaultIfEmpty(source.Length).Min();
+        return source[start..end];
+    }
+
     private static string ReadSource(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "README.md")))
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
             directory = directory.Parent;
 
         Assert.NotNull(directory);
-        return File.ReadAllText(Path.Combine([directory!.FullName, .. parts]));
+        return File.ReadAllText(Path.Combine([directory!.FullName, .. parts])).ReplaceLineEndings("\n");
     }
 }
