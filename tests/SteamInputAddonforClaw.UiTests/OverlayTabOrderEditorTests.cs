@@ -1,3 +1,4 @@
+using System.IO;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay;
 using Xunit;
@@ -10,6 +11,23 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class AddonQuickSettingsTabOrderEditorTests
 {
     private static OverlayRowCapabilities Selectable() => new(() => true);
+
+    [Fact]
+    public void Tab_order_rows_use_shared_detail_padding_and_keep_the_existing_row_contract()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
+            directory = directory.Parent;
+
+        Assert.NotNull(directory);
+        var source = File.ReadAllText(Path.Combine(directory!.FullName,
+            "src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
+
+        Assert.Contains("Container = OverlayRowChrome.Create(grid);", source);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(Container);", source);
+        Assert.Contains("internal OverlayRowCapabilities Capabilities { get; }", source);
+        Assert.Contains("Adjust: delta =>", source);
+    }
 
     [Fact]
     public void LiveReorderKeepsTheSelectedEditorRowIdentityNotItsOldSlot()

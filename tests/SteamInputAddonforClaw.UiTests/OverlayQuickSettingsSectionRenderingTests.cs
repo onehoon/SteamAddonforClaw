@@ -28,6 +28,22 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
     }
 
     [Fact]
+    public void Feature_header_toggle_keeps_primary_row_role_and_remaining_rows_are_details()
+    {
+        var toggle = ToggleRow(QuickSettingsRowId.DeviceTdpEnabled);
+        var value = NumericRow(QuickSettingsRowId.DeviceTdpAcPl1, 20);
+        var section = new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP", [toggle, value]);
+
+        var rows = OverlayQuickSettingsSectionRendering.DescribeRows(section);
+
+        Assert.True(rows[0].IsFeatureHeader);
+        Assert.Equal("TDP", rows[0].DisplayLabel);
+        Assert.True(rows[0].StrongLabel);
+        Assert.False(rows[1].IsFeatureHeader);
+        Assert.Equal(value.Label, rows[1].DisplayLabel);
+    }
+
+    [Fact]
     public void Unlabeled_or_non_toggle_first_visible_rows_keep_the_normal_rendering_path()
     {
         var toggle = ToggleRow(QuickSettingsRowId.DeviceTdpEnabled);

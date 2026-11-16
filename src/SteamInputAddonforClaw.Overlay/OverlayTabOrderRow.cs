@@ -62,6 +62,7 @@ internal sealed class AddonQuickSettingsTabOrderRow
         grid.Children.Add(buttons);
 
         Container = OverlayRowChrome.Create(grid);
+        OverlayRowChrome.ApplyDetailPadding(Container);
 
         // Always selectable; Left/Right adjusts, A does nothing (no reorder mode).
         Capabilities = new OverlayRowCapabilities(

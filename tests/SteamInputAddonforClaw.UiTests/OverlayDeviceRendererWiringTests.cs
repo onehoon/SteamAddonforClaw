@@ -870,6 +870,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("displayLabelOverride ?? row.Label", quickSettings);
         Assert.Contains("descriptor.IsFeatureHeader", quickSettings);
         Assert.Contains("descriptor.DisplayLabel", quickSettings);
+        Assert.Contains("if (!descriptor.IsFeatureHeader)", quickSettings);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container)", quickSettings);
         Assert.Contains("QamDetailIndent", quickSettings);
         Assert.Contains("descriptor.StrongLabel", quickSettings);
         Assert.DoesNotContain("section.Label.Contains", quickSettings);
@@ -952,6 +954,7 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("CreateOverlaySectionCard(sectionPanel)", quickSettings);
         Assert.Contains("QamSectionPadding", quickSettings);
+        Assert.Contains("QamDetailRowPadding", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs"));
         Assert.Contains("QamSectionCornerRadius", quickSettings);
         Assert.Contains("QamSectionBrush", quickSettings);
         Assert.Contains("CreateSettingCard(SettingCardId.ClawHud", clawHud);
@@ -962,6 +965,9 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable)",
             ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs"));
         Assert.Contains("section.Children.Add(row.Container);", clawHud);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container);", clawHud);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(_quickSettingsYButtonQuickJumpRow.Container);", clawHud);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(_quickSettingsCurrentPowerSourceOnlyRow.Container);", clawHud);
         Assert.Contains("_expandedSettingCard == card", clawHud);
         Assert.Contains("ToggleSettingCard", clawHud);
         Assert.Contains("ResetSettingCardsForShow();", shell);
@@ -1009,8 +1015,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("headerButton.Click += (_, _) => ToggleSettingCard(id);", createCard);
         Assert.Contains("AutomationProperties.SetName(headerButton, $\"{title}, expand settings\")", createCard);
         Assert.Contains("RegisterRowPointerSelection(header);", createCard);
-        Assert.Contains("QamDetailMargin", createCard);
-        Assert.Contains("QamRowSpacing", createCard);
+        Assert.Contains("var details = CreateOverlayDetailStack();", createCard);
+        Assert.DoesNotContain("QamDetailMargin", createCard);
         Assert.DoesNotContain("PointerEntered", createCard);
         Assert.DoesNotContain("PointerExited", createCard);
     }

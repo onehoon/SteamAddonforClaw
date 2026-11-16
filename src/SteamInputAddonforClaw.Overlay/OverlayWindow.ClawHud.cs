@@ -120,12 +120,8 @@ public sealed partial class OverlayWindow
             Activate: () => ToggleSettingCard(id)));
         RegisterRowPointerSelection(header);
 
-        var details = new StackPanel
-        {
-            Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0),
-            Margin = OverlayQamResources.Get("QamDetailMargin", new Thickness(16, 0, 16, 0)),
-            Visibility = Visibility.Collapsed,
-        };
+        var details = CreateOverlayDetailStack();
+        details.Visibility = Visibility.Collapsed;
         details.Children.Add(detailsContent);
 
         var content = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
@@ -276,6 +272,7 @@ public sealed partial class OverlayWindow
             FormatYButtonQuickJumpChoice,
             value => RequestYButtonQuickJumpChange((QuickOverlayYButtonTarget)(int)Math.Round(value)),
             OverlayValueButtonKind.DiscreteChoice);
+        OverlayRowChrome.ApplyDetailPadding(_quickSettingsYButtonQuickJumpRow.Container);
         section.Children.Add(_quickSettingsYButtonQuickJumpRow.Container);
         _quickSettingsRows.Add(CreateSettingDetailRow(
             new OverlayRow(_quickSettingsYButtonQuickJumpRow.Container, _quickSettingsYButtonQuickJumpRow.Capabilities),
@@ -284,6 +281,7 @@ public sealed partial class OverlayWindow
 
         _quickSettingsCurrentPowerSourceOnlyRow = new OverlayToggleRow(
             "Show only current power source", RequestQuickSettingsCurrentPowerSourceOnly);
+        OverlayRowChrome.ApplyDetailPadding(_quickSettingsCurrentPowerSourceOnlyRow.Container);
         section.Children.Add(_quickSettingsCurrentPowerSourceOnlyRow.Container);
         _quickSettingsRows.Add(CreateSettingDetailRow(
             new OverlayRow(_quickSettingsCurrentPowerSourceOnlyRow.Container, _quickSettingsCurrentPowerSourceOnlyRow.Capabilities),
@@ -457,6 +455,7 @@ public sealed partial class OverlayWindow
 
     private void AddClawHudRow(StackPanel section, OverlayToggleRow row)
     {
+        OverlayRowChrome.ApplyDetailPadding(row.Container);
         section.Children.Add(row.Container);
         _clawHudRows.Add(CreateSettingDetailRow(
             new OverlayRow(row.Container, row.Capabilities),
@@ -466,6 +465,7 @@ public sealed partial class OverlayWindow
 
     private void AddClawHudRow(StackPanel section, OverlayValueRow row)
     {
+        OverlayRowChrome.ApplyDetailPadding(row.Container);
         section.Children.Add(row.Container);
         _clawHudRows.Add(CreateSettingDetailRow(
             new OverlayRow(row.Container, row.Capabilities),

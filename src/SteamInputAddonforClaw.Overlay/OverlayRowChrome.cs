@@ -8,6 +8,11 @@ namespace SteamInputAddonforClaw.Overlay;
 // stateless construction helper rather than a row base class or visual framework.
 internal static class OverlayRowChrome
 {
+    internal static void ApplyDetailPadding(Border container)
+    {
+        container.Padding = OverlayQamResources.Get("QamDetailRowPadding", new Thickness(16, 5, 16, 5));
+    }
+
     internal static Border Create(UIElement child) => new()
     {
         Child = child,
