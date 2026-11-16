@@ -1199,7 +1199,18 @@ public sealed partial class MainWindow : Window
 
     private static string GetDisplayVersion()
     {
-        return Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.1.0";
+        var assembly = Assembly.GetEntryAssembly();
+        var informationalVersion = assembly?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        return FormatDisplayVersion(informationalVersion, assembly?.GetName().Version);
+    }
+
+    internal static string FormatDisplayVersion(string? informationalVersion, Version? assemblyVersion)
+    {
+        var displayVersion = informationalVersion?.Split('+', 2)[0].Trim();
+        if (!string.IsNullOrWhiteSpace(displayVersion))
+            return displayVersion;
+
+        return assemblyVersion?.ToString(3) ?? "0.1.0";
     }
 
     internal static string FormatWindowTitle(string version, bool updateReady = false)

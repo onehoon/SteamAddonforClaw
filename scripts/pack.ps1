@@ -6,6 +6,9 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
 
+    [ValidateSet('win', 'win-pre')]
+    [string]$Channel = 'win',
+
     [switch]$PreserveReleases,
 
     [string]$ReleaseNotesPath
@@ -51,6 +54,7 @@ $vpkArguments = @(
     '--packId', 'SteamInputAddonforClaw',
     '--packTitle', 'Steam Addon for Claw',
     '--packVersion', $Version,
+    '--channel', $Channel,
     '--packDir', $publishDirectory,
     '--mainExe', 'SteamInputAddonforClaw.exe',
     '--icon', $iconPath,
