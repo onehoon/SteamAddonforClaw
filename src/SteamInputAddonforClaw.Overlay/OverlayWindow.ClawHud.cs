@@ -375,6 +375,7 @@ public sealed partial class OverlayWindow
         if (!inFlight)
             _pendingQuickSettingsCurrentPowerSourceOnly = null;
         RenderQuickSettingsCurrentPowerSourceRow();
+        RenderSimplifiedTdpControlsRow();
     }
 
     private void SetSimplifiedTdpControlsMutationInFlight(bool inFlight)
@@ -382,6 +383,7 @@ public sealed partial class OverlayWindow
         _quickSettingsMutationInFlight = inFlight;
         if (!inFlight)
             _pendingQuickSettingsSimplifiedTdpControls = null;
+        RenderQuickSettingsCurrentPowerSourceRow();
         RenderSimplifiedTdpControlsRow();
     }
 
