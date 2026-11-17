@@ -4,11 +4,9 @@ using SteamInputAddonforClaw.Profiles.Performance;
 
 namespace SteamInputAddonforClaw.Profiles;
 
-/// <summary>Small persistence owner for enabling and disabling complete game profiles.</summary>
+/// <summary>Small persistence owner for ensuring complete enabled game profiles.</summary>
 internal sealed class GameProfileMutations
 {
-    private const int FallbackPl1Watts = 20;
-    private const int FallbackPl2Watts = 22;
     private readonly ProfileStore _store;
     private readonly ProfileMutationGate _gate;
 
@@ -24,6 +22,9 @@ internal sealed class GameProfileMutations
 
     internal enum MutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
     internal sealed record Capture(uint AppId, GameProfile Profile, bool Exists, bool PersistenceWritable);
+    internal sealed record EnrollmentResult(MutationOutcome Outcome, bool Changed, int SkippedCount, int ActivatedCount);
+
+    internal TdpPowerLimits? TdpLimits => _tdpLimits;
 
     internal Capture? CaptureProfile(uint appId)
     {
@@ -65,28 +66,53 @@ internal sealed class GameProfileMutations
 
     internal MutationOutcome SetEnabled(uint appId, bool enabled, string? displayName)
     {
+        if (appId == 0) return MutationOutcome.InvalidTarget;
+        if (!enabled) return MutationOutcome.Succeeded;
+        return EnsureProfiles(
+            new Dictionary<uint, string?> { [appId] = displayName },
+            EmptyXboxGames,
+            includeExistingProfiles: false).Outcome;
+    }
+
+    internal EnrollmentResult EnsureProfiles(
+        IReadOnlyDictionary<uint, string?> steamGames,
+        IReadOnlyDictionary<string, string?> xboxGames,
+        bool includeExistingProfiles)
+    {
+        ArgumentNullException.ThrowIfNull(steamGames);
+        ArgumentNullException.ThrowIfNull(xboxGames);
         lock (_gate.Sync)
         {
             var loaded = _store.Load();
-            if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
-            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            GameProfile profile;
-            if (enabled)
+            if (!loaded.CanSafelyReplace)
+                return new(MutationOutcome.PersistenceFailed, false, 0, 0);
+
+            var document = GameProfileEnrollment.Ensure(
+                loaded.Document,
+                steamGames,
+                xboxGames,
+                includeExistingProfiles,
+                _tdpLimits,
+                out var changed,
+                out var skippedCount,
+                out var activatedCount);
+            if (!changed)
+                return new(MutationOutcome.Succeeded, false, skippedCount, activatedCount);
+
+            try
             {
-                var existing = loaded.Document.Games.TryGetValue(key, out var current) ? current : new GameProfile();
-                var completed = Complete(existing, loaded.Document.Device);
-                profile = completed with { Enabled = true, DisplayName = displayName ?? completed.DisplayName };
+                _store.Save(document);
+                return new(MutationOutcome.Succeeded, true, skippedCount, activatedCount);
             }
-            else
+            catch
             {
-                if (!loaded.Document.Games.TryGetValue(key, out var disabledProfile)) return MutationOutcome.Succeeded;
-                profile = disabledProfile with { Enabled = false };
+                return new(MutationOutcome.PersistenceFailed, false, skippedCount, activatedCount);
             }
-            loaded.Document.Games[key] = profile;
-            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; }
-            catch { return MutationOutcome.PersistenceFailed; }
         }
     }
+
+    private static readonly IReadOnlyDictionary<string, string?> EmptyXboxGames =
+        new Dictionary<string, string?>(StringComparer.Ordinal);
 
     internal MutationOutcome SetCpuBoostAc(uint appId, CpuBoostMode mode)
         => SetCpuBoost(appId, cpu => cpu with { Ac = mode });
@@ -195,6 +221,7 @@ internal sealed class GameProfileMutations
 
     internal MutationOutcome SetFavorite(uint appId, bool favorite, string? displayName)
     {
+        if (appId == 0) return MutationOutcome.InvalidTarget;
         lock (_gate.Sync)
         {
             var loaded = _store.Load();
@@ -203,15 +230,28 @@ internal sealed class GameProfileMutations
             if (!loaded.Document.Games.TryGetValue(key, out var current))
             {
                 if (!favorite) return MutationOutcome.Succeeded;
-                loaded.Document.Games[key] = new GameProfile { Favorite = true, DisplayName = displayName };
+                current = new GameProfile();
             }
-            else loaded.Document.Games[key] = current with { Favorite = favorite, DisplayName = displayName ?? current.DisplayName };
+
+            if (!current.Enabled)
+            {
+                if (!GameProfileEnrollment.TryComplete(current, loaded.Document.Device, _tdpLimits, out var completed))
+                    return MutationOutcome.InvalidTarget;
+                current = completed;
+            }
+
+            var updated = current with { Favorite = favorite, DisplayName = SelectDisplayName(current.DisplayName, displayName) };
+            if (loaded.Document.Games.TryGetValue(key, out var existing) && existing == updated)
+                return MutationOutcome.Succeeded;
+
+            loaded.Document.Games[key] = updated;
             try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
         }
     }
 
     internal MutationOutcome SetResolution(uint appId, GameDisplayResolution? resolution, string? displayName)
     {
+        if (appId == 0) return MutationOutcome.InvalidTarget;
         lock (_gate.Sync)
         {
             var loaded = _store.Load();
@@ -220,11 +260,20 @@ internal sealed class GameProfileMutations
             if (!loaded.Document.Games.TryGetValue(key, out var current))
             {
                 if (resolution is null) return MutationOutcome.Succeeded;
-                current = new GameProfile { Enabled = false, DisplayName = displayName };
+                current = new GameProfile();
+            }
+            if (!current.Enabled)
+            {
+                if (!GameProfileEnrollment.TryComplete(current, loaded.Document.Device, _tdpLimits, out var completed))
+                    return MutationOutcome.InvalidTarget;
+                current = completed;
             }
             if (current.Display.Resolution is null && resolution is null) return MutationOutcome.Succeeded;
             var display = current.Display with { Resolution = resolution };
-            loaded.Document.Games[key] = current with { Display = display, DisplayName = displayName ?? current.DisplayName };
+            var updated = current with { Display = display, DisplayName = SelectDisplayName(current.DisplayName, displayName) };
+            if (loaded.Document.Games.TryGetValue(key, out var existing) && existing == updated)
+                return MutationOutcome.Succeeded;
+            loaded.Document.Games[key] = updated;
             try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
         }
     }
@@ -287,30 +336,15 @@ internal sealed class GameProfileMutations
     internal bool Enable(uint appId, string? displayName)
         => SetEnabled(appId, true, displayName) == MutationOutcome.Succeeded;
 
+    // Keep the legacy call contract safe for stale callers; game profiles are always enabled.
     internal bool Disable(uint appId)
         => SetEnabled(appId, false, null) == MutationOutcome.Succeeded;
 
     private static GameProfile Complete(GameProfile profile, DeviceSettings device)
     {
-        var cpu = device.Performance.CpuBoost is { Ac: { } ac, Dc: { } dc }
-            ? new GameCpuBoostSettings { Enabled = true, Ac = ac, Dc = dc }
-            : new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled };
-
-        var tdp = device.Performance.Tdp is { Ac: { } tdpAc, Dc: { } tdpDc }
-            ? new GameTdpSettings { Enabled = true, Ac = tdpAc, Dc = tdpDc }
-            : new GameTdpSettings
-            {
-                Enabled = true,
-                Ac = new TdpPowerPair { Pl1Watts = FallbackPl1Watts, Pl2Watts = FallbackPl2Watts },
-                Dc = new TdpPowerPair { Pl1Watts = FallbackPl1Watts, Pl2Watts = FallbackPl2Watts }
-            };
-
-        var existingTdp = profile.Performance.Tdp is { Ac: { }, Dc: { } } existing
-            ? existing
-            : tdp;
-        var power = device.Performance.PowerMode is { Ac: { } powerAc, Dc: { } powerDc }
-            ? new GamePowerModeSettings { Enabled = true, Ac = powerAc, Dc = powerDc }
-            : null;
-        return profile with { Performance = profile.Performance with { CpuBoost = profile.Performance.CpuBoost ?? cpu, Tdp = existingTdp, PowerMode = profile.Performance.PowerMode ?? power } };
+        return profile with { Performance = GameProfileEnrollment.CompleteForCapture(profile.Performance, device) };
     }
+
+    private static string? SelectDisplayName(string? existing, string? incoming) =>
+        string.IsNullOrWhiteSpace(incoming) ? existing : incoming;
 }

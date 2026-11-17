@@ -1130,8 +1130,6 @@ public sealed class MainUiLocalizationResourceTests
             ("Steam_PowerMode_ToggleUpdateFailed", "Windows Power Mode could not be updated."),
             ("Steam_Tdp_UpdateFailed", "TDP could not be updated."),
             ("Steam_PowerMode_UpdateFailed", "Power Mode could not be updated."),
-            ("Steam_Profile_UpdateFailed", "Profile could not be updated."),
-            ("Steam_Profile_RuntimeInterrupted", "Profile could not be updated because the Runtime connection was interrupted."),
             ("Steam_Resolution_UpdateFailed", "Display resolution could not be updated.")
         };
         foreach (var (key, fallback) in localErrors)
@@ -1305,8 +1303,6 @@ public sealed class MainUiLocalizationResourceTests
             ("Xbox_CpuBoost_UpdateFailed", "CPU Boost could not be updated."),
             ("Xbox_TdpControl_ToggleUpdateFailed", "TDP Control could not be updated."),
             ("Xbox_PowerMode_ToggleUpdateFailed", "Windows Power Mode could not be updated."),
-            ("Xbox_Profile_UpdateFailed", "Profile could not be updated."),
-            ("Xbox_Profile_RuntimeInterrupted", "Profile could not be updated because the Runtime connection was interrupted."),
             ("Xbox_BackMapping_InvalidTargets", "Choose valid M1 and M2 targets before saving the per-game mapping."),
             ("Xbox_BackMapping_UpdateFailed", "M1 / M2 mapping could not be updated."),
             ("Xbox_PowerMode_UpdateFailed", "Power Mode could not be updated."),

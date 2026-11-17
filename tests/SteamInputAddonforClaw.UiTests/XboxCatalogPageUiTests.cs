@@ -36,7 +36,7 @@ public sealed class XboxCatalogPageUiTests
 
         Assert.Contains(document.Descendants().Where(element => element.Name.LocalName == "TextBlock"),
             element => (string?)element.Attribute("Text") == "Steam");
-        Assert.Contains("x:Name=\"ProfileEnabledToggle\"", document.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileEnabledToggle", document.ToString(), StringComparison.Ordinal);
         Assert.Contains("FavoriteButton_Click", code, StringComparison.Ordinal);
     }
 
@@ -54,7 +54,7 @@ public sealed class XboxCatalogPageUiTests
         Assert.Contains("x:Name=\"GameGrid\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding DisplayName}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FavoriteButton_Click", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"ProfileEnabledToggle\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileEnabledToggle", xaml, StringComparison.Ordinal);
         foreach (var control in new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle", "FpsEnabledToggle", "ResolutionComboBox" })
             Assert.Contains($"x:Name=\"{control}\"", xaml, StringComparison.Ordinal);
         foreach (var internalField in new[] { "StoreId", "TitleId", "PackageFamilyName", "PackageFullName", "ConfigPath", "Executable", "AUMID", "ProcessPath" })
@@ -70,7 +70,7 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
-    public void Performance_feature_toggles_are_hidden_but_profile_master_switches_remain_visible()
+    public void Performance_feature_toggles_remain_hidden_and_master_switches_are_removed()
     {
         var pages = new[]
         {
@@ -104,11 +104,7 @@ public sealed class XboxCatalogPageUiTests
 
             if (pageName != "DevicePage.xaml")
             {
-                var profileMaster = document.Descendants().Single(element =>
-                    element.Name.LocalName == "ToggleSwitch"
-                    && (string?)element.Attribute(xamlNamespace + "Name") == "ProfileEnabledToggle");
-                Assert.NotEqual("Collapsed", (string?)profileMaster.Attribute("Visibility"));
-                Assert.Equal("ProfileEnabledToggle_Toggled", (string?)profileMaster.Attribute("Toggled"));
+                Assert.DoesNotContain("ProfileEnabledToggle", document.ToString(), StringComparison.Ordinal);
             }
         }
     }
@@ -397,7 +393,7 @@ public sealed class XboxCatalogPageUiTests
         var steamCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml.cs"));
         foreach (var method in new[]
         {
-            "SetXboxGameProfileFavoriteAsync", "SetXboxGameProfileEnabledAsync", "SetXboxGameProfileCpuBoostEnabledAsync",
+            "SetXboxGameProfileFavoriteAsync", "SetXboxGameProfileCpuBoostEnabledAsync",
             "SetXboxGameProfileCpuBoostAcAsync", "SetXboxGameProfileCpuBoostDcAsync", "SetXboxGameProfileTdpEnabledAsync",
             "SetXboxGameProfileTdpAsync", "SetXboxGameProfilePowerModeEnabledAsync", "SetXboxGameProfilePowerModeAcAsync",
             "SetXboxGameProfilePowerModeDcAsync", "SetXboxGameProfileFpsLimitEnabledAsync", "SetXboxGameProfileFpsLimitAcAsync",
@@ -414,7 +410,6 @@ public sealed class XboxCatalogPageUiTests
         var clearSelection = Method(code, "private void ClearSelection()", "private void Render(");
         var tdpSubmit = Method(code, "private async Task SubmitTdpAfterDelayAsync", "private void SetTdpText");
         var fpsSubmit = Method(code, "private async Task SubmitFpsAfterDelayAsync", "private void CancelFpsDebounce");
-        var profileEnabled = Method(code, "private async void ProfileEnabledToggle_Toggled", "private void RenderBackButtonMapping");
         Assert.Contains("CancelTdpDebounce()", select, StringComparison.Ordinal);
         Assert.Contains("CancelFpsDebounce()", select, StringComparison.Ordinal);
         Assert.Contains("ClearSelection()", back, StringComparison.Ordinal);
@@ -422,7 +417,7 @@ public sealed class XboxCatalogPageUiTests
         Assert.Contains("CancelFpsDebounce()", clearSelection, StringComparison.Ordinal);
         Assert.DoesNotContain("CancelTdpDebounce()", deactivate, StringComparison.Ordinal);
         Assert.DoesNotContain("CancelFpsDebounce()", deactivate, StringComparison.Ordinal);
-        Assert.Contains("CancelTdpDebounce()", profileEnabled, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileEnabledToggle_Toggled", code, StringComparison.Ordinal);
         Assert.DoesNotContain("|| !_active", tdpSubmit, StringComparison.Ordinal);
         Assert.DoesNotContain("|| !_active", fpsSubmit, StringComparison.Ordinal);
 

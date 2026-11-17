@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -83,28 +84,30 @@ public sealed class SteamGameControllerProfileTests : IDisposable
     }
 
     [Fact]
-    public void Disabling_and_reenabling_profile_preserves_controller_override()
+    public void Legacy_disable_request_keeps_profile_enabled_and_preserves_controller_override()
     {
         Directory.CreateDirectory(_directory);
         var store = new ProfileStore(StorePath);
         store.Save(new ProfileDocument());
-        var mutations = new GameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new GameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
 
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(12345, true, "Test Game"));
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
             mutations.SetSteamVirtualController(12345, SteamVirtualControllerPreference.DualSenseEdge));
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(12345, false, null));
-        Assert.Equal(GameProfileMutations.MutationOutcome.Unavailable,
+        Assert.True(store.Load().Document.Games["12345"].Enabled);
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
             mutations.SetSteamVirtualController(12345, SteamVirtualControllerPreference.SteamDeck));
-        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge,
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck,
             store.Load().Document.Games["12345"].SteamVirtualController);
 
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(12345, true, null));
-        Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge,
+        Assert.True(store.Load().Document.Games["12345"].Enabled);
+        Assert.Equal(SteamVirtualControllerPreference.SteamDeck,
             store.Load().Document.Games["12345"].SteamVirtualController);
-        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
-            mutations.SetSteamVirtualController(12345, SteamVirtualControllerPreference.SteamDeck));
     }
+
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
 
     public void Dispose()
     {

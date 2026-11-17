@@ -121,7 +121,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task Active_XBOX_overlay_uses_live_title_for_first_profile_and_persists_it_when_enabled()
+    public async Task Active_XBOX_profile_capture_uses_live_title_without_persisting_a_profile()
     {
         Directory.CreateDirectory(_directory);
         var store = new ProfileStore(ProfilePath);
@@ -140,15 +140,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.True(page.Available);
         Assert.False(initialSnapshot.Exists);
         Assert.Equal(liveTitle, page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
-
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, target, QuickSettingsRowId.ProfileEnabled,
-            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
-        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
-
-        var persisted = store.Load().Document.XboxGames[Key];
-        Assert.True(persisted.Enabled);
-        Assert.Equal(liveTitle, persisted.DisplayName);
-        Assert.Equal(liveTitle, result.Page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+        Assert.False(File.Exists(ProfilePath));
     }
 
     [Fact]
@@ -377,8 +369,9 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
 
         var disabled = await control.SetXboxGameProfileEnabledAsync(Key, false, "Game");
         Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, disabled.Outcome);
-        Assert.Equal(2, gpuHardware.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(-1, -1), gpuHardware.LastSetRange);
+        Assert.Equal(1, gpuHardware.SetCalls);
+        Assert.Equal(new IntelGpuFrequencyRange(1725, -1), gpuHardware.LastSetRange);
+        Assert.True(store.Load().Document.XboxGames[Key].Enabled);
 
         fps.BeginShutdown();
         fps.Dispose();
@@ -512,7 +505,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task Active_XBOX_mapping_and_profile_enable_changes_reconcile_only_after_persistence()
+    public async Task Active_XBOX_profile_is_always_enabled_and_mapping_reconciles_only_after_persistence()
     {
         var store = new ProfileStore(ProfilePath);
         var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
@@ -532,7 +525,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
 
         Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, mapping)).Succeeded);
         Assert.Equal(mapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
-        Assert.False(store.Load().Document.XboxGames[Key].Enabled);
+        Assert.True(store.Load().Document.XboxGames[Key].Enabled);
         expectedPersistedMapping = null;
         Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, null)).Succeeded);
         Assert.Null(store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
@@ -540,15 +533,15 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, mapping)).Succeeded);
         Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed,
             (await control.SetXboxGameProfileEnabledAsync(Key, true, "Game")).Outcome);
-        Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed,
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded,
             (await control.SetXboxGameProfileEnabledAsync(Key, false, "Game")).Outcome);
-        Assert.False(store.Load().Document.XboxGames[Key].Enabled);
+        Assert.True(store.Load().Document.XboxGames[Key].Enabled);
         Assert.Equal(mapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
         Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed,
             (await control.SetXboxGameProfileEnabledAsync(Key, true, "Game")).Outcome);
         Assert.True(store.Load().Document.XboxGames[Key].Enabled);
         Assert.Equal(mapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
-        Assert.Equal(6, reconciles);
+        Assert.Equal(5, reconciles);
     }
 
     [Fact]

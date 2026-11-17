@@ -3040,23 +3040,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (Volatile.Read(ref _processShutdownStarted) != 0) return;
 
-            var migration = AlwaysOnPerformanceFeatureMigration.Run(
-                _profileStore, _profileMutationGate, cancellationToken);
-            if (migration.Status == AlwaysOnPerformanceFeatureMigrationStatus.UnsafeProfile)
-            {
-                AppLog.Warn("Profiles.AlwaysOn", "Performance settings were not migrated because the profile document is unsafe to replace; startup will continue.", null,
-                    ("ProfileStatus", migration.ProfileStatus));
-                return;
-            }
-
-            var changed = migration.Status == AlwaysOnPerformanceFeatureMigrationStatus.Changed;
-            if (changed)
-                AppLog.Info("Profiles.AlwaysOn", "Existing TDP, CPU Boost, and Windows Power Mode settings were normalized to managed mode.");
-
-            if (cancellationToken.IsCancellationRequested
-                || Volatile.Read(ref _processShutdownStarted) != 0)
-                return;
-
             var tdpSeeded = false;
             if (_tdpRuntime is { } tdpRuntime)
             {
@@ -3089,7 +3072,46 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 || Volatile.Read(ref _processShutdownStarted) != 0)
                 return;
 
+            var activeTarget = CaptureActiveProfileTarget();
+            var activeProfileWasEnabled = IsPersistedActiveProfileEnabled(activeTarget);
+            var steamTargets = activeTarget.Kind == ActiveProfileTargetKind.Steam
+                ? new Dictionary<uint, string?> { [activeTarget.SteamAppId] = null }
+                : EmptySteamProfileTargets;
+            var xboxTargets = activeTarget.Kind == ActiveProfileTargetKind.Xbox
+                ? new Dictionary<string, string?>(StringComparer.Ordinal)
+                    { [activeTarget.XboxGameKey!] = _xboxGameSessionRuntime?.ActiveGame?.DisplayName }
+                : EmptyXboxProfileTargets;
+            var migration = AlwaysOnPerformanceFeatureMigration.Run(
+                _profileStore,
+                _profileMutationGate,
+                cancellationToken,
+                _gameProfileMutations.TdpLimits,
+                steamTargets,
+                xboxTargets);
+            if (migration.Status == AlwaysOnPerformanceFeatureMigrationStatus.UnsafeProfile)
+            {
+                AppLog.Warn("Profiles.AlwaysOn", "Performance settings and game profiles were not migrated because the profile document is unsafe to replace; startup will continue.", null,
+                    ("ProfileStatus", migration.ProfileStatus));
+                return;
+            }
+
+            var changed = migration.Status == AlwaysOnPerformanceFeatureMigrationStatus.Changed;
             if (changed)
+                AppLog.Info("Profiles.AlwaysOn", "Existing performance settings were normalized and recognized game profiles were activated where their TDP values passed device validation.",
+                    ("ActivatedProfileCount", migration.ActivatedProfileCount));
+
+            var activeProfileActivated = !activeProfileWasEnabled && IsPersistedActiveProfileEnabled(activeTarget);
+
+            if (activeProfileActivated)
+            {
+                if (activeTarget.Kind == ActiveProfileTargetKind.Steam)
+                    RequestControllerPresentationReconcile("StartupGameProfileActivated");
+                else if (activeTarget.Kind == ActiveProfileTargetKind.Xbox && activeTarget.XboxGameKey is { } xboxKey)
+                    ReconcileEffectiveBackButtonMapping($"StartupXboxProfileActivated:{xboxKey}");
+
+                ReconcileEffectiveGameProfile("DeferredStartupGameProfileActivated");
+            }
+            else if (changed)
             {
                 try { _cpuBoostRuntime.ReconcileWithResult(); }
                 catch (Exception exception) { AppLog.Warn("Profiles.CpuBoost", "Post-migration CPU Boost reconcile failed; Runtime remains available.", exception); }
@@ -3127,6 +3149,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("Profiles.AlwaysOn", "Deferred performance setup failed; Addon startup continues and the next launch can retry.", exception);
         }
     }
+
+    private static readonly IReadOnlyDictionary<uint, string?> EmptySteamProfileTargets = new Dictionary<uint, string?>();
+    private static readonly IReadOnlyDictionary<string, string?> EmptyXboxProfileTargets = new Dictionary<string, string?>();
+
+    private bool IsPersistedActiveProfileEnabled(ActiveProfileTarget target) => target.Kind switch
+    {
+        ActiveProfileTargetKind.Steam => _gameProfileMutations.CaptureProfile(target.SteamAppId) is
+            { Exists: true, Profile.Enabled: true, PersistenceWritable: true },
+        ActiveProfileTargetKind.Xbox when target.XboxGameKey is { } key => _xboxGameProfileMutations.CaptureProfile(key) is
+            { Exists: true, Profile.Enabled: true, PersistenceWritable: true },
+        _ => false,
+    };
 
     private void StartDisabledBootAdmissionRetryIfEligible()
     {
@@ -4183,6 +4217,35 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var target = CaptureActiveProfileTarget();
         AppLog.Debug("Profiles", "Effective game-profile reconcile started.",
             ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
+
+        if (target.Kind != ActiveProfileTargetKind.None)
+        {
+            IReadOnlyDictionary<uint, string?> steamGames = target.Kind == ActiveProfileTargetKind.Steam
+                ? new Dictionary<uint, string?> { [target.SteamAppId] = null }
+                : EmptySteamProfileTargets;
+            IReadOnlyDictionary<string, string?> xboxGames = target.Kind == ActiveProfileTargetKind.Xbox
+                ? new Dictionary<string, string?>(StringComparer.Ordinal)
+                    { [target.XboxGameKey!] = _xboxGameSessionRuntime?.ActiveGame is { } activeXbox
+                        && string.Equals(activeXbox.Key, target.XboxGameKey, StringComparison.Ordinal)
+                            ? activeXbox.DisplayName
+                            : null }
+                : EmptyXboxProfileTargets;
+            var enrollment = _gameProfileMutations.EnsureProfiles(
+                steamGames, xboxGames, includeExistingProfiles: false);
+            if (enrollment.Outcome != GameProfileMutations.MutationOutcome.Succeeded)
+            {
+                AppLog.Warn("Profiles", "Active game profile could not be initialized; the existing global/fail-safe profile remains effective.", null,
+                    ("ProfileTarget", target.LogLabel), ("Outcome", enrollment.Outcome), ("Trigger", trigger));
+            }
+            else if (enrollment.ActivatedCount > 0)
+            {
+                if (target.Kind == ActiveProfileTargetKind.Steam)
+                    RequestControllerPresentationReconcile($"GameProfileActivated:{trigger}");
+                else if (target.Kind == ActiveProfileTargetKind.Xbox && target.XboxGameKey is { } xboxKey)
+                    ReconcileEffectiveBackButtonMapping($"XboxProfileActivated:{trigger}:{xboxKey}");
+            }
+        }
+
         try
         {
             _cpuBoostRuntime.Reconcile();

@@ -393,7 +393,9 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("OverlayQuickSettingsSectionRendering.PlanRows", reconcile);
         Assert.Contains("plan.ChangedRowIds", reconcile);
         Assert.Contains("rendered.RenderedRows.TryGetValue", reconcile);
-        Assert.Contains("if (plan.DesiredRows.Count == 0)", emptySectionPath);
+        Assert.Contains("if (plan.DesiredRows.Count == 0 && !profileHeadingOnly)", emptySectionPath);
+        Assert.Contains("if (plan.DesiredRows.Count == 0)", reconcile);
+        Assert.Contains("CreateOverlaySectionHeadingRow(section.Label!)", reconcile);
         Assert.Contains("RemoveQuickSettingsSection(surface, rendered);", emptySectionPath);
         Assert.Contains("RemoveRenderedQuickSettingsRow", reconcile);
         Assert.Contains("CreateRenderedQuickSettingsRow", reconcile);
@@ -834,7 +836,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("bool WellFormed,", source);
         Assert.Contains("row.Visible", source);
         Assert.Contains(".Where(row => row.Visible && QuickSettingsRowRendering.IsWellFormed(row))", quickSettings);
-        Assert.Contains("if (desiredRows.Count == 0)", quickSettings);
+        Assert.Contains("if (desiredRows.Count == 0 && !profileHeadingOnly)", quickSettings);
+        Assert.Contains("section.SectionId == QuickSettingsSectionId.ProfileGeneral", quickSettings);
         Assert.Contains("return new RenderedQuickSettingsSection { Section = section, Rows = [] };", source);
     }
 
@@ -880,9 +883,10 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Profile_title_and_enable_toggle_stay_data_driven_before_other_profile_sections()
+    public void Profile_title_stays_data_driven_without_a_visible_master_toggle()
     {
         var presentation = ReadSource("src", "SteamInputAddonforClaw", "Frontend", "QuickSettingsPresentation.cs");
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
         var buildProfile = ExtractMethod(presentation,
             "private static QuickSettingsPageSnapshot BuildProfile(ProfileQuickSettingsProjection snapshot)");
         var buildGeneral = ExtractMethod(presentation,
@@ -891,7 +895,10 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.True(buildProfile.IndexOf("BuildProfileGeneralSection(snapshot)", StringComparison.Ordinal)
             < buildProfile.IndexOf("BuildProfileTdpSection(snapshot)", StringComparison.Ordinal));
         Assert.Contains("QuickSettingsRowId.ProfileEnabled", buildGeneral);
+        Assert.Contains("Writable: false", buildGeneral);
+        Assert.Contains("Visible = false", buildGeneral);
         Assert.Contains("QuickSettingsSectionId.ProfileGeneral, snapshot.DisplayName, [row]", buildGeneral);
+        Assert.Contains("CreateOverlaySectionHeadingRow(section.Label)", quickSettings);
         Assert.DoesNotContain("new OverlayToggleRow", presentation);
     }
 

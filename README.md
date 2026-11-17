@@ -159,9 +159,9 @@ The **Vibration Strength** section also includes **Vibration Recovery → Restor
 
 ### Steam
 
-The **Steam** page lists installed Steam games and Non-Steam shortcuts that Steam recognizes. Use **Refresh**, search, and the favorite control to find a game. Select a game to edit its profile. Profiles can be prepared before launching the game; use the profile's enable switch when you want it to apply.
+The **Steam** page lists installed Steam games and Non-Steam shortcuts that Steam recognizes. Use **Refresh**, search, and the favorite control to find a game. Select a game to edit its profile. Recognized games receive an enabled profile automatically, so you can configure it before launching the game. The profile takes a one-time snapshot of the current Device performance values when it is created; later Device changes do not overwrite that game-specific snapshot.
 
-The first profile card is **Virtual Controller**. Choose **Use default**, **Steam Deck**, or **DualSense Edge**. The choice can be edited only while the profile is enabled and Steam / Big Picture is idle; turning the profile off retains its saved choice. With Big Picture active, a game's enabled override is selected automatically when Steam reports that game as active, then the global choice is restored when the game ends and Big Picture remains active. **Use default** always inherits **Controller → Controller for Steam Game**.
+The first profile card is **Virtual Controller**. Choose **Use default**, **Steam Deck**, or **DualSense Edge**. The choice can be edited while Steam / Big Picture is idle. With Big Picture active, a game's explicit override is selected automatically when Steam reports that game as active, then the global choice is restored when the game ends and Big Picture remains active. **Use default** always inherits **Controller → Controller for Steam Game**.
 
 Per-game options include:
 
@@ -172,15 +172,15 @@ Per-game options include:
 - **Intel FPS Limit** — a per-power-source target from 40 to 120 FPS in 1 FPS steps. It uses Intel's FPS-limiting support; some games may not support it.
 - **Resolution** — **Do not change**, 1920 × 1200, 1920 × 1080, 1680 × 1050, or 1440 × 900.
 
-When the game profile is enabled and active, its configured **TDP Control**, **CPU Boost**, and **Windows Power Mode** values take priority over the matching Device values. When there is no active enabled game profile, the Device values apply. These three settings are managed when configured and have no per-feature on/off switch. **Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls and do not have Device-level fallback settings. When the game is no longer active, the profile-only controls stop applying and the Device values become effective again. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
+When the game profile is active, its configured **TDP Control**, **CPU Boost**, and **Windows Power Mode** values take priority over the matching Device values. When there is no active game profile, the Device values apply. These three settings are managed when configured and have no per-feature on/off switch. **Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls and do not have Device-level fallback settings. When the game is no longer active, the profile-only controls stop applying and the Device values become effective again. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
 
 ### XBOX
 
-The **XBOX** page lists recognized installed Xbox/Microsoft Store games available to the current Windows user. Use **Refresh**, search, and favorites, then select a game to edit its profile. Enable the profile when you want its selected settings to apply while that game is active. Not every Store app or Game Pass title is necessarily recognized by the catalog.
+The **XBOX** page lists recognized installed Xbox/Microsoft Store games available to the current Windows user. Use **Refresh**, search, and favorites, then select a game to edit its profile. Recognized games receive an enabled profile automatically, so you can configure it before launch. The profile takes a one-time snapshot of the current Device performance values when it is created; later Device changes do not overwrite that game-specific snapshot. Not every Store app or Game Pass title is necessarily recognized by the catalog.
 
 The performance options match the Steam profile options: TDP Control, CPU Boost, Windows Power Mode, Minimum GPU Clock, Intel FPS Limit, and Resolution. The XBOX profile also has a controller section for **Use global M1 / M2 mapping**. Turn that off to choose per-game Xbox 360 targets for M1 and M2. Steam Deck presentation still keeps M1 as R4 and M2 as L4.
 
-As with Steam, you can prepare a profile before the game starts. When the profile is enabled and the Addon recognizes the corresponding XBOX title as active, its configured TDP Control, CPU Boost, and Windows Power Mode values take priority over Device values. With no active enabled profile, Device values apply. Minimum GPU Clock, Intel FPS Limit, and Resolution are game-profile-only and have no Device-level fallback.
+As with Steam, you can prepare a profile before the game starts. When the Addon recognizes the corresponding XBOX title as active, its configured TDP Control, CPU Boost, and Windows Power Mode values take priority over Device values. With no active game profile, Device values apply. Minimum GPU Clock, Intel FPS Limit, and Resolution are game-profile-only and have no Device-level fallback.
 
 ### ClawHUD
 
@@ -255,9 +255,9 @@ View whether components needed by controller features are ready. This is a statu
 
 ## Game profiles and setting priority
 
-You can create and edit Steam and XBOX game profiles before starting a game. Saved values are kept when a profile is disabled.
+Recognized Steam and XBOX games receive enabled profiles automatically and can be edited before launch. When a profile is first created, its TDP, CPU Boost, and Windows Power Mode values copy the current Device values once; later Device changes do not change the saved game values. If a Device value is not initialized, the profile uses the documented product default for that setting.
 
-A Steam game's **Virtual Controller** choice is available only while its master profile is enabled. **Use default** or a disabled/missing profile inherits the global **Controller → Controller for Steam Game** choice. When a game starts in Big Picture, its enabled explicit choice is selected automatically; when it ends and Big Picture stays open, the global choice resumes. Manual global and per-game controller choices are locked while any Steam game or Big Picture Mode is active. Turning a profile off keeps its saved controller choice for when the profile is enabled again.
+A Steam game's **Virtual Controller** choice is available while Steam / Big Picture is idle. **Use default** or a profile without an explicit override inherits the global **Controller → Controller for Steam Game** choice. When a game starts in Big Picture, its explicit profile choice is selected automatically; when it ends and Big Picture stays open, the global choice resumes. Manual global and per-game controller choices are locked while any Steam game or Big Picture Mode is active.
 
 **TDP Control**, **CPU Boost**, and **Windows Power Mode** are managed settings at both Device and game-profile level. When an enabled game profile is active, its configured values take priority over Device values. When there is no active enabled game profile, Device values apply. These three settings do not have individual on/off switches.
 
@@ -277,7 +277,7 @@ When the game stops being active, the profile-only settings stop applying and co
 
 ## Non-Steam games
 
-To use a Steam profile for a regular Windows game, first add that game to Steam as a **Non-Steam Game**. The **Steam** page lists shortcuts that Steam recognizes, so you can prepare and enable a profile there. Start the game through its Steam shortcut and confirm Steam continues to show it as active. Some launchers close their own shortcut when they start a separate game process; if Steam then stops recognizing the shortcut, the Addon may stop applying that profile too.
+To use a Steam profile for a regular Windows game, first add that game to Steam as a **Non-Steam Game**. The **Steam** page lists shortcuts that Steam recognizes, and creates an enabled profile when the game is discovered so you can configure it there. Start the game through its Steam shortcut and confirm Steam continues to show it as active. Some launchers close their own shortcut when they start a separate game process; if Steam then stops recognizing the shortcut, the Addon may stop applying that profile too.
 
 ## Quick Settings Overlay
 
@@ -338,7 +338,7 @@ If the controller has not returned after a short wait, try **Restart Addon** fro
 
 ### A Steam game appears as an Xbox controller
 
-Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. Set the global choice at **Controller → Controller for Steam Game** before starting a game, or enable the Steam profile and choose its **Virtual Controller** override. Manual changes are disabled while a Steam game or Big Picture Mode is active.
+Confirm that Steam is running and that Steam recognizes the game as active. Confirm that MSI Center M is disabled for Addon controller ownership. Before starting a game, set the global choice at **Controller → Controller for Steam Game** or choose the game's **Virtual Controller** override in its automatically enabled Steam profile. Manual changes are disabled while a Steam game or Big Picture Mode is active.
 
 ### Gyro values appear in Steam calibration, but the game does not respond
 
@@ -362,7 +362,7 @@ Check that the button you are pressing is assigned to **Quick Settings Overlay**
 
 ### A game profile does not apply
 
-In **Steam** or **XBOX**, select the correct game and confirm its profile master switch is enabled. For Steam, confirm Steam still recognizes the game as active. Check whether the setting is for **Plugged in** or **On battery**. Configured TDP Control, CPU Boost, and Windows Power Mode values in the active profile take priority over Device values. Minimum GPU Clock, Intel FPS Limit, and Resolution are profile-only settings and apply only when their feature controls are enabled.
+In **Steam** or **XBOX**, select the correct game and confirm the profile and setting values are available. Recognized games are enabled automatically. For Steam, confirm Steam still recognizes the game as active. Check whether the setting is for **Plugged in** or **On battery**. Configured TDP Control, CPU Boost, and Windows Power Mode values in the active profile take priority over Device values. Minimum GPU Clock, Intel FPS Limit, and Resolution are profile-only settings and apply only when their feature controls are enabled.
 
 ### A Non-Steam profile stops applying after a launcher closes
 

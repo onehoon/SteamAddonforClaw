@@ -2,12 +2,15 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AlwaysOnPerformanceFeatureMigrationTests
 {
+    private const string XboxProfileKey = "identity:SAMPLE.GAME|CN%3DSAMPLE|PC";
+
     [Fact]
     public void Migrates_only_existing_feature_flags_and_preserves_values_profiles_and_extension_data()
     {
@@ -16,7 +19,7 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
         var document = BuildDocument();
         store.Save(document);
 
-        var result = AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate());
+        var result = AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate(), tdpLimits: TdpLimits());
 
         Assert.Equal(AlwaysOnPerformanceFeatureMigrationStatus.Changed, result.Status);
         var migrated = store.Load().Document;
@@ -37,7 +40,7 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
         Assert.Equal(document.Games.Count, migrated.Games.Count);
         foreach (var (key, profile) in migrated.Games)
         {
-            Assert.Equal(document.Games[key].Enabled, profile.Enabled);
+            Assert.True(profile.Enabled);
             Assert.Equal(document.Games[key].Favorite, profile.Favorite);
             var sourcePerformance = document.Games[key].Performance;
             var sourceTdp = sourcePerformance.Tdp!;
@@ -62,7 +65,7 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
         Assert.Equal(document.XboxGames.Count, migrated.XboxGames.Count);
         foreach (var (key, profile) in migrated.XboxGames)
         {
-            Assert.Equal(document.XboxGames[key].Enabled, profile.Enabled);
+            Assert.True(profile.Enabled);
             Assert.Equal(document.XboxGames[key].Favorite, profile.Favorite);
             var sourcePerformance = document.XboxGames[key].Performance;
             var sourceTdp = sourcePerformance.Tdp!;
@@ -89,7 +92,7 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
         AssertJsonEqual(document.Device.Performance.ExtensionData!["futurePerformance"], migrated.Device.Performance.ExtensionData!["futurePerformance"]);
         AssertJsonEqual(document.Device.Performance.Tdp!.ExtensionData!["futureTdp"], migratedDeviceTdp.ExtensionData!["futureTdp"]);
         AssertJsonEqual(document.Games["101"].ExtensionData!["futureSteam"], migrated.Games["101"].ExtensionData!["futureSteam"]);
-        AssertJsonEqual(document.XboxGames["Xbox!Game!Identity"].ExtensionData!["futureXbox"], migrated.XboxGames["Xbox!Game!Identity"].ExtensionData!["futureXbox"]);
+        AssertJsonEqual(document.XboxGames[XboxProfileKey].ExtensionData!["futureXbox"], migrated.XboxGames[XboxProfileKey].ExtensionData!["futureXbox"]);
     }
 
     [Fact]
@@ -107,17 +110,17 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
         var store = new ProfileStore(path);
         store.Save(BuildDocument());
         Assert.Equal(AlwaysOnPerformanceFeatureMigrationStatus.Changed,
-            AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate()).Status);
+            AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate(), tdpLimits: TdpLimits()).Status);
         var secondRunTimestamp = new DateTime(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(path, secondRunTimestamp);
 
         Assert.Equal(AlwaysOnPerformanceFeatureMigrationStatus.Unchanged,
-            AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate()).Status);
+            AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate(), tdpLimits: TdpLimits()).Status);
         Assert.Equal(secondRunTimestamp, File.GetLastWriteTimeUtc(path));
     }
 
     [Fact]
-    public void Migration_does_not_synthesize_missing_performance_records()
+    public void Migration_uses_approved_fallbacks_to_activate_profiles_when_device_values_are_missing()
     {
         using var directory = new TemporaryDirectory();
         var path = Path.Combine(directory.Path, "profiles.json");
@@ -134,7 +137,7 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
             },
             XboxGames = new Dictionary<string, XboxGameProfile>
             {
-                ["Xbox!Game!Identity"] = new() { Enabled = false, Favorite = true, Performance = new GamePerformanceOverrides() }
+                [XboxProfileKey] = new() { Enabled = false, Favorite = true, Performance = new GamePerformanceOverrides() }
             }
         };
         var store = new ProfileStore(path);
@@ -142,20 +145,74 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
         var timestamp = new DateTime(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(path, timestamp);
 
-        var result = AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate());
+        var result = AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate(), tdpLimits: TdpLimits());
 
-        Assert.Equal(AlwaysOnPerformanceFeatureMigrationStatus.Unchanged, result.Status);
+        Assert.Equal(AlwaysOnPerformanceFeatureMigrationStatus.Changed, result.Status);
         var loaded = store.Load().Document;
         Assert.Null(loaded.Device.Performance.Tdp);
         Assert.Null(loaded.Device.Performance.CpuBoost);
         Assert.Null(loaded.Device.Performance.PowerMode);
-        Assert.Null(loaded.Games["101"].Performance.Tdp);
-        Assert.Null(loaded.Games["101"].Performance.CpuBoost);
-        Assert.Null(loaded.Games["101"].Performance.PowerMode);
-        Assert.Null(loaded.XboxGames["Xbox!Game!Identity"].Performance.Tdp);
-        Assert.Null(loaded.XboxGames["Xbox!Game!Identity"].Performance.CpuBoost);
-        Assert.Null(loaded.XboxGames["Xbox!Game!Identity"].Performance.PowerMode);
-        Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+        Assert.True(loaded.Games["101"].Enabled);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, loaded.Games["101"].Performance.CpuBoost!.Ac);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 22 }, loaded.Games["101"].Performance.Tdp!.Ac);
+        Assert.Equal(WindowsPowerMode.BestPerformance, loaded.Games["101"].Performance.PowerMode!.Ac);
+        Assert.True(loaded.XboxGames[XboxProfileKey].Enabled);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, loaded.XboxGames[XboxProfileKey].Performance.CpuBoost!.Dc);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 22 }, loaded.XboxGames[XboxProfileKey].Performance.Tdp!.Dc);
+        Assert.Equal(WindowsPowerMode.BestPerformance, loaded.XboxGames[XboxProfileKey].Performance.PowerMode!.Dc);
+        Assert.NotEqual(timestamp, File.GetLastWriteTimeUtc(path));
+    }
+
+    [Fact]
+    public void Migration_does_not_write_profiles_with_TDP_values_outside_device_limits()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "profiles.json");
+        var source = BuildDocument();
+        var invalidTdp = new GameTdpSettings
+        {
+            Enabled = false,
+            Ac = new TdpPowerPair { Pl1Watts = 45, Pl2Watts = 50 },
+            Dc = new TdpPowerPair { Pl1Watts = 45, Pl2Watts = 50 }
+        };
+        var invalidPerformance = new GamePerformanceOverrides
+        {
+            CpuBoost = new GameCpuBoostSettings { Enabled = false, Ac = CpuBoostMode.Disabled, Dc = CpuBoostMode.Aggressive },
+            Tdp = invalidTdp,
+            PowerMode = new GamePowerModeSettings { Enabled = false, Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.Balanced }
+        };
+        var original = source with
+        {
+            Device = source.Device with
+            {
+                Performance = source.Device.Performance with
+                {
+                    CpuBoost = source.Device.Performance.CpuBoost! with { Enabled = true },
+                    Tdp = source.Device.Performance.Tdp! with { Enabled = true },
+                    PowerMode = source.Device.Performance.PowerMode! with { Enabled = true }
+                }
+            },
+            Games = new Dictionary<string, GameProfile> { ["101"] = new() { Enabled = false, DisplayName = "Saved name", Performance = invalidPerformance } },
+            XboxGames = new Dictionary<string, XboxGameProfile>
+            {
+                [XboxProfileKey] = new() { Enabled = false, DisplayName = "Saved Xbox name", Performance = invalidPerformance }
+            }
+        };
+        var store = new ProfileStore(path);
+        store.Save(original);
+        var originalBytes = File.ReadAllBytes(path);
+
+        var result = AlwaysOnPerformanceFeatureMigration.Run(store, new ProfileMutationGate(), tdpLimits: TdpLimits());
+
+        Assert.Equal(AlwaysOnPerformanceFeatureMigrationStatus.Unchanged, result.Status);
+        Assert.Equal(originalBytes, File.ReadAllBytes(path));
+        var saved = store.Load().Document;
+        Assert.False(saved.Games["101"].Enabled);
+        Assert.Equal("Saved name", saved.Games["101"].DisplayName);
+        Assert.Equal(invalidTdp, saved.Games["101"].Performance.Tdp);
+        Assert.False(saved.XboxGames[XboxProfileKey].Enabled);
+        Assert.Equal("Saved Xbox name", saved.XboxGames[XboxProfileKey].DisplayName);
+        Assert.Equal(invalidTdp, saved.XboxGames[XboxProfileKey].Performance.Tdp);
     }
 
     [Fact]
@@ -280,8 +337,8 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
             },
             XboxGames = new Dictionary<string, XboxGameProfile>
             {
-                ["Xbox!Game!Identity"] = new() { Enabled = true, Favorite = true, DisplayName = "Xbox active", Performance = Performance(), ExtensionData = Data("{\"future\":\"xbox\"}") },
-                ["Xbox!Second!Identity"] = new() { Enabled = false, Favorite = false, DisplayName = "Xbox prepared", Performance = Performance() }
+                [XboxProfileKey] = new() { Enabled = true, Favorite = true, DisplayName = "Xbox active", Performance = Performance(), ExtensionData = Data("{\"future\":\"xbox\"}") },
+                ["store:second-game"] = new() { Enabled = false, Favorite = false, DisplayName = "Xbox prepared", Performance = Performance() }
             }
         };
     }
@@ -302,6 +359,8 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
         foreach (var (key, value) in expected.ExtensionData ?? [])
             AssertJsonEqual(value, actual.ExtensionData![key]);
     }
+
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
 
     private static void AssertJsonEqual(JsonElement expected, JsonElement actual) =>
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse(expected.GetRawText()), JsonNode.Parse(actual.GetRawText())));

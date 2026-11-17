@@ -429,7 +429,9 @@ public sealed partial class OverlayWindow
     private RenderedQuickSettingsSection BuildQuickSettingsSection(QuickSettingsSurface surface, QuickSettingsSection section)
     {
         var desiredRows = OverlayQuickSettingsSectionRendering.DescribeRows(section);
-        if (desiredRows.Count == 0)
+        var profileHeadingOnly = section.SectionId == QuickSettingsSectionId.ProfileGeneral
+            && !string.IsNullOrWhiteSpace(section.Label);
+        if (desiredRows.Count == 0 && !profileHeadingOnly)
             return new RenderedQuickSettingsSection { Section = section, Rows = [] };
 
         var sectionPanel = new StackPanel();
@@ -474,7 +476,9 @@ public sealed partial class OverlayWindow
     {
         var plan = OverlayQuickSettingsSectionRendering.PlanRows(
             rendered.RenderedRows.ToDictionary(pair => pair.Key, pair => pair.Value.Descriptor), section);
-        if (plan.DesiredRows.Count == 0)
+        var profileHeadingOnly = section.SectionId == QuickSettingsSectionId.ProfileGeneral
+            && !string.IsNullOrWhiteSpace(section.Label);
+        if (plan.DesiredRows.Count == 0 && !profileHeadingOnly)
         {
             RemoveQuickSettingsSection(surface, rendered);
             return new RenderedQuickSettingsSection { Section = section, Rows = [] };
@@ -486,6 +490,26 @@ public sealed partial class OverlayWindow
         foreach (var rowId in plan.ChangedRowIds)
             if (rendered.RenderedRows.TryGetValue(rowId, out var oldRow))
                 RemoveRenderedQuickSettingsRow(surface, rendered, rowId, oldRow);
+
+        if (plan.DesiredRows.Count == 0)
+        {
+            foreach (var rowId in rendered.RenderedRows.Keys.ToArray())
+                if (rendered.RenderedRows.TryGetValue(rowId, out var oldRow))
+                    RemoveRenderedQuickSettingsRow(surface, rendered, rowId, oldRow);
+
+            if (!string.Equals(rendered.HeadingLabel, section.Label, StringComparison.Ordinal))
+            {
+                if (rendered.Heading is not null)
+                    rendered.RowStack.Children.Remove(rendered.Heading);
+                rendered.Heading = CreateOverlaySectionHeadingRow(section.Label!);
+                rendered.HeadingLabel = section.Label;
+                rendered.RowStack.Children.Insert(0, rendered.Heading);
+            }
+
+            rendered.Section = section;
+            rendered.Rows = [];
+            return rendered;
+        }
 
         var desiredHeader = plan.DesiredRows.FirstOrDefault(row => row.IsFeatureHeader);
         var desiredHeadingLabel = desiredHeader is null && !string.IsNullOrEmpty(section.Label)

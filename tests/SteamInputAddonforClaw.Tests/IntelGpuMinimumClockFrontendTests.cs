@@ -22,7 +22,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         var profilesPath = Path.Combine(_directory, "profiles.json");
         var store = new ProfileStore(profilesPath);
         var gate = new ProfileMutationGate();
-        var gameMutations = new GameProfileMutations(store, gate);
+        var gameMutations = new GameProfileMutations(store, gate, TdpLimits());
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, gameMutations.SetEnabled(42, true, "Game"));
         var hardware = new FakeMinimumClockControl();
         using var runtime = new IntelGpuMinimumClockRuntime(
@@ -68,7 +68,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         var profilesPath = Path.Combine(_directory, "profiles.json");
         var store = new ProfileStore(profilesPath);
         var gate = new ProfileMutationGate();
-        var gameMutations = new GameProfileMutations(store, gate);
+        var gameMutations = new GameProfileMutations(store, gate, TdpLimits());
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, gameMutations.SetEnabled(42, true, "Game"));
         var hardware = new FakeMinimumClockControl();
         var target = ActiveProfileTarget.ForSteam(42);
@@ -94,14 +94,14 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task Whole_profile_toggle_reconciles_between_game_override_and_factory_release()
+    public async Task Legacy_profile_disable_request_keeps_the_active_game_override()
     {
         Directory.CreateDirectory(_directory);
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
         var profilesPath = Path.Combine(_directory, "profiles.json");
         var store = new ProfileStore(profilesPath);
         var gate = new ProfileMutationGate();
-        var mutations = new GameProfileMutations(store, gate);
+        var mutations = new GameProfileMutations(store, gate, TdpLimits());
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(42, true, "Game"));
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
             mutations.SetGpuMinimumClockEnabled(42, true,
@@ -116,10 +116,10 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
             activeProfileTargetSource: () => target);
 
         Assert.True((await control.SetGameProfileEnabledAsync(42, false, null)).Succeeded);
-        Assert.Equal(1, hardware.SetCalls);
-        Assert.Equal(-1, hardware.LastSetRange.Min);
+        Assert.Equal(0, hardware.SetCalls);
+        Assert.True(store.Load().Document.Games["42"].Enabled);
         Assert.True((await control.SetGameProfileEnabledAsync(42, true, "Game")).Succeeded);
-        Assert.Equal(2, hardware.SetCalls);
+        Assert.Equal(1, hardware.SetCalls);
         Assert.Equal(1725, hardware.LastSetRange.Min);
     }
 
@@ -141,6 +141,8 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
             intelGpuMinimumClockRuntime: runtime,
             featureSupport: new(true, true, true, true, true, true, true));
     }
+
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
 
     public void Dispose()
     {

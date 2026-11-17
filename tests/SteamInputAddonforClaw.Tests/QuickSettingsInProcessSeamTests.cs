@@ -167,7 +167,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     public async Task Capture_profile_page_projects_the_current_active_target()
     {
         var profilesPath = Path.Combine(_testDirectory, "profiles.json");
-        var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath), tdpLimits: TdpLimits());
         mutations.SetEnabled(4000u, true, "Offline Game");
         var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 4000u);
 
@@ -196,7 +196,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     public async Task Capture_profile_page_with_a_stale_app_id_is_unavailable_for_the_requested_context()
     {
         var profilesPath = Path.Combine(_testDirectory, "profiles.json");
-        var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath), tdpLimits: TdpLimits());
         mutations.SetEnabled(555u, true, "Active Game");
         var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 555u);
 
@@ -211,7 +211,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     public async Task Capture_profile_page_projects_the_current_active_game_and_persists_nothing()
     {
         var profilesPath = Path.Combine(_testDirectory, "profiles.json");
-        var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath), tdpLimits: TdpLimits());
         mutations.SetEnabled(555u, true, "Active Game");
         var contentsBefore = File.ReadAllText(profilesPath);
         var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 555u);
@@ -451,6 +451,8 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = null;
         if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, recursive: true);
     }
+
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
 
     private sealed class FakeStartupManager : IWindowsStartupManager
     {

@@ -25,7 +25,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     public void Canonical_key_families_are_accepted(string key)
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetFavorite(key, true, "Game"));
         Assert.Contains(key, store.Load().Document.XboxGames.Keys);
@@ -63,7 +63,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
                 }
             }
         });
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, true, "Game"));
         var copied = store.Load().Document.XboxGames[StoreKey];
@@ -76,15 +76,15 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         Assert.Equal(WindowsPowerMode.BestPerformance, copied.Performance.PowerMode!.Ac);
 
         var fallbackStore = new ProfileStore(Path.Combine(_directory, "fallback", "profiles.json"));
-        var fallback = new XboxGameProfileMutations(fallbackStore, new ProfileMutationGate());
+        var fallback = new XboxGameProfileMutations(fallbackStore, new ProfileMutationGate(), TdpLimits());
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, fallback.SetEnabled(PfnKey, true, null));
         var defaulted = fallbackStore.Load().Document.XboxGames[PfnKey];
-        Assert.Equal(CpuBoostMode.Enabled, defaulted.Performance.CpuBoost!.Ac);
-        Assert.Equal(CpuBoostMode.Enabled, defaulted.Performance.CpuBoost.Dc);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, defaulted.Performance.CpuBoost!.Ac);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, defaulted.Performance.CpuBoost.Dc);
         Assert.True(defaulted.Performance.Tdp!.Enabled);
         Assert.Equal(Pair(20, 22), defaulted.Performance.Tdp.Ac);
         Assert.Equal(Pair(20, 22), defaulted.Performance.Tdp.Dc);
-        Assert.Null(defaulted.Performance.PowerMode);
+        Assert.Equal(WindowsPowerMode.BestPerformance, defaulted.Performance.PowerMode!.Ac);
         Assert.Null(defaulted.Performance.FpsLimit);
     }
 
@@ -92,13 +92,13 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     public void Capture_completes_defaults_in_memory_without_persisting_an_entry()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
 
         var capture = mutations.CaptureProfile(StoreKey);
 
         Assert.False(capture.Exists);
         Assert.True(capture.PersistenceWritable);
-        Assert.Equal(CpuBoostMode.Enabled, capture.Profile.Performance.CpuBoost!.Ac);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, capture.Profile.Performance.CpuBoost!.Ac);
         Assert.Equal(Pair(20, 22), capture.Profile.Performance.Tdp!.Ac);
         Assert.Null(capture.Profile.Performance.FpsLimit);
         Assert.False(File.Exists(PathName));
@@ -125,7 +125,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     public void Back_button_mapping_mutation_is_atomic_validated_and_preserves_profile_data()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
         var extendedController = new NonSteamGameControllerOverrides
         {
@@ -164,15 +164,15 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         var cleared = store.Load().Document.XboxGames[StoreKey];
         Assert.Null(cleared.Controller.BackButtonMapping);
         Assert.Equal("kept", cleared.Controller.ExtensionData!["futureControllerField"].GetString());
-        Assert.False(cleared.Enabled);
+        Assert.True(cleared.Enabled);
         Assert.Equal(1, store.Load().Document.SchemaVersion);
     }
 
     [Fact]
-    public void Back_button_mapping_null_on_missing_profile_is_noop_and_explicit_mapping_creates_disabled_profile()
+    public void Back_button_mapping_null_on_missing_profile_is_noop_and_explicit_mapping_creates_complete_profile()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(StoreKey, null));
         Assert.False(File.Exists(PathName));
@@ -180,7 +180,10 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.B);
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(StoreKey, mapping));
         var created = store.Load().Document.XboxGames[StoreKey];
-        Assert.False(created.Enabled);
+        Assert.True(created.Enabled);
+        Assert.NotNull(created.Performance.CpuBoost);
+        Assert.NotNull(created.Performance.Tdp);
+        Assert.NotNull(created.Performance.PowerMode);
         Assert.Equal(mapping, created.Controller.BackButtonMapping);
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, false, null));
@@ -254,7 +257,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     }
 
     [Fact]
-    public void Disable_and_reenable_preserve_values_and_display_name_never_changes_identity()
+    public void Legacy_disable_call_cannot_turn_off_profile_and_existing_display_name_is_preserved()
     {
         var store = new ProfileStore(PathName);
         var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
@@ -265,17 +268,17 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         mutations.SetResolution(StoreKey, new GameDisplayResolution { Width = 1440, Height = 900 }, "First name");
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, false, "Ignored while disabling"));
-        var disabled = store.Load().Document.XboxGames[StoreKey];
-        Assert.False(disabled.Enabled);
-        Assert.Equal("First name", disabled.DisplayName);
-        Assert.Equal(CpuBoostMode.Aggressive, disabled.Performance.CpuBoost!.Ac);
-        Assert.Equal(Pair(25, 32), disabled.Performance.Tdp!.Ac);
-        Assert.Equal(1440, disabled.Display.Resolution!.Width);
+        var stillEnabled = store.Load().Document.XboxGames[StoreKey];
+        Assert.True(stillEnabled.Enabled);
+        Assert.Equal("First name", stillEnabled.DisplayName);
+        Assert.Equal(CpuBoostMode.Aggressive, stillEnabled.Performance.CpuBoost!.Ac);
+        Assert.Equal(Pair(25, 32), stillEnabled.Performance.Tdp!.Ac);
+        Assert.Equal(1440, stillEnabled.Display.Resolution!.Width);
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, true, "Updated name"));
         var reenabled = store.Load().Document.XboxGames[StoreKey];
         Assert.True(reenabled.Enabled);
-        Assert.Equal("Updated name", reenabled.DisplayName);
+        Assert.Equal("First name", reenabled.DisplayName);
         Assert.Equal(CpuBoostMode.Aggressive, reenabled.Performance.CpuBoost!.Ac);
         Assert.Equal(CpuBoostMode.Disabled, reenabled.Performance.CpuBoost.Dc);
         Assert.Equal(Pair(25, 32), reenabled.Performance.Tdp!.Ac);
@@ -283,22 +286,24 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     }
 
     [Fact]
-    public void Favorite_on_creates_disabled_entry_off_on_absent_is_noop_and_existing_values_survive()
+    public void Favorite_on_creates_complete_enabled_entry_and_existing_values_survive()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetFavorite(StoreKey, false, "Game"));
         Assert.False(File.Exists(PathName));
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetFavorite(StoreKey, true, "Game"));
         var favoriteOnly = store.Load().Document.XboxGames[StoreKey];
         Assert.True(favoriteOnly.Favorite);
-        Assert.False(favoriteOnly.Enabled);
-        Assert.Null(favoriteOnly.Performance.CpuBoost);
-        Assert.Null(favoriteOnly.Performance.Tdp);
+        Assert.True(favoriteOnly.Enabled);
+        Assert.NotNull(favoriteOnly.Performance.CpuBoost);
+        Assert.NotNull(favoriteOnly.Performance.Tdp);
+        Assert.NotNull(favoriteOnly.Performance.PowerMode);
 
         var extended = favoriteOnly with
         {
+            Enabled = false,
             Performance = new GamePerformanceOverrides { CpuBoost = new() { Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Enabled } },
             Display = new GameDisplayOverrides { Resolution = new() { Width = 1920, Height = 1200 } },
             ExtensionData = new() { ["futureProfile"] = JsonDocument.Parse("true").RootElement.Clone() }
@@ -308,6 +313,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetFavorite(StoreKey, false, "Renamed"));
         var updated = store.Load().Document.XboxGames[StoreKey];
         Assert.False(updated.Favorite);
+        Assert.True(updated.Enabled);
         Assert.Equal("Renamed", updated.DisplayName);
         Assert.Equal(CpuBoostMode.Aggressive, updated.Performance.CpuBoost!.Ac);
         Assert.Equal(1920, updated.Display.Resolution!.Width);
@@ -319,7 +325,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     public void Cpu_boost_side_and_enabled_changes_preserve_other_values()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         mutations.SetEnabled(StoreKey, true, "Game");
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostAc(StoreKey, CpuBoostMode.Aggressive));
@@ -358,7 +364,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     {
         var store = new ProfileStore(PathName);
         store.Save(new ProfileDocument { Device = new() { Performance = new() { PowerMode = new() { Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.BestPowerEfficiency } } } });
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         mutations.SetEnabled(StoreKey, true, "Game");
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetPowerModeAc(StoreKey, WindowsPowerMode.BestPerformance));
@@ -369,17 +375,17 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         Assert.Equal(WindowsPowerMode.BestPowerEfficiency, saved.Dc);
 
         var absentStore = new ProfileStore(Path.Combine(_directory, "no-power", "profiles.json"));
-        var absent = new XboxGameProfileMutations(absentStore, new ProfileMutationGate());
+        var absent = new XboxGameProfileMutations(absentStore, new ProfileMutationGate(), TdpLimits());
         absent.SetEnabled(StoreKey, true, "Game");
-        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Unavailable, absent.SetPowerModeAc(StoreKey, WindowsPowerMode.Balanced));
-        Assert.Null(absentStore.Load().Document.XboxGames[StoreKey].Performance.PowerMode);
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, absent.SetPowerModeAc(StoreKey, WindowsPowerMode.Balanced));
+        Assert.Equal(WindowsPowerMode.Balanced, absentStore.Load().Document.XboxGames[StoreKey].Performance.PowerMode!.Ac);
     }
 
     [Fact]
     public void Fps_mutations_create_sixty_sixty_defaults_and_reject_out_of_range_values()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         mutations.SetEnabled(StoreKey, true, "Game");
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetFpsLimitEnabled(StoreKey, true));
@@ -399,16 +405,19 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     }
 
     [Fact]
-    public void Resolution_create_clear_and_extension_data_follow_offline_semantics()
+    public void Resolution_create_clear_and_extension_data_keep_complete_profile_semantics()
     {
         var store = new ProfileStore(PathName);
-        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
 
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetResolution(StoreKey, null, "Game"));
         Assert.False(File.Exists(PathName));
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetResolution(StoreKey, new() { Width = 1440, Height = 900 }, "Game"));
         var created = store.Load().Document.XboxGames[StoreKey];
-        Assert.False(created.Enabled);
+        Assert.True(created.Enabled);
+        Assert.NotNull(created.Performance.CpuBoost);
+        Assert.NotNull(created.Performance.Tdp);
+        Assert.NotNull(created.Performance.PowerMode);
         Assert.Equal(1440, created.Display.Resolution!.Width);
 
         var extended = created with { ExtensionData = new() { ["futureProfile"] = JsonDocument.Parse("42").RootElement.Clone() } };
@@ -417,7 +426,7 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         var cleared = store.Load().Document.XboxGames[StoreKey];
         Assert.Null(cleared.Display.Resolution);
         Assert.True(cleared.ExtensionData!.ContainsKey("futureProfile"));
-        Assert.False(cleared.Enabled);
+        Assert.True(cleared.Enabled);
     }
 
     [Fact]
@@ -438,8 +447,8 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     {
         var store = new ProfileStore(PathName);
         var gate = new ProfileMutationGate();
-        var steam = new GameProfileMutations(store, gate);
-        var xbox = new XboxGameProfileMutations(store, gate);
+        var steam = new GameProfileMutations(store, gate, TdpLimits());
+        var xbox = new XboxGameProfileMutations(store, gate, TdpLimits());
         var work = Enumerable.Range(0, 20).SelectMany(index => new Task[]
         {
             Task.Run(() => steam.SetFavorite((uint)(1000 + index), true, $"Steam {index}")),

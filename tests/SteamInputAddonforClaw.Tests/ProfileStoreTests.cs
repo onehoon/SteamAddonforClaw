@@ -197,7 +197,7 @@ public sealed class ProfileStoreTests : IDisposable
             }
         });
 
-        Assert.True(new GameProfileMutations(store).Enable(123, "Game"));
+        Assert.True(new GameProfileMutations(store, tdpLimits: TdpLimits()).Enable(123, "Game"));
         var game = store.Load().Document.Games["123"];
 
         Assert.True(game.Enabled);
@@ -212,20 +212,20 @@ public sealed class ProfileStoreTests : IDisposable
     {
         var store = new ProfileStore(ProfilesPath);
 
-        Assert.True(new GameProfileMutations(store).Enable(123, null));
+        Assert.True(new GameProfileMutations(store, tdpLimits: TdpLimits()).Enable(123, null));
         var game = store.Load().Document.Games["123"];
 
-        Assert.Equal(new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, game.Performance.CpuBoost);
+        Assert.Equal(new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.EfficientEnabled, Dc = CpuBoostMode.EfficientEnabled }, game.Performance.CpuBoost);
         Assert.Equal(new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 22 }, game.Performance.Tdp!.Ac);
         Assert.Equal(new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 22 }, game.Performance.Tdp.Dc);
         Assert.True(game.Performance.Tdp.Enabled);
     }
 
     [Fact]
-    public void DisableAndReenable_PreservesGameValuesAndEntry()
+    public void LegacyDisableCallCannotTurnOffAnEnabledProfile()
     {
         var store = new ProfileStore(ProfilesPath);
-        var mutations = new GameProfileMutations(store);
+        var mutations = new GameProfileMutations(store, tdpLimits: TdpLimits());
         Assert.True(mutations.Enable(123, "Game"));
         var custom = store.Load().Document.Games["123"] with
         {
@@ -240,7 +240,7 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.True(mutations.Enable(123, null));
         Assert.True(mutations.Disable(123));
         var game = store.Load().Document.Games["123"];
-        Assert.False(game.Enabled);
+        Assert.True(game.Enabled);
         Assert.Equal(CpuBoostMode.Disabled, game.Performance.CpuBoost!.Ac);
         Assert.Equal(25, game.Performance.Tdp!.Ac.Pl1Watts);
     }
@@ -249,13 +249,13 @@ public sealed class ProfileStoreTests : IDisposable
     public void CpuBoostSideMutations_PreserveTheOppositePersistedSide()
     {
         var store = new ProfileStore(ProfilesPath);
-        var mutations = new GameProfileMutations(store);
+        var mutations = new GameProfileMutations(store, tdpLimits: TdpLimits());
         Assert.True(mutations.Enable(123, "Game"));
 
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostAc(123, CpuBoostMode.Aggressive));
         var afterAc = store.Load().Document.Games["123"].Performance.CpuBoost!;
         Assert.Equal(CpuBoostMode.Aggressive, afterAc.Ac);
-        Assert.Equal(CpuBoostMode.Enabled, afterAc.Dc);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, afterAc.Dc);
 
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostDc(123, CpuBoostMode.Disabled));
         var afterDc = store.Load().Document.Games["123"].Performance.CpuBoost!;
@@ -267,7 +267,7 @@ public sealed class ProfileStoreTests : IDisposable
     public void FeatureEnabledMutations_PreserveEachFeatureConfiguration()
     {
         var store = new ProfileStore(ProfilesPath);
-        var mutations = new GameProfileMutations(store);
+        var mutations = new GameProfileMutations(store, tdpLimits: TdpLimits());
         Assert.True(mutations.Enable(123, "Game"));
 
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostEnabled(123, false));
@@ -276,7 +276,7 @@ public sealed class ProfileStoreTests : IDisposable
         var game = store.Load().Document.Games["123"];
         Assert.False(game.Performance.CpuBoost!.Enabled);
         Assert.False(game.Performance.Tdp!.Enabled);
-        Assert.Equal(CpuBoostMode.Enabled, game.Performance.CpuBoost.Ac);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, game.Performance.CpuBoost.Ac);
         Assert.Equal(20, game.Performance.Tdp.Ac.Pl1Watts);
     }
 
@@ -284,7 +284,7 @@ public sealed class ProfileStoreTests : IDisposable
     public void Game_minimum_gpu_clock_override_round_trips_exact_driver_values_and_keeps_independent_enable_state()
     {
         var store = new ProfileStore(ProfilesPath);
-        var mutations = new GameProfileMutations(store);
+        var mutations = new GameProfileMutations(store, tdpLimits: TdpLimits());
         Assert.True(mutations.Enable(123, "Game"));
         var settings = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1725.125, DcMhz = 1825.375 };
 
@@ -332,7 +332,7 @@ public sealed class ProfileStoreTests : IDisposable
             }
         });
 
-        Assert.True(new GameProfileMutations(store).Enable(123, "Game"));
+        Assert.True(new GameProfileMutations(store, tdpLimits: TdpLimits()).Enable(123, "Game"));
 
         var gpu = store.Load().Document.Games["123"].Performance.GpuMinimumClock!;
         Assert.False(gpu.Enabled);
@@ -608,16 +608,18 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
-    public void FavoriteMutation_CreatesDisabledEntryAndRoundTrips()
+    public void FavoriteMutation_CreatesACompleteEnabledEntryAndRoundTrips()
     {
-        var mutations = new GameProfileMutations(new ProfileStore(ProfilesPath));
+        var mutations = new GameProfileMutations(new ProfileStore(ProfilesPath), tdpLimits: TdpLimits());
 
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetFavorite(123, true, "Game"));
 
         var profile = new ProfileStore(ProfilesPath).Load().Document.Games["123"];
         Assert.True(profile.Favorite);
-        Assert.False(profile.Enabled);
-        Assert.Null(profile.Performance.CpuBoost);
+        Assert.True(profile.Enabled);
+        Assert.NotNull(profile.Performance.CpuBoost);
+        Assert.NotNull(profile.Performance.Tdp);
+        Assert.NotNull(profile.Performance.PowerMode);
         Assert.True(new ProfileStore(ProfilesPath).Load().Document.Games["123"].Favorite);
     }
 
@@ -629,27 +631,32 @@ public sealed class ProfileStoreTests : IDisposable
         {
             ["123"] = new() { DisplayName = "Game", Performance = new() { CpuBoost = new() { Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Enabled } } }
         }});
-        var mutations = new GameProfileMutations(store);
+        var mutations = new GameProfileMutations(store, tdpLimits: TdpLimits());
 
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetFavorite(123, true, null));
 
         var profile = store.Load().Document.Games["123"];
         Assert.True(profile.Favorite);
-        Assert.False(profile.Enabled);
+        Assert.True(profile.Enabled);
         Assert.Equal(CpuBoostMode.Aggressive, profile.Performance.CpuBoost!.Ac);
+        Assert.NotNull(profile.Performance.Tdp);
+        Assert.NotNull(profile.Performance.PowerMode);
     }
 
     [Fact]
-    public void SetResolution_CreatesDisabledProfileAndRoundTrips()
+    public void SetResolution_CreatesACompleteEnabledProfileAndRoundTrips()
     {
         var store = new ProfileStore(ProfilesPath);
-        var mutations = new GameProfileMutations(store);
+        var mutations = new GameProfileMutations(store, tdpLimits: TdpLimits());
 
         var result = mutations.SetResolution(123, new GameDisplayResolution { Width = 1440, Height = 900 }, "Game");
 
         var saved = store.Load().Document.Games["123"];
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, result);
-        Assert.False(saved.Enabled);
+        Assert.True(saved.Enabled);
+        Assert.NotNull(saved.Performance.CpuBoost);
+        Assert.NotNull(saved.Performance.Tdp);
+        Assert.NotNull(saved.Performance.PowerMode);
         Assert.Equal(1440, saved.Display.Resolution!.Width);
         Assert.Equal(900, saved.Display.Resolution.Height);
         Assert.Equal("Game", saved.DisplayName);
@@ -663,12 +670,12 @@ public sealed class ProfileStoreTests : IDisposable
         {
             ["123"] = new() { Enabled = false, Display = new() { Resolution = new GameDisplayResolution { Width = 1920, Height = 1080 }, ExtensionData = new() { ["future"] = System.Text.Json.JsonDocument.Parse("true").RootElement.Clone() } } }
         }});
-        var mutations = new GameProfileMutations(store);
+        var mutations = new GameProfileMutations(store, tdpLimits: TdpLimits());
 
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetResolution(123, null, null));
 
         var saved = store.Load().Document.Games["123"];
-        Assert.False(saved.Enabled);
+        Assert.True(saved.Enabled);
         Assert.Null(saved.Display.Resolution);
         Assert.True(saved.Display.ExtensionData!.ContainsKey("future"));
     }
@@ -759,6 +766,8 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Contains("futureDisplay", saved);
         Assert.Equal(1, store.Load().Document.SchemaVersion);
     }
+
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
 
     public void Dispose()
     {
