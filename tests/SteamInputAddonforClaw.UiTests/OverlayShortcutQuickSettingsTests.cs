@@ -80,6 +80,90 @@ public sealed class OverlayShortcutQuickSettingsTests
     }
 
     [Fact]
+    public void Delayed_settings_snapshot_selects_first_adjustable_row_unless_user_navigated_shortcut()
+    {
+        Assert.True(OverlayWindow.ShouldAutoSelectShortcutSettings(
+            hasSelectableSettings: true,
+            userNavigatedThisEntry: false));
+        Assert.False(OverlayWindow.ShouldAutoSelectShortcutSettings(
+            hasSelectableSettings: true,
+            userNavigatedThisEntry: true));
+        Assert.False(OverlayWindow.ShouldAutoSelectShortcutSettings(
+            hasSelectableSettings: false,
+            userNavigatedThisEntry: false));
+
+        var cachedTileSelection = new OverlayShortcutSelection();
+        cachedTileSelection.Configure(tileCount: 3, columnCount: 3, preferredIndex: 1);
+        Assert.Equal(3, cachedTileSelection.TileCount);
+        var selectedTileIndex = cachedTileSelection.SelectedIndex;
+
+        var section = new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control",
+        [
+            new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle,
+                false, false, null, null, QuickSettingsCommitPolicy.Immediate) { Visible = false },
+            NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "Plugged in · PL1", 20),
+            NumericRow(QuickSettingsRowId.ProfileTdpAcPl2, "Plugged in · PL2", 25)
+        ]);
+        var profilePage = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile,
+            QuickSettingsProfileTarget.ForSteam(570), true, null, [section], []);
+        var visibleRows = OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(profilePage)
+            .SelectMany(OverlayQuickSettingsSectionRendering.DescribeRows)
+            .ToArray();
+        Assert.Equal(QuickSettingsRowId.ProfileTdpAcPl1, visibleRows[0].Row.RowId);
+
+        var adjustments = 0;
+        var selection = new OverlayRowSelection();
+        selection.SetRows(visibleRows.Select(row => new OverlayRowCapabilities(
+            () => row.Row.Available && row.Row.Writable,
+            Adjust: row.Row.RowId == QuickSettingsRowId.ProfileTdpAcPl1 ? _ => adjustments++ : null)).ToArray());
+
+        Assert.Equal(0, selection.SelectedIndex);
+        Assert.Equal(QuickSettingsRowId.ProfileTdpAcPl1, visibleRows[selection.SelectedIndex!.Value].Row.RowId);
+        selection.AdjustSelected(+1);
+        Assert.Equal(1, adjustments);
+
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var refreshStart = quickSettings.IndexOf("private void RefreshShortcutQuickSettingsView(QuickSettingsRowId? preferredShortcutRowId)", StringComparison.Ordinal);
+        var refreshEnd = quickSettings.IndexOf("private string? ResolveShortcutQuickSettingsStatus(", refreshStart, StringComparison.Ordinal);
+        var refresh = quickSettings[refreshStart..refreshEnd];
+        Assert.Contains("ShouldAutoSelectShortcutSettings(", refresh, StringComparison.Ordinal);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Shortcut))", refresh, StringComparison.Ordinal);
+        Assert.Contains("RefreshShortcutQuickSettingsView(preferredShortcutRowId);", quickSettings, StringComparison.Ordinal);
+
+        Assert.False(OverlayWindow.ShouldAutoSelectShortcutSettings(
+            hasSelectableSettings: true,
+            userNavigatedThisEntry: true));
+        Assert.Equal(selectedTileIndex, cachedTileSelection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Explicit_shortcut_navigation_and_tile_tap_are_preserved_when_settings_arrive_later()
+    {
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+        foreach (var method in new[]
+                 {
+                     "internal void NavigateUp()",
+                     "internal void NavigateDown()",
+                     "internal void AdjustSelectedRow(int delta)",
+                     "internal void ActivateSelectedRow()"
+                 })
+            Assert.Contains("MarkShortcutUserNavigatedThisEntry();", ExtractMethod(navigation, method), StringComparison.Ordinal);
+
+        var markInteraction = ExtractMethod(navigation, "private void MarkShortcutUserNavigatedThisEntry()");
+        Assert.Contains("if (OnShortcutPage())", markInteraction, StringComparison.Ordinal);
+        Assert.Contains("_shortcutUserNavigatedThisEntry = true;", markInteraction, StringComparison.Ordinal);
+        Assert.Contains("MarkShortcutUserNavigatedThisEntry();",
+            ExtractMethod(navigation, "private void SelectShortcutTile(Guid tileId, string source)"), StringComparison.Ordinal);
+
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        Assert.Contains("_shortcutUserNavigatedThisEntry = false;",
+            ExtractMethod(shell, "private void ApplySelectedTabVisualState()"), StringComparison.Ordinal);
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        Assert.Contains("_shortcutUserNavigatedThisEntry = false;",
+            ExtractMethod(quickSettings, "private void ResetShortcutQuickSettingsForShow()"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Shortcut_profile_artwork_reuses_the_existing_profile_host_and_loader()
     {
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
@@ -190,6 +274,24 @@ public sealed class OverlayShortcutQuickSettingsTests
         for (var index = 0; (index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0; index += value.Length)
             count++;
         return count;
+    }
+
+    private static string ExtractMethod(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Could not find method {signature}.");
+        var openBrace = source.IndexOf('{', start);
+        Assert.True(openBrace >= 0, $"Could not find the body for {signature}.");
+
+        var depth = 0;
+        for (var index = openBrace; index < source.Length; index++)
+        {
+            if (source[index] == '{') depth++;
+            else if (source[index] == '}' && --depth == 0)
+                return source[start..(index + 1)];
+        }
+
+        throw new InvalidOperationException($"Could not find the end of method {signature}.");
     }
 
     private static string ReadSource(params string[] parts)

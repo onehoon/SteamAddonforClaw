@@ -848,8 +848,11 @@ public sealed partial class OverlayWindow
 
         if (!_shortcutSettingsSelected)
         {
-            if (!HasSelectableShortcutTile() && _pageRows[AddonQuickSettingsTabId.Shortcut]
-                    .Any(row => row.Capabilities.IsSelectable()))
+            var hasSelectableSettings = _pageRows[AddonQuickSettingsTabId.Shortcut]
+                .Any(row => row.Capabilities.IsSelectable());
+            if (ShouldAutoSelectShortcutSettings(
+                    hasSelectableSettings,
+                    _shortcutUserNavigatedThisEntry))
                 _shortcutSettingsSelected = true;
 
             if (_shortcutSettingsSelected)
@@ -900,6 +903,11 @@ public sealed partial class OverlayWindow
             : ResolveProfileStatusMessage(profilePage);
     }
 
+    internal static bool ShouldAutoSelectShortcutSettings(
+        bool hasSelectableSettings,
+        bool userNavigatedThisEntry) =>
+        hasSelectableSettings && !userNavigatedThisEntry;
+
     private void RestoreShortcutQuickSettingsHome()
     {
         if (_shortcutQuickSettingsSource is not { } source || _shortcutQuickSettingsHost is null) return;
@@ -922,6 +930,7 @@ public sealed partial class OverlayWindow
         _devicePageReceivedThisShow = false;
         _profilePageReceivedThisShow = false;
         _shortcutSettingsSelected = false;
+        _shortcutUserNavigatedThisEntry = false;
         RestoreShortcutQuickSettingsHome();
         _pageRows[AddonQuickSettingsTabId.Shortcut] = [];
     }

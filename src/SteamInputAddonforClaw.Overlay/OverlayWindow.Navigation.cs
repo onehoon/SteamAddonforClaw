@@ -23,6 +23,7 @@ public sealed partial class OverlayWindow
     // The Runtime-owned Shortcut projection uses one transient 2D selection model.
     private readonly OverlayShortcutSelection _shortcutSelection = new();
     private bool _shortcutSettingsSelected;
+    private bool _shortcutUserNavigatedThisEntry;
 
     // OQ5-UI-04 s.11: NavigateUp/Down move logical row selection; Left/Right and Accept dispatch to
     // the selected row only when it registered that capability. All row/selection state stays private
@@ -30,6 +31,7 @@ public sealed partial class OverlayWindow
     // with its current Runtime-projected tile count and three-column layout.
     internal void NavigateUp()
     {
+        MarkShortcutUserNavigatedThisEntry();
         if (OnShortcutPage())
         {
             if (_shortcutSettingsSelected)
@@ -51,6 +53,7 @@ public sealed partial class OverlayWindow
 
     internal void NavigateDown()
     {
+        MarkShortcutUserNavigatedThisEntry();
         if (OnShortcutPage())
         {
             if (_shortcutSettingsSelected)
@@ -77,6 +80,7 @@ public sealed partial class OverlayWindow
     // the fallback row is never mutated under a stale highlight.
     internal void AdjustSelectedRow(int delta)
     {
+        MarkShortcutUserNavigatedThisEntry();
         _numericSliderRepeatTarget.Clear();
         if (OnShortcutPage())
         {
@@ -115,6 +119,7 @@ public sealed partial class OverlayWindow
 
     internal void ActivateSelectedRow()
     {
+        MarkShortcutUserNavigatedThisEntry();
         if (OnShortcutPage())
         {
             if (_shortcutSettingsSelected)
@@ -129,6 +134,12 @@ public sealed partial class OverlayWindow
     }
 
     private bool OnShortcutPage() => _tabState.SelectedTab == AddonQuickSettingsTabId.Shortcut;
+
+    private void MarkShortcutUserNavigatedThisEntry()
+    {
+        if (OnShortcutPage())
+            _shortcutUserNavigatedThisEntry = true;
+    }
 
     private void MoveRowSelection(bool up)
     {
@@ -151,6 +162,7 @@ public sealed partial class OverlayWindow
         for (var index = 0; index < tiles.Count; index++)
         {
             if (tiles[index].TileId != tileId) continue;
+            MarkShortcutUserNavigatedThisEntry();
             _shortcutSettingsSelected = false;
             _numericSliderRepeatTarget.Clear();
             _shortcutSelection.Select(index);

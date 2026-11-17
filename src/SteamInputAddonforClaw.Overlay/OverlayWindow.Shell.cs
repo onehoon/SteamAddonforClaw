@@ -287,7 +287,10 @@ public sealed partial class OverlayWindow
             page.Visibility = id == selected ? Visibility.Visible : Visibility.Collapsed;
 
         if (selected == AddonQuickSettingsTabId.Shortcut)
+        {
+            _shortcutUserNavigatedThisEntry = false;
             RefreshShortcutQuickSettingsView();
+        }
         else
         {
             _shortcutSettingsSelected = false;
