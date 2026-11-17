@@ -370,6 +370,42 @@ public sealed class OverlayQuickSettingsPageBindingTests
     }
 
     [Fact]
+    public async Task Hidden_TDP_enabled_row_stays_in_the_grouped_overlay_mutation_contract()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var source = TdpPage();
+        var tdpSection = source.Sections.Single(section => section.SectionId == QuickSettingsSectionId.DeviceTdp);
+        var hiddenSection = tdpSection with
+        {
+            Rows = [tdpSection.Rows[0] with { Visible = false }, .. tdpSection.Rows.Skip(1)]
+        };
+        var page = source with
+        {
+            Sections = [hiddenSection, .. source.Sections.Where(section => section.SectionId != QuickSettingsSectionId.DeviceTdp)]
+        };
+        using var binding = NewBinding(page, mutate.Func, delay.Func);
+
+        Assert.False(binding.BuildEffectivePage().Sections.Single(section => section.SectionId == QuickSettingsSectionId.DeviceTdp)
+            .Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceTdpEnabled).Visible);
+        binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsValue.Integer(18));
+        delay.Elapse();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "hidden-row grouped mutation submitted");
+
+        var intent = Assert.Single(mutate.Calls);
+        Assert.Equal(5, intent.Values.Count);
+        Assert.True(intent.Values.Single(value => value.RowId == QuickSettingsRowId.DeviceTdpEnabled).Value.BooleanValue);
+        Assert.Equal(
+        [
+            QuickSettingsRowId.DeviceTdpEnabled,
+            QuickSettingsRowId.DeviceTdpAcPl1,
+            QuickSettingsRowId.DeviceTdpAcPl2,
+            QuickSettingsRowId.DeviceTdpDcPl1,
+            QuickSettingsRowId.DeviceTdpDcPl2,
+        ], intent.Values.Select(value => value.RowId));
+    }
+
+    [Fact]
     public async Task Group_later_edit_reuses_the_pending_whole_draft_and_only_the_newest_is_submitted()
     {
         var delay = new ManualDelay();

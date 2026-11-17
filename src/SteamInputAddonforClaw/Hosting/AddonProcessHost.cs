@@ -129,6 +129,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeShutdownPrepared;
     private int _profileRuntimeStartupReady;
     private Task? _deferredRuntimeStartup;
+    private Task? _alwaysOnPerformanceSetupTask;
     private Task _disabledBootAdmissionRetryTask = Task.CompletedTask;
     private CancellationTokenSource? _disabledBootAdmissionRetryCancellation;
     private Task? _backgroundUpdateTask;
@@ -3017,7 +3018,114 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             ReconcileDeviceProfileStartup();
             StartBackgroundUpdate();
+            StartAlwaysOnPerformanceSetup();
         }, cancellationToken);
+    }
+
+    private void StartAlwaysOnPerformanceSetup()
+    {
+        if (_alwaysOnPerformanceSetupTask is not null
+            || Volatile.Read(ref _processShutdownStarted) != 0)
+            return;
+
+        var cancellationToken = _startupCancellationTokenSource.Token;
+        _alwaysOnPerformanceSetupTask = Task.Run(
+            () => RunAlwaysOnPerformanceSetup(cancellationToken), CancellationToken.None);
+    }
+
+    private void RunAlwaysOnPerformanceSetup(CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+
+            var migration = AlwaysOnPerformanceFeatureMigration.Run(
+                _profileStore, _profileMutationGate, cancellationToken);
+            if (migration.Status == AlwaysOnPerformanceFeatureMigrationStatus.UnsafeProfile)
+            {
+                AppLog.Warn("Profiles.AlwaysOn", "Performance settings were not migrated because the profile document is unsafe to replace; startup will continue.", null,
+                    ("ProfileStatus", migration.ProfileStatus));
+                return;
+            }
+
+            var changed = migration.Status == AlwaysOnPerformanceFeatureMigrationStatus.Changed;
+            if (changed)
+                AppLog.Info("Profiles.AlwaysOn", "Existing TDP, CPU Boost, and Windows Power Mode settings were normalized to managed mode.");
+
+            if (cancellationToken.IsCancellationRequested
+                || Volatile.Read(ref _processShutdownStarted) != 0)
+                return;
+
+            var tdpSeeded = false;
+            if (_tdpRuntime is { } tdpRuntime)
+            {
+                var snapshot = tdpRuntime.CaptureSnapshot();
+                if (snapshot is { Available: true, PersistenceWritable: true, Configuration: null })
+                {
+                    var seed = tdpRuntime.SetEnabled(true);
+                    if (!seed.Succeeded)
+                    {
+                        AppLog.Warn("Profiles.Tdp", "First-run TDP configuration could not be initialized from validated Center M Manual values.", null,
+                            ("Reason", seed.FailureMessage ?? seed.Outcome.ToString()));
+                    }
+                    else
+                    {
+                        tdpSeeded = true;
+                        if (seed.Completion is { } completion)
+                        {
+                            AppLog.Info("Profiles.Tdp", "First-run TDP values were saved and the existing hardware apply path was queued.",
+                                ("ApplyPending", !completion.IsCompleted));
+                        }
+                        else
+                        {
+                            AppLog.Info("Profiles.Tdp", "First-run TDP values were saved; apply is deferred until the power source is known.");
+                        }
+                    }
+                }
+            }
+
+            if (cancellationToken.IsCancellationRequested
+                || Volatile.Read(ref _processShutdownStarted) != 0)
+                return;
+
+            if (changed)
+            {
+                try { _cpuBoostRuntime.ReconcileWithResult(); }
+                catch (Exception exception) { AppLog.Warn("Profiles.CpuBoost", "Post-migration CPU Boost reconcile failed; Runtime remains available.", exception); }
+
+                try
+                {
+                    var result = _powerModeRuntime.ReconcileWithResult();
+                    if (!result.Succeeded)
+                        AppLog.Warn("Profiles.PowerMode", "Post-migration Windows Power Mode reconcile did not complete successfully.", null,
+                            ("Reason", result.FailureMessage ?? "ApplyFailed"));
+                }
+                catch (Exception exception) { AppLog.Warn("Profiles.PowerMode", "Post-migration Windows Power Mode reconcile failed; Runtime remains available.", exception); }
+
+                if (!tdpSeeded && _tdpRuntime is { } migratedTdpRuntime)
+                {
+                    try
+                    {
+                        migratedTdpRuntime.ReconcileCurrent(
+                            forceApply: true, invalidateHardwareCache: false, reason: "AlwaysOnSettingsMigration");
+                    }
+                    catch (Exception exception) { AppLog.Warn("Profiles.Tdp", "Post-migration TDP reconcile failed; Runtime remains available.", exception); }
+                }
+            }
+
+            if ((changed || tdpSeeded)
+                && _frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
+                control.NotifyStateInvalidated();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            AppLog.Debug("Profiles.AlwaysOn", "Deferred performance setup was canceled during shutdown.");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.AlwaysOn", "Deferred performance setup failed; Addon startup continues and the next launch can retry.", exception);
+        }
     }
 
     private void StartDisabledBootAdmissionRetryIfEligible()
@@ -3772,6 +3880,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
             catch (Exception exception) { AppLog.Error("Startup", "Deferred Runtime startup work failed.", exception); }
             _deferredRuntimeStartup = null;
+        }
+        if (_alwaysOnPerformanceSetupTask is not null)
+        {
+            try { await _alwaysOnPerformanceSetupTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+            catch (Exception exception) { AppLog.Warn("Profiles.AlwaysOn", "Deferred performance setup did not drain cleanly during shutdown.", exception); }
+            _alwaysOnPerformanceSetupTask = null;
         }
         try { await _disabledBootAdmissionRetryTask.ConfigureAwait(false); }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }

@@ -585,7 +585,7 @@ public sealed partial class XboxPage : UserControl
         try
         {
             await Task.Delay(300, token);
-            if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), ProfileEnabledToggle.IsOn)
+            if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), _snapshot?.Enabled == true && _snapshot.PersistenceWritable)
                 || _frontend is null || _selectedGame is null
                 || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2)
                 return;

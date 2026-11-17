@@ -66,7 +66,7 @@
             <ctcontrols:SettingsExpander x:Name="TdpExpander" x:Uid="Device_TdpExpander" Header="TDP Control" IsExpanded="False"
                 Description="Configure processor power limits for plugged-in and battery operation.">
                 <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
-                <ToggleSwitch x:Name="TdpEnabledToggleSwitch" OffContent="" OnContent="" Toggled="TdpEnabledToggleSwitch_Toggled" />
+                <ToggleSwitch x:Name="TdpEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard x:Uid="Device_TdpAcCard" Header="Plugged in">
                         <StackPanel Spacing="6">
@@ -96,9 +96,9 @@
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch
                     x:Name="CpuBoostEnabledToggleSwitch"
+                    Visibility="Collapsed"
                     OffContent=""
-                    OnContent=""
-                    Toggled="CpuBoostEnabledToggleSwitch_Toggled" />
+                    OnContent="" />
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard x:Uid="Device_CpuBoostAcCard" Header="Plugged in">
                         <ComboBox
@@ -155,7 +155,7 @@
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE7E8;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
-                <ToggleSwitch x:Name="PowerModeEnabledToggleSwitch" OffContent="" OnContent="" Toggled="PowerModeEnabledToggleSwitch_Toggled" />
+                <ToggleSwitch x:Name="PowerModeEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard x:Uid="Device_PowerModeAcCard" Header="Plugged in"><ComboBox x:Name="PowerModeAcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeAcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>
                     <ctcontrols:SettingsCard x:Uid="Device_PowerModeDcCard" Header="On battery"><ComboBox x:Name="PowerModeDcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeDcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>

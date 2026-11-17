@@ -9,6 +9,36 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class PowerModeTests
 {
     [Fact]
+    public void Startup_bootstraps_power_mode_from_known_windows_values_with_enabled_true()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");
+        var store = new ProfileStore(path);
+        var runtime = new PowerModeRuntime(store, new FakePowerModePolicy());
+
+        runtime.StartupReconcile();
+
+        var persisted = store.Load().Document.Device.Performance.PowerMode;
+        Assert.NotNull(persisted);
+        Assert.True(persisted!.Enabled);
+        Assert.Equal(WindowsPowerMode.Balanced, persisted.Ac);
+        Assert.Equal(WindowsPowerMode.Balanced, persisted.Dc);
+    }
+
+    [Fact]
+    public void Startup_does_not_bootstrap_power_mode_when_windows_values_are_unavailable()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");
+        var runtime = new PowerModeRuntime(new ProfileStore(path), new FakePowerModePolicy { FailRead = true });
+
+        runtime.StartupReconcile();
+
+        Assert.False(File.Exists(path));
+        Assert.False(runtime.Snapshot.PersistenceWritable);
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Null(runtime.Snapshot.DcDesired);
+    }
+
+    [Fact]
     public void Device_mutation_keeps_active_game_power_mode_authoritative()
     {
         var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");

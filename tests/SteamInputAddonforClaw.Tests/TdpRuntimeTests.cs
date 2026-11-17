@@ -109,6 +109,7 @@ public sealed class TdpRuntimeTests : IDisposable
 
         Assert.True(result.Succeeded);
         var persisted = new ProfileStore(PathName).Load().Document.Device.Performance.Tdp;
+        Assert.True(persisted?.Enabled);
         Assert.Equal(seed.Ac, persisted?.Ac);
         Assert.Equal(seed.Dc, persisted?.Dc);
         Assert.Contains("SetData(81,8)", transport.Operations);

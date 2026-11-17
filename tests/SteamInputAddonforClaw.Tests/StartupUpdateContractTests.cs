@@ -43,6 +43,35 @@ public sealed class StartupUpdateContractTests
     }
 
     [Fact]
+    public void Always_on_performance_setup_is_queued_after_existing_startup_reconciliation()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var deferredStart = source.IndexOf("internal void StartDeferredRuntimeStartup()", StringComparison.Ordinal);
+        var deferredEnd = source.IndexOf("private void StartAlwaysOnPerformanceSetup()", deferredStart, StringComparison.Ordinal);
+        var deferred = source[deferredStart..deferredEnd];
+        var controllerStartup = deferred.IndexOf("TryStartDisabledModeControllerAsync(", StringComparison.Ordinal);
+        var profileStartup = deferred.IndexOf("ReconcileDeviceProfileStartup();", StringComparison.Ordinal);
+        var backgroundUpdate = deferred.IndexOf("StartBackgroundUpdate();", StringComparison.Ordinal);
+        var setupQueue = deferred.IndexOf("StartAlwaysOnPerformanceSetup();", StringComparison.Ordinal);
+        var setupEnd = source.IndexOf("private void StartDisabledBootAdmissionRetryIfEligible()", deferredEnd, StringComparison.Ordinal);
+        var setupMethod = source[deferredEnd..setupEnd];
+
+        Assert.True(controllerStartup >= 0);
+        Assert.True(profileStartup > controllerStartup);
+        Assert.True(backgroundUpdate > profileStartup);
+        Assert.True(setupQueue > backgroundUpdate);
+        Assert.Contains("Task.Run(", setupMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("await ", setupMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("Task.Delay", setupMethod, StringComparison.Ordinal);
+        Assert.Contains("_startupCancellationTokenSource.Token", setupMethod, StringComparison.Ordinal);
+        Assert.Contains("Configuration: null", setupMethod, StringComparison.Ordinal);
+        Assert.Contains("tdpRuntime.SetEnabled(true)", setupMethod, StringComparison.Ordinal);
+        Assert.Contains("if (!tdpSeeded && _tdpRuntime is", setupMethod, StringComparison.Ordinal);
+        Assert.Contains("catch (Exception exception)", setupMethod, StringComparison.Ordinal);
+        Assert.Contains("_alwaysOnPerformanceSetupTask.ConfigureAwait(false)", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Startup_coordinator_has_no_network_update_dependency()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw", "Startup", "StartupCoordinator.cs");
