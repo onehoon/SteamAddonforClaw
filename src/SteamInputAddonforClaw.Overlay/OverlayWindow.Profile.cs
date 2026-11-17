@@ -85,7 +85,8 @@ public sealed partial class OverlayWindow
         if (!selected)
         {
             _noGameRecheckRequestedForThisEntry = false;
-            ClearProfileArtwork();
+            if (_tabState.SelectedTab != AddonQuickSettingsTabId.Shortcut)
+                ClearProfileArtwork();
             return;
         }
 
@@ -100,6 +101,7 @@ public sealed partial class OverlayWindow
     private void PrepareActiveProfileFirstShow()
     {
         if (!_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)) return;
+        _profilePageReceivedThisShow = false;
         _noGameRecheckRequestedForThisEntry = false;
         _activeProfileInitialLoadPending = true;
         var page = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Loading the active game profile.");
@@ -114,17 +116,20 @@ public sealed partial class OverlayWindow
         if (page.PageId != QuickSettingsPageId.Profile) return;
         if (!_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)) return;
 
+        var preferredShortcutRowId = CaptureShortcutSelectionRowId();
+        _profilePageReceivedThisShow = true;
         _activeProfileInitialLoadPending = false;
         surface.Binding?.ApplyAuthoritativePage(page);
         RenderQuickSettingsPage(surface);
         ApplyProfilePresentation(page);
         UpdateProfileArtwork(page);
         TryRequestNoRunningGameRecheck(page);
+        RefreshShortcutQuickSettingsView(preferredShortcutRowId);
     }
 
     private void UpdateProfileArtwork(QuickSettingsPageSnapshot? page)
     {
-        var appId = _tabState.SelectedTab == AddonQuickSettingsTabId.Profile
+        var appId = IsProfileArtworkPresentationTab(_tabState.SelectedTab)
             ? SteamGameArtworkResolver.EligibleSteamAppId(page)
             : null;
         if (appId is null)
@@ -303,13 +308,16 @@ public sealed partial class OverlayWindow
 
     private bool IsCurrentProfileArtworkTarget(uint appId)
     {
-        if (!_isVisible || _tabState.SelectedTab != AddonQuickSettingsTabId.Profile
+        if (!_isVisible || !IsProfileArtworkPresentationTab(_tabState.SelectedTab)
             || _profileArtworkRequestedAppId != appId
             || !_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface))
             return false;
 
         return SteamGameArtworkResolver.EligibleSteamAppId(surface.Binding?.AuthoritativePage) == appId;
     }
+
+    internal static bool IsProfileArtworkPresentationTab(AddonQuickSettingsTabId tab) =>
+        tab is AddonQuickSettingsTabId.Profile or AddonQuickSettingsTabId.Shortcut;
 
     private void ClearProfileArtwork()
     {

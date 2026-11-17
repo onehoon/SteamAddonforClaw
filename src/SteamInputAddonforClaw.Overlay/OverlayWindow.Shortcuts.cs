@@ -29,6 +29,8 @@ public sealed partial class OverlayWindow
     private IReadOnlyList<FrontendShortcutTile> _renderedShortcutTiles = [];
     private Guid? _renderedShortcutSelectedTileId;
     private Grid? _shortcutGrid;
+    private StackPanel? _shortcutQuickSettingsHost;
+    private TextBlock? _shortcutQuickSettingsStatus;
     private bool _shortcutExecutionInFlight;
     private bool _isVisible;
 
@@ -36,6 +38,25 @@ public sealed partial class OverlayWindow
 
     private FrameworkElement BuildShortcutPage()
     {
+        var root = new StackPanel
+        {
+            Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        _shortcutQuickSettingsHost = new StackPanel
+        {
+            Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        _shortcutQuickSettingsStatus = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Visibility = Visibility.Collapsed,
+        };
+        OverlayQamResources.ApplyTextStyle(_shortcutQuickSettingsStatus, "QamCaptionTextStyle");
+        _shortcutQuickSettingsHost.Children.Add(_shortcutQuickSettingsStatus);
+
         _shortcutGrid = new Grid
         {
             ColumnSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
@@ -43,8 +64,19 @@ public sealed partial class OverlayWindow
         };
         for (var column = 0; column < ShortcutVisualColumnCount; column++)
             _shortcutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var separator = new Border
+        {
+            Height = OverlayQamResources.Get("QamSectionSeparatorThickness", new Thickness(0, 1, 0, 0)).Top,
+            Background = OverlayQamResources.Brush("QamSeparatorBrush"),
+            Margin = new Thickness(0, 4, 0, 4),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsHitTestVisible = false,
+        };
+        root.Children.Add(_shortcutQuickSettingsHost);
+        root.Children.Add(separator);
+        root.Children.Add(_shortcutGrid);
         RenderShortcutSnapshot();
-        return _shortcutGrid;
+        return root;
     }
 
     internal void ApplyShortcutState(FrontendShortcutDashboardSnapshot snapshot)

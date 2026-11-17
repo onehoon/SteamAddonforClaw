@@ -142,7 +142,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.DoesNotContain("QamSeparatorBrush", rowChrome);
         Assert.DoesNotContain("QamSectionSeparatorThickness", rowChrome);
         Assert.Contains("private static void SetOverlaySectionSeparator(Border card, bool visible)", quickSettings);
-        Assert.Contains("card.BorderBrush = OverlayQamResources.Brush(\"QamSeparatorBrush\")", quickSettings);
+        Assert.Contains("var brush = OverlayQamResources.Brush(\"QamSeparatorBrush\")", quickSettings);
         Assert.Contains("\"QamSectionSeparatorThickness\"", quickSettings);
         Assert.Contains("Margin = OverlayQamResources.Get(\"QamRowMargin\", new Thickness(-16, 0, -16, 0))", quickSettings);
         Assert.Contains("BorderBrush = OverlayQamResources.Brush(\"QamSeparatorBrush\")", sectionCard);
@@ -189,7 +189,7 @@ public sealed class OverlayQamVisualResourcesTests
         var sectionCardEnd = quickSettings.IndexOf("private bool TryCreateQuickSettingsRow", sectionCardStart, StringComparison.Ordinal);
         var sectionCard = quickSettings[sectionCardStart..sectionCardEnd];
         var separatorStart = quickSettings.IndexOf("private static void SetOverlaySectionSeparator", StringComparison.Ordinal);
-        var separatorEnd = quickSettings.IndexOf("private static void ApplyQuickSettingsSectionSeparators", separatorStart, StringComparison.Ordinal);
+        var separatorEnd = quickSettings.IndexOf("private void ApplyQuickSettingsSectionSeparators", separatorStart, StringComparison.Ordinal);
         var separator = quickSettings[separatorStart..separatorEnd];
 
         AssertResourceValue(resources, "QamSectionSpacing", "0");
@@ -208,7 +208,8 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[0].Container, visible: false)", clawHud);
         Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[1].Container, visible: true)", clawHud);
         Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[2].Container, visible: true)", clawHud);
-        Assert.Contains("card.BorderThickness = visible", separator);
+        Assert.Contains("var thickness = visible", separator);
+        Assert.Contains("if (card.BorderThickness != thickness)", separator);
         Assert.Contains("QamSectionSeparatorThickness", separator);
         Assert.Contains("new Thickness(0, 1, 0, 0)", separator);
         Assert.Contains("var steamCard = CreateOverlaySectionCard(steamSection)", controller);

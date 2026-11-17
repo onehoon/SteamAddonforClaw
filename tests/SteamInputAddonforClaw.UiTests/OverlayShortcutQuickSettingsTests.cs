@@ -1,0 +1,203 @@
+using System.IO;
+using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Overlay;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+public sealed class OverlayShortcutQuickSettingsTests
+{
+    [Fact]
+    public void Shortcut_page_places_shared_quick_settings_before_the_unchanged_tile_grid()
+    {
+        var shortcuts = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var buildStart = shortcuts.IndexOf("private FrameworkElement BuildShortcutPage()", StringComparison.Ordinal);
+        var buildEnd = shortcuts.IndexOf("internal void ApplyShortcutState(", buildStart, StringComparison.Ordinal);
+        var build = shortcuts[buildStart..buildEnd];
+
+        Assert.Contains("_shortcutQuickSettingsHost", build, StringComparison.Ordinal);
+        Assert.Contains("var separator = new Border", build, StringComparison.Ordinal);
+        Assert.True(build.IndexOf("_shortcutQuickSettingsHost", StringComparison.Ordinal)
+            < build.IndexOf("var separator = new Border", StringComparison.Ordinal));
+        Assert.True(build.IndexOf("root.Children.Add(separator)", StringComparison.Ordinal)
+            < build.IndexOf("root.Children.Add(_shortcutGrid)", StringComparison.Ordinal));
+        Assert.Contains("Background = OverlayQamResources.Brush(\"QamSeparatorBrush\")", build, StringComparison.Ordinal);
+        Assert.Contains("IsHitTestVisible = false", build, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text = \"Shortcuts\"", build, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScrollViewer", build, StringComparison.Ordinal);
+        Assert.Contains("if (rendered.Card.Visibility != visibility)", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("if (_shortcutQuickSettingsStatus!.Text != statusText)", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("if (card.BorderThickness != thickness)", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("desiredSource.HomeHost.Children.Remove(desiredSource.Content)", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("_shortcutQuickSettingsHost.Children.Add(desiredSource.Content)", quickSettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuickSettingsPageId.Shortcut", quickSettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("new OverlayQuickSettingsPageBinding(\n            QuickSettingsPageId.Shortcut", quickSettings, StringComparison.Ordinal);
+
+        var tileGridStart = shortcuts.IndexOf("private void RenderShortcutSnapshot()", StringComparison.Ordinal);
+        var tileGridEnd = shortcuts.IndexOf("private ShortcutTileControls CreateShortcutTile(", tileGridStart, StringComparison.Ordinal);
+        var tileRenderer = shortcuts[tileGridStart..tileGridEnd];
+        Assert.Contains("OverlayShortcutTileReconciliation.Between(_renderedShortcutTiles, tiles)", tileRenderer, StringComparison.Ordinal);
+        Assert.Contains("private const int ShortcutVisualColumnCount = 3;", shortcuts, StringComparison.Ordinal);
+        Assert.DoesNotContain("_shortcutGrid.Children.Clear()", tileRenderer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shortcut_uses_only_original_typed_tdp_and_cpu_boost_sections()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw", "Frontend", "QuickSettingsPresentation.cs");
+
+        Assert.Contains("OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(page)", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("QuickSettingsSectionId.DeviceTdp", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("QuickSettingsSectionId.DeviceCpuBoost", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("QuickSettingsSectionId.ProfileTdp", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("QuickSettingsSectionId.ProfileCpuBoost", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("surface.Binding", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("QuickSettingsCommitGroupId.ProfileTdpConfiguration", presentation, StringComparison.Ordinal);
+        Assert.Contains("QuickSettingsCommitGroupId.DeviceTdpConfiguration", presentation, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuickSettingsPageId.Shortcut", presentation, StringComparison.Ordinal);
+        Assert.Contains("row.Visible", quickSettings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shortcut_navigation_keeps_tile_actions_separate_from_shared_rows_and_allows_slider_repeat()
+    {
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+
+        Assert.Contains("_shortcutSettingsSelected", navigation, StringComparison.Ordinal);
+        Assert.Contains("_rowSelection.MoveNext()", navigation, StringComparison.Ordinal);
+        Assert.Contains("_rowSelection.MovePrevious()", navigation, StringComparison.Ordinal);
+        Assert.Contains("_numericSliderRepeatTarget.TryAdjust(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta)", navigation, StringComparison.Ordinal);
+        Assert.Contains("if (_shortcutSettingsSelected)", navigation, StringComparison.Ordinal);
+        Assert.Contains("RequestSelectedShortcutExecution();", navigation, StringComparison.Ordinal);
+        Assert.Contains("ApplyShortcutSelectionVisual(bringIntoView: true)", navigation, StringComparison.Ordinal);
+        Assert.Contains("FindInitialShortcutTileIndex(_shortcutSnapshot.Tiles)", navigation, StringComparison.Ordinal);
+        Assert.Contains("if (tiles[index].Enabled)", navigation, StringComparison.Ordinal);
+
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        Assert.Contains("_rowSelection.SetRows(_shortcutSettingsSelected ? CapabilitiesFor(selected) : [])", shell, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shortcut_profile_artwork_reuses_the_existing_profile_host_and_loader()
+    {
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
+
+        Assert.Contains("AddonQuickSettingsTabId.Shortcut", profile, StringComparison.Ordinal);
+        Assert.Contains("ResolveAndApplyProfileArtworkAsync", profile, StringComparison.Ordinal);
+        Assert.Contains("ProfileArtworkHost", xaml, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(xaml, "x:Name=\"ProfileArtworkHost\""));
+        Assert.DoesNotContain("ShortcutArtworkHost", profile + xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shortcut_source_uses_profile_for_recognized_targets_and_global_only_for_exact_no_game()
+    {
+        var steam = ProfilePage(QuickSettingsProfileTarget.ForSteam(570));
+        var xbox = ProfilePage(QuickSettingsProfileTarget.ForXbox("xbox:game"));
+        var unavailableSteam = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(570), "Profile storage is read-only.");
+        var noGame = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile, null, "No game is currently running. Start a game to configure its profile.");
+        var unrelatedFailure = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile, null, "Active profile capture failed.");
+
+        Assert.Equal(QuickSettingsPageId.Profile, OverlayShortcutQuickSettingsProjection.ResolveSourcePage(steam, devicePageReceived: false));
+        Assert.Equal(QuickSettingsPageId.Profile, OverlayShortcutQuickSettingsProjection.ResolveSourcePage(xbox, devicePageReceived: false));
+        Assert.Equal(QuickSettingsPageId.Profile, OverlayShortcutQuickSettingsProjection.ResolveSourcePage(unavailableSteam, devicePageReceived: true));
+        Assert.Null(OverlayShortcutQuickSettingsProjection.ResolveSourcePage(noGame, devicePageReceived: false));
+        Assert.Equal(QuickSettingsPageId.Device, OverlayShortcutQuickSettingsProjection.ResolveSourcePage(noGame, devicePageReceived: true));
+        Assert.Equal(QuickSettingsPageId.Profile, OverlayShortcutQuickSettingsProjection.ResolveSourcePage(unrelatedFailure, devicePageReceived: true));
+        Assert.Null(OverlayShortcutQuickSettingsProjection.ResolveSourcePage(null, devicePageReceived: true));
+        Assert.Equal("Global", OverlayShortcutQuickSettingsProjection.ResolveTitle(noGame));
+        Assert.Equal("Example Game", OverlayShortcutQuickSettingsProjection.ResolveTitle(ProfilePage(
+            QuickSettingsProfileTarget.ForSteam(570), gameName: "Example Game")));
+
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var profileSource = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        Assert.Contains("IsExactNoRunningGamePage(surface.Binding?.AuthoritativePage)", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("var preferredShortcutRowId = CaptureShortcutSelectionRowId();", profileSource, StringComparison.Ordinal);
+        Assert.Contains("RefreshShortcutQuickSettingsView(preferredShortcutRowId);", profileSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shortcut_section_projection_keeps_original_hidden_rows_and_group_constraints()
+    {
+        var hiddenEnabled = new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP", QuickSettingsControlKind.Toggle,
+            Available: false, Writable: false, Value: null, SliderSpec: null, QuickSettingsCommitPolicy.Immediate) { Visible = false };
+        var pl1 = NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "Plugged in · PL1", 20);
+        var hiddenPl2 = NumericRow(QuickSettingsRowId.ProfileTdpAcPl2, "Plugged in · PL2", 25) with { Visible = false };
+        var tdp = new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control", [hiddenEnabled, pl1, hiddenPl2]);
+        var cpuBoost = new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, "CPU Boost", []);
+        var powerMode = new QuickSettingsSection(QuickSettingsSectionId.ProfilePowerMode, "Windows Power Mode", []);
+        var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(570), true,
+            null, [tdp, cpuBoost, powerMode],
+            [new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, 5) { ExactGap = true }]);
+
+        var selected = OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(page);
+
+        Assert.Collection(selected, section => Assert.Same(tdp, section), section => Assert.Same(cpuBoost, section));
+        Assert.Same(hiddenEnabled, selected[0].Rows[0]);
+        Assert.Same(hiddenPl2, selected[0].Rows[2]);
+        Assert.False(selected[0].Rows[0].Visible);
+        Assert.False(selected[0].Rows[2].Visible);
+        Assert.Contains(QuickSettingsRowId.ProfileTdpAcPl2, selected[0].Rows.Select(row => row.RowId));
+        Assert.True(page.LinkedSliderConstraints[0].ExactGap);
+        Assert.Empty(OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(page with { Available = false }));
+    }
+
+    [Theory]
+    [InlineData(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpDcPl1, true)]
+    [InlineData(QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpAcPl1, false)]
+    public void First_rendered_tdp_row_is_the_visible_pl1_for_the_current_power_source(
+        QuickSettingsRowId firstVisible,
+        QuickSettingsRowId hiddenPowerSourceRow,
+        bool acVisible)
+    {
+        var tdp = new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control",
+        [
+            new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle,
+                true, false, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate) { Visible = false },
+            NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "Plugged in · PL1", 20, acVisible),
+            NumericRow(QuickSettingsRowId.ProfileTdpDcPl1, "On battery · PL1", 15, !acVisible),
+        ]);
+        var cpuBoost = new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, "CPU Boost", []);
+        var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(570), true,
+            null, [tdp, cpuBoost], []);
+
+        var projection = OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(page);
+        var firstRenderedRow = OverlayQuickSettingsSectionRendering.DescribeRows(projection[0])[0].Row;
+
+        Assert.Equal(firstVisible, firstRenderedRow.RowId);
+        Assert.False(projection[0].Rows.Single(row => row.RowId == hiddenPowerSourceRow).Visible);
+    }
+
+    private static QuickSettingsPageSnapshot ProfilePage(QuickSettingsProfileTarget target, string gameName = "") =>
+        new(QuickSettingsPageId.Profile, target, true, null,
+            [new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, gameName, [])], []);
+
+    private static QuickSettingsRow NumericRow(QuickSettingsRowId rowId, string label, int value, bool visible = true) =>
+        new(rowId, label, QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(value),
+            new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, 5, 50, 1, " W"),
+            new QuickSettingsCommitPolicy(QuickSettingsCommitMode.TrailingDebounce, 300),
+            QuickSettingsCommitGroupId.ProfileTdpConfiguration) { Visible = visible };
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        for (var index = 0; (index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0; index += value.Length)
+            count++;
+        return count;
+    }
+
+    private static string ReadSource(params string[] parts)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "README.md")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine([directory!.FullName, .. parts]));
+    }
+}

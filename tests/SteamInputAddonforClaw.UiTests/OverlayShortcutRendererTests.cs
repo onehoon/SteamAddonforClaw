@@ -198,7 +198,8 @@ public sealed class OverlayShortcutRendererTests
             < show.IndexOf("WindowInterop.ShowWithoutActivation(this);", StringComparison.Ordinal));
         Assert.Contains("ResetShortcutSelection();", shortcutTabSelection, StringComparison.Ordinal);
         Assert.Contains("ApplyShortcutSelectionVisual();", shortcutTabSelection, StringComparison.Ordinal);
-        Assert.Contains("preferredIndex: 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"), StringComparison.Ordinal);
+        Assert.Contains("FindInitialShortcutTileIndex(_shortcutSnapshot.Tiles)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"), StringComparison.Ordinal);
+        Assert.Contains("if (tiles[index].Enabled)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"), StringComparison.Ordinal);
         Assert.Contains("_shortcutTiles.TryGetValue(tile.TileId, out var existing)", renderer, StringComparison.Ordinal);
         Assert.Contains("selectedTileId", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"), StringComparison.Ordinal);
         Assert.Contains("FirstOrDefault", renderer, StringComparison.Ordinal);

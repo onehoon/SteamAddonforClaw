@@ -22,6 +22,7 @@ public sealed partial class OverlayWindow
 
     // The Runtime-owned Shortcut projection uses one transient 2D selection model.
     private readonly OverlayShortcutSelection _shortcutSelection = new();
+    private bool _shortcutSettingsSelected;
 
     // OQ5-UI-04 s.11: NavigateUp/Down move logical row selection; Left/Right and Accept dispatch to
     // the selected row only when it registered that capability. All row/selection state stays private
@@ -29,13 +30,45 @@ public sealed partial class OverlayWindow
     // with its current Runtime-projected tile count and three-column layout.
     internal void NavigateUp()
     {
-        if (OnShortcutPage()) { if (_shortcutSelection.MoveUp()) ApplyShortcutSelectionVisual(bringIntoView: true); return; }
+        if (OnShortcutPage())
+        {
+            if (_shortcutSettingsSelected)
+            {
+                MoveShortcutSettingsRow(up: true);
+                return;
+            }
+
+            if (_shortcutSelection.SelectedIndex is { } selectedTile &&
+                selectedTile < _shortcutSelection.ColumnCount &&
+                SelectLastShortcutSettingsRow())
+                return;
+
+            if (_shortcutSelection.MoveUp()) ApplyShortcutSelectionVisual(bringIntoView: true);
+            return;
+        }
         MoveRowSelection(up: true);
     }
 
     internal void NavigateDown()
     {
-        if (OnShortcutPage()) { if (_shortcutSelection.MoveDown()) ApplyShortcutSelectionVisual(bringIntoView: true); return; }
+        if (OnShortcutPage())
+        {
+            if (_shortcutSettingsSelected)
+            {
+                var lastSelectable = LastSelectableShortcutSettingsRow();
+                if (lastSelectable is { } last && _rowSelection.SelectedIndex == last && HasSelectableShortcutTile())
+                {
+                    SelectFirstShortcutTile();
+                    return;
+                }
+
+                MoveShortcutSettingsRow(up: false);
+                return;
+            }
+
+            if (_shortcutSelection.MoveDown()) ApplyShortcutSelectionVisual(bringIntoView: true);
+            return;
+        }
         MoveRowSelection(up: false);
     }
 
@@ -47,6 +80,18 @@ public sealed partial class OverlayWindow
         _numericSliderRepeatTarget.Clear();
         if (OnShortcutPage())
         {
+            if (_shortcutSettingsSelected)
+            {
+                if (_rowSelection.AdjustSelected(delta))
+                {
+                    RefreshRowSelectionAfterMove();
+                    return;
+                }
+
+                _numericSliderRepeatTarget.Arm(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta);
+                return;
+            }
+
             if (delta < 0 ? _shortcutSelection.MoveLeft() : _shortcutSelection.MoveRight())
                 ApplyShortcutSelectionVisual(bringIntoView: true);
             return;
@@ -62,7 +107,7 @@ public sealed partial class OverlayWindow
 
     internal void RepeatAdjustSelectedNumericSlider(int delta)
     {
-        if (OnShortcutPage()) return;
+        if (OnShortcutPage() && !_shortcutSettingsSelected) return;
         _numericSliderRepeatTarget.TryAdjust(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta);
     }
 
@@ -72,7 +117,12 @@ public sealed partial class OverlayWindow
     {
         if (OnShortcutPage())
         {
-            RequestSelectedShortcutExecution();
+            if (_shortcutSettingsSelected)
+            {
+                if (_rowSelection.ActivateSelected()) RefreshRowSelectionAfterMove();
+            }
+            else
+                RequestSelectedShortcutExecution();
             return;
         }
         if (_rowSelection.ActivateSelected()) RefreshRowSelectionAfterMove();
@@ -100,8 +150,12 @@ public sealed partial class OverlayWindow
         var tiles = _shortcutSnapshot.Tiles;
         for (var index = 0; index < tiles.Count; index++)
         {
-            if (tiles[index].TileId != tileId || !_shortcutSelection.Select(index)) continue;
+            if (tiles[index].TileId != tileId) continue;
+            _shortcutSettingsSelected = false;
+            _numericSliderRepeatTarget.Clear();
+            _shortcutSelection.Select(index);
             OverlayLog.Debug("Shortcut", "Shortcut tile selected.", ("TileId", tileId), ("Source", source));
+            ApplyRowSelectionVisual();
             ApplyShortcutSelectionVisual();
             return;
         }
@@ -109,7 +163,7 @@ public sealed partial class OverlayWindow
 
     private void ApplyShortcutSelectionVisual(bool bringIntoView = false)
     {
-        var selectedTile = GetSelectedShortcutTile();
+        var selectedTile = _shortcutSettingsSelected ? null : GetSelectedShortcutTile();
         var selectedTileId = selectedTile?.TileId;
         if (_renderedShortcutSelectedTileId != selectedTileId)
         {
@@ -151,7 +205,71 @@ public sealed partial class OverlayWindow
     {
         var count = _shortcutSnapshot.Available ? _shortcutSnapshot.Tiles.Count : 0;
         var columns = count == 0 ? 0 : Math.Min(ShortcutVisualColumnCount, count);
-        _shortcutSelection.Configure(count, columns, preferredIndex: 0);
+        var initialIndex = count == 0 ? 0 : FindInitialShortcutTileIndex(_shortcutSnapshot.Tiles);
+        _shortcutSelection.Configure(count, columns, preferredIndex: initialIndex);
+    }
+
+    private void MoveShortcutSettingsRow(bool up)
+    {
+        if (up ? _rowSelection.MovePrevious() : _rowSelection.MoveNext())
+        {
+            _numericSliderRepeatTarget.Clear();
+            RefreshRowSelectionAfterMove();
+        }
+    }
+
+    private int? LastSelectableShortcutSettingsRow()
+    {
+        var capabilities = CapabilitiesFor(AddonQuickSettingsTabId.Shortcut);
+        for (var index = capabilities.Count - 1; index >= 0; index--)
+            if (capabilities[index].IsSelectable())
+                return index;
+        return null;
+    }
+
+    private bool SelectLastShortcutSettingsRow()
+    {
+        if (LastSelectableShortcutSettingsRow() is not { } index) return false;
+        SelectShortcutSettingsRow(index, bringIntoView: true);
+        return true;
+    }
+
+    private bool HasSelectableShortcutTile() =>
+        _shortcutSnapshot.Available && _shortcutSnapshot.Tiles.Count > 0 && _shortcutSelection.SelectedIndex is not null;
+
+    private void SelectFirstShortcutTile()
+    {
+        if (!HasSelectableShortcutTile()) return;
+        _shortcutSettingsSelected = false;
+        _numericSliderRepeatTarget.Clear();
+        var initialIndex = FindInitialShortcutTileIndex(_shortcutSnapshot.Tiles);
+        _shortcutSelection.Select(initialIndex);
+        if (_shortcutSelection.SelectedIndex != initialIndex)
+        {
+            var count = _shortcutSelection.TileCount;
+            var columns = _shortcutSelection.ColumnCount;
+            _shortcutSelection.Configure(count, columns, preferredIndex: initialIndex);
+        }
+        ApplyRowSelectionVisual();
+        ApplyShortcutSelectionVisual(bringIntoView: true);
+    }
+
+    private static int FindInitialShortcutTileIndex(IReadOnlyList<FrontendShortcutTile> tiles)
+    {
+        for (var index = 0; index < tiles.Count; index++)
+            if (tiles[index].Enabled)
+                return index;
+        return 0;
+    }
+
+    private void SelectShortcutSettingsRow(int index, bool bringIntoView)
+    {
+        _shortcutSettingsSelected = true;
+        _numericSliderRepeatTarget.Clear();
+        _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Shortcut), index);
+        ApplyShortcutSelectionVisual();
+        ApplyRowSelectionVisual();
+        if (bringIntoView) BringSelectedRowIntoView();
     }
 
     private void RefreshShortcutSelection(FrontendShortcutDashboardSnapshot snapshot)
@@ -162,8 +280,11 @@ public sealed partial class OverlayWindow
             ? Math.Min(ShortcutVisualColumnCount, snapshot.Tiles.Count)
             : 0;
         var preferredIndex = OverlayShortcutSelection.FindTileIndex(selectedTileId, snapshot.Tiles);
+        var fallbackIndex = snapshot.Available && snapshot.Tiles.Count > 0
+            ? FindInitialShortcutTileIndex(snapshot.Tiles)
+            : 0;
         _shortcutSelection.Configure(snapshot.Available ? snapshot.Tiles.Count : 0, columns,
-            preferredIndex >= 0 ? preferredIndex : 0);
+            preferredIndex >= 0 ? preferredIndex : fallbackIndex);
         RenderShortcutSnapshot();
     }
 
@@ -183,7 +304,7 @@ public sealed partial class OverlayWindow
 
     private void ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId tab, Border? preferredContainer = null)
     {
-        if (_tabState.SelectedTab != tab || tab == AddonQuickSettingsTabId.Shortcut ||
+        if (_tabState.SelectedTab != tab || (tab == AddonQuickSettingsTabId.Shortcut && !_shortcutSettingsSelected) ||
             !_pageRows.TryGetValue(tab, out var rows))
             return;
 
@@ -209,7 +330,7 @@ public sealed partial class OverlayWindow
         int? preferredIndex,
         bool bringIntoViewOnChange)
     {
-        if (_tabState.SelectedTab != tab || tab == AddonQuickSettingsTabId.Shortcut ||
+        if (_tabState.SelectedTab != tab || (tab == AddonQuickSettingsTabId.Shortcut && !_shortcutSettingsSelected) ||
             !_pageRows.TryGetValue(tab, out var rows))
             return;
 
@@ -242,7 +363,8 @@ public sealed partial class OverlayWindow
         var selectedIndex = _rowSelection.SelectedIndex;
         for (var i = 0; i < rows.Count; i++)
         {
-            var brush = i == selectedIndex ? _rowSelectedFillBrush : RowUnselectedFillBrush;
+            var isActiveSelection = _tabState.SelectedTab != AddonQuickSettingsTabId.Shortcut || _shortcutSettingsSelected;
+            var brush = isActiveSelection && i == selectedIndex ? _rowSelectedFillBrush : RowUnselectedFillBrush;
             if (!ReferenceEquals(rows[i].Container.Background, brush))
                 rows[i].Container.Background = brush;
         }
@@ -265,8 +387,11 @@ public sealed partial class OverlayWindow
         for (var index = 0; index < rows.Count; index++)
         {
             if (!ReferenceEquals(rows[index].Container, container)) continue;
+            if (_tabState.SelectedTab == AddonQuickSettingsTabId.Shortcut)
+                _shortcutSettingsSelected = true;
             _numericSliderRepeatTarget.Clear();
-            if (_rowSelection.TrySelect(index)) ApplyRowSelectionVisual();
+            if (_rowSelection.TrySelect(index)) ApplyShortcutSelectionVisual();
+            ApplyRowSelectionVisual();
             return;
         }
     }

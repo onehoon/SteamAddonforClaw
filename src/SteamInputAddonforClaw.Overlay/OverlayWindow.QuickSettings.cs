@@ -157,6 +157,45 @@ internal sealed record QuickSettingsSectionRowPlan(
     IReadOnlyList<QuickSettingsRenderedRowDescriptor> DesiredRows,
     IReadOnlySet<QuickSettingsRowId> ChangedRowIds);
 
+internal static class OverlayShortcutQuickSettingsProjection
+{
+    internal static QuickSettingsPageId? ResolveSourcePage(
+        QuickSettingsPageSnapshot? profilePage,
+        bool devicePageReceived)
+    {
+        if (profilePage is not { PageId: QuickSettingsPageId.Profile })
+            return null;
+
+        return OverlayWindow.IsExactNoRunningGamePage(profilePage)
+            ? devicePageReceived ? QuickSettingsPageId.Device : null
+            : QuickSettingsPageId.Profile;
+    }
+
+    internal static IReadOnlyList<QuickSettingsSection> SelectPerformanceSections(QuickSettingsPageSnapshot? page)
+    {
+        if (page is not { Available: true }) return [];
+
+        return page.PageId switch
+        {
+            QuickSettingsPageId.Device => page.Sections
+                .Where(section => section.SectionId is QuickSettingsSectionId.DeviceTdp or QuickSettingsSectionId.DeviceCpuBoost)
+                .ToArray(),
+            QuickSettingsPageId.Profile => page.Sections
+                .Where(section => section.SectionId is QuickSettingsSectionId.ProfileTdp or QuickSettingsSectionId.ProfileCpuBoost)
+                .ToArray(),
+            _ => [],
+        };
+    }
+
+    internal static string ResolveTitle(QuickSettingsPageSnapshot? profilePage)
+    {
+        if (OverlayWindow.IsExactNoRunningGamePage(profilePage)) return "Global";
+        var title = profilePage?.Sections
+            .FirstOrDefault(section => section.SectionId == QuickSettingsSectionId.ProfileGeneral)?.Label;
+        return string.IsNullOrWhiteSpace(title) ? "Profile" : title;
+    }
+}
+
 public sealed partial class OverlayWindow
 {
     private sealed class RenderedQuickSettingsRow
@@ -183,6 +222,7 @@ public sealed partial class OverlayWindow
     {
         internal required QuickSettingsPageId PageId { get; init; }
         internal required AddonQuickSettingsTabId TabId { get; init; }
+        internal required Grid HomeHost { get; init; }
         internal required StackPanel Content { get; init; }
         internal OverlayQuickSettingsPageBinding? Binding { get; set; }
         internal Dictionary<QuickSettingsRowId, OverlayToggleRow> ToggleRows { get; } = new();
@@ -196,6 +236,9 @@ public sealed partial class OverlayWindow
     }
 
     private readonly Dictionary<QuickSettingsPageId, QuickSettingsSurface> _quickSettingsSurfaces = new();
+    private QuickSettingsSurface? _shortcutQuickSettingsSource;
+    private bool _devicePageReceivedThisShow;
+    private bool _profilePageReceivedThisShow;
 
     // SF-V2-07/09 section 10.2/44/12.1: App owns the NamedPipeOverlayClient; the narrow mutation
     // delegate is the only transport seam received by the Window/binders.
@@ -235,26 +278,32 @@ public sealed partial class OverlayWindow
             ApplyActiveProfilePage(page);
             return;
         }
+        var preferredShortcutRowId = CaptureShortcutSelectionRowId();
         if (!_quickSettingsSurfaces.TryGetValue(page.PageId, out var surface))
         {
             OverlayLog.Warn("QuickSettings", "Ignoring a Quick Settings page for an unconfigured surface.", exception: null, ("PageId", page.PageId));
             return;
         }
+        _devicePageReceivedThisShow = true;
         surface.Binding?.ApplyAuthoritativePage(page);
         RenderQuickSettingsPage(surface);
+        RefreshShortcutQuickSettingsView(preferredShortcutRowId);
     }
 
     // The surface is populated or updated after ConfigureQuickSettings/ApplyQuickSettingsPage runs.
     private FrameworkElement BuildQuickSettingsPage(AddonQuickSettingsTabId tabId, QuickSettingsPageId pageId)
     {
         var content = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
+        var homeHost = new Grid();
+        homeHost.Children.Add(content);
         _quickSettingsSurfaces[pageId] = new QuickSettingsSurface
         {
             PageId = pageId,
             TabId = tabId,
+            HomeHost = homeHost,
             Content = content,
         };
-        return content;
+        return homeHost;
     }
 
     // Render the binder's current effective page. Value-only updates touch changed rows; structural
@@ -355,7 +404,7 @@ public sealed partial class OverlayWindow
     private void RebuildQuickSettingsContent(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
     {
         var preferredRowId = CaptureQuickSettingsSelection(surface);
-        if (_tabState.SelectedTab == surface.TabId)
+        if (_tabState.SelectedTab == SelectionTabFor(surface))
             _numericSliderRepeatTarget.Clear();
 
         surface.ToggleRows.Clear();
@@ -396,7 +445,7 @@ public sealed partial class OverlayWindow
         var shapeChanged = surface.RenderedSections.Count != requestedIds.Count || page.Sections.Any(section =>
             !surface.RenderedSections.TryGetValue(section.SectionId, out var rendered) ||
             !OverlayQuickSettingsSectionRendering.HasSameShape(rendered.Section, section));
-        if (shapeChanged && _tabState.SelectedTab == surface.TabId)
+        if (shapeChanged && _tabState.SelectedTab == SelectionTabFor(surface))
             _numericSliderRepeatTarget.Clear();
 
         foreach (var sectionId in surface.RenderedSections.Keys.Where(id => !requestedIds.Contains(id)).ToArray())
@@ -648,12 +697,34 @@ public sealed partial class OverlayWindow
                     rows.AddRange(rendered.Rows);
         }
         _pageRows[surface.TabId] = rows;
+
+        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Shortcut && ReferenceEquals(surface, _shortcutQuickSettingsSource))
+        {
+            var shortcutRows = new List<OverlayRow>();
+            var canRender = CanRenderShortcutSettings(page);
+            foreach (var (sectionId, rendered) in surface.RenderedSections)
+                if (rendered.Card is not null)
+                {
+                    var visibility = canRender && IsShortcutPerformanceSection(sectionId)
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+                    if (rendered.Card.Visibility != visibility)
+                        rendered.Card.Visibility = visibility;
+                }
+
+            if (canRender)
+                foreach (var section in OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(page))
+                    if (surface.RenderedSections.TryGetValue(section.SectionId, out var rendered))
+                        shortcutRows.AddRange(rendered.Rows);
+            _pageRows[AddonQuickSettingsTabId.Shortcut] = shortcutRows;
+        }
     }
 
     private QuickSettingsRowId? CaptureQuickSettingsSelection(QuickSettingsSurface surface)
     {
-        if (_tabState.SelectedTab != surface.TabId ||
-            !_pageRows.TryGetValue(surface.TabId, out var oldRows) ||
+        var tab = SelectionTabFor(surface);
+        if (_tabState.SelectedTab != tab ||
+            !_pageRows.TryGetValue(tab, out var oldRows) ||
             _rowSelection.SelectedIndex is not { } selectedIndex || selectedIndex < 0 || selectedIndex >= oldRows.Count)
             return null;
 
@@ -665,23 +736,223 @@ public sealed partial class OverlayWindow
         QuickSettingsRowId? preferredRowId,
         bool bringIntoView)
     {
-        if (_tabState.SelectedTab != surface.TabId) return;
+        var tab = SelectionTabFor(surface);
+        if (_tabState.SelectedTab != tab) return;
 
-        var rowIds = _pageRows.TryGetValue(surface.TabId, out var rows)
+        var rowIds = _pageRows.TryGetValue(tab, out var rows)
             ? rows.Select(row => row.QuickSettingsRowId).ToArray()
             : Array.Empty<QuickSettingsRowId?>();
         var preferredIndex = OverlayQuickSettingsSectionRendering.FindPreferredRowIndex(rowIds, preferredRowId);
 
-        _rowSelection.SetRows(CapabilitiesFor(surface.TabId), preferredIndex);
+        _rowSelection.SetRows(CapabilitiesFor(tab), preferredIndex);
         ApplyRowSelectionVisual();
         var selectedIndex = _rowSelection.SelectedIndex;
-        var selectedRowId = selectedIndex is { } selectedRowIndex && _pageRows.TryGetValue(surface.TabId, out var currentRows) &&
+        var selectedRowId = selectedIndex is { } selectedRowIndex && _pageRows.TryGetValue(tab, out var currentRows) &&
             selectedRowIndex >= 0 && selectedRowIndex < currentRows.Count
                 ? currentRows[selectedRowIndex].QuickSettingsRowId
                 : null;
+        if (tab == AddonQuickSettingsTabId.Shortcut)
+        {
+            if (_shortcutSettingsSelected && selectedIndex is null && HasSelectableShortcutTile() &&
+                !(surface.PageId == QuickSettingsPageId.Profile &&
+                  IsExactNoRunningGamePage(surface.Binding?.AuthoritativePage)))
+            {
+                _shortcutSettingsSelected = false;
+                ApplyShortcutSelectionVisual();
+                ApplyRowSelectionVisual();
+            }
+            return;
+        }
+
         if (bringIntoView || selectedRowId != preferredRowId)
             BringSelectedRowIntoView();
     }
+
+    private AddonQuickSettingsTabId SelectionTabFor(QuickSettingsSurface surface) =>
+        _tabState.SelectedTab == AddonQuickSettingsTabId.Shortcut && ReferenceEquals(surface, _shortcutQuickSettingsSource)
+            ? AddonQuickSettingsTabId.Shortcut
+            : surface.TabId;
+
+    private void RefreshShortcutQuickSettingsView()
+        => RefreshShortcutQuickSettingsView(CaptureShortcutSelectionRowId());
+
+    private void RefreshShortcutQuickSettingsView(QuickSettingsRowId? preferredShortcutRowId)
+    {
+        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Shortcut || _shortcutQuickSettingsHost is null)
+        {
+            RestoreShortcutQuickSettingsHome();
+            return;
+        }
+
+        var profilePage = _profilePageReceivedThisShow
+            ? _quickSettingsSurfaces.GetValueOrDefault(QuickSettingsPageId.Profile)?.Binding?.AuthoritativePage
+            : null;
+        var devicePage = _devicePageReceivedThisShow
+            ? _quickSettingsSurfaces.GetValueOrDefault(QuickSettingsPageId.Device)?.Binding?.AuthoritativePage
+            : null;
+        var sourcePageId = OverlayShortcutQuickSettingsProjection.ResolveSourcePage(profilePage, devicePage is not null);
+        var desiredSource = sourcePageId is { } pageId
+            ? _quickSettingsSurfaces.GetValueOrDefault(pageId)
+            : null;
+
+        if (!ReferenceEquals(desiredSource, _shortcutQuickSettingsSource))
+        {
+            RestoreShortcutQuickSettingsHome();
+            if (desiredSource is not null)
+            {
+                desiredSource.HomeHost.Children.Remove(desiredSource.Content);
+                _shortcutQuickSettingsHost.Children.Add(desiredSource.Content);
+                _shortcutQuickSettingsSource = desiredSource;
+            }
+        }
+
+        var visiblePage = desiredSource?.Binding?.AuthoritativePage;
+        var canShowSettings = CanRenderShortcutSettings(visiblePage);
+        if (desiredSource is not null)
+        {
+            foreach (var (sectionId, rendered) in desiredSource.RenderedSections)
+            {
+                if (rendered.Card is null) continue;
+                var visible = canShowSettings && sectionId is
+                    (QuickSettingsSectionId.DeviceTdp or QuickSettingsSectionId.DeviceCpuBoost or
+                     QuickSettingsSectionId.ProfileTdp or QuickSettingsSectionId.ProfileCpuBoost);
+                var visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+                if (rendered.Card.Visibility != visibility)
+                    rendered.Card.Visibility = visibility;
+            }
+
+            if (visiblePage is not null)
+                ApplyQuickSettingsSectionSeparators(desiredSource, visiblePage);
+
+            var rows = new List<OverlayRow>();
+            if (canShowSettings)
+                foreach (var section in OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(visiblePage))
+                    if (desiredSource.RenderedSections.TryGetValue(section.SectionId, out var rendered))
+                        rows.AddRange(rendered.Rows);
+            _pageRows[AddonQuickSettingsTabId.Shortcut] = rows;
+        }
+        else
+            _pageRows[AddonQuickSettingsTabId.Shortcut] = [];
+
+        var title = OverlayShortcutQuickSettingsProjection.ResolveTitle(profilePage);
+        if (PageTitle.Text != title)
+            PageTitle.Text = title;
+        UpdateProfileArtwork(profilePage);
+        var status = ResolveShortcutQuickSettingsStatus(profilePage, devicePage);
+        var statusText = status ?? string.Empty;
+        if (_shortcutQuickSettingsStatus!.Text != statusText)
+            _shortcutQuickSettingsStatus.Text = statusText;
+        var statusVisibility = string.IsNullOrWhiteSpace(statusText) ? Visibility.Collapsed : Visibility.Visible;
+        if (_shortcutQuickSettingsStatus.Visibility != statusVisibility)
+            _shortcutQuickSettingsStatus.Visibility = statusVisibility;
+
+        if (!_shortcutSettingsSelected)
+        {
+            if (!HasSelectableShortcutTile() && _pageRows[AddonQuickSettingsTabId.Shortcut]
+                    .Any(row => row.Capabilities.IsSelectable()))
+                _shortcutSettingsSelected = true;
+
+            if (_shortcutSettingsSelected)
+            {
+                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Shortcut));
+                ApplyRowSelectionVisual();
+                ApplyShortcutSelectionVisual();
+                return;
+            }
+
+            if (_rowSelection.SelectedIndex is not null || _pageRows[AddonQuickSettingsTabId.Shortcut].Count > 0)
+                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Shortcut));
+            ApplyRowSelectionVisual();
+            ApplyShortcutSelectionVisual();
+            return;
+        }
+
+        var shortcutRowIds = _pageRows[AddonQuickSettingsTabId.Shortcut]
+            .Select(row => row.QuickSettingsRowId).ToArray();
+        var mappedPreferredRowId = sourcePageId is { } currentSourcePageId
+            ? MapShortcutSelectionRowId(preferredShortcutRowId, currentSourcePageId)
+            : preferredShortcutRowId;
+        var preferredIndex = OverlayQuickSettingsSectionRendering.FindPreferredRowIndex(shortcutRowIds, mappedPreferredRowId);
+        _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Shortcut), preferredIndex);
+        var waitingForGlobalDevicePage = IsExactNoRunningGamePage(profilePage) && devicePage is null;
+        if (_rowSelection.SelectedIndex is null && HasSelectableShortcutTile() && !waitingForGlobalDevicePage)
+            _shortcutSettingsSelected = false;
+        ApplyRowSelectionVisual();
+        ApplyShortcutSelectionVisual();
+    }
+
+    private string? ResolveShortcutQuickSettingsStatus(
+        QuickSettingsPageSnapshot? profilePage,
+        QuickSettingsPageSnapshot? devicePage)
+    {
+        if (!_profilePageReceivedThisShow || profilePage is null)
+            return "Loading the active game profile.";
+
+        if (IsExactNoRunningGamePage(profilePage))
+        {
+            if (!_devicePageReceivedThisShow || devicePage is null)
+                return "Loading global performance settings.";
+            return devicePage.Available ? null : devicePage.Message ?? "Global performance settings are unavailable.";
+        }
+
+        return profilePage is { Available: true, ProfileTarget: { IsStructurallyValid: true } }
+            ? null
+            : ResolveProfileStatusMessage(profilePage);
+    }
+
+    private void RestoreShortcutQuickSettingsHome()
+    {
+        if (_shortcutQuickSettingsSource is not { } source || _shortcutQuickSettingsHost is null) return;
+
+        _shortcutQuickSettingsHost.Children.Remove(source.Content);
+        source.HomeHost.Children.Add(source.Content);
+        _shortcutQuickSettingsSource = null;
+        if (source.Binding?.AuthoritativePage is { } page)
+        {
+            foreach (var rendered in source.RenderedSections.Values)
+                if (rendered.Card is { Visibility: not Visibility.Visible } card)
+                    card.Visibility = Visibility.Visible;
+            ApplyQuickSettingsSectionSeparators(source, page);
+        }
+        _pageRows[AddonQuickSettingsTabId.Shortcut] = [];
+    }
+
+    private void ResetShortcutQuickSettingsForShow()
+    {
+        _devicePageReceivedThisShow = false;
+        _profilePageReceivedThisShow = false;
+        _shortcutSettingsSelected = false;
+        RestoreShortcutQuickSettingsHome();
+        _pageRows[AddonQuickSettingsTabId.Shortcut] = [];
+    }
+
+    private QuickSettingsRowId? CaptureShortcutSelectionRowId()
+    {
+        if (!_shortcutSettingsSelected || _tabState.SelectedTab != AddonQuickSettingsTabId.Shortcut ||
+            !_pageRows.TryGetValue(AddonQuickSettingsTabId.Shortcut, out var rows) ||
+            _rowSelection.SelectedIndex is not { } index || index < 0 || index >= rows.Count)
+            return null;
+        return rows[index].QuickSettingsRowId;
+    }
+
+    private static QuickSettingsRowId? MapShortcutSelectionRowId(
+        QuickSettingsRowId? rowId,
+        QuickSettingsPageId targetPageId) => (rowId, targetPageId) switch
+    {
+        (QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsPageId.Profile) => QuickSettingsRowId.ProfileTdpAcPl1,
+        (QuickSettingsRowId.DeviceTdpAcPl2, QuickSettingsPageId.Profile) => QuickSettingsRowId.ProfileTdpAcPl2,
+        (QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsPageId.Profile) => QuickSettingsRowId.ProfileTdpDcPl1,
+        (QuickSettingsRowId.DeviceTdpDcPl2, QuickSettingsPageId.Profile) => QuickSettingsRowId.ProfileTdpDcPl2,
+        (QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsPageId.Profile) => QuickSettingsRowId.ProfileCpuBoostAc,
+        (QuickSettingsRowId.DeviceCpuBoostDc, QuickSettingsPageId.Profile) => QuickSettingsRowId.ProfileCpuBoostDc,
+        (QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsPageId.Device) => QuickSettingsRowId.DeviceTdpAcPl1,
+        (QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsPageId.Device) => QuickSettingsRowId.DeviceTdpAcPl2,
+        (QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsPageId.Device) => QuickSettingsRowId.DeviceTdpDcPl1,
+        (QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsPageId.Device) => QuickSettingsRowId.DeviceTdpDcPl2,
+        (QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsPageId.Device) => QuickSettingsRowId.DeviceCpuBoostAc,
+        (QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsPageId.Device) => QuickSettingsRowId.DeviceCpuBoostDc,
+        _ => rowId,
+    };
 
     private static Border CreateOverlaySectionHeadingRow(string title)
     {
@@ -703,16 +974,23 @@ public sealed partial class OverlayWindow
 
     private static void SetOverlaySectionSeparator(Border card, bool visible)
     {
-        card.BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush");
-        card.BorderThickness = visible
+        var brush = OverlayQamResources.Brush("QamSeparatorBrush");
+        if (!ReferenceEquals(card.BorderBrush, brush))
+            card.BorderBrush = brush;
+        var thickness = visible
             ? OverlayQamResources.Get("QamSectionSeparatorThickness", new Thickness(0, 1, 0, 0))
             : new Thickness(0);
+        if (card.BorderThickness != thickness)
+            card.BorderThickness = thickness;
     }
 
-    private static void ApplyQuickSettingsSectionSeparators(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
+    private void ApplyQuickSettingsSectionSeparators(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
     {
         var hasFeature = false;
-        foreach (var section in page.Sections)
+        var sections = _tabState.SelectedTab == AddonQuickSettingsTabId.Shortcut && ReferenceEquals(surface, _shortcutQuickSettingsSource)
+            ? OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(page)
+            : page.Sections;
+        foreach (var section in sections)
         {
             if (!surface.RenderedSections.TryGetValue(section.SectionId, out var rendered) || rendered.Card is null)
                 continue;
@@ -727,6 +1005,14 @@ public sealed partial class OverlayWindow
             hasFeature = true;
         }
     }
+
+    private static bool CanRenderShortcutSettings(QuickSettingsPageSnapshot? page) =>
+        page is { Available: true } &&
+        (page.PageId == QuickSettingsPageId.Device || page.ProfileTarget is { IsStructurallyValid: true });
+
+    private static bool IsShortcutPerformanceSection(QuickSettingsSectionId sectionId) => sectionId is
+        QuickSettingsSectionId.DeviceTdp or QuickSettingsSectionId.DeviceCpuBoost or
+        QuickSettingsSectionId.ProfileTdp or QuickSettingsSectionId.ProfileCpuBoost;
 
     private static Border CreateOverlaySectionCard(UIElement child)
     {
