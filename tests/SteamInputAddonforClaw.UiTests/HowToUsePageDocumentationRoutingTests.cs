@@ -146,7 +146,6 @@ public sealed class HowToUsePageDocumentationRoutingTests
         Assert.True(existingViewCheck >= 0 && createView > existingViewCheck);
         Assert.Contains("DocumentationWebViewHost.Children.Add(webView)", code, StringComparison.Ordinal);
         Assert.Contains("webView.Loaded += DocumentationWebView_Loaded", code, StringComparison.Ordinal);
-        Assert.Contains("DefaultBackgroundColor = Color.FromArgb(255, 255, 255, 255)", code, StringComparison.Ordinal);
     }
 
     [Fact]

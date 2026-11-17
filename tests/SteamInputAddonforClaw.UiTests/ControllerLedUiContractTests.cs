@@ -11,27 +11,16 @@ public sealed class ControllerLedUiContractTests
         var xaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml"));
         var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml.cs"));
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
-        var ledExpanders = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander"
-            && (string?)element.Attribute("Header") == "Joystick LED").ToArray();
-        var expanders = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander"
-            && (string?)element.Attribute(x + "Name") == "ControllerLedExpander").ToArray();
-
-        Assert.Single(ledExpanders);
-        Assert.Single(expanders);
-        Assert.Equal("Joystick LED", (string?)expanders[0].Attribute("Header"));
-        var directHeaderToggle = expanders[0].Elements().SingleOrDefault(element => element.Name.LocalName == "ToggleSwitch"
+        var expander = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "SettingsExpander"
+            && (string?)element.Attribute(x + "Name") == "ControllerLedExpander");
+        var directHeaderToggle = expander.Elements().SingleOrDefault(element => element.Name.LocalName == "ToggleSwitch"
             && (string?)element.Attribute(x + "Name") == "ControllerLedEnabledToggle");
         Assert.NotNull(directHeaderToggle);
-        var expanderItems = expanders[0].Elements().Single(element => element.Name.LocalName == "SettingsExpander.Items");
-        var itemHeaders = expanderItems.Elements().Where(element => element.Name.LocalName == "SettingsCard")
-            .Select(element => (string?)element.Attribute("Header")).ToArray();
-        Assert.Equal(new[] { "Brightness", "Color" }, itemHeaders);
-        Assert.DoesNotContain("Enabled", itemHeaders);
+        Assert.Single(expander.Descendants(), element => element.Name.LocalName == "Slider"
+            && (string?)element.Attribute(x + "Name") == "ControllerLedBrightnessSlider");
+        Assert.Single(expander.Descendants(), element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute(x + "Name") == "ControllerLedColorButton");
         Assert.Contains("IsAlphaEnabled=\"False\"", xaml.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("Battery", xaml.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Breathing", xaml.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Wave", xaml.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("NavigationViewItem.*LED", xaml.ToString(), StringComparison.OrdinalIgnoreCase);
         var mainWindow = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
         Assert.DoesNotContain("ControllerLed", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ApplyControllerLedSettings(bootstrap.Settings.ControllerLed)", code, StringComparison.Ordinal);

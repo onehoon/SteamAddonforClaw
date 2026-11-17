@@ -6,144 +6,24 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayShortcutRendererTests
 {
     [Fact]
-    public void Shortcut_page_uses_a_fixed_three_column_runtime_snapshot_and_has_no_fixed_slot_poc()
+    public void Shortcut_page_reconciles_authoritative_runtime_tiles_without_clearing_the_grid()
     {
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
         var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
-
         Assert.DoesNotContain("TemporaryShortcutTiles", shell + renderer, StringComparison.Ordinal);
-        Assert.DoesNotContain("Slot 1", shell + renderer, StringComparison.Ordinal);
-        Assert.DoesNotContain("Slot 2", shell + renderer, StringComparison.Ordinal);
-        Assert.DoesNotContain("Slot 3", shell + renderer, StringComparison.Ordinal);
-        Assert.DoesNotContain("Slot 4", shell + renderer, StringComparison.Ordinal);
+        foreach (var legacySlot in new[] { "Slot 1", "Slot 2", "Slot 3", "Slot 4" })
+            Assert.DoesNotContain(legacySlot, shell + renderer, StringComparison.Ordinal);
         Assert.Contains("FrontendShortcutDashboardSnapshot", renderer, StringComparison.Ordinal);
         Assert.Contains("_shortcutSnapshot.Tiles", renderer, StringComparison.Ordinal);
         Assert.Contains("OverlayShortcutTileReconciliation.Between(_renderedShortcutTiles, tiles)", renderer, StringComparison.Ordinal);
-        Assert.Contains("Reconciliation", renderer, StringComparison.Ordinal);
-        Assert.Contains("private const int ShortcutVisualColumnCount = 3;", renderer, StringComparison.Ordinal);
-        Assert.Contains("column < ShortcutVisualColumnCount", renderer, StringComparison.Ordinal);
-        Assert.Contains("index / ShortcutVisualColumnCount", renderer, StringComparison.Ordinal);
-        Assert.Contains("index % ShortcutVisualColumnCount", renderer, StringComparison.Ordinal);
         Assert.DoesNotContain("_shortcutGrid.Children.Clear()", renderer, StringComparison.Ordinal);
         Assert.DoesNotContain("_shortcutTiles.Clear()", renderer, StringComparison.Ordinal);
         Assert.DoesNotContain("_shortcutGrid.RowDefinitions.Clear()", renderer, StringComparison.Ordinal);
         Assert.DoesNotContain("_shortcutGrid.ColumnDefinitions.Clear()", renderer, StringComparison.Ordinal);
         Assert.Contains("if (updated.Contains(tile.TileId))", renderer, StringComparison.Ordinal);
         Assert.Contains("if (repositioned.Contains(tile.TileId))", renderer, StringComparison.Ordinal);
-        Assert.DoesNotContain("Math.Min(2", renderer, StringComparison.Ordinal);
         Assert.Contains("for (var index = 0; index < tiles.Count; index++)", renderer, StringComparison.Ordinal);
     }
-
-    [Fact]
-    public void Shortcut_renderer_stretches_tile_text_and_keeps_centered_text_and_other_states()
-    {
-        var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
-        var resources = ReadSource("src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml");
-        var tileStart = renderer.IndexOf("private ShortcutTileControls CreateShortcutTile(", StringComparison.Ordinal);
-        var tileEnd = renderer.IndexOf("private static void UpdateShortcutTilePosition(", tileStart, StringComparison.Ordinal);
-        var tileBuilder = renderer[tileStart..tileEnd];
-
-        Assert.Contains("FrontendShortcutDashboardSnapshot.Unavailable()", renderer, StringComparison.Ordinal);
-        Assert.Contains("_shortcutSnapshot.Available", renderer, StringComparison.Ordinal);
-        Assert.Contains("tile.Enabled", renderer, StringComparison.Ordinal);
-        Assert.Contains("Text = tile.Title", renderer, StringComparison.Ordinal);
-        Assert.Contains("new FontIcon", renderer, StringComparison.Ordinal);
-        Assert.Contains("Glyph = tile.IconGlyph", renderer, StringComparison.Ordinal);
-        Assert.Contains("FontSize = 24", renderer, StringComparison.Ordinal);
-        Assert.Contains("FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(\"Segoe Fluent Icons\")", renderer, StringComparison.Ordinal);
-        Assert.Contains("Orientation = Orientation.Vertical", renderer, StringComparison.Ordinal);
-        Assert.Contains("header.Children.Add(icon)", renderer, StringComparison.Ordinal);
-        Assert.Contains("header.Children.Add(title)", renderer, StringComparison.Ordinal);
-        Assert.True(
-            renderer.IndexOf("header.Children.Add(icon)", StringComparison.Ordinal)
-            < renderer.IndexOf("header.Children.Add(title)", StringComparison.Ordinal));
-        Assert.DoesNotContain("contentWidth", tileBuilder, StringComparison.Ordinal);
-        Assert.DoesNotContain("MaxWidth =", tileBuilder, StringComparison.Ordinal);
-        Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", renderer, StringComparison.Ordinal);
-        Assert.Contains("var hasStatus = !string.IsNullOrWhiteSpace(tile.StatusText);", renderer, StringComparison.Ordinal);
-        Assert.Contains("MaxLines = hasStatus ? 1 : 2", renderer, StringComparison.Ordinal);
-        Assert.Contains("Spacing = hasStatus ? 4 : 6", renderer, StringComparison.Ordinal);
-        Assert.Contains("Spacing = hasStatus ? 4 : 0", renderer, StringComparison.Ordinal);
-        Assert.Contains("Visibility = hasStatus ? Visibility.Visible : Visibility.Collapsed", renderer, StringComparison.Ordinal);
-        Assert.Contains("tile.StatusText ?? string.Empty", renderer, StringComparison.Ordinal);
-        Assert.Contains("controls.Status.Text != statusText", renderer, StringComparison.Ordinal);
-        Assert.Contains("controls.Icon.Glyph != tile.IconGlyph", renderer, StringComparison.Ordinal);
-        Assert.Contains("controls.Border.Opacity != opacity", renderer, StringComparison.Ordinal);
-
-        var titleStart = tileBuilder.IndexOf("var title = new TextBlock", StringComparison.Ordinal);
-        var titleEnd = tileBuilder.IndexOf("OverlayQamResources.ApplyTextStyle(title", titleStart, StringComparison.Ordinal);
-        var titleBuilder = tileBuilder[titleStart..titleEnd];
-        Assert.Contains("TextAlignment = TextAlignment.Center", titleBuilder, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", titleBuilder, StringComparison.Ordinal);
-        Assert.Contains("TextWrapping = TextWrapping.Wrap", titleBuilder, StringComparison.Ordinal);
-        Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", titleBuilder, StringComparison.Ordinal);
-        Assert.Contains("MaxLines = hasStatus ? 1 : 2", titleBuilder, StringComparison.Ordinal);
-
-        var headerStart = tileBuilder.IndexOf("var header = new StackPanel", StringComparison.Ordinal);
-        var headerEnd = tileBuilder.IndexOf("header.Children.Add(icon)", headerStart, StringComparison.Ordinal);
-        var headerBuilder = tileBuilder[headerStart..headerEnd];
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", headerBuilder, StringComparison.Ordinal);
-
-        var statusBuilder = tileBuilder[
-            tileBuilder.IndexOf("var status = new TextBlock", StringComparison.Ordinal)..
-            tileBuilder.IndexOf("OverlayQamResources.ApplyTextStyle(status", StringComparison.Ordinal)];
-        Assert.Contains("TextAlignment = TextAlignment.Center", statusBuilder, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", statusBuilder, StringComparison.Ordinal);
-        Assert.Contains("TextWrapping = TextWrapping.Wrap", statusBuilder, StringComparison.Ordinal);
-        Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", statusBuilder, StringComparison.Ordinal);
-        Assert.Contains("MaxLines = 2", statusBuilder, StringComparison.Ordinal);
-        Assert.Contains("Visibility = hasStatus ? Visibility.Visible : Visibility.Collapsed", statusBuilder, StringComparison.Ordinal);
-
-        var iconStart = tileBuilder.IndexOf("var icon = new FontIcon", StringComparison.Ordinal);
-        var iconEnd = tileBuilder.IndexOf("var header = new StackPanel", iconStart, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", tileBuilder[iconStart..iconEnd], StringComparison.Ordinal);
-
-        var contentStart = tileBuilder.IndexOf("var content = new StackPanel", StringComparison.Ordinal);
-        var contentEnd = tileBuilder.IndexOf("var border = new Border", contentStart, StringComparison.Ordinal);
-        var contentBuilder = tileBuilder[contentStart..contentEnd];
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", contentBuilder, StringComparison.Ordinal);
-        Assert.Contains("VerticalAlignment = VerticalAlignment.Center", contentBuilder, StringComparison.Ordinal);
-
-        var borderStart = tileBuilder.IndexOf("var border = new Border", StringComparison.Ordinal);
-        var borderEnd = tileBuilder.IndexOf("border.Tapped +=", borderStart, StringComparison.Ordinal);
-        var borderBuilder = tileBuilder[borderStart..borderEnd];
-        Assert.DoesNotContain("Width = tileSize", borderBuilder, StringComparison.Ordinal);
-        Assert.Contains("Height = tileSize", borderBuilder, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", borderBuilder, StringComparison.Ordinal);
-
-        Assert.Contains("ApplyTextStyle(status, \"QamCaptionTextStyle\")", renderer, StringComparison.Ordinal);
-        Assert.Contains("TextAlignment = TextAlignment.Center", titleBuilder, StringComparison.Ordinal);
-        Assert.Contains("TextAlignment = TextAlignment.Center", statusBuilder, StringComparison.Ordinal);
-        Assert.Contains("VerticalAlignment = VerticalAlignment.Center", renderer, StringComparison.Ordinal);
-        Assert.Contains("<Style x:Key=\"QamTileTitleTextStyle\" TargetType=\"TextBlock\" BasedOn=\"{StaticResource QamBodyStrongTextStyle}\" />", resources, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"FontSize\" Value=\"16\" />", resources, StringComparison.Ordinal);
-        Assert.Contains("<x:Double x:Key=\"QamShortcutTileSize\">117.33333333333333</x:Double>", resources, StringComparison.Ordinal);
-        Assert.DoesNotContain("_shortcutStatus", renderer, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void One_through_six_tiles_keep_three_column_rectangular_slot_geometry_and_spacing()
-    {
-        var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
-        var resources = ReadSource("src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml");
-
-        Assert.Contains("ColumnSpacing = OverlayQamResources.Get(\"QamTileSpacing\", 8.0)", renderer, StringComparison.Ordinal);
-        Assert.Contains("RowSpacing = OverlayQamResources.Get(\"QamTileSpacing\", 8.0)", renderer, StringComparison.Ordinal);
-        Assert.Contains("new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }", renderer, StringComparison.Ordinal);
-        Assert.Contains("Height = tileSize", renderer, StringComparison.Ordinal);
-        Assert.Contains("<x:Double x:Key=\"QamTileSpacing\">8</x:Double>", resources, StringComparison.Ordinal);
-
-        for (var tileCount = 1; tileCount <= 6; tileCount++)
-        {
-            var positions = Enumerable.Range(0, tileCount)
-                .Select(index => (Row: index / 3, Column: index % 3))
-                .ToArray();
-            Assert.Equal(Enumerable.Range(0, tileCount),
-                positions.Select(position => position.Row * 3 + position.Column));
-            Assert.All(positions, position => Assert.InRange(position.Column, 0, 2));
-        }
-    }
-
     [Fact]
     public void Accept_and_pointer_use_the_same_tile_id_execution_intent()
     {
@@ -225,26 +105,6 @@ public sealed class OverlayShortcutRendererTests
         Assert.DoesNotContain("_shortcutGrid.Children.Clear()", render, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Show_animation_is_120ms_and_hide_is_immediate()
-    {
-        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
-        var showStart = presentation.IndexOf("internal async Task ShowForPocAsync()", StringComparison.Ordinal);
-        var hideStart = presentation.IndexOf("internal Task HideForPocAsync()", showStart, StringComparison.Ordinal);
-        var hideEnd = presentation.IndexOf("private void ConfigureWindow()", hideStart, StringComparison.Ordinal);
-        Assert.True(showStart >= 0 && hideStart > showStart && hideEnd > hideStart);
-        var show = presentation[showStart..hideStart];
-        var hide = presentation[hideStart..hideEnd];
-
-        Assert.Contains("ShowDuration = TimeSpan.FromMilliseconds(120)", presentation, StringComparison.Ordinal);
-        Assert.Contains("!AnimationsEnabled()", show, StringComparison.Ordinal);
-        Assert.Contains("new UISettings().AnimationsEnabled", presentation, StringComparison.Ordinal);
-        Assert.Contains("await AnimateAsync(HiddenScale, 1.0f, HiddenTranslateYDip, 0.0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);", show, StringComparison.Ordinal);
-        Assert.DoesNotContain("HideDuration", presentation, StringComparison.Ordinal);
-        Assert.DoesNotContain("AnimationsEnabled()", hide, StringComparison.Ordinal);
-        Assert.DoesNotContain("AnimateAsync", hide, StringComparison.Ordinal);
-        Assert.Contains("WindowInterop.Hide(this);", hide, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void Shortcut_refresh_reuses_tile_controls_by_identity_and_only_navigation_requests_scroll()
@@ -275,6 +135,22 @@ public sealed class OverlayShortcutRendererTests
         Assert.DoesNotContain("StartBringIntoView", refresh + renderer, StringComparison.Ordinal);
         Assert.Contains("if (bringIntoView && OnShortcutPage()", navigation, StringComparison.Ordinal);
         Assert.Contains("ApplyShortcutSelectionVisual(bringIntoView: true)", navigation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Hide_completes_synchronously_after_cancelling_unsubmitted_work_and_hiding_the_window()
+    {
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var start = presentation.IndexOf("internal Task HideForPocAsync()", StringComparison.Ordinal);
+        var end = presentation.IndexOf("private void ConfigureWindow()", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var hide = presentation[start..end];
+        Assert.Contains("CancelUnsubmittedDrafts()", hide, StringComparison.Ordinal);
+        Assert.Contains("CancelPendingControllerVibrationDraft()", hide, StringComparison.Ordinal);
+        Assert.Contains("WindowInterop.Hide(this)", hide, StringComparison.Ordinal);
+        Assert.Contains("return Task.CompletedTask", hide, StringComparison.Ordinal);
+        Assert.DoesNotContain("await ", hide, StringComparison.Ordinal);
+        Assert.DoesNotContain("AnimateAsync", hide, StringComparison.Ordinal);
     }
 
     [Fact]

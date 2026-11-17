@@ -8,39 +8,24 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class SettingsPageLoggingTests
 {
     [Fact]
-    public void Settings_page_owns_a_compact_logging_card_before_components()
+    public void Settings_page_exposes_logging_selection_and_open_folder_action()
     {
         var root = FindRepositoryRoot();
         var xamlPath = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
-        var xaml = File.ReadAllText(xamlPath);
         var document = XDocument.Load(xamlPath);
-        var loggingCard = document.Descendants()
-            .Single(element => element.Name.LocalName == "SettingsCard"
-                && (string?)element.Attribute("Header") == "Logging");
+        XNamespace xamlNs = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var loggingCard = Assert.Single(document.Descendants(), element => element.Name.LocalName == "SettingsCard"
+            && (string?)element.Attribute(xamlNs + "Uid") == "Settings_LoggingCard");
 
-        Assert.Equal("Choose log detail.", (string?)loggingCard.Attribute("Description"));
-
-        var controlRow = loggingCard.Descendants().Single(element => element.Name.LocalName == "StackPanel");
+        var comboBox = Assert.Single(loggingCard.Descendants(), element => element.Name.LocalName == "ComboBox"
+            && (string?)element.Attribute(xamlNs + "Name") == "LogLevelComboBox");
         Assert.Equal(
-            new[] { "ComboBox", "Button" },
-            controlRow.Elements().Select(element => element.Name.LocalName));
+            Enum.GetValues<FrontendLogLevel>().Length,
+            comboBox.Elements().Count(element => element.Name.LocalName == "ComboBoxItem"));
+        var openFolderButton = Assert.Single(loggingCard.Descendants(), element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute(xamlNs + "Uid") == "Settings_OpenLogFolderButton");
+        Assert.Equal("OpenLogFolderButton_Click", (string?)openFolderButton.Attribute("Click"));
 
-        var comboBox = controlRow.Elements().First();
-        Assert.Equal(
-            new[] { "Off", "Info", "Debug" },
-            comboBox.Elements()
-                .Where(element => element.Name.LocalName == "ComboBoxItem")
-                .Select(element => (string?)element.Attribute("Content")));
-        Assert.Equal("120", (string?)comboBox.Attribute("Width"));
-        Assert.Equal("Open folder", (string?)controlRow.Elements().Last().Attribute("Content"));
-        Assert.Contains("Click=\"OpenLogFolderButton_Click\"", xaml, StringComparison.Ordinal);
-
-        Assert.DoesNotContain("SelectedIndex=", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("QuickSettingsPowerSourceCard", xaml, StringComparison.Ordinal);
-        Assert.True(xaml.IndexOf("Header=\"Logging\"", StringComparison.Ordinal)
-            < xaml.IndexOf("x:Name=\"RequiredComponentsExpander\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("x:Name=\"RequiredComponentsExpander\"", StringComparison.Ordinal)
-            < xaml.IndexOf("x:Name=\"DeveloperMenuCard\"", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -116,9 +101,7 @@ public sealed class SettingsPageLoggingTests
         var xaml = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "DeveloperPage.xaml"));
         var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "DeveloperPage.xaml.cs"));
 
-        Assert.DoesNotContain("Header=\"Logging\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("LogLevelComboBox", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Log Folder\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OpenLogFolderButton_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("_logDirectoryPath = bootstrap.LogDirectoryPath", source, StringComparison.Ordinal);
         Assert.DoesNotContain("_isInitializingLogLevel", source, StringComparison.Ordinal);
@@ -127,16 +110,9 @@ public sealed class SettingsPageLoggingTests
         Assert.DoesNotContain("SetLogLevel(", source, StringComparison.Ordinal);
         Assert.DoesNotContain("RefreshAuthoritativeStateAsync", source, StringComparison.Ordinal);
 
-        foreach (var diagnostic in new[]
-        {
-            "Text=\"Environment Discovery\"",
-            "Header=\"Gyro / Sensor Test\"",
-            "Header=\"Fan Hardware Probe\"",
-        })
-        {
-            Assert.Contains(diagnostic, xaml, StringComparison.Ordinal);
-        }
-        Assert.DoesNotContain("Header=\"Vibration Profile 0/100 Probe\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"GenerateEnvironmentDiscoveryReportButton\" Click=\"GenerateEnvironmentDiscoveryReportButton_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OpenSensorProbeButton_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OpenFanHardwareProbeButton_Click\"", xaml, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

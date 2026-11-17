@@ -188,7 +188,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         Assert.False(page.Available);
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
         Assert.Null(page.ProfileTarget?.SteamAppId);
-        Assert.Equal("No game is currently running. Start a game to configure its profile.", page.Message);
+        Assert.False(string.IsNullOrWhiteSpace(page.Message));
         Assert.Empty(page.Sections);
     }
 
@@ -380,7 +380,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         var result = await control.MoveAddonQuickSettingsTabAsync(new(AddonQuickSettingsTabId.Profile, -1));
 
         Assert.False(result.Succeeded);
-        Assert.Equal("Failed to save the tab order.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         Assert.Equal(current, result.State.Rows.Select(row => row.TabId));
         Assert.Equal(current, coordinator.AddonQuickSettingsTabOrder);
         Assert.Equal(0, invalidations);

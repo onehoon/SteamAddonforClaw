@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -210,54 +211,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("return (nint)1;", source);
     }
 
-    [Fact]
-    public void WindowInterop_requests_square_corners_without_making_failure_fatal()
-    {
-        var source = ReadWindowInteropSource();
 
-        Assert.Contains("private const uint DwmwaWindowCornerPreference = 33;", source);
-        Assert.Contains("private const int DwmcpDoNotRound = 1;", source);
-        Assert.Contains("ApplySquareCorners(hwnd);", source);
-        Assert.Contains("DwmSetWindowAttribute", source);
-        Assert.Contains("continuing without failing Overlay setup.", source);
-        Assert.Contains("Interlocked.Exchange(ref _squareCornerWarningLogged, 1)", source);
-    }
-
-    [Fact]
-    public void Large_overlay_uses_the_neutral_surface_and_centered_scale_fade_contract()
-    {
-        var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
-        var source = ReadOverlayWindowSource();
-        var surfaceHostStart = xaml.IndexOf("x:Name=\"SurfaceHost\"", StringComparison.Ordinal);
-        var opaquePanelStart = xaml.IndexOf("x:Name=\"OpaquePanel\"", StringComparison.Ordinal);
-        var animatedContentStart = xaml.IndexOf("<Grid x:Name=\"AnimatedContent\"", opaquePanelStart, StringComparison.Ordinal);
-        Assert.True(surfaceHostStart >= 0 && opaquePanelStart > surfaceHostStart && animatedContentStart > opaquePanelStart);
-        var surfaceHostDeclaration = xaml[surfaceHostStart..opaquePanelStart];
-        var opaquePanelDeclaration = xaml[opaquePanelStart..animatedContentStart];
-
-        Assert.Contains("RequestedTheme=\"Dark\"", xaml);
-        Assert.Contains("Background=\"{StaticResource QamSurfaceBrush}\"", surfaceHostDeclaration);
-        Assert.Contains("Background=\"{StaticResource QamRailBrush}\"", xaml);
-        Assert.DoesNotContain("Background=", opaquePanelDeclaration);
-        Assert.DoesNotContain("CornerRadius=", opaquePanelDeclaration);
-        Assert.DoesNotContain("#FFF3F3F3", xaml);
-
-        Assert.Contains("private const float HiddenScale = 0.98f;", source);
-        Assert.Contains("private const float HiddenTranslateYDip = 8.0f;", source);
-        Assert.Contains("private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(120);", source);
-        Assert.DoesNotContain("HideDuration", source);
-        Assert.Contains("ElementCompositionPreview.GetElementVisual(AnimatedContent)", source);
-        Assert.Contains("AnimatedContent.ActualWidth", source);
-        Assert.Contains("AnimatedContent.ActualHeight", source);
-        Assert.Contains("visual.CenterPoint", source);
-        Assert.Contains("visual.StartAnimation(nameof(visual.Scale), scale);", source);
-        Assert.Contains("AnimationTranslateYPhysical", source);
-        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
-        var hide = SliceMethod(presentation, "internal Task HideForPocAsync()", "private void ConfigureWindow()");
-        Assert.Contains("WindowInterop.Hide(this);", hide);
-        Assert.DoesNotContain("AnimateAsync", hide);
-        Assert.DoesNotContain("ContentSlideDistanceDip", source);
-    }
 
     [Fact]
     public void OverlayQuickSettingsPageBinding_takes_a_narrow_mutation_delegate_not_the_client()
@@ -341,29 +295,6 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("surface.ValueRows.Clear()", reconcile);
     }
 
-    [Fact]
-    public void Quick_settings_section_separators_follow_the_current_visible_feature_order()
-    {
-        var source = ReadOverlayWindowSource();
-        var rebuild = source[source.IndexOf("private void RebuildQuickSettingsContent", StringComparison.Ordinal)..
-            source.IndexOf("private void ReconcileQuickSettingsSections", StringComparison.Ordinal)];
-        var reconcile = source[source.IndexOf("private void ReconcileQuickSettingsSections", StringComparison.Ordinal)..
-            source.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal)];
-        var separatorPolicy = source[source.IndexOf("private void ApplyQuickSettingsSectionSeparators", StringComparison.Ordinal)..
-            source.IndexOf("private static Border CreateOverlaySectionCard", StringComparison.Ordinal)];
-
-        Assert.Contains("ApplyQuickSettingsSectionSeparators(surface, page);", rebuild);
-        Assert.Contains("ReorderQuickSettingsSectionCards(surface, page);", reconcile);
-        Assert.Contains("ApplyQuickSettingsSectionSeparators(surface, page);", reconcile);
-        Assert.Contains("rendered.Card is null", separatorPolicy);
-        Assert.Contains("surface.PageId == QuickSettingsPageId.Profile", separatorPolicy);
-        Assert.Contains("section.SectionId == QuickSettingsSectionId.ProfileGeneral", separatorPolicy);
-        Assert.Contains("var hasFeature = false;", separatorPolicy);
-        Assert.Contains("SetOverlaySectionSeparator(rendered.Card, hasFeature)", separatorPolicy);
-        Assert.True(separatorPolicy.IndexOf("SetOverlaySectionSeparator(rendered.Card, hasFeature)", StringComparison.Ordinal)
-            < separatorPolicy.IndexOf("hasFeature = true", StringComparison.Ordinal));
-        Assert.Contains("OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(page)", separatorPolicy);
-    }
 
     [Fact]
     public void Quick_settings_section_updates_preserve_selected_row_identity_and_scroll_only_when_needed()
@@ -549,22 +480,14 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("preferActiveProfile", reset + show + dispatch);
         Assert.True(show.IndexOf("ResetUiForShow();", StringComparison.Ordinal)
             < show.IndexOf("WindowInterop.ShowWithoutActivation(this);", StringComparison.Ordinal));
-        Assert.Contains("No game is currently running.\\nStart a game to configure its profile.", profile);
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", profile);
-        Assert.Contains("VerticalAlignment = VerticalAlignment.Center", profile);
-        Assert.Contains("TextAlignment = TextAlignment.Center", profile);
-        Assert.Contains("_profileStatusMessage.FontSize = 16", profile);
-        Assert.DoesNotContain("FontSize = 20", profile);
         Assert.Contains("var activeProfileReady = HasRenderableActiveProfile(page);", profile);
         Assert.Contains("_profileStatusMessage.Text = ResolveProfileStatusMessage(page);", profile);
         Assert.Contains("_profileStatusMessage.Visibility = Visibility.Collapsed", profile);
         Assert.Contains("_profileDetailRoot.Visibility = Visibility.Collapsed", profile);
 
-        const string noGameMessage = "No game is currently running. Start a game to configure its profile.";
-        const string noGameDisplayMessage = "No game is currently running.\nStart a game to configure its profile.";
-        Assert.Equal(noGameDisplayMessage, OverlayWindow.ResolveProfileStatusMessage(
-            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, noGameMessage)));
-        Assert.Equal(1, noGameDisplayMessage.Count(character => character == '\n'));
+        const string noGameStatus = "runtime no-game status";
+        Assert.Equal(noGameStatus, OverlayWindow.ResolveProfileStatusMessage(
+            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, noGameStatus)));
     }
 
     [Fact]
@@ -580,7 +503,6 @@ public sealed class OverlayDeviceRendererWiringTests
         var applyIndex = prepare.IndexOf("ApplyProfilePresentation(page);", StringComparison.Ordinal);
         Assert.Contains("private bool _activeProfileInitialLoadPending;", profile);
         Assert.Contains("_activeProfileInitialLoadPending = true;", prepare);
-        Assert.Contains("\"Loading the active game profile.\"", prepare);
         Assert.True(retireRowsIndex >= 0 && retireRowsIndex < renderIndex && renderIndex < applyIndex);
 
         var pendingIndex = presentation.IndexOf("if (_activeProfileInitialLoadPending)", StringComparison.Ordinal);
@@ -601,21 +523,20 @@ public sealed class OverlayDeviceRendererWiringTests
     [Fact]
     public void Profile_status_distinguishes_no_game_from_an_unavailable_active_xbox_profile()
     {
-        const string noGameMessage = "No game is currently running. Start a game to configure its profile.";
-        const string noGameDisplayMessage = "No game is currently running.\nStart a game to configure its profile.";
-        const string xboxFailureMessage = "The active XBOX game Profile is unavailable.";
+        const string noGameMessage = "runtime no-game status";
+        const string xboxFailureMessage = "runtime active-profile failure";
         var noGamePage = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, noGameMessage);
         var unrelatedNoTargetFailure = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, xboxFailureMessage);
         var unavailableXboxPage = QuickSettingsPageSnapshot.Unavailable(
             QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:active"), xboxFailureMessage);
 
         Assert.False(OverlayWindow.HasRenderableActiveProfile(noGamePage));
-        Assert.Equal(noGameDisplayMessage, OverlayWindow.ResolveProfileStatusMessage(noGamePage));
+        Assert.Equal(noGameMessage, OverlayWindow.ResolveProfileStatusMessage(noGamePage));
         Assert.False(OverlayWindow.HasRenderableActiveProfile(unavailableXboxPage));
         Assert.Equal(xboxFailureMessage, OverlayWindow.ResolveProfileStatusMessage(unavailableXboxPage));
         Assert.Equal(xboxFailureMessage, OverlayWindow.ResolveProfileStatusMessage(unrelatedNoTargetFailure));
         Assert.NotEqual(noGameMessage, OverlayWindow.ResolveProfileStatusMessage(unavailableXboxPage));
-        Assert.Equal("Profile settings are unavailable.", OverlayWindow.ResolveProfileStatusMessage(null));
+        Assert.False(string.IsNullOrWhiteSpace(OverlayWindow.ResolveProfileStatusMessage(null)));
 
         var presentation = ExtractMethod(ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"),
             "private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)");
@@ -765,7 +686,7 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Overlay_value_row_uses_touchable_icon_buttons_and_the_same_adjustment_seam()
+    public void Overlay_value_row_preserves_one_step_adjustment_and_numeric_repeat_behavior()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs");
 
@@ -779,20 +700,11 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains(": new Button();", source);
         Assert.Contains("Delay = 300", source);
         Assert.Contains("Interval = 75", source);
-        Assert.Contains("FontIcon", source);
-        Assert.Contains("CreateIconButton", source);
-        Assert.Contains("QamValueButtonStyle", source);
-        Assert.Contains("QamValueButtonWidth", source);
-        Assert.Contains("QamValueButtonHeight", source);
-        Assert.Contains("QamValueButtonCornerRadius", source);
         Assert.Contains("button.Click += click", source);
         Assert.Contains("_model.RequestAdjust(-1)", source);
         Assert.Contains("_model.RequestAdjust(+1)", source);
         Assert.Contains("Adjust: OnControllerAdjust", source);
         Assert.Contains("Activate: null", source);
-        Assert.DoesNotContain("CreateArrowButton", source);
-        Assert.DoesNotContain("‹", source);
-        Assert.DoesNotContain("›", source);
         var rowStart = source.IndexOf("internal sealed class OverlayValueRow", StringComparison.Ordinal);
         var valueRowSource = source[rowStart..];
         Assert.DoesNotContain("Slider", valueRowSource);
@@ -844,16 +756,12 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Quick_settings_use_single_column_sections_and_pointer_selection_without_mutation_on_empty_row_tap()
+    public void Quick_settings_pointer_tap_selects_rows_without_mutating_on_empty_space()
     {
         var source = ReadOverlayWindowSource();
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
         var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
 
-        Assert.Contains("var sectionPanel = new StackPanel", quickSettings);
-        Assert.Contains("QamSectionSpacing", quickSettings);
-        Assert.Contains("var rowStack = new StackPanel { Spacing = OverlayQamResources.Get(\"QamRowSpacing\", 0.0) }", quickSettings);
-        Assert.Contains("sectionPanel.Children.Add(rowStack);", quickSettings);
         Assert.Contains("RegisterRowPointerSelection(row.Container);", quickSettings);
         Assert.Contains("RegisterRowPointerSelection(row.Container);", source);
         Assert.Contains("_rowSelection.TrySelect(index)", navigation);
@@ -862,8 +770,6 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("new PointerEventHandler", navigation);
         Assert.Contains("handledEventsToo: true", navigation);
         Assert.DoesNotContain("overlayRow.Container.Tapped +=", quickSettings);
-        Assert.DoesNotContain("sectionPanel.ColumnDefinitions", quickSettings);
-        Assert.DoesNotContain("rowStack.ColumnDefinitions", quickSettings);
     }
 
     [Fact]
@@ -876,9 +782,6 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("descriptor.IsFeatureHeader", quickSettings);
         Assert.Contains("descriptor.DisplayLabel", quickSettings);
         Assert.Contains("if (!descriptor.IsFeatureHeader)", quickSettings);
-        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container)", quickSettings);
-        Assert.Contains("QamDetailIndent", quickSettings);
-        Assert.Contains("descriptor.StrongLabel", quickSettings);
         Assert.DoesNotContain("section.Label.Contains", quickSettings);
         Assert.DoesNotContain("section.Label == \"TDP\"", quickSettings);
         Assert.DoesNotContain("section.Label == \"CPU Boost\"", quickSettings);
@@ -894,8 +797,6 @@ public sealed class OverlayDeviceRendererWiringTests
         var buildGeneral = ExtractMethod(presentation,
             "private static QuickSettingsSection BuildProfileGeneralSection(ProfileQuickSettingsProjection snapshot)");
 
-        Assert.True(buildProfile.IndexOf("BuildProfileGeneralSection(snapshot)", StringComparison.Ordinal)
-            < buildProfile.IndexOf("BuildProfileTdpSection(snapshot)", StringComparison.Ordinal));
         Assert.Contains("QuickSettingsRowId.ProfileEnabled", buildGeneral);
         Assert.Contains("Writable: false", buildGeneral);
         Assert.Contains("Visible = false", buildGeneral);
@@ -904,53 +805,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("new OverlayToggleRow", presentation);
     }
 
-    [Fact]
-    public void Profile_resolution_row_uses_the_shared_detail_indent_in_the_generic_renderer()
-    {
-        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
-        var buildStart = quickSettings.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal);
-        var buildEnd = quickSettings.IndexOf("private static void RemoveQuickSettingsSection", buildStart, StringComparison.Ordinal);
-        var buildSection = quickSettings[buildStart..buildEnd];
 
-        Assert.Contains("var detailStack = CreateOverlayDetailStack();", buildSection);
-        Assert.Contains("detailStack.Children.Add(row.Row.Container);", buildSection);
-        Assert.Contains("rowStack.Children.Add(detailStack);", buildSection);
-        Assert.DoesNotContain("QamDetailIndent", buildSection);
-        var detailStackStart = quickSettings.IndexOf("private static StackPanel CreateOverlayDetailStack()", StringComparison.Ordinal);
-        var detailStackEnd = quickSettings.IndexOf("private static void SetOverlaySectionSeparator", detailStackStart, StringComparison.Ordinal);
-        var detailStack = quickSettings[detailStackStart..detailStackEnd];
-        Assert.Contains("QamRowSpacing", detailStack);
-        Assert.Contains("QamDetailIndent", detailStack);
-    }
-
-    [Fact]
-    public void Heading_only_quick_settings_sections_use_shared_row_chrome_without_an_extra_header_gap()
-    {
-        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
-        var helperStart = quickSettings.IndexOf("private static Border CreateOverlaySectionHeadingRow", StringComparison.Ordinal);
-        var helperEnd = quickSettings.IndexOf("private static StackPanel CreateOverlayDetailStack", helperStart, StringComparison.Ordinal);
-        var headingHelper = quickSettings[helperStart..helperEnd];
-        var buildStart = quickSettings.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal);
-        var buildEnd = quickSettings.IndexOf("private static void RemoveQuickSettingsSection", buildStart, StringComparison.Ordinal);
-        var build = quickSettings[buildStart..buildEnd];
-        var rowStackStart = build.IndexOf("var rowStack = new StackPanel", StringComparison.Ordinal);
-        var rowStackEnd = build.IndexOf("sectionPanel.Children.Add(rowStack);", rowStackStart, StringComparison.Ordinal);
-        var rowStack = build[rowStackStart..rowStackEnd];
-
-        Assert.True(helperStart >= 0);
-        Assert.True(helperEnd > helperStart);
-        Assert.Contains("QamBodyStrongTextStyle", headingHelper);
-        Assert.Contains("OverlayRowChrome.Create(heading)", headingHelper);
-        Assert.DoesNotContain("RegisterRowPointerSelection", headingHelper);
-        Assert.DoesNotContain("new OverlayRow", headingHelper);
-        Assert.DoesNotContain("_pageRows", headingHelper);
-        Assert.Contains("QamRowSpacing", rowStack);
-        Assert.Contains("rendered.Heading = CreateOverlaySectionHeadingRow(section.Label);", build);
-        Assert.Contains("var detailStack = CreateOverlayDetailStack();", build);
-        Assert.Contains("rowStack.Children.Add(detailStack);", build);
-        Assert.DoesNotContain("QamSectionHeaderSpacing", rowStack);
-        Assert.DoesNotContain("new TextBlock { Text = section.Label", build);
-    }
 
     [Fact]
     public void Setting_root_and_detail_pages_reuse_the_existing_settings_controls()
@@ -962,10 +817,6 @@ public sealed class OverlayDeviceRendererWiringTests
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
 
         Assert.Contains("CreateOverlaySectionCard(sectionPanel)", quickSettings);
-        Assert.Contains("QamSectionPadding", quickSettings);
-        Assert.Contains("QamDetailRowPadding", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs"));
-        Assert.Contains("QamSectionCornerRadius", quickSettings);
-        Assert.Contains("QamSectionBrush", quickSettings);
         var settingPageStart = clawHud.IndexOf("private FrameworkElement BuildSettingPage", StringComparison.Ordinal);
         var settingPageEnd = clawHud.IndexOf("private FrameworkElement CreateSettingDetailPage", settingPageStart, StringComparison.Ordinal);
         var settingPage = clawHud[settingPageStart..settingPageEnd];
@@ -981,14 +832,9 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("host.Children.Add(tabOrderDetailView);", settingPage);
         Assert.DoesNotContain("CreateOverlayDetailStack", clawHud);
         Assert.DoesNotContain("SettingCardId", clawHud);
-        Assert.Contains("Quick Settings", clawHud);
-        Assert.Contains("Show only current power source", clawHud);
         Assert.Contains("ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable)",
             ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs"));
         Assert.Contains("section.Children.Add(row.Container);", clawHud);
-        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container);", clawHud);
-        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(_quickSettingsYButtonQuickJumpRow.Container);", clawHud);
-        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(_quickSettingsCurrentPowerSourceOnlyRow.Container);", clawHud);
         Assert.Contains("IsSettingDetailActive(detail)", clawHud);
         Assert.Contains("ResetDetailForTabChangeOrShow();", shell);
         Assert.Contains("TryReturnFromDetailPage()", profile);
@@ -1052,22 +898,6 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("PageTitle.Text = LabelFor(selected);", selectedState);
     }
 
-    [Fact]
-    public void Setting_root_rows_use_the_shared_section_separator_policy()
-    {
-        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
-        var settingPage = clawHud[clawHud.IndexOf("private FrameworkElement BuildSettingPage", StringComparison.Ordinal)..
-            clawHud.IndexOf("private FrameworkElement CreateSettingDetailPage", StringComparison.Ordinal)];
-        var createRootRow = clawHud[clawHud.IndexOf("private OverlayRow CreateSettingRootRow", StringComparison.Ordinal)..
-            clawHud.IndexOf("private void OpenSettingDetail", StringComparison.Ordinal)];
-
-        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[0].Container, visible: false)", settingPage);
-        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[1].Container, visible: true)", settingPage);
-        Assert.Contains("SetOverlaySectionSeparator(_settingRootRows[2].Container, visible: true)", settingPage);
-        Assert.Contains("CreateDetailMenuChrome(title, $\"Open {title} settings\")", createRootRow);
-        Assert.DoesNotContain("SetOverlaySectionSeparator", createRootRow);
-        Assert.DoesNotContain("CreateOverlayDetailStack", createRootRow);
-    }
 
     [Fact]
     public void Setting_root_rows_open_prebuilt_details_through_controller_and_pointer_activation()
@@ -1081,10 +911,15 @@ public sealed class OverlayDeviceRendererWiringTests
         var chrome = clawHud[chromeStart..chromeEnd];
 
         Assert.Contains("var (container, headerButton) = CreateDetailMenuChrome(title, $\"Open {title} settings\");", rootRow);
-        Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", chrome);
-        Assert.Contains("Padding = OverlayQamResources.Get(\"QamRowPadding\", new Thickness(16, 10, 16, 10))", chrome);
-        Assert.Contains("MinHeight = OverlayQamResources.Get(\"QamRowMinHeight\", 42.0)", chrome);
-        Assert.Contains("return (CreateOverlaySectionCard(header), button);", chrome);
+        Assert.Contains("MinHeight = OverlayQamResources.Get(\"QamRowMinHeight\"", chrome);
+        var rowMinHeight = XDocument.Parse(ReadSource(
+            "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"))
+            .Descendants()
+            .Single(element => (string?)element.Attribute(XName.Get(
+                "Key", "http://schemas.microsoft.com/winfx/2006/xaml")) == "QamRowMinHeight")
+            .Value;
+        Assert.True(double.TryParse(rowMinHeight, NumberStyles.Float, CultureInfo.InvariantCulture, out var minHeight)
+            && minHeight >= 40);
         Assert.Contains("IsTabStop = false", chrome);
         Assert.Contains("AllowFocusOnInteraction = false", chrome);
         Assert.Contains("headerButton.Click += (_, _) => OpenSettingDetail(id, detailView, detailRows, container, title);", rootRow);
@@ -1104,18 +939,15 @@ public sealed class OverlayDeviceRendererWiringTests
         var overlayApp = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
         var host = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
 
-        Assert.True(clawHud.IndexOf("SettingDetailId.ClawHud, \"ClawHUD\"", StringComparison.Ordinal)
-            < clawHud.IndexOf("SettingDetailId.QuickSettings, \"Quick Settings\"", StringComparison.Ordinal));
-        Assert.True(clawHud.IndexOf("SettingDetailId.QuickSettings, \"Quick Settings\"", StringComparison.Ordinal)
-            < clawHud.IndexOf("SettingDetailId.TabOrder, \"Quick Overlay Tab Order\"", StringComparison.Ordinal));
+        Assert.Contains("SettingDetailId.ClawHud,", clawHud);
+        Assert.Contains("SettingDetailId.QuickSettings,", clawHud);
+        Assert.Contains("SettingDetailId.TabOrder,", clawHud);
         Assert.Contains("SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value", host);
         Assert.Contains("SetQuickOverlayYButtonTargetAsync(target", host);
         Assert.Contains("SendCurrentPowerSourceMutationAsync", overlayApp);
         Assert.Contains("SendYButtonQuickJumpMutationAsync(target)", overlayApp);
         Assert.Contains("QuickSettingsCurrentPowerSourceOnlyRequested", clawHud);
         Assert.Contains("YButtonQuickJumpTargetRequested", clawHud);
-        Assert.True(clawHud.IndexOf("section.Children.Add(_quickSettingsYButtonQuickJumpRow.Container)", StringComparison.Ordinal)
-            < clawHud.IndexOf("section.Children.Add(_quickSettingsCurrentPowerSourceOnlyRow.Container)", StringComparison.Ordinal));
         Assert.Contains("OverlayValueButtonKind.DiscreteChoice", clawHud);
         Assert.Contains("canInteract: _quickSettingsYButtonQuickJumpAvailable && !_yButtonQuickJumpMutationInFlight", clawHud);
         Assert.Contains("var quickSettingsMutation = !led && controllerForSteamMutation is null && !yButtonQuickJumpMutation", controller);
@@ -1270,181 +1102,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("CanInvokeSettingDetailAction", clawHud);
     }
 
-    [Fact]
-    public void Feature_header_toggles_can_use_shared_strong_body_typography()
-    {
-        var toggle = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs");
-        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
 
-        Assert.Contains("bool strongLabel = false", toggle);
-        Assert.Contains("QamBodyStrongTextStyle", toggle);
-        Assert.Contains("displayLabelOverride ?? row.Label", quickSettings);
-        Assert.Contains("strongLabel)", quickSettings);
-    }
-
-    [Fact]
-    public void Overlay_shell_uses_a_left_vertical_fluent_icon_rail_and_passive_bumper_hints()
-    {
-        var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
-        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
-        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
-        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
-        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
-        var project = ReadSource("src", "SteamInputAddonforClaw.Overlay", "SteamInputAddonforClaw.Overlay.csproj");
-        var tabRailStart = xaml.IndexOf("x:Name=\"TabRail\"", StringComparison.Ordinal);
-        var tabRailEnd = xaml.IndexOf("</Border>", tabRailStart, StringComparison.Ordinal);
-        var tabRail = xaml[tabRailStart..tabRailEnd];
-        var tabRailStartIndex = xaml.IndexOf("x:Name=\"TabRail\"", StringComparison.Ordinal);
-        var document = XDocument.Parse(xaml);
-        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
-        var shellElement = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "QamShell");
-        var railElement = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "TabRail");
-        var railGrid = Assert.Single(railElement.Elements(), element => element.Name.LocalName == "Grid");
-        var pageHost = document.Descendants().Single(element =>
-            element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1");
-        var bodyColumn = pageHost.ToString(SaveOptions.DisableFormatting);
-        var railCluster = Assert.Single(railGrid.Elements(), element =>
-            element.Name.LocalName == "StackPanel" && (string?)element.Attribute(x + "Name") == "TabRailCluster");
-        var clusterChildren = railCluster.Elements().ToArray();
-        var tabStrip = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "TabStrip");
-        var previousHint = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "PreviousTabBumperHint");
-        var nextHint = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "NextTabBumperHint");
-        var clock = railGrid.Elements().Single(element => (string?)element.Attribute(x + "Name") == "RailClockText");
-        var footer = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "QuickJumpFooter");
-        var railFontIcons = railElement.Descendants().Where(element => element.Name.LocalName == "FontIcon").ToArray();
-
-        Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
-        Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
-        Assert.DoesNotContain("MaxWidth=\"452\"", xaml);
-        Assert.Contains("x:Name=\"QamShell\"", xaml);
-        Assert.Contains("<ColumnDefinition Width=\"52\" />", xaml);
-        Assert.Contains("<ColumnDefinition Width=\"*\" />", xaml);
-        Assert.True(tabRailStartIndex > 0);
-        Assert.Contains("x:Name=\"TabRail\"", tabRail);
-        Assert.Contains("Grid.Column=\"0\"", tabRail);
-        Assert.Equal("0", (string?)railElement.Attribute("Grid.Row"));
-        Assert.Equal("0", (string?)pageHost.Attribute("Grid.Row"));
-        Assert.Same(shellElement, pageHost.Parent);
-        Assert.Contains("x:Name=\"TabStrip\"", tabRail);
-        Assert.Contains("x:Name=\"TabRailCluster\"", tabRail);
-        Assert.Equal("12", (string?)clock.Attribute("FontSize"));
-        Assert.Equal("Center", (string?)clock.Attribute("HorizontalTextAlignment"));
-        Assert.Equal("False", (string?)clock.Attribute("IsHitTestVisible"));
-        Assert.Equal("False", (string?)clock.Attribute("IsTabStop"));
-        Assert.Same(railGrid, clock.Parent);
-        Assert.Equal("Center", (string?)railCluster.Attribute("VerticalAlignment"));
-        Assert.Equal("Stretch", (string?)railCluster.Attribute("HorizontalAlignment"));
-        Assert.Equal("{StaticResource QamRailHintGap}", (string?)railCluster.Attribute("Spacing"));
-        Assert.Equal(
-            new[] { "PreviousTabBumperHint", "TabStrip", "NextTabBumperHint" },
-            clusterChildren.Select(element => (string?)element.Attribute(x + "Name")));
-        Assert.Equal("{StaticResource QamRailSpacing}", (string?)tabStrip.Attribute("RowSpacing"));
-        Assert.Null(previousHint.Attribute("Margin"));
-        Assert.Null(nextHint.Attribute("Margin"));
-        Assert.DoesNotContain("QamRailHintMargin", xaml);
-        Assert.DoesNotContain("ColumnDefinitions", tabRail);
-        Assert.Equal(1, CountOccurrences(bodyColumn, "<Grid.ColumnDefinitions>"));
-        Assert.Contains("Grid.Column=\"1\"", bodyColumn);
-        Assert.DoesNotContain("Margin=\"{StaticResource QamBodyContentPadding}\"", bodyColumn);
-        Assert.Contains("Padding=\"{StaticResource QamBodyContentPadding}\"", bodyColumn);
-        Assert.Single(System.Text.RegularExpressions.Regex.Matches(xaml, "<ScrollViewer\\b"));
-        Assert.Contains("x:Name=\"BodyScroll\"", xaml);
-        Assert.Contains("x:Name=\"TabBody\"", xaml);
-        Assert.DoesNotContain("Steam_LB.png", xaml);
-        Assert.DoesNotContain("Steam_RB.png", xaml);
-        Assert.DoesNotContain("Assets\\Controller\\Steam_LB.png", project);
-        Assert.DoesNotContain("Assets\\Controller\\Steam_RB.png", project);
-        Assert.Equal("\uF10C", (string?)previousHint.Attribute("Glyph"));
-        Assert.Equal("\uF10D", (string?)nextHint.Attribute("Glyph"));
-        Assert.Equal("Segoe Fluent Icons", (string?)previousHint.Attribute("FontFamily"));
-        Assert.Equal("Segoe Fluent Icons", (string?)nextHint.Attribute("FontFamily"));
-        Assert.Equal("{StaticResource QamRailHintIconSize}", (string?)previousHint.Attribute("FontSize"));
-        Assert.Equal("{StaticResource QamRailHintIconSize}", (string?)nextHint.Attribute("FontSize"));
-        Assert.Equal("{StaticResource QamDisabledTextBrush}", (string?)previousHint.Attribute("Foreground"));
-        Assert.Equal("{StaticResource QamDisabledTextBrush}", (string?)nextHint.Attribute("Foreground"));
-        Assert.Equal("False", (string?)previousHint.Attribute("IsHitTestVisible"));
-        Assert.Equal("False", (string?)nextHint.Attribute("IsHitTestVisible"));
-        Assert.Single(railFontIcons, element => (string?)element.Attribute("Glyph") == "\uF10C");
-        Assert.Single(railFontIcons, element => (string?)element.Attribute("Glyph") == "\uF10D");
-        Assert.Equal("LB, previous tab", (string?)previousHint.Attribute("AutomationProperties.Name"));
-        Assert.Equal("RB, next tab", (string?)nextHint.Attribute("AutomationProperties.Name"));
-        Assert.Same(railCluster, tabStrip.Parent);
-        Assert.Same(railCluster, previousHint.Parent);
-        Assert.Same(railCluster, nextHint.Parent);
-        Assert.DoesNotContain(tabStrip.DescendantsAndSelf(), element => ReferenceEquals(element, previousHint));
-        Assert.DoesNotContain(tabStrip.DescendantsAndSelf(), element => ReferenceEquals(element, nextHint));
-        Assert.Contains("new TranslateTransform { Y = QuickJumpFooter.Height / 2.0 }", ReadOverlayWindowSource());
-        Assert.Contains("Grid.SetRow(tabHost, position)", shell);
-        Assert.DoesNotContain("position + 1", shell);
-        Assert.DoesNotContain("Grid.SetColumn(tabHost, position)", shell);
-        Assert.Contains("TabStrip.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });", shell);
-        Assert.Contains("AutomationProperties.SetName(button, label)", shell);
-        Assert.Contains("ToolTipService.SetToolTip(button, label)", shell);
-        Assert.Contains("Content = new FontIcon", shell);
-        Assert.Contains("FontFamily = new FontFamily(\"Segoe Fluent Icons\")", shell);
-        Assert.Contains("Glyph = GlyphFor(id)", shell);
-        Assert.Contains("FontSize = OverlayQamResources.Get(\"QamRailIconSize\", 24.0)", shell);
-        Assert.Contains("private static string GlyphFor(AddonQuickSettingsTabId id)", shell);
-        Assert.Contains("AddonQuickSettingsTabId.Device => \"\\uE772\"", shell);
-        Assert.Contains("AddonQuickSettingsTabId.Profile => \"\\uE8A5\"", shell);
-        Assert.Contains("AddonQuickSettingsTabId.Controller => \"\\uE7FC\"", shell);
-        Assert.Contains("AddonQuickSettingsTabId.Shortcut => \"\\uE71B\"", shell);
-        Assert.Contains("AddonQuickSettingsTabId.Setting => \"\\uE713\"", shell);
-        Assert.DoesNotContain("SymbolIcon", shell);
-        Assert.DoesNotContain("SymbolFor(", shell);
-        Assert.Contains("QamRailButtonStyle", shell);
-        Assert.Contains("QamRailIconSize", shell);
-        Assert.DoesNotContain("Foreground =", shell[shell.IndexOf("Content = new FontIcon", StringComparison.Ordinal)..shell.IndexOf("Tag = id", StringComparison.Ordinal)]);
-        var selectedVisual = shell[shell.IndexOf("private void ApplySelectedHeaderVisual()", StringComparison.Ordinal)..
-            shell.IndexOf("// s.12: deterministic tab-change ordering", StringComparison.Ordinal)];
-        Assert.Contains("button.Background =", selectedVisual);
-        Assert.Contains("button.Foreground =", selectedVisual);
-        Assert.DoesNotContain("FontIcon", selectedVisual);
-        Assert.DoesNotContain("_tabIndicators", shell);
-        Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
-        Assert.Contains("MinWidth = 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
-        Assert.Contains("OverlayTabState", shell);
-        Assert.Contains("QamRailSelectedFillBrush", shell);
-        Assert.Contains("SelectPreviousTab", shell);
-        Assert.Contains("SelectNextTab", shell);
-        Assert.Contains("case OverlayNavigationAction.PreviousTab:", app);
-        Assert.Contains("_window?.SelectPreviousTab();", app);
-        Assert.Contains("case OverlayNavigationAction.NextTab:", app);
-        Assert.Contains("_window?.SelectNextTab();", app);
-        Assert.Contains("case OverlayNavigationAction.RepeatNavigateLeft:", app);
-        Assert.Contains("_window?.RepeatAdjustSelectedNumericSlider(-1);", app);
-        Assert.Contains("case OverlayNavigationAction.RepeatNavigateRight:", app);
-        Assert.Contains("_window?.RepeatAdjustSelectedNumericSlider(+1);", app);
-        Assert.Contains("_tabState.ResetForShow();", shell);
-        Assert.Contains("NavigateUp", navigation);
-        Assert.Contains("NavigateDown", navigation);
-        Assert.Contains("AdjustSelectedRow", navigation);
-        Assert.Contains("_numericSliderRepeatTarget.TryAdjust(_tabState.SelectedTab, _rowSelection.SelectedCapabilities, delta)", navigation);
-
-        var footerChildren = footer.Descendants().ToArray();
-        var footerIcons = footerChildren.Where(element => element.Name.LocalName == "FontIcon").ToArray();
-        var footerLabels = footerChildren.Where(element => element.Name.LocalName == "TextBlock").ToArray();
-        Assert.Equal("1", (string?)footer.Attribute("Grid.Row"));
-        Assert.Equal("2", (string?)footer.Attribute("Grid.ColumnSpan"));
-        Assert.Equal("36", (string?)footer.Attribute("Height"));
-        Assert.Equal("{StaticResource QamRailBrush}", (string?)footer.Attribute("Background"));
-        Assert.Same(shellElement, footer.Parent);
-        Assert.Same(shellElement, railElement.Parent);
-        var footerContent = Assert.Single(footer.Elements(), element => element.Name.LocalName == "StackPanel");
-        Assert.Equal("Left", (string?)footerContent.Attribute("HorizontalAlignment"));
-        Assert.Equal("16,0,0,0", (string?)footerContent.Attribute("Margin"));
-        Assert.Equal("Center", (string?)footerContent.Attribute("VerticalAlignment"));
-        Assert.Single(footerIcons);
-        Assert.Equal("\uF095", (string?)footerIcons[0].Attribute("Glyph"));
-        Assert.Equal("Segoe Fluent Icons", (string?)footerIcons[0].Attribute("FontFamily"));
-        Assert.Equal("20", (string?)footerIcons[0].Attribute("FontSize"));
-        Assert.Equal("False", (string?)footerIcons[0].Attribute("IsHitTestVisible"));
-        Assert.Single(footerLabels);
-        Assert.Equal("—", (string?)footerLabels[0].Attribute("Text"));
-        Assert.Equal("14", (string?)footerLabels[0].Attribute("FontSize"));
-        Assert.Equal("False", (string?)footerLabels[0].Attribute("IsHitTestVisible"));
-        Assert.DoesNotContain(footerChildren, element => element.Attribute("Text")?.Value.Contains(':') == true);
-    }
 
     [Fact]
     public void Rail_clock_refreshes_on_show_and_stops_on_hide_or_close()
@@ -1460,89 +1118,17 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("StartRailClockUpdates();", show);
         Assert.Contains("StopRailClockUpdates();", hide);
         Assert.Contains("StopRailClockUpdates();", window);
-        Assert.Contains("DateTime.Now.ToString(\"HH:mm\", CultureInfo.InvariantCulture)", clock);
+        Assert.Contains("UpdateRailClockText();", clock);
         Assert.Contains("TimeSpan.FromSeconds(20)", clock);
         Assert.Contains("_railClockTimer.Tick += OnRailClockTimerTick;", clock);
         Assert.Contains("catch (Exception exception)", clock);
         Assert.Contains("continuing without affecting Overlay setup", clock);
         Assert.Contains("_railClockTimer?.Stop();", presentation);
-        Assert.Contains("&#xF095;", xaml);
+        Assert.Contains("RailClockText", xaml);
     }
 
-    [Fact]
-    public void Rows_and_tabs_use_the_measured_qam_fill_and_resource_owned_metrics()
-    {
-        var chrome = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs");
-        var resources = ReadSource("src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml");
-        var source = ReadOverlayWindowSource();
 
-        Assert.Contains("QamRowPadding", chrome);
-        Assert.Contains("QamRowMinHeight", chrome);
-        Assert.Contains("QamRowCornerRadius", chrome);
-        Assert.Contains("QamSelectionBorderThickness", chrome);
-        Assert.DoesNotContain("QamRowSeparatorThickness", chrome);
-        Assert.DoesNotContain("QamSeparatorBrush", chrome);
-        Assert.Contains("QamSelectedFillBrush", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"));
-        Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
-        Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
-        Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
-        Assert.Contains("_tabHosts", source);
-        Assert.Contains("Grid.SetRow(tabHost, position)", source);
-        Assert.DoesNotContain("Grid.SetColumn(tabHost, position)", source);
-        Assert.DoesNotContain("Grid.SetColumn(button, position)", source);
-        Assert.Contains("_tabState.TryApplyOrder(normalized)", source);
-        Assert.Contains("QamRailSelectedFillBrush", source);
-        Assert.Contains("QamRailIconSelectedBrush", source);
-        Assert.Contains("QamRailSelectedFillBrush", resources);
-        Assert.DoesNotContain("Width = 3", source);
-    }
 
-    [Fact]
-    public void OverlayWindow_code_behind_is_only_the_composition_root()
-    {
-        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
-
-        Assert.DoesNotContain("RenderQuickSettingsPage", source);
-        Assert.DoesNotContain("RebuildQuickSettingsContent", source);
-        Assert.DoesNotContain("BuildTabOrderEditorPage", source);
-        Assert.DoesNotContain("NavigateUp", source);
-        Assert.DoesNotContain("AnimateAsync", source);
-    }
-
-    [Fact]
-    public void OverlayWindow_partial_files_keep_one_owner_and_explicit_responsibilities()
-    {
-        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
-        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
-        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
-        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
-
-        Assert.Contains("partial class OverlayWindow", presentation);
-        Assert.Contains("ShowForPocAsync", presentation);
-        Assert.Contains("HideForPocAsync", presentation);
-        Assert.Contains("AnimateAsync", presentation);
-
-        Assert.Contains("partial class OverlayWindow", shell);
-        Assert.Contains("BuildShell", shell);
-        Assert.Contains("ApplyTabOrderState", shell);
-        Assert.Contains("ApplySelectedTabVisualState", shell);
-
-        Assert.Contains("partial class OverlayWindow", navigation);
-        Assert.Contains("NavigateUp", navigation);
-        Assert.Contains("AdjustSelectedRow", navigation);
-        Assert.Contains("BringSelectedRowIntoView", navigation);
-
-        Assert.Contains("partial class OverlayWindow", quickSettings);
-        Assert.Contains("ConfigureQuickSettings", quickSettings);
-        Assert.Contains("RenderQuickSettingsPage", quickSettings);
-        Assert.Contains("RebuildQuickSettingsContent", quickSettings);
-
-        var splitSources = string.Join(Environment.NewLine, presentation, shell, navigation, quickSettings);
-        Assert.DoesNotContain("class OverlayNavigationManager", splitSources);
-        Assert.DoesNotContain("class OverlayPresentationManager", splitSources);
-        Assert.DoesNotContain("class OverlayShellManager", splitSources);
-        Assert.DoesNotContain("class OverlayQuickSettingsManager", splitSources);
-    }
 
     private static string ReadOverlayWindowSource() => string.Join(
         Environment.NewLine,

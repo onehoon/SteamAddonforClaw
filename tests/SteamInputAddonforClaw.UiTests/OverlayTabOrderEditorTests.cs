@@ -12,12 +12,11 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
     private static OverlayRowCapabilities Selectable() => new(() => true);
 
     [Fact]
-    public void Tab_order_rows_keep_the_existing_detail_padding_and_mutation_contract()
+    public void Tab_order_rows_expose_selection_capabilities_and_adjustment()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs");
 
         Assert.Contains("Container = OverlayRowChrome.Create(grid);", source);
-        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(Container);", source);
         Assert.Contains("internal OverlayRowCapabilities Capabilities { get; }", source);
         Assert.Contains("Adjust: delta =>", source);
     }

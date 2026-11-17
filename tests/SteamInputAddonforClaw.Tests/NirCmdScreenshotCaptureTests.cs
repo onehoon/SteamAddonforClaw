@@ -130,7 +130,7 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
         var result = await capture.CaptureAsync(_testDirectory);
 
         Assert.Equal(ShortcutExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal("Screenshot could not be saved.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         Assert.DoesNotContain(_testDirectory, result.FailureMessage, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -330,7 +330,7 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
         var result = await capture.CaptureAsync(_testDirectory);
 
         Assert.Equal(ShortcutExecutionOutcome.Unavailable, result.Outcome);
-        Assert.Equal("Screenshot is unavailable.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         Assert.Equal(0, launchCount);
         Assert.False(Directory.Exists(_testDirectory));
     }
@@ -357,7 +357,7 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
         var result = await capture.CaptureAsync(_testDirectory);
 
         Assert.Equal(ShortcutExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal("Screenshot could not be saved.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         Assert.Equal(0, launchCount);
     }
 

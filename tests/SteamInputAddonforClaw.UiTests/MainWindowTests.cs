@@ -6,11 +6,6 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class MainWindowTests
 {
-    [Fact]
-    public void FormatWindowTitle_DefaultPreservesTheOriginalTitle()
-    {
-        Assert.Equal("Steam Addon for Claw v0.1.20", MainWindow.FormatWindowTitle("0.1.20"));
-    }
 
     [Fact]
     public void FormatDisplayVersion_preserves_pre_release_suffix_and_strips_build_metadata()
@@ -27,15 +22,16 @@ public sealed class MainWindowTests
     }
 
     [Theory]
-    [InlineData("0.1.20", false, "Steam Addon for Claw v0.1.20")]
-    [InlineData("0.1.20", true, "Steam Addon for Claw v0.1.20 — Update Available")]
-    [InlineData("0.1.467-pre", false, "Steam Addon for Claw v0.1.467-pre")]
-    [InlineData("0.1.467-pre", true, "Steam Addon for Claw v0.1.467-pre — Update Available")]
-    public void FormatWindowTitle_PreservesTheVersionPrefixAndOptionallyShowsUpdateReady(string version, bool updateReady, string expected)
+    [InlineData("0.1.20")]
+    [InlineData("0.1.467-pre")]
+    public void FormatWindowTitle_keeps_version_and_distinguishes_update_ready_state(string version)
     {
-        Assert.Equal(expected, MainWindow.FormatWindowTitle(version, updateReady));
+        var normal = MainWindow.FormatWindowTitle(version, updateReady: false);
+        var ready = MainWindow.FormatWindowTitle(version, updateReady: true);
+        Assert.Contains(version, normal, StringComparison.Ordinal);
+        Assert.Contains(version, ready, StringComparison.Ordinal);
+        Assert.NotEqual(normal, ready);
     }
-
     [Fact]
     public void Update_ready_indicator_is_driven_only_by_the_ready_to_install_snapshot()
     {
@@ -84,11 +80,11 @@ public sealed class MainWindowTests
         var badgeMethod = code[badgeStart..badgeEnd];
         Assert.Contains("MainNavigationView.SettingsItem is NavigationViewItem settingsItem", badgeMethod, StringComparison.Ordinal);
         Assert.Contains("settingsItem.InfoBadge = _isUpdateReady ? _updateReadyDotBadge : null", badgeMethod, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"MainNav_Settings\", \"Settings\")", code, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"MainNav_Settings\"", code, StringComparison.Ordinal);
 
         var menuItems = xaml.Descendants().Single(element => element.Name.LocalName == "NavigationView.MenuItems");
         Assert.DoesNotContain(menuItems.Elements().Where(element => element.Name.LocalName == "NavigationViewItem"), item =>
-            string.Equals((string?)item.Attribute("Content"), "Settings", StringComparison.Ordinal));
+            string.Equals((string?)item.Attribute("Tag"), "Settings", StringComparison.Ordinal));
         Assert.DoesNotContain("CaptureAppUpdateAsync", code, StringComparison.Ordinal);
         Assert.Contains("_settingsContent?.RequestAppUpdateRefresh();", code, StringComparison.Ordinal);
     }

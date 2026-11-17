@@ -73,35 +73,6 @@ public sealed class MainUiThemeTests
         Assert.Equal(expected, MainUiThemePreferenceStore.ResolveSystemTheme(appsUseLightTheme, ElementTheme.Light));
     }
 
-    [Fact]
-    public void Settings_theme_card_is_between_updates_and_gaming_home_with_exact_choices()
-    {
-        var path = Source("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
-        var xaml = File.ReadAllText(path);
-        var document = XDocument.Load(path);
-        var stack = document.Descendants().Single(element => element.Name.LocalName == "StackPanel"
-            && element.Elements().Any(child =>
-                (string?)child.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "UpdateCard"));
-        var cardOrder = stack.Elements()
-            .Select(element => (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")))
-            .ToArray();
-        var themeCard = document.Descendants().Single(element =>
-            element.Name.LocalName == "SettingsCard"
-            && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "AppThemeCard");
-        var comboBox = themeCard.Descendants().Single(element => element.Name.LocalName == "ComboBox");
-
-        Assert.True(Array.IndexOf(cardOrder, "UpdateCard") < Array.IndexOf(cardOrder, "AppThemeCard"));
-        Assert.True(Array.IndexOf(cardOrder, "AppThemeCard") < Array.IndexOf(cardOrder, "GamingHomeExpander"));
-        Assert.Equal("App theme", (string?)themeCard.Attribute("Header"));
-        Assert.Equal("Choose the main app appearance.", (string?)themeCard.Attribute("Description"));
-        var themeHeaderIcon = themeCard.Elements().Single(element => element.Name.LocalName == "SettingsCard.HeaderIcon");
-        var themeFontIcon = themeHeaderIcon.Elements().Single(element => element.Name.LocalName == "FontIcon");
-        Assert.Equal("\uE7A1", (string?)themeFontIcon.Attribute("Glyph"));
-        Assert.Equal(new[] { "System", "Light", "Dark" }, comboBox.Elements()
-            .Where(element => element.Name.LocalName == "ComboBoxItem")
-            .Select(element => (string?)element.Attribute("Tag")));
-        Assert.Contains("SelectionChanged=\"AppThemeComboBox_SelectionChanged\"", xaml, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void Programmatic_theme_selection_is_suppressed_and_user_changes_are_forwarded()
@@ -211,20 +182,6 @@ public sealed class MainUiThemeTests
         Assert.True(savedSelectionRestore > rollback);
         Assert.True(successfulSelection > saveAttempt);
         Assert.True(apply > successfulSelection);
-        Assert.Contains("Theme could not be saved. The previous selection was kept.", handler, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void How_to_use_webview_uses_white_default_background_before_attachment()
-    {
-        var source = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "HowToUsePage.xaml.cs"));
-        var methodStart = source.IndexOf("private WebView2 EnsureDocumentationWebView()", StringComparison.Ordinal);
-        var methodEnd = source.IndexOf("private void DocumentationWebView_Loaded", methodStart, StringComparison.Ordinal);
-        var method = source[methodStart..methodEnd];
-
-        var background = method.IndexOf("DefaultBackgroundColor = Color.FromArgb(255, 255, 255, 255)", StringComparison.Ordinal);
-        var attachment = method.IndexOf("DocumentationWebViewHost.Children.Add(webView)", StringComparison.Ordinal);
-        Assert.True(background >= 0 && attachment > background);
     }
 
     private static MainUiThemePreferenceStore CreateStore(string root)

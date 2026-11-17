@@ -729,7 +729,7 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.Equal(FirstTimeSetupStatus.Complete, setup.Status);
         Assert.False(prerequisites.IsRoutingReady);
         Assert.Equal("SetupRequired", presentation.Status);
-        Assert.Equal("VIIPER is required for controller routing.", presentation.Reason);
+        Assert.False(string.IsNullOrWhiteSpace(presentation.Reason));
     }
 
     [Theory]

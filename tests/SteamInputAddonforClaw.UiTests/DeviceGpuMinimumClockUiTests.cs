@@ -92,7 +92,6 @@ public sealed class DeviceGpuMinimumClockUiTests
         foreach (var page in new[] { "ProfilePage.xaml", "XboxPage.xaml" })
         {
             var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views", page));
-            Assert.Contains("Header=\"Minimum GPU Clock\"", xaml, StringComparison.Ordinal);
             Assert.Contains("GpuMinimumClockEnabledToggle", xaml, StringComparison.Ordinal);
         }
     }

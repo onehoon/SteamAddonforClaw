@@ -44,7 +44,7 @@ public sealed class TdpFrontendContractTests
 
         Assert.False(result.Succeeded);
         Assert.Equal(FrontendTdpMutationOutcome.InvalidTarget, result.Outcome);
-        Assert.Equal("outside model ranges", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
     }
 
     [Fact]

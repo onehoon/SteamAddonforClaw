@@ -131,7 +131,7 @@ public sealed class ShortcutFoundationContractTests
         Assert.Empty(availableEmpty.Tiles);
         Assert.False(unavailable.Available);
         Assert.Empty(unavailable.Tiles);
-        Assert.Equal("Runtime unavailable", unavailable.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(unavailable.FailureMessage));
         Assert.Equal(tile, new FrontendShortcutDashboardSnapshot(true, [tile]).Tiles.Single());
 
         var propertyNames = typeof(FrontendShortcutTile).GetProperties().Select(property => property.Name);

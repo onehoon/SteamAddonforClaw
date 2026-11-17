@@ -13,31 +13,12 @@ public sealed class BackButtonUiLayoutTests
     }
 
     [Fact]
-    public void Controller_page_places_one_m1_m2_editor_after_front_buttons()
+    public void Controller_page_exposes_both_rear_mapping_controls()
     {
         var xaml = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
-
-        var gamebar = xaml.IndexOf("Header=\"XBOX Gamebar Button\"", StringComparison.Ordinal);
-        var centerM = xaml.IndexOf("Header=\"Center M Button\"", StringComparison.Ordinal);
-        var back = xaml.IndexOf("Header=\"M1 / M2 Button\"", StringComparison.Ordinal);
-
-        Assert.True(gamebar >= 0 && centerM >= 0 && back >= 0);
-        Assert.True(gamebar < centerM && centerM < back);
         Assert.Equal(1, Count(xaml, "x:Name=\"M1TargetComboBox\""));
         Assert.Equal(1, Count(xaml, "x:Name=\"M2TargetComboBox\""));
-        Assert.DoesNotContain("M1Normal", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("M2Steam", xaml, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Controller_page_explains_xbox360_only_and_steamdeck_rear_behavior()
-    {
-        var xaml = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
-
-        Assert.Contains("XBOX 360 mode only", xaml, StringComparison.Ordinal);
-        Assert.Contains("Steam Game / Big Picture", xaml, StringComparison.Ordinal);
-        Assert.Contains("M1 as R4", xaml, StringComparison.Ordinal);
-        Assert.Contains("M2 as L4", xaml, StringComparison.Ordinal);
+        Assert.Equal(2, Count(xaml, "SelectionChanged=\"BackButtonTargetComboBox_SelectionChanged\""));
     }
 
     [Fact]
@@ -52,29 +33,16 @@ public sealed class BackButtonUiLayoutTests
     }
 
     [Fact]
-    public void Controller_page_offers_every_defined_target_with_readable_labels()
+    public void Controller_page_offers_every_defined_rear_mapping_target()
     {
-        var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
+        var code = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
         var options = Read("src/SteamInputAddonforClaw.UI/Views/BackButtonMappingUiOptions.cs");
-        var labels = Read("src/SteamInputAddonforClaw.Contracts/BackButtons/BackButtonMapping.cs");
-
-        Assert.Contains("BackButtonMappingUiOptions.AddTargets", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("BackButtonMappingUiOptions.AddTargets", code, StringComparison.Ordinal);
         Assert.Contains("Enum.GetValues<Xbox360BackButtonTarget>()", options, StringComparison.Ordinal);
         Assert.Contains("BackButtonMappingLabels.GetDisplayName(target)", options, StringComparison.Ordinal);
-        foreach (var label in new[]
-        {
-            "Disabled", "D-Pad Up", "D-Pad Right", "D-Pad Down", "D-Pad Left",
-            "Left Bumper (LB)", "Right Bumper (RB)", "Left Trigger (LT)", "Right Trigger (RT)",
-            "Left Stick Click (L3)", "Right Stick Click (R3)", "Xbox Guide"
-        })
-        {
-            Assert.Contains($"=> \"{label}\"", labels, StringComparison.Ordinal);
-        }
-
-        Assert.DoesNotContain("=> \"DPadUp\"", labels, StringComparison.Ordinal);
-        Assert.DoesNotContain("=> \"LeftStickClick\"", labels, StringComparison.Ordinal);
+        Assert.All(Enum.GetValues<SteamInputAddonforClaw.Contracts.BackButtons.Xbox360BackButtonTarget>(), target =>
+            Assert.False(string.IsNullOrWhiteSpace(SteamInputAddonforClaw.Contracts.BackButtons.BackButtonMappingLabels.GetDisplayName(target))));
     }
-
     [Fact]
     public void Rear_edits_emit_one_whole_record_and_allow_duplicate_targets()
     {

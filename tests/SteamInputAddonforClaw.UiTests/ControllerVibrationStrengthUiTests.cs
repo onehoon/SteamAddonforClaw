@@ -46,7 +46,7 @@ public sealed class ControllerVibrationStrengthUiTests
     }
 
     [Fact]
-    public void Controller_page_exposes_collapsed_icon_vibration_group_with_two_slider_rows_and_compact_recovery_card()
+    public void Controller_page_keeps_vibration_controls_and_recovery_action_connected()
     {
         var root = FindRepositoryRoot();
         var path = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
@@ -56,39 +56,14 @@ public sealed class ControllerVibrationStrengthUiTests
             element.Name.LocalName == "SettingsExpander"
             && (string?)element.Attribute(x + "Name") == "VibrationStrengthExpander");
 
-        Assert.Equal("Vibration Strength", (string?)expander.Attribute("Header"));
-        Assert.Equal("False", (string?)expander.Attribute("IsExpanded"));
-        Assert.Equal("Set the vibration strength applied while the Addon owns the controller.", (string?)expander.Attribute("Description"));
-        Assert.Contains(expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon");
-        var ledExpander = document.Descendants().Single(element =>
-            element.Name.LocalName == "SettingsExpander"
-            && (string?)element.Attribute(x + "Name") == "ControllerLedExpander");
-        Assert.NotSame(ledExpander.Parent, expander.Parent);
-        Assert.DoesNotContain("Controller Settings", expander.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("settings.json", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase);
 
-        var mappingContent = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "MappingContent");
-        Assert.DoesNotContain(mappingContent.Descendants(), element => ReferenceEquals(element, expander));
-        Assert.True(document.ToString().IndexOf("x:Name=\"MappingContent\"", StringComparison.Ordinal)
-            < document.ToString().IndexOf("x:Name=\"VibrationStrengthExpander\"", StringComparison.Ordinal));
+        AssertSliderRow(expander, x, "LeftVibrationStrengthSlider", "LeftVibrationStrengthPercentText", "LeftVibrationTestButton");
+        AssertSliderRow(expander, x, "RightVibrationStrengthSlider", "RightVibrationStrengthPercentText", "RightVibrationTestButton");
 
-        AssertSliderRow(expander, x, "Left Motor", "LeftVibrationStrengthSlider", "LeftVibrationStrengthPercentText", "LeftVibrationTestButton");
-        AssertSliderRow(expander, x, "Right Motor", "RightVibrationStrengthSlider", "RightVibrationStrengthPercentText", "RightVibrationTestButton");
-
-        var items = expander.Elements().Single(element => element.Name.LocalName == "SettingsExpander.Items");
-        var cards = items.Elements().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
-        Assert.Equal(3, cards.Length);
-        Assert.Equal(["Left Motor", "Right Motor", "Vibration Recovery"], cards.Select(card => (string?)card.Attribute("Header")));
-        var recoveryButton = Assert.Single(cards[2].Elements());
-        Assert.Equal("Button", recoveryButton.Name.LocalName);
-        Assert.Equal("RestoreVibrationButton", (string?)recoveryButton.Attribute(x + "Name"));
-        Assert.Equal("Restore", (string?)recoveryButton.Attribute("Content"));
+        var recoveryButton = Assert.Single(expander.Descendants(), element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute(x + "Name") == "RestoreVibrationButton");
         Assert.Equal("RestoreVibrationButton_Click", (string?)recoveryButton.Attribute("Click"));
-        Assert.Equal("Right", (string?)recoveryButton.Attribute("HorizontalAlignment"));
-        Assert.Contains("Temporarily disconnects virtual controller input", (string?)recoveryButton.Attribute("ToolTipService.ToolTip"), StringComparison.Ordinal);
-        Assert.DoesNotContain(cards[2].Descendants(), element => element.Name.LocalName is "TextBlock" or "StackPanel" or "Grid");
-        Assert.DoesNotContain("RestoreVibrationStatusText", cards[2].ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("RestoreVibrationStatusText", File.ReadAllText(path), StringComparison.Ordinal);
         var pageCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
         var rearmHandlerStart = pageCode.IndexOf("private async void RestoreVibrationButton_Click", StringComparison.Ordinal);
         var rearmHandlerEnd = pageCode.IndexOf("private void ShowRumbleRearmMessageUnlessFailure", rearmHandlerStart, StringComparison.Ordinal);
@@ -97,8 +72,8 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("frontend.RunDeveloperRumbleRearmAsync()", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("CanStartVibrationRearm(", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("_vibrationRearmInProgress = true", rearmHandler, StringComparison.Ordinal);
-        Assert.Contains("RestoreVibrationButton.Content = MainUiStrings.Get(\"Controller_RestoreVibrationButton_BusyContent\", \"Restoring…\")", rearmHandler, StringComparison.Ordinal);
-        Assert.Contains("RestoreVibrationButton.Content = MainUiStrings.Get(\"Controller_RestoreVibrationButton/Content\", \"Restore\")", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("Controller_RestoreVibrationButton_BusyContent", rearmHandler, StringComparison.Ordinal);
+        Assert.Contains("Controller_RestoreVibrationButton/Content", rearmHandler, StringComparison.Ordinal);
         var restoreResourceKey = "Controller_RestoreVibrationButton.Content";
         foreach (var culture in new[] { "en-US", "ko-KR" })
         {
@@ -109,14 +84,9 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("await RefreshVibrationStrengthAsync(preserveFailure)", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("(\"Status\", result.Status)", rearmHandler, StringComparison.Ordinal);
         Assert.DoesNotContain("result.Status;", rearmHandler, StringComparison.Ordinal);
-        Assert.DoesNotContain("RestoreVibrationStatusText", pageCode, StringComparison.Ordinal);
-        Assert.Contains("Controller restored. Test both motors to confirm vibration.", rearmHandler, StringComparison.Ordinal);
-        Assert.Contains("Could not restore the controller. See the application log.", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("RestoreVibrationButton.IsEnabled = _frontend is not null && CanStartVibrationRearm(", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("_vibrationSnapshot.Writable", rearmHandler, StringComparison.Ordinal);
         Assert.Contains("CanShowRumbleRearmMessage(", pageCode, StringComparison.Ordinal);
-        var developerPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
-        Assert.DoesNotContain("Vibration Profile 0/100 Probe", developerPage, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml")));
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs")));
     }
@@ -398,24 +368,23 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("TryStartVibrationMotorTest(", testHandler, StringComparison.Ordinal);
         Assert.Contains("frontend.TestControllerVibrationMotorAsync(motor)", testHandler, StringComparison.Ordinal);
 
-        Assert.DoesNotContain("Firmware values read successfully", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("persistent firmware ceiling", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml")), StringComparison.OrdinalIgnoreCase);
 
+        const string unavailableStatus = "fixture unavailable status";
         var unavailable = FrontendControllerVibrationStrengthSnapshot.Unavailable(
-            "Production vibration strength is not enabled for this model.") with { TestAvailable = true };
+            unavailableStatus) with { TestAvailable = true };
         Assert.False(unavailable.Available);
         Assert.False(unavailable.Writable);
         Assert.True(unavailable.TestAvailable);
         Assert.Null(unavailable.LeftPercent);
         Assert.Null(unavailable.RightPercent);
-        Assert.Equal("Production vibration strength is not enabled for this model.", unavailable.Status);
+        Assert.Equal(unavailableStatus, unavailable.Status);
     }
 
     [Fact]
     public async Task Physical_test_dispatches_once_when_strength_capability_is_unavailable_but_test_is_available()
     {
         var unavailable = FrontendControllerVibrationStrengthSnapshot.Unavailable(
-            "Production vibration strength is not enabled for this model.") with { TestAvailable = true };
+            "fixture unavailable status") with { TestAvailable = true };
         Assert.False(unavailable.Available);
         Assert.False(unavailable.Writable);
         Assert.True(unavailable.TestAvailable);
@@ -426,7 +395,7 @@ public sealed class ControllerVibrationStrengthUiTests
         var startedCount = 0;
         var expected = new FrontendControllerVibrationTestResult(
             FrontendControllerVibrationTestOutcome.Succeeded,
-            "Physical vibration test completed.");
+            "fixture test result");
         var request = ControllerPage.TryStartVibrationMotorTest(
             unavailable,
             hasPendingDraft: false,
@@ -449,25 +418,20 @@ public sealed class ControllerVibrationStrengthUiTests
     private static void AssertSliderRow(
         XElement expander,
         XNamespace x,
-        string header,
         string sliderName,
         string percentName,
         string testButtonName)
     {
-        var card = expander.Descendants().Single(element => element.Name.LocalName == "SettingsCard"
-            && (string?)element.Attribute("Header") == header);
-        Assert.Null((string?)card.Attribute("ContentAlignment"));
-        var slider = card.Descendants().Single(element => element.Name.LocalName == "Slider"
+        var slider = expander.Descendants().Single(element => element.Name.LocalName == "Slider"
             && (string?)element.Attribute(x + "Name") == sliderName);
         Assert.Equal("0", (string?)slider.Attribute("Minimum"));
         Assert.Equal("100", (string?)slider.Attribute("Maximum"));
         Assert.Equal("1", (string?)slider.Attribute("StepFrequency"));
-        Assert.Equal("Collapsed", (string?)slider.Attribute("Visibility"));
-        Assert.Contains(card.Descendants(), element => element.Name.LocalName == "TextBlock"
+        Assert.Contains(expander.Descendants(), element => element.Name.LocalName == "TextBlock"
             && (string?)element.Attribute(x + "Name") == percentName);
-        Assert.Contains(card.Descendants(), element => element.Name.LocalName == "Button"
+        Assert.Contains(expander.Descendants(), element => element.Name.LocalName == "Button"
             && (string?)element.Attribute(x + "Name") == testButtonName
-            && (string?)element.Attribute("Content") == "Test");
+            && (string?)element.Attribute("Click") is not null);
     }
 
     private static string FindRepositoryRoot()

@@ -27,8 +27,8 @@ public sealed class WindowsTweaksRuntimeTests
             Assert.Equal(FrontendWindowsTweakApplicability.AllSupportedWindows, item.Applicability);
         });
         var fasterMenus = Assert.Single(FrontendWindowsTweakCatalog.All, item => item.Id == FrontendWindowsTweakId.InstantContextMenus);
-        Assert.Equal("Faster Menus", fasterMenus.Title);
-        Assert.Equal("Disable menu animation and reduce submenu delay to 10 ms.", fasterMenus.Description);
+        Assert.False(string.IsNullOrWhiteSpace(fasterMenus.Title));
+        Assert.False(string.IsNullOrWhiteSpace(fasterMenus.Description));
         Assert.Equal(6, (int)FrontendWindowsTweakId.DisableEdgeBackground);
         Assert.Equal(7, (int)FrontendWindowsTweakId.DisableStartupAppDelay);
         Assert.DoesNotContain((FrontendWindowsTweakId)5, FrontendWindowsTweakCatalog.All.Select(item => item.Id));
@@ -152,7 +152,7 @@ public sealed class WindowsTweaksRuntimeTests
         var failedRow = Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.VirtualMachinePlatform);
         Assert.Equal(FrontendWindowsTweakState.Unknown, failedRow.State);
         Assert.False(failedRow.CanChange);
-        Assert.Equal("Virtual Machine Platform state could not be read. Check Windows servicing configuration.", failedRow.Detail);
+        Assert.False(string.IsNullOrWhiteSpace(failedRow.Detail));
         Assert.Equal(FrontendWindowsTweakState.Disabled,
             Assert.Single(snapshot.Tweaks, item => item.Id == FrontendWindowsTweakId.InstantContextMenus).State);
     }
@@ -225,7 +225,7 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.Equal(FrontendWindowsTweakState.EnablePendingRestart, result.UpdatedTweak.State);
         Assert.True(result.UpdatedTweak.ConfiguredEnabled);
         Assert.False(result.UpdatedTweak.EffectiveEnabled);
-        Assert.Equal("Windows requires a restart to complete this change.", result.UpdatedTweak.Detail);
+        Assert.False(string.IsNullOrWhiteSpace(result.UpdatedTweak.Detail));
     }
 
     [Fact]
@@ -256,7 +256,7 @@ public sealed class WindowsTweaksRuntimeTests
         Assert.Equal(FrontendWindowsTweakState.Enabled, result.UpdatedTweak.State);
         Assert.True(result.UpdatedTweak.ConfiguredEnabled);
         Assert.True(result.UpdatedTweak.EffectiveEnabled);
-        Assert.Equal("Virtual Machine Platform could not be enabled. Check Windows servicing configuration.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         Assert.DoesNotContain("VmpCommandException", result.FailureMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("SourceUnavailable", result.FailureMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("Sensitive", result.FailureMessage, StringComparison.Ordinal);

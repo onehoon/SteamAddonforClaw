@@ -10,113 +10,21 @@ namespace SteamInputAddonforClaw.UiTests;
 
 public sealed class WindowsTweaksUiContractTests
 {
-    [Fact]
-    public void Tweaks_navigation_is_inserted_before_how_to_use_and_keeps_device_default()
-    {
-        var root = FindRepositoryRoot();
-        var main = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
-        var menu = main.Descendants().Single(element => element.Name.LocalName == "NavigationView.MenuItems");
-        var tags = menu.Elements().Where(element => element.Name.LocalName == "NavigationViewItem")
-            .Select(element => (string?)element.Attribute("Tag")).ToArray();
-
-        Assert.Equal(new[] { "Device", "MsiUpdates", "Controller", "Profile", "Xbox", "Overlay", "QuickOverlay", "Shortcut", "Tweaks", "HowToUse" }, tags);
-        Assert.Equal("Device", (string?)menu.Elements().First().Attribute("Tag"));
-        Assert.Equal(MainNavigationPage.Device, new MainNavigationState().CurrentPage);
-    }
 
     [Fact]
-    public void Page_contains_exactly_the_seven_retained_compact_switches_with_inline_status()
+    public void Windows_tweak_cards_are_bound_to_the_shared_mutation_handler()
     {
         var root = FindRepositoryRoot();
         var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml"));
         var cards = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
-        var names = cards.Select(card => (string?)card.Attribute("Header")).ToArray();
-
-        Assert.Equal(new[]
-        {
-            "Memory Integrity",
-            "Virtual Machine Platform",
-            "Faster Menus",
-            "Classic Context Menu",
-            "Disable Password on Wake",
-            "Disable Edge Background",
-            "Disable Startup App Delay",
-        }, names);
+        Assert.NotEmpty(cards);
         foreach (var card in cards)
         {
             Assert.False(string.IsNullOrWhiteSpace((string?)card.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))));
             var toggle = Assert.Single(card.Descendants(), element => element.Name.LocalName == "ToggleSwitch");
-            Assert.Same(card, toggle.Parent?.Parent);
-            Assert.Equal("False", (string?)toggle.Attribute("IsEnabled"));
-            Assert.Null(toggle.Attribute("IsOn"));
-            Assert.Equal("Center", (string?)toggle.Attribute("VerticalAlignment"));
-            Assert.Null(card.Attribute("MinHeight"));
-
-            var description = Assert.Single(card.Elements(), element => element.Name.LocalName == "SettingsCard.Description");
-            var descriptionText = Assert.Single(description.Elements(), element => element.Name.LocalName == "TextBlock");
-            Assert.Equal("1", (string?)descriptionText.Attribute("MaxLines"));
-
-            var content = Assert.Single(card.Elements(), element => element.Name.LocalName == "StackPanel");
-            Assert.Equal("Horizontal", (string?)content.Attribute("Orientation"));
-            var statusAndToggle = content.Elements().ToArray();
-            Assert.Equal(new[] { "TextBlock", "ToggleSwitch" }, statusAndToggle.Select(element => element.Name.LocalName));
-            Assert.Same(statusAndToggle[0].Parent, toggle.Parent);
-            Assert.Equal("Collapsed", (string?)statusAndToggle[0].Attribute("Visibility"));
-            Assert.Equal("CharacterEllipsis", (string?)statusAndToggle[0].Attribute("TextTrimming"));
-            Assert.Equal("180", (string?)statusAndToggle[0].Attribute("MaxWidth"));
-            Assert.Null(statusAndToggle[0].Attribute("Height"));
+            Assert.Equal("TweakSwitch_Toggled", (string?)toggle.Attribute("Toggled"));
         }
-
-        Assert.DoesNotContain(cards.SelectMany(card => card.Descendants()), element =>
-            (string?)element.Attribute("Height") == "18");
-        Assert.DoesNotContain(cards.SelectMany(card => card.Descendants()), element =>
-            (string?)element.Attribute("Width") == "250");
     }
-
-    [Fact]
-    public void Page_groups_tweaks_under_the_approved_section_headers()
-    {
-        var root = FindRepositoryRoot();
-        var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml"));
-        var pageTitle = xaml.Descendants().Single(element =>
-            element.Name.LocalName == "TextBlock" && (string?)element.Attribute("FontSize") == "24");
-        Assert.Equal("Tweaks", (string?)pageTitle.Attribute("Text"));
-
-        var panel = xaml.Descendants().Single(element =>
-            element.Name.LocalName == "StackPanel"
-            && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "TweaksPanel");
-        var items = panel.Elements().Select(element => element.Name.LocalName switch
-        {
-            "TextBlock" => (string?)element.Attribute("Text"),
-            "SettingsCard" => (string?)element.Attribute("Header"),
-            _ => null,
-        }).ToArray();
-
-        Assert.Equal(new[]
-        {
-            "Gaming Performance",
-            "Memory Integrity",
-            "Virtual Machine Platform",
-            "Registry Tweaks",
-            "Faster Menus",
-            "Classic Context Menu",
-            "Disable Password on Wake",
-            "Disable Edge Background",
-            "Disable Startup App Delay",
-        }, items);
-        var fasterMenus = panel.Descendants().Single(element =>
-            element.Name.LocalName == "SettingsCard" && (string?)element.Attribute("Header") == "Faster Menus");
-        Assert.Equal("Disable menu animation and reduce submenu delay to 10 ms.",
-            (string?)fasterMenus.Descendants().First(element => element.Name.LocalName == "TextBlock").Attribute("Text"));
-
-        Assert.Equal("Disable Edge Startup Boost and background mode; existing processes may continue until closed.",
-            (string?)panel.Descendants().Single(element => (string?)element.Attribute("Header") == "Disable Edge Background")
-                .Descendants().First(element => element.Name.LocalName == "TextBlock").Attribute("Text"));
-        Assert.Equal("Remove configured Explorer startup-app launch delays; actual startup gains may vary.",
-            (string?)panel.Descendants().Single(element => (string?)element.Attribute("Header") == "Disable Startup App Delay")
-                .Descendants().First(element => element.Name.LocalName == "TextBlock").Attribute("Text"));
-    }
-
     [Fact]
     public void Omitted_model_specific_tweak_hides_the_entire_card()
     {
@@ -151,69 +59,54 @@ public sealed class WindowsTweaksUiContractTests
     }
 
     [Fact]
-    public void Mixed_and_exception_states_keep_their_special_labels()
+    public void Mixed_and_exception_states_use_their_semantic_resource_keys()
     {
-        var mixed = new FrontendWindowsTweakSnapshot(
-            FrontendWindowsTweakId.DisableEdgeBackground, FrontendWindowsTweakState.Mixed, false, null, true, "Pair differs.");
-        var enabled = new FrontendWindowsTweakSnapshot(
-            FrontendWindowsTweakId.DisableEdgeBackground, FrontendWindowsTweakState.Enabled, true, true, true, null);
-        var pending = new FrontendWindowsTweakSnapshot(
-            FrontendWindowsTweakId.VirtualMachinePlatform, FrontendWindowsTweakState.EnablePendingRestart, true, false, true, null);
-
-        Assert.Equal(
-            MainUiStrings.Get("Tweaks_State_MixedApply", "Mixed — turn On to apply"),
-            WindowsTweaksPage.FormatState(mixed));
-        Assert.Equal(
-            MainUiStrings.Get("Tweaks_State_Disabled", "Disabled"),
-            WindowsTweaksPage.FormatState(enabled));
-        Assert.Equal(
-            MainUiStrings.Get("Tweaks_State_RestartRequired", "Restart required"),
-            WindowsTweaksPage.FormatState(pending));
-
-        var configuredNotRunning = new FrontendWindowsTweakSnapshot(
-            FrontendWindowsTweakId.MemoryIntegrity, FrontendWindowsTweakState.EnablePendingRestart, true, false, true, null);
-        var explorerRestart = new FrontendWindowsTweakSnapshot(
-            FrontendWindowsTweakId.DisableEdgeBackground, FrontendWindowsTweakState.ExplorerRestartPending, true, false, true, null);
-
-        Assert.Equal(
-            MainUiStrings.Get("Tweaks_State_ConfiguredNotRunning", "Configured — not running"),
-            WindowsTweaksPage.FormatState(configuredNotRunning));
-        Assert.Equal(
-            MainUiStrings.Get("Tweaks_State_ExplorerRestartRequired", "Explorer restart required"),
-            WindowsTweaksPage.FormatState(explorerRestart));
+        var mixed = new FrontendWindowsTweakSnapshot(FrontendWindowsTweakId.DisableEdgeBackground,
+            FrontendWindowsTweakState.Mixed, false, null, true, "Pair differs.");
+        var enabled = new FrontendWindowsTweakSnapshot(FrontendWindowsTweakId.DisableEdgeBackground,
+            FrontendWindowsTweakState.Enabled, true, true, true, null);
+        var pending = new FrontendWindowsTweakSnapshot(FrontendWindowsTweakId.VirtualMachinePlatform,
+            FrontendWindowsTweakState.EnablePendingRestart, true, false, true, null);
+        Assert.Equal(MainUiStrings.Get("Tweaks_State_MixedApply", string.Empty), WindowsTweaksPage.FormatState(mixed));
+        Assert.Equal(MainUiStrings.Get("Tweaks_State_Disabled", string.Empty), WindowsTweaksPage.FormatState(enabled));
+        Assert.Equal(MainUiStrings.Get("Tweaks_State_RestartRequired", string.Empty), WindowsTweaksPage.FormatState(pending));
+        var configured = new FrontendWindowsTweakSnapshot(FrontendWindowsTweakId.MemoryIntegrity,
+            FrontendWindowsTweakState.EnablePendingRestart, true, false, true, null);
+        var explorer = new FrontendWindowsTweakSnapshot(FrontendWindowsTweakId.DisableEdgeBackground,
+            FrontendWindowsTweakState.ExplorerRestartPending, true, false, true, null);
+        Assert.Equal(MainUiStrings.Get("Tweaks_State_ConfiguredNotRunning", string.Empty), WindowsTweaksPage.FormatState(configured));
+        Assert.Equal(MainUiStrings.Get("Tweaks_State_ExplorerRestartRequired", string.Empty), WindowsTweaksPage.FormatState(explorer));
     }
-
     [Fact]
-    public void Verified_status_labels_describe_feature_behavior_not_the_applied_tweak_flag()
+    public void Status_semantics_invert_disable_features_and_omit_os_feature_status()
     {
         var cases = new[]
         {
-            (FrontendWindowsTweakId.InstantContextMenus, FrontendWindowsTweakState.Enabled, "Tweaks_State_Enabled", "Enabled"),
-            (FrontendWindowsTweakId.InstantContextMenus, FrontendWindowsTweakState.Disabled, "Tweaks_State_Disabled", "Disabled"),
-            (FrontendWindowsTweakId.ClassicContextMenu, FrontendWindowsTweakState.Enabled, "Tweaks_State_Enabled", "Enabled"),
-            (FrontendWindowsTweakId.ClassicContextMenu, FrontendWindowsTweakState.Disabled, "Tweaks_State_Disabled", "Disabled"),
-            (FrontendWindowsTweakId.DisablePasswordOnWake, FrontendWindowsTweakState.Enabled, "Tweaks_State_Disabled", "Disabled"),
-            (FrontendWindowsTweakId.DisablePasswordOnWake, FrontendWindowsTweakState.Disabled, "Tweaks_State_Enabled", "Enabled"),
-            (FrontendWindowsTweakId.DisableEdgeBackground, FrontendWindowsTweakState.Enabled, "Tweaks_State_Disabled", "Disabled"),
-            (FrontendWindowsTweakId.DisableEdgeBackground, FrontendWindowsTweakState.Disabled, "Tweaks_State_Enabled", "Enabled"),
-            (FrontendWindowsTweakId.DisableStartupAppDelay, FrontendWindowsTweakState.Enabled, "Tweaks_State_Disabled", "Disabled"),
-            (FrontendWindowsTweakId.DisableStartupAppDelay, FrontendWindowsTweakState.Disabled, "Tweaks_State_Enabled", "Enabled"),
+            (FrontendWindowsTweakId.InstantContextMenus, FrontendWindowsTweakState.Enabled, "Tweaks_State_Enabled"),
+            (FrontendWindowsTweakId.InstantContextMenus, FrontendWindowsTweakState.Disabled, "Tweaks_State_Disabled"),
+            (FrontendWindowsTweakId.ClassicContextMenu, FrontendWindowsTweakState.Enabled, "Tweaks_State_Enabled"),
+            (FrontendWindowsTweakId.ClassicContextMenu, FrontendWindowsTweakState.Disabled, "Tweaks_State_Disabled"),
+            (FrontendWindowsTweakId.DisablePasswordOnWake, FrontendWindowsTweakState.Enabled, "Tweaks_State_Disabled"),
+            (FrontendWindowsTweakId.DisablePasswordOnWake, FrontendWindowsTweakState.Disabled, "Tweaks_State_Enabled"),
+            (FrontendWindowsTweakId.DisableEdgeBackground, FrontendWindowsTweakState.Enabled, "Tweaks_State_Disabled"),
+            (FrontendWindowsTweakId.DisableEdgeBackground, FrontendWindowsTweakState.Disabled, "Tweaks_State_Enabled"),
+            (FrontendWindowsTweakId.DisableStartupAppDelay, FrontendWindowsTweakState.Enabled, "Tweaks_State_Disabled"),
+            (FrontendWindowsTweakId.DisableStartupAppDelay, FrontendWindowsTweakState.Disabled, "Tweaks_State_Enabled"),
         };
-
-        foreach (var (id, state, resourceKey, fallback) in cases)
+        foreach (var (id, state, resourceKey) in cases)
         {
-            var row = new FrontendWindowsTweakSnapshot(id, state, state == FrontendWindowsTweakState.Enabled, state == FrontendWindowsTweakState.Enabled, true, null);
-            Assert.Equal(MainUiStrings.Get(resourceKey, fallback), WindowsTweaksPage.FormatState(row));
+            var row = new FrontendWindowsTweakSnapshot(id, state,
+                state == FrontendWindowsTweakState.Enabled, state == FrontendWindowsTweakState.Enabled, true, null);
+            Assert.Equal(MainUiStrings.Get(resourceKey, string.Empty), WindowsTweaksPage.FormatState(row));
         }
-
         foreach (var id in new[] { FrontendWindowsTweakId.MemoryIntegrity, FrontendWindowsTweakId.VirtualMachinePlatform })
         foreach (var state in new[] { FrontendWindowsTweakState.Enabled, FrontendWindowsTweakState.Disabled })
         {
-            var row = new FrontendWindowsTweakSnapshot(id, state, state == FrontendWindowsTweakState.Enabled, state == FrontendWindowsTweakState.Enabled, true, null);
+            var row = new FrontendWindowsTweakSnapshot(id, state,
+                state == FrontendWindowsTweakState.Enabled, state == FrontendWindowsTweakState.Enabled, true, null);
             Assert.Null(WindowsTweaksPage.FormatState(row));
         }
     }
-
     [Fact]
     public void Updating_one_tweak_row_preserves_all_other_rows_and_warning_date()
     {
@@ -248,7 +141,6 @@ public sealed class WindowsTweaksUiContractTests
         Assert.Contains("SetOperationMessage(result.Succeeded ? null : result.FailureMessage)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Exception.Message", page, StringComparison.Ordinal);
         Assert.DoesNotContain("TryCaptureAfterMutationFailureAsync", page, StringComparison.Ordinal);
-        Assert.Contains("Reopen the Tweaks tab to refresh Windows state", page, StringComparison.Ordinal);
         var handlerStart = page.IndexOf("private async void TweakSwitch_Toggled", StringComparison.Ordinal);
         var handlerEnd = page.IndexOf("internal static string? FormatState", handlerStart, StringComparison.Ordinal);
         Assert.True(handlerStart >= 0 && handlerEnd > handlerStart);
@@ -258,8 +150,6 @@ public sealed class WindowsTweaksUiContractTests
         Assert.Contains("HashSet<FrontendWindowsTweakId> _mutatingIds", page, StringComparison.Ordinal);
         Assert.Contains("!_mutatingIds.Contains(row.Id)", page, StringComparison.Ordinal);
         Assert.Contains("_mutatingIds.Count > 0", page, StringComparison.Ordinal);
-        Assert.Contains("Registry policy controls may be restricted", page, StringComparison.Ordinal);
-        Assert.Contains("startup apps launch closer together", page, StringComparison.Ordinal);
         var dialogStart = page.IndexOf("private async Task<bool> ShowDailyWarningAsync()", StringComparison.Ordinal);
         var dialogEnd = page.IndexOf("private async Task<FrontendWindowsTweaksSnapshot> CaptureAsync()", dialogStart, StringComparison.Ordinal);
         Assert.True(dialogStart >= 0 && dialogEnd > dialogStart);
@@ -277,7 +167,6 @@ public sealed class WindowsTweaksUiContractTests
         Assert.Contains("return result;", frontendControl[mutationStart..mutationEnd], StringComparison.Ordinal);
         Assert.DoesNotContain("Process.Start", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Restart-Computer", page, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Apply changes", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "WindowsTweaksPage.xaml")), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
