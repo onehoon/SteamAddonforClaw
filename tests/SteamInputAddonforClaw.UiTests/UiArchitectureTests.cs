@@ -1646,8 +1646,9 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("<TextBlock Text=\"Profile\" VerticalAlignment=\"Center\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsCard Grid.Row=\"1\">", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SelectedGameNameText\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"ProfileEnabledToggle\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("x:Name=\"ProfileEnabledToggle\" Grid.Column=\"1\" HorizontalAlignment=\"Right\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileEnabledToggle", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileEnabledToggle_Toggled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SelectedGameNameText\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<Grid x:Name=\"DetailPanel\" Visibility=\"Collapsed\" RowSpacing=\"16\">", xaml, StringComparison.Ordinal);
         Assert.Contains("<Grid.RowDefinitions><RowDefinition Height=\"Auto\"/><RowDefinition Height=\"Auto\"/><RowDefinition Height=\"*\"/></Grid.RowDefinitions>", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("<Grid Grid.Row=\"1\" ColumnSpacing=\"12\">", xaml, StringComparison.Ordinal);

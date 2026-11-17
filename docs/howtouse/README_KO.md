@@ -150,9 +150,9 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 ### Steam
 
-**Steam** 페이지에는 설치된 Steam 게임과 Steam이 인식하는 Non-Steam 바로가기가 표시됩니다. **Refresh**, 검색, 즐겨찾기를 사용해 게임을 찾고 선택하면 프로필을 편집할 수 있습니다. 게임을 실행하기 전에 미리 프로필을 설정하고, 실제 사용할 프로필의 활성화 스위치를 켜세요.
+**Steam** 페이지에는 설치된 Steam 게임과 Steam이 인식하는 Non-Steam 바로가기가 표시됩니다. **Refresh**, 검색, 즐겨찾기를 사용해 게임을 찾고 선택하면 프로필을 편집할 수 있습니다. 인식된 게임에는 활성화된 프로필이 자동으로 만들어지므로 실행 전에 미리 설정할 수 있습니다. 프로필을 처음 만들 때 현재 Device 성능 값을 한 번 복사하며, 이후 Device 값을 변경해도 게임별 저장값은 바뀌지 않습니다.
 
-게임 상세 설정 맨 위의 **Virtual Controller**에서 **Use default**, **Steam Deck**, **DualSense Edge**를 선택합니다. 이 선택은 프로필이 켜져 있고 Steam / Big Picture가 비활성 상태일 때만 편집할 수 있습니다. 프로필을 꺼도 선택한 값은 보존됩니다. **Use default** 또는 프로필이 없거나 꺼진 경우에는 **Controller → Controller for Steam Game**의 전역 선택을 따릅니다. Big Picture에서 게임이 활성화되면 켜진 프로필의 명시적 선택이 자동 적용되고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아갑니다.
+게임 상세 설정 맨 위의 **Virtual Controller**에서 **Use default**, **Steam Deck**, **DualSense Edge**를 선택합니다. 이 선택은 Steam / Big Picture가 비활성 상태일 때 편집할 수 있습니다. **Use default** 또는 게임별 선택이 없는 경우에는 **Controller → Controller for Steam Game**의 전역 선택을 따릅니다. Big Picture에서 게임이 활성화되면 프로필의 명시적 선택이 자동 적용되고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아갑니다.
 
 게임별 설정은 다음과 같습니다.
 
@@ -163,15 +163,15 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 - **Intel FPS Limit** — 전원 상태별 40~120 FPS 목표값을 1 FPS 단위로 설정합니다. Intel의 FPS 제한 기능을 사용하며 일부 게임은 지원하지 않을 수 있습니다.
 - **Resolution** — **Do not change**, 1920 × 1200, 1920 × 1080, 1680 × 1050, 1440 × 900
 
-게임 프로필 마스터가 켜져 있고 게임이 활성 상태이면 저장된 **TDP Control**, **CPU Boost**, **Windows Power Mode** 값이 대응하는 Device 값보다 우선합니다. 활성 프로필이 없으면 Device 값이 적용됩니다. 이 세 설정에는 기능별 켜기/끄기 토글이 없습니다. **Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**은 게임 프로필 전용 기능이므로 대응하는 Device 설정이 없습니다. 게임이 비활성화되면 게임 프로필 전용 설정의 적용이 끝나고 Device 값이 다시 적용됩니다. 별도 런처가 종료될 때 Steam이 바로가기를 더 이상 활성 게임으로 인식하지 않으면, 자식 게임 프로세스가 실행 중이어도 프로필 적용이 끝날 수 있습니다. 자세한 내용은 [Non-Steam 게임](#non-steam-게임)을 참고하세요.
+게임 프로필이 활성 게임에 적용되면 저장된 **TDP Control**, **CPU Boost**, **Windows Power Mode** 값이 대응하는 Device 값보다 우선합니다. 적용 중인 게임 프로필이 없으면 Device 값이 적용됩니다. 이 세 설정에는 기능별 켜기/끄기 토글이 없습니다. **Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**은 게임 프로필 전용 기능이므로 대응하는 Device 설정이 없습니다. 게임이 비활성화되면 게임 프로필 전용 설정의 적용이 끝나고 Device 값이 다시 적용됩니다. 별도 런처가 종료될 때 Steam이 바로가기를 더 이상 활성 게임으로 인식하지 않으면, 자식 게임 프로세스가 실행 중이어도 프로필 적용이 끝날 수 있습니다. 자세한 내용은 [Non-Steam 게임](#non-steam-게임)을 참고하세요.
 
 ### XBOX
 
-**XBOX** 페이지에는 현재 Windows 사용자에게 설치되어 있고 앱이 인식한 Xbox/Microsoft Store 게임이 표시됩니다. **Refresh**, 검색, 즐겨찾기를 사용하고 게임을 선택해 프로필을 편집하세요. 해당 게임이 활성화됐을 때 설정을 적용하려면 프로필을 켭니다. 모든 Store 앱이나 Game Pass 타이틀이 목록에 표시되는 것은 아닙니다.
+**XBOX** 페이지에는 현재 Windows 사용자에게 설치되어 있고 앱이 인식한 Xbox/Microsoft Store 게임이 표시됩니다. **Refresh**, 검색, 즐겨찾기를 사용하고 게임을 선택해 프로필을 편집하세요. 인식된 게임에는 활성화된 프로필이 자동으로 만들어지므로 실행 전에 설정할 수 있습니다. 프로필을 처음 만들 때 현재 Device 성능 값을 한 번 복사하며, 이후 Device 값을 변경해도 게임별 저장값은 바뀌지 않습니다. 모든 Store 앱이나 Game Pass 타이틀이 목록에 표시되는 것은 아닙니다.
 
 성능 설정은 Steam 프로필과 같은 TDP Control, CPU Boost, Windows Power Mode, Minimum GPU Clock, Intel FPS Limit, Resolution입니다. XBOX 프로필에는 **Use global M1 / M2 mapping** 설정도 있습니다. 이를 끄면 해당 게임에서 사용할 Xbox 360 M1/M2 동작을 따로 지정할 수 있습니다. Steam Deck 표현에서는 M1은 R4, M2는 L4로 유지됩니다.
 
-게임을 실행하기 전에 미리 프로필을 설정할 수 있습니다. 프로필 마스터가 켜져 있고 Addon이 해당 XBOX 게임을 활성 상태로 인식하면 저장된 TDP Control, CPU Boost, Windows Power Mode 값이 Device 값보다 우선합니다. 활성 프로필이 없으면 Device 값이 적용됩니다. Minimum GPU Clock, Intel FPS Limit, Resolution은 게임 프로필 전용이므로 Device 대체 설정이 없습니다.
+게임을 실행하기 전에 미리 프로필을 설정할 수 있습니다. Addon이 해당 XBOX 게임을 활성 상태로 인식하면 저장된 TDP Control, CPU Boost, Windows Power Mode 값이 Device 값보다 우선합니다. 적용 중인 게임 프로필이 없으면 Device 값이 적용됩니다. Minimum GPU Clock, Intel FPS Limit, Resolution은 게임 프로필 전용이므로 Device 대체 설정이 없습니다.
 
 ### ClawHUD
 
@@ -244,9 +244,9 @@ Windows 게임 전체 화면 환경에서 사용할 홈 앱을 **Off**, **XBOX**
 
 ## 게임 프로필과 설정 우선순위
 
-Steam 및 XBOX 게임 프로필은 게임을 실행하기 전에 미리 만들고 편집할 수 있습니다. 프로필을 꺼도 저장된 값은 유지됩니다.
+인식된 Steam 및 XBOX 게임에는 활성화된 프로필이 자동으로 만들어지므로 실행 전에 편집할 수 있습니다. 프로필 최초 생성 시 TDP, CPU Boost, Windows Power Mode에 현재 Device 값을 한 번 복사하며, 이후 Device 값 변경은 저장된 게임별 값에 반영되지 않습니다. Device 값이 초기화되지 않았다면 해당 설정에는 제품 기본값이 사용됩니다.
 
-Steam 게임의 **Virtual Controller**는 마스터 프로필이 켜져 있을 때만 편집할 수 있습니다. **Use default** 또는 프로필이 없거나 꺼진 경우 **Controller → Controller for Steam Game**의 전역 선택을 사용합니다. Big Picture에서 게임이 시작되면 켜진 프로필의 명시적 선택으로 자동 전환하고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아옵니다. Steam 게임 또는 Big Picture가 활성화된 동안 전역·게임별 컨트롤러 수동 선택은 잠깁니다. 프로필을 껐다 다시 켜도 게임별 선택은 보존됩니다.
+Steam 게임의 **Virtual Controller**는 Steam / Big Picture가 비활성 상태일 때 편집할 수 있습니다. **Use default** 또는 게임별 선택이 없는 경우 **Controller → Controller for Steam Game**의 전역 선택을 사용합니다. Big Picture에서 게임이 시작되면 프로필의 명시적 선택으로 자동 전환하고, 게임이 끝나 Big Picture가 계속 열려 있으면 전역 선택으로 돌아옵니다. Steam 게임 또는 Big Picture가 활성화된 동안 전역·게임별 컨트롤러 수동 선택은 잠깁니다.
 
 **TDP Control**, **CPU Boost**, **Windows Power Mode**는 Device와 게임 프로필 양쪽에서 유효한 설정이 있을 때 관리됩니다. 활성 게임 프로필이 있으면 프로필 값이 우선하고, 활성 프로필이 없으면 Device 값이 적용됩니다. 이 세 설정에는 기능별 켜기/끄기 토글이 없습니다.
 
@@ -266,7 +266,7 @@ Steam 게임의 **Virtual Controller**는 마스터 프로필이 켜져 있을 �
 
 ## Non-Steam 게임
 
-일반 Windows 게임에 Steam 프로필을 사용하려면 먼저 Steam에 해당 게임을 **Non-Steam Game**으로 추가하세요. **Steam** 페이지에 Steam이 인식하는 바로가기가 표시되므로 프로필을 미리 설정하고 활성화할 수 있습니다. Steam 바로가기로 게임을 실행하고 Steam이 계속 활성 게임으로 표시하는지 확인하세요. 일부 런처는 별도 게임 프로세스를 실행한 뒤 자신의 바로가기를 종료합니다. 이때 Steam이 바로가기를 더 이상 활성 상태로 보지 않으면 Addon의 프로필 적용도 끝날 수 있습니다.
+일반 Windows 게임에 Steam 프로필을 사용하려면 먼저 Steam에 해당 게임을 **Non-Steam Game**으로 추가하세요. **Steam** 페이지에 Steam이 인식하는 바로가기가 표시되며, 게임이 검색되면 활성화된 프로필이 자동으로 만들어집니다. 프로필을 미리 설정한 뒤 Steam 바로가기로 게임을 실행하고 Steam이 계속 활성 게임으로 표시하는지 확인하세요. 일부 런처는 별도 게임 프로세스를 실행한 뒤 자신의 바로가기를 종료합니다. 이때 Steam이 바로가기를 더 이상 활성 상태로 보지 않으면 Addon의 프로필 적용도 끝날 수 있습니다.
 
 ## Quick Settings Overlay
 
@@ -327,7 +327,7 @@ Windows 절전, 최대 절전, 복귀, 재시작 뒤 컨트롤러 연결과 설�
 
 ### Steam 게임이 Xbox 컨트롤러로 표시됩니다
 
-Steam이 실행 중이고 게임을 활성 상태로 인식하는지 확인하세요. Addon이 컨트롤러를 관리하도록 MSI Center M이 비활성화되어 있는지도 확인하세요. 게임을 시작하기 전에 전역 컨트롤러는 **Controller → Controller for Steam Game**에서 선택하고, 필요하면 Steam 프로필을 켠 뒤 **Virtual Controller** 게임별 선택을 지정하세요. Steam 게임이나 Big Picture가 활성화되면 수동 선택은 잠깁니다. 일반 Windows 환경에서는 Xbox 360을 사용합니다.
+Steam이 실행 중이고 게임을 활성 상태로 인식하는지 확인하세요. Addon이 컨트롤러를 관리하도록 MSI Center M이 비활성화되어 있는지도 확인하세요. 게임을 시작하기 전에 전역 컨트롤러는 **Controller → Controller for Steam Game**에서 선택하거나, 자동 활성화된 Steam 프로필에서 **Virtual Controller** 게임별 선택을 지정하세요. Steam 게임이나 Big Picture가 활성화되면 수동 선택은 잠깁니다. 일반 Windows 환경에서는 Xbox 360을 사용합니다.
 
 ### 절전 복귀 후 컨트롤러가 응답하지 않습니다
 
@@ -347,7 +347,7 @@ Addon이 컨트롤러를 관리하는 상태에서 **Controller → Vibration St
 
 ### 게임 프로필이 적용되지 않습니다
 
-**Steam** 또는 **XBOX**에서 올바른 게임을 선택하고 프로필 마스터 스위치가 켜져 있는지 확인하세요. Steam 게임은 Steam이 계속 활성 상태로 인식해야 합니다. **Plugged in**과 **On battery** 중 현재 전원에 맞는 값을 확인하세요. 저장된 TDP Control, CPU Boost, Windows Power Mode 값은 활성 프로필에서 Device 값보다 우선합니다. Minimum GPU Clock, Intel FPS Limit, Resolution은 프로필 전용 설정이며 해당 프로필 기능을 켠 경우에만 적용됩니다.
+**Steam** 또는 **XBOX**에서 올바른 게임을 선택하고 프로필과 설정값이 준비됐는지 확인하세요. 인식된 게임의 프로필은 자동으로 활성화됩니다. Steam 게임은 Steam이 계속 활성 상태로 인식해야 합니다. **Plugged in**과 **On battery** 중 현재 전원에 맞는 값을 확인하세요. 저장된 TDP Control, CPU Boost, Windows Power Mode 값은 활성 프로필에서 Device 값보다 우선합니다. Minimum GPU Clock, Intel FPS Limit, Resolution은 프로필 전용 설정이며 해당 기능을 켠 경우에만 적용됩니다.
 
 ### 런처를 닫은 뒤 Non-Steam 프로필 적용이 끝납니다
 

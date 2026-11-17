@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
@@ -176,7 +177,7 @@ public sealed class SteamVirtualControllerFrontendTests : IDisposable
                 ["12345"] = new() { Enabled = false, Favorite = false, DisplayName = "Test Game" }
             }
         });
-        var gameMutations = new GameProfileMutations(profileStore, new ProfileMutationGate());
+        var gameMutations = new GameProfileMutations(profileStore, new ProfileMutationGate(), TdpLimits());
         var profileBefore = File.ReadAllBytes(profilePath);
         var reconcileCount = 0;
         var invalidationCount = 0;
@@ -208,7 +209,7 @@ public sealed class SteamVirtualControllerFrontendTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
         var profilePath = Path.Combine(_directory, "idle-profiles.json");
         var store = new ProfileStore(profilePath);
-        var gameProfileMutations = new GameProfileMutations(store, new ProfileMutationGate());
+        var gameProfileMutations = new GameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
             gameProfileMutations.SetEnabled(12345, true, "Idle Game"));
         var control = new InProcessAddonFrontendControl(
@@ -231,6 +232,8 @@ public sealed class SteamVirtualControllerFrontendTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = null;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
     }
+
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
 
     private sealed class NoOpStartupManager : IWindowsStartupManager
     {

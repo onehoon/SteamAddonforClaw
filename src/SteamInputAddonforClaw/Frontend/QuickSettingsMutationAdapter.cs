@@ -125,6 +125,16 @@ internal static class QuickSettingsMutationAdapter
             && IsProfileBackButtonMappingRow(intent.EditedRowId))
             return new(false, "Per-game M1/M2 mapping is available only for XBOX profiles.", currentPage);
 
+        if (intent.EditedRowId == QuickSettingsRowId.ProfileEnabled)
+        {
+            if (!TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileEnabled, out _))
+                return new(false, "Malformed Profile toggle intent.", currentPage);
+
+            // The profile master switch is retired. Treat a valid stale intent as a no-op and
+            // return the authoritative page; neither true nor false has mutation authority.
+            return new(true, null, currentPage);
+        }
+
         var editedRow = currentPage.Sections.SelectMany(s => s.Rows).FirstOrDefault(r => r.RowId == intent.EditedRowId);
         if (editedRow is not { Available: true, Writable: true })
             return new(false, "This row is not editable.", currentPage);

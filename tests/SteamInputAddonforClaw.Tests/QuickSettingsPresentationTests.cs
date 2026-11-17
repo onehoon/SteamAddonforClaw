@@ -617,7 +617,8 @@ public sealed class QuickSettingsPresentationTests
         Assert.Equal(8, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Minimum);
         Assert.Equal(30, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Maximum);
         Assert.True(FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).Writable);
-        Assert.True(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileEnabled).Visible);
         var controller = page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileController);
         Assert.Equal("M1 / M2 Button Mapping", controller.Label);
         Assert.Equal([QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsRowId.ProfileBackButtonM2], controller.Rows.Select(row => row.RowId));
@@ -637,7 +638,8 @@ public sealed class QuickSettingsPresentationTests
         Assert.True(FindRow(dcOnly, QuickSettingsRowId.ProfileCpuBoostDc).Visible);
 
         var disabled = QuickSettingsPresentation.BuildProfile(xbox with { Enabled = false });
-        Assert.True(FindRow(disabled, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileEnabled).Visible);
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileTdpEnabled).Writable);
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileCpuBoostEnabled).Writable);
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfilePowerModeEnabled).Writable);
@@ -722,11 +724,12 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
-    public void Profile_disabled_parent_makes_subfeature_rows_non_writable_but_keeps_them_visible()
+    public void Legacy_disabled_profile_keeps_children_visible_but_non_writable_without_master_control()
     {
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { Enabled = false });
 
-        Assert.True(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileEnabled).Visible);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfileTdpEnabled).Writable);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfileCpuBoostEnabled).Writable);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfilePowerModeEnabled).Writable);

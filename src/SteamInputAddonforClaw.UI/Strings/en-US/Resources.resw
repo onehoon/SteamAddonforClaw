@@ -276,9 +276,8 @@
   <data name="Steam_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
   <data name="Steam_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
   <data name="Steam_Profile_LoadFailed" xml:space="preserve"><value>Profile settings could not be loaded.</value></data>
-  <data name="Steam_Profile_RuntimeInterrupted" xml:space="preserve"><value>Profile could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Steam_Profile_SettingsUnwritable" xml:space="preserve"><value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Steam_Profile_UpdateFailed" xml:space="preserve"><value>Profile could not be updated.</value></data>
+  <data name="Steam_Profile_InitializationUnavailable" xml:space="preserve"><value>This game profile could not be initialized because required device settings are unavailable. Editing is disabled.</value></data>
   <data name="Steam_RefreshGamesButton.Content" xml:space="preserve"><value>↻ Refresh</value></data>
   <data name="Steam_Resolution_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
   <data name="Steam_Resolution_UpdateFailed" xml:space="preserve"><value>Display resolution could not be updated.</value></data>
@@ -363,9 +362,8 @@
   <data name="Xbox_PowerMode_ToggleUpdateFailed" xml:space="preserve"><value>Windows Power Mode could not be updated.</value></data>
   <data name="Xbox_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
   <data name="Xbox_Profile_LoadFailed" xml:space="preserve"><value>XBOX profile settings could not be loaded.</value></data>
-  <data name="Xbox_Profile_RuntimeInterrupted" xml:space="preserve"><value>Profile could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Xbox_Profile_SettingsUnwritable" xml:space="preserve"><value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
-  <data name="Xbox_Profile_UpdateFailed" xml:space="preserve"><value>Profile could not be updated.</value></data>
+  <data name="Xbox_Profile_InitializationUnavailable" xml:space="preserve"><value>This game profile could not be initialized because required device settings are unavailable. Editing is disabled.</value></data>
   <data name="Xbox_RefreshGamesButton.Content" xml:space="preserve"><value>↻ Refresh</value></data>
   <data name="Xbox_Resolution_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
   <data name="Xbox_Resolution_UpdateFailed" xml:space="preserve"><value>Display resolution could not be updated.</value></data>

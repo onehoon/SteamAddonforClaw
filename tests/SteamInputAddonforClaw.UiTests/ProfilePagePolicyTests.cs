@@ -108,7 +108,8 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("GpuMinimumClockExpander.Visibility = _featureSupport.IntelGpuMinimumClock ? Visibility.Visible : Visibility.Collapsed", initialize);
         Assert.Contains("TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && _featureSupport.Tdp && snapshot.Limits is not null", render);
         Assert.Contains("snapshot.FpsLimit?.Available == true", render);
-        Assert.Contains("_featureSupport.Tdp && snapshot.Exists && snapshot.Enabled && snapshot.Limits is null", status);
+        Assert.Contains("if (!snapshot.Exists)", status);
+        Assert.Contains("_featureSupport.Tdp && snapshot.Enabled && snapshot.Limits is null", status);
         Assert.Contains("preservePendingFpsDraft: true", code);
         Assert.Contains("DisableEditorsAfterCaptureFailure();", code);
         Assert.Contains("preserveUnavailableDraft = preserveDraft && _gpuDraftDirty && gpu?.Available != true", code);

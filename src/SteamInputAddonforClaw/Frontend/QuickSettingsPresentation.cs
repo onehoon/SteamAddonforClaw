@@ -233,10 +233,10 @@ internal static class QuickSettingsPresentation
     {
         var row = new QuickSettingsRow(QuickSettingsRowId.ProfileEnabled, "Profile", QuickSettingsControlKind.Toggle,
             Available: true,
-            Writable: snapshot.PersistenceWritable,
+            Writable: false,
             Value: QuickSettingsValue.Boolean(snapshot.Enabled),
             SliderSpec: null,
-            CommitPolicy: QuickSettingsCommitPolicy.Immediate);
+            CommitPolicy: QuickSettingsCommitPolicy.Immediate) { Visible = false };
         return new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, snapshot.DisplayName, [row]);
     }
 

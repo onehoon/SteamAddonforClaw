@@ -275,8 +275,39 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public async Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var games = await _scanProfileGames(cancellationToken).ConfigureAwait(false);
+        var recognizedGames = new Dictionary<uint, string?>();
+        foreach (var game in games)
+        {
+            if (game.AppId == 0
+                || game.Source == ProfileGameSource.Steam && SteamProfileCatalogPolicy.IsHiddenSystemApp(game.AppId))
+                continue;
+            recognizedGames.TryAdd(game.AppId, game.Name);
+        }
+
+        var activeTarget = _activeProfileTargetSource?.Invoke() ?? ActiveProfileTarget.None;
+        var activeProfileWasEnabled = IsPersistedProfileEnabled(activeTarget);
+        var enrollment = _gameProfileMutations?.EnsureProfiles(
+            recognizedGames,
+            EmptyXboxProfileGames,
+            includeExistingProfiles: false);
+        if (enrollment is { Outcome: not GameProfileMutations.MutationOutcome.Succeeded })
+            AppLog.Warn("Profiles.Catalog", "Steam game profiles could not be initialized; catalog remains available with profile editing disabled until persistence is safe.", null,
+                ("Outcome", enrollment.Outcome));
+
+        if (enrollment is { Outcome: GameProfileMutations.MutationOutcome.Succeeded })
+            await ReconcileActiveTargetAfterCatalogEnrollmentAsync(
+                enrollment, activeTarget, activeProfileWasEnabled,
+                activeTarget.Kind == ActiveProfileTargetKind.Steam && recognizedGames.ContainsKey(activeTarget.SteamAppId),
+                cancellationToken).ConfigureAwait(false);
+
+        if (enrollment is { Outcome: GameProfileMutations.MutationOutcome.Succeeded, Changed: true })
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+
         var favorites = _gameProfileMutations?.CaptureFavoriteAppIds();
-        return (await _scanProfileGames(cancellationToken).ConfigureAwait(false))
+        return games
             .Select(game => new FrontendProfileGameCatalogEntry(
                 game.AppId,
                 game.Name,
@@ -292,6 +323,33 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         cancellationToken.ThrowIfCancellationRequested();
 
         var result = await _scanXboxGames(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (result.Outcome == XboxInstalledGameCatalogOutcome.Completed)
+        {
+            var games = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var game in result.Games)
+                games.TryAdd(game.Identity.Key, game.Identity.DisplayName);
+
+            var activeTarget = _activeProfileTargetSource?.Invoke() ?? ActiveProfileTarget.None;
+            var activeProfileWasEnabled = IsPersistedProfileEnabled(activeTarget);
+            var enrollment = _gameProfileMutations?.EnsureProfiles(
+                EmptySteamProfileGames,
+                games,
+                includeExistingProfiles: false);
+            if (enrollment is { Outcome: not GameProfileMutations.MutationOutcome.Succeeded })
+                AppLog.Warn("Profiles.Catalog", "Xbox game profiles could not be initialized; catalog remains available with profile editing disabled until persistence is safe.", null,
+                    ("Outcome", enrollment.Outcome));
+
+            if (enrollment is { Outcome: GameProfileMutations.MutationOutcome.Succeeded })
+                await ReconcileActiveTargetAfterCatalogEnrollmentAsync(
+                    enrollment, activeTarget, activeProfileWasEnabled,
+                    activeTarget.Kind == ActiveProfileTargetKind.Xbox && activeTarget.XboxGameKey is { } activeKey && games.ContainsKey(activeKey),
+                    cancellationToken).ConfigureAwait(false);
+
+            if (enrollment is { Outcome: GameProfileMutations.MutationOutcome.Succeeded, Changed: true })
+                StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+
         var favorites = _xboxGameProfileMutations?.CaptureFavoriteKeys();
         return result.Outcome switch
         {
@@ -312,6 +370,39 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         };
     }
 
+    private static readonly IReadOnlyDictionary<uint, string?> EmptySteamProfileGames = new Dictionary<uint, string?>();
+    private static readonly IReadOnlyDictionary<string, string?> EmptyXboxProfileGames = new Dictionary<string, string?>();
+
+    private bool IsPersistedProfileEnabled(ActiveProfileTarget target) => target.Kind switch
+    {
+        ActiveProfileTargetKind.Steam => _gameProfileMutations?.CaptureProfile(target.SteamAppId) is
+            { Exists: true, Profile.Enabled: true, PersistenceWritable: true },
+        ActiveProfileTargetKind.Xbox when target.XboxGameKey is { } key => _xboxGameProfileMutations?.CaptureProfile(key) is
+            { Exists: true, Profile.Enabled: true, PersistenceWritable: true },
+        _ => false,
+    };
+
+    private async Task ReconcileActiveTargetAfterCatalogEnrollmentAsync(
+        GameProfileMutations.EnrollmentResult enrollment,
+        ActiveProfileTarget target,
+        bool wasEnabled,
+        bool activeTargetWasScanned,
+        CancellationToken cancellationToken)
+    {
+        if (enrollment.ActivatedCount == 0 || wasEnabled
+            || !IsPersistedProfileEnabled(target)
+            || !activeTargetWasScanned)
+            return;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (target.Kind == ActiveProfileTargetKind.Steam)
+            _requestControllerPresentationReconcile?.Invoke("SteamCatalogProfileActivated");
+        else if (target.Kind == ActiveProfileTargetKind.Xbox && target.XboxGameKey is { } key)
+            _reconcileXboxBackButtonMapping?.Invoke(key);
+
+        await ReconcileActiveProfileMutationAsync(ProfileApplyKind.All, "GameProfileCatalogEnrollment").ConfigureAwait(false);
+    }
+
     public Task<FrontendXboxGameProfileSnapshot> CaptureXboxGameProfileAsync(string key, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -323,10 +414,26 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         MutateXboxGame(key, cancellationToken, mutations => mutations.SetFavorite(key, favorite, displayName), ProfileApplyKind.None);
 
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledAsync(string key, bool enabled, string? displayName, CancellationToken cancellationToken = default) =>
-        MutateXboxGame(key, cancellationToken,
-            mutations => mutations.SetEnabled(key, enabled, displayName),
-            ProfileApplyKind.All,
-            reconcileBackButtonMapping: true);
+        SetXboxGameProfileEnabledCoreAsync(key, enabled, displayName, cancellationToken);
+
+    private Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledCoreAsync(
+        string key, bool enabled, string? displayName, CancellationToken cancellationToken)
+    {
+        if (enabled)
+            return MutateXboxGame(key, cancellationToken,
+                mutations => mutations.SetEnabled(key, true, displayName),
+                ProfileApplyKind.All,
+                reconcileBackButtonMapping: true);
+
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var outcome = _xboxGameProfileMutations?.SetEnabled(key, false, displayName)
+            ?? XboxGameProfileMutations.MutationOutcome.Unavailable;
+        if (outcome == XboxGameProfileMutations.MutationOutcome.Succeeded)
+            return Task.FromResult(new FrontendXboxGameProfileMutationResult(
+                FrontendGameProfileMutationOutcome.Succeeded, null, CaptureXboxGameProfile(key)));
+        return MutateXboxGame(key, cancellationToken, _ => outcome, ProfileApplyKind.None);
+    }
 
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileBackButtonMappingAsync(
         string key,
@@ -658,7 +765,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         var outcome = _gameProfileMutations?.SetEnabled(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
-        return MutateGame(appId, outcome, ProfileApplyKind.ExistingProfileEnable,
+        if (!enabled && outcome == GameProfileMutations.MutationOutcome.Succeeded)
+            return Task.FromResult(new FrontendGameProfileMutationResult(
+                FrontendGameProfileMutationOutcome.Succeeded, null, CaptureGameProfile(appId)));
+        return MutateGame(appId, outcome, enabled ? ProfileApplyKind.ExistingProfileEnable : ProfileApplyKind.None,
             ProfileApplyKind.PowerMode, ProfileApplyKind.FpsLimit, ProfileApplyKind.GpuMinimumClock);
     }
 

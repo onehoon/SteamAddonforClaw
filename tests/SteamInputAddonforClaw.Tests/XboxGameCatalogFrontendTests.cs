@@ -1,6 +1,9 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
+using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Xbox;
@@ -14,6 +17,12 @@ public sealed class XboxGameCatalogFrontendTests
     public async Task Completed_catalog_projects_only_the_canonical_key_and_display_name_once()
     {
         var calls = 0;
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "profiles.json");
+        var store = new ProfileStore(path);
+        var gate = new ProfileMutationGate();
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
+        var steamMutations = new GameProfileMutations(store, gate, TdpLimits());
         var control = CreateControl(_ =>
         {
             calls++;
@@ -21,7 +30,7 @@ public sealed class XboxGameCatalogFrontendTests
                 XboxInstalledGameCatalogOutcome.Completed,
                 [CreateGame("store:game-one", "Aniimo Legend"), CreateGame("pfn:game-two", "星のカービィ")],
                 null));
-        });
+        }, mutations, steamMutations);
 
         var snapshot = await control.ScanXboxGamesAsync();
 
@@ -30,8 +39,8 @@ public sealed class XboxGameCatalogFrontendTests
         Assert.Equal(
             new[]
             {
-                new FrontendXboxGameCatalogEntry("store:game-one", "Aniimo Legend", FavoriteStateKnown: false),
-                new("pfn:game-two", "星のカービィ", FavoriteStateKnown: false),
+                new FrontendXboxGameCatalogEntry("store:game-one", "Aniimo Legend", FavoriteStateKnown: true),
+                new("pfn:game-two", "星のカービィ", FavoriteStateKnown: true),
             },
             snapshot.Games.ToArray());
         Assert.Equal(["DisplayName", "Favorite", "FavoriteStateKnown", "Key"], typeof(FrontendXboxGameCatalogEntry)
@@ -39,19 +48,31 @@ public sealed class XboxGameCatalogFrontendTests
             .Select(property => property.Name)
             .Order(StringComparer.Ordinal)
             .ToArray());
+        var saved = store.Load().Document.XboxGames;
+        Assert.All(saved.Values, profile => Assert.True(profile.Enabled));
+        Assert.Equal(CpuBoostMode.EfficientEnabled, saved["store:game-one"].Performance.CpuBoost!.Ac);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 22 }, saved["store:game-one"].Performance.Tdp!.Ac);
+        Assert.Equal(WindowsPowerMode.BestPerformance, saved["store:game-one"].Performance.PowerMode!.Dc);
+        Assert.Null(saved["store:game-one"].Performance.FpsLimit);
+        Assert.Null(saved["store:game-one"].Performance.GpuMinimumClock);
+        Assert.Null(saved["store:game-one"].Display.Resolution);
+        Assert.Null(saved["store:game-one"].Controller.BackButtonMapping);
     }
 
     [Fact]
     public async Task Catalog_favorites_are_merged_from_the_XBOX_profile_store()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"XboxFavoriteProjection-{Guid.NewGuid():N}", "profiles.json");
-        var mutations = new SteamInputAddonforClaw.Profiles.XboxGameProfileMutations(
-            new SteamInputAddonforClaw.Profiles.ProfileStore(path), new SteamInputAddonforClaw.Profiles.ProfileMutationGate());
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "profiles.json");
+        var store = new ProfileStore(path);
+        var gate = new ProfileMutationGate();
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
+        var steamMutations = new GameProfileMutations(store, gate, TdpLimits());
         Assert.Equal(SteamInputAddonforClaw.Profiles.XboxGameProfileMutations.MutationOutcome.Succeeded,
             mutations.SetFavorite("store:game-one", true, "Aniimo Legend"));
         var control = CreateControl(_ => Task.FromResult(new XboxInstalledGameCatalogResult(
             XboxInstalledGameCatalogOutcome.Completed,
-            [CreateGame("store:game-one", "Aniimo Legend"), CreateGame("pfn:game-two", "Other")], null)), mutations);
+            [CreateGame("store:game-one", "Aniimo Legend"), CreateGame("pfn:game-two", "Other")], null)), mutations, steamMutations);
 
         var snapshot = await control.ScanXboxGamesAsync();
 
@@ -79,6 +100,27 @@ public sealed class XboxGameCatalogFrontendTests
         Assert.DoesNotContain(rawFailure, snapshot.FailureMessage!, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData((int)XboxInstalledGameCatalogOutcome.Failed)]
+    [InlineData((int)XboxInstalledGameCatalogOutcome.Unavailable)]
+    public async Task Failed_or_unavailable_catalog_does_not_enroll_profiles(int outcomeValue)
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "profiles.json");
+        var store = new ProfileStore(path);
+        var gate = new ProfileMutationGate();
+        var mutations = new XboxGameProfileMutations(store, gate, TdpLimits());
+        var steamMutations = new GameProfileMutations(store, gate, TdpLimits());
+        var outcome = (XboxInstalledGameCatalogOutcome)outcomeValue;
+        var control = CreateControl(_ => Task.FromResult(new XboxInstalledGameCatalogResult(
+            outcome, [CreateGame("store:game-one", "Aniimo Legend")], "catalog unavailable")), mutations, steamMutations);
+
+        var snapshot = await control.ScanXboxGamesAsync();
+
+        Assert.NotEqual(FrontendXboxGameCatalogOutcome.Ready, snapshot.Outcome);
+        Assert.False(File.Exists(path));
+    }
+
     [Fact]
     public async Task Cancellation_token_is_forwarded_to_the_production_scan_seam()
     {
@@ -100,14 +142,17 @@ public sealed class XboxGameCatalogFrontendTests
 
     private static InProcessAddonFrontendControl CreateControl(
         Func<CancellationToken, Task<XboxInstalledGameCatalogResult>> scanXboxGames,
-        SteamInputAddonforClaw.Profiles.XboxGameProfileMutations? mutations = null)
+        XboxGameProfileMutations? mutations = null,
+        GameProfileMutations? steamMutations = null)
     {
         var settings = new StartupSettingsCoordinator(
             new AppSettings(),
             new SettingsStore(Path.Combine(Path.GetTempPath(), $"XboxFrontend-{Guid.NewGuid():N}.json")),
             new NoOpStartupManager());
         return new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null,
-            scanXboxGames: scanXboxGames, xboxGameProfileMutations: mutations);
+            scanXboxGames: scanXboxGames,
+            gameProfileMutations: steamMutations,
+            xboxGameProfileMutations: mutations);
     }
 
     private static XboxInstalledGameCatalogEntry CreateGame(string key, string displayName)
@@ -118,6 +163,20 @@ public sealed class XboxGameCatalogFrontendTests
             "store-internal",
             "family-internal");
         return new(identity);
+    }
+
+    private static TdpPowerLimits TdpLimits() => new(8, 30, 8, 37);
+
+    private sealed class TemporaryDirectory : IDisposable
+    {
+        internal string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"XboxCatalog-{Guid.NewGuid():N}");
+
+        internal TemporaryDirectory() => Directory.CreateDirectory(Path);
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true);
+        }
     }
 
     private sealed class NoOpStartupManager : IWindowsStartupManager

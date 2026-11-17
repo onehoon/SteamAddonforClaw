@@ -218,18 +218,14 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
     }
 
     [Fact]
-    public void Profile_game_title_is_the_existing_mutable_general_toggle_row()
+    public void Profile_game_title_is_kept_as_a_heading_without_a_visible_or_mutable_master_toggle()
     {
-        var row = ToggleRow(QuickSettingsRowId.ProfileEnabled) with { Label = "Profile" };
+        var row = ToggleRow(QuickSettingsRowId.ProfileEnabled) with { Label = "Profile", Visible = false, Writable = false };
         var section = new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, "Current game", [row]);
 
-        var rendered = OverlayQuickSettingsSectionRendering.DescribeRows(section).Single();
-
-        Assert.Equal(QuickSettingsRowId.ProfileEnabled, rendered.Row.RowId);
-        Assert.True(rendered.IsFeatureHeader);
-        Assert.Equal("Current game", rendered.DisplayLabel);
-        Assert.Equal(QuickSettingsCommitPolicy.Immediate, rendered.Row.CommitPolicy);
-        Assert.True(OverlayQuickSettingsPageBinding.CanMutate(rendered.Row));
+        Assert.Empty(OverlayQuickSettingsSectionRendering.DescribeRows(section));
+        Assert.False(OverlayQuickSettingsPageBinding.CanMutate(row));
+        Assert.Equal("Current game", section.Label);
     }
 
     [Fact]

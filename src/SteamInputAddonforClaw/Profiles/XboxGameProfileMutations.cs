@@ -7,8 +7,6 @@ namespace SteamInputAddonforClaw.Profiles;
 /// <summary>Persistence-only mutations for the canonical string-keyed XBOX profile collection.</summary>
 internal sealed class XboxGameProfileMutations
 {
-    private const int FallbackPl1Watts = 20;
-    private const int FallbackPl2Watts = 22;
     private readonly ProfileStore _store;
     private readonly ProfileMutationGate _gate;
     private TdpPowerLimits? _tdpLimits;
@@ -29,6 +27,7 @@ internal sealed class XboxGameProfileMutations
         internal static MutationChange ChangedSuccessfully => new(MutationOutcome.Succeeded, true);
         internal static MutationChange NoChange => new(MutationOutcome.Succeeded, false);
         internal static MutationChange Unavailable => new(MutationOutcome.Unavailable, false);
+        internal static MutationChange InvalidTarget => new(MutationOutcome.InvalidTarget, false);
     }
 
     internal void SetTdpLimits(TdpPowerLimits tdpLimits) => _tdpLimits = tdpLimits ?? throw new ArgumentNullException(nameof(tdpLimits));
@@ -61,41 +60,41 @@ internal sealed class XboxGameProfileMutations
         }
     }
 
-    internal MutationOutcome SetEnabled(string key, bool enabled, string? displayName) => Mutate(key, (document, canonicalKey) =>
+    internal MutationOutcome SetEnabled(string key, bool enabled, string? displayName)
     {
-        if (!enabled)
+        if (!IsCanonicalKey(key)) return MutationOutcome.InvalidTarget;
+        if (!enabled) return MutationOutcome.Succeeded;
+        return Mutate(key, (document, canonicalKey) =>
         {
-            if (!document.XboxGames.TryGetValue(canonicalKey, out var existing)) return MutationChange.NoChange;
-            document.XboxGames[canonicalKey] = existing with { Enabled = false };
+            document.XboxGames.TryGetValue(canonicalKey, out var current);
+            if (!GameProfileEnrollment.TryComplete(current ?? new XboxGameProfile(), document.Device, _tdpLimits, out var completed))
+                return MutationChange.InvalidTarget;
+            var updated = completed with { DisplayName = SelectEnrollmentDisplayName(current?.DisplayName, displayName) };
+            if (current == updated) return MutationChange.NoChange;
+            document.XboxGames[canonicalKey] = updated;
             return MutationChange.ChangedSuccessfully;
-        }
-
-        var profile = document.XboxGames.TryGetValue(canonicalKey, out var current)
-            ? Complete(current, document.Device)
-            : Complete(new XboxGameProfile(), document.Device);
-        document.XboxGames[canonicalKey] = profile with
-        {
-            Enabled = true,
-            DisplayName = displayName ?? profile.DisplayName
-        };
-        return MutationChange.ChangedSuccessfully;
-    });
+        });
+    }
 
     internal MutationOutcome SetFavorite(string key, bool favorite, string? displayName) => Mutate(key, (document, canonicalKey) =>
     {
         if (!document.XboxGames.TryGetValue(canonicalKey, out var current))
         {
             if (!favorite) return MutationChange.NoChange;
-            document.XboxGames[canonicalKey] = new XboxGameProfile { Favorite = true, DisplayName = displayName };
+            current = new XboxGameProfile();
         }
-        else
+
+        if (!current.Enabled)
         {
-            document.XboxGames[canonicalKey] = current with
-            {
-                Favorite = favorite,
-                DisplayName = displayName ?? current.DisplayName
-            };
+            if (!GameProfileEnrollment.TryComplete(current, document.Device, _tdpLimits, out var completed))
+                return MutationChange.InvalidTarget;
+            current = completed;
         }
+
+        var updated = current with { Favorite = favorite, DisplayName = SelectDisplayName(current.DisplayName, displayName) };
+        if (document.XboxGames.TryGetValue(canonicalKey, out var existing) && existing == updated)
+            return MutationChange.NoChange;
+        document.XboxGames[canonicalKey] = updated;
         return MutationChange.ChangedSuccessfully;
     });
 
@@ -173,15 +172,25 @@ internal sealed class XboxGameProfileMutations
         if (!document.XboxGames.TryGetValue(canonicalKey, out var current))
         {
             if (resolution is null) return MutationChange.NoChange;
-            current = new XboxGameProfile { Enabled = false, DisplayName = displayName };
+            current = new XboxGameProfile();
+        }
+
+        if (!current.Enabled)
+        {
+            if (!GameProfileEnrollment.TryComplete(current, document.Device, _tdpLimits, out var completed))
+                return MutationChange.InvalidTarget;
+            current = completed;
         }
 
         if (current.Display.Resolution is null && resolution is null) return MutationChange.NoChange;
-        document.XboxGames[canonicalKey] = current with
+        var updated = current with
         {
             Display = current.Display with { Resolution = resolution },
-            DisplayName = displayName ?? current.DisplayName
+            DisplayName = SelectDisplayName(current.DisplayName, displayName)
         };
+        if (document.XboxGames.TryGetValue(canonicalKey, out var existing) && existing == updated)
+            return MutationChange.NoChange;
+        document.XboxGames[canonicalKey] = updated;
         return MutationChange.ChangedSuccessfully;
     });
 
@@ -195,7 +204,14 @@ internal sealed class XboxGameProfileMutations
             if (!document.XboxGames.TryGetValue(canonicalKey, out var current))
             {
                 if (mapping is null) return MutationChange.NoChange;
-                current = new XboxGameProfile { Enabled = false };
+                current = new XboxGameProfile();
+            }
+
+            if (!current.Enabled)
+            {
+                if (!GameProfileEnrollment.TryComplete(current, document.Device, _tdpLimits, out var completed))
+                    return MutationChange.InvalidTarget;
+                current = completed;
             }
 
             var controller = current.Controller;
@@ -279,32 +295,12 @@ internal sealed class XboxGameProfileMutations
         }
     }
 
-    private static XboxGameProfile Complete(XboxGameProfile profile, DeviceSettings device)
-    {
-        var cpu = device.Performance.CpuBoost is { Ac: { } ac, Dc: { } dc }
-            ? new GameCpuBoostSettings { Enabled = true, Ac = ac, Dc = dc }
-            : new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled };
-        var tdp = device.Performance.Tdp is { Ac: { } tdpAc, Dc: { } tdpDc }
-            ? new GameTdpSettings { Enabled = true, Ac = tdpAc, Dc = tdpDc }
-            : new GameTdpSettings
-            {
-                Enabled = true,
-                Ac = new TdpPowerPair { Pl1Watts = FallbackPl1Watts, Pl2Watts = FallbackPl2Watts },
-                Dc = new TdpPowerPair { Pl1Watts = FallbackPl1Watts, Pl2Watts = FallbackPl2Watts }
-            };
-        var power = device.Performance.PowerMode is { Ac: { } powerAc, Dc: { } powerDc }
-            ? new GamePowerModeSettings { Enabled = true, Ac = powerAc, Dc = powerDc }
-            : null;
+    private static XboxGameProfile Complete(XboxGameProfile profile, DeviceSettings device) =>
+        profile with { Performance = GameProfileEnrollment.CompleteForCapture(profile.Performance, device) };
 
-        var completeTdp = profile.Performance.Tdp is { Ac: not null, Dc: not null } existingTdp ? existingTdp : tdp;
-        return profile with
-        {
-            Performance = profile.Performance with
-            {
-                CpuBoost = profile.Performance.CpuBoost ?? cpu,
-                Tdp = completeTdp,
-                PowerMode = profile.Performance.PowerMode ?? power
-            }
-        };
-    }
+    private static string? SelectEnrollmentDisplayName(string? existing, string? incoming) =>
+        string.IsNullOrWhiteSpace(existing) ? incoming : existing;
+
+    private static string? SelectDisplayName(string? existing, string? incoming) =>
+        string.IsNullOrWhiteSpace(incoming) ? existing : incoming;
 }

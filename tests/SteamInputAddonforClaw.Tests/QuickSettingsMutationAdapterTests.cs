@@ -579,17 +579,21 @@ public sealed class QuickSettingsMutationAdapterTests
         Assert.False(result.Succeeded);
     }
 
-    [Fact]
-    public async Task Profile_enabled_toggle_dispatches_exactly_once_with_display_name_forwarded()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Retired_profile_master_toggle_is_a_successful_noop(bool enabled)
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, displayName: "My Game") };
         var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileEnabled,
-            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(enabled))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
 
-        Assert.Equal(["ProfileEnabled:111:True:My Game"], control.ProfileCalls);
+        Assert.Empty(control.ProfileCalls);
         Assert.True(result.Succeeded);
+        Assert.Equal(QuickSettingsProfileTarget.ForSteam(111), result.Page.ProfileTarget);
+        Assert.True(result.Page.Available);
     }
 
     [Fact]
@@ -884,7 +888,6 @@ public sealed class QuickSettingsMutationAdapterTests
     {
         var cases = new (QuickSettingsRowId RowId, QuickSettingsRowValue[] Values, string SteamCall, string XboxCall)[]
         {
-            (QuickSettingsRowId.ProfileEnabled, [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))], "ProfileEnabled:111:True:Steam Game", "XboxProfileEnabled:xbox:test:True:Xbox Game"),
             (QuickSettingsRowId.ProfileTdpEnabled, [new(QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsValue.Boolean(true))], "ProfileTdpEnabled:111:True", "XboxProfileTdpEnabled:xbox:test:True"),
             (QuickSettingsRowId.ProfileTdpAcPl1, [new(QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsValue.Boolean(true)), new(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsValue.Integer(15)), new(QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsValue.Integer(20)), new(QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsValue.Integer(12)), new(QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsValue.Integer(18))], "ProfileTdp:111", "XboxProfileTdp:xbox:test"),
             (QuickSettingsRowId.ProfileCpuBoostEnabled, [new(QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsValue.Boolean(true))], "ProfileCpuBoostEnabled:111:True", "XboxProfileCpuBoostEnabled:xbox:test:True"),

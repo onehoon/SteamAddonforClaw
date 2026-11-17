@@ -229,7 +229,7 @@ public sealed partial class XboxPage : UserControl
     }
 
     private async Task SelectGameAsync(FrontendXboxGameCatalogEntry game) { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.Key, preserveDirtyTdpDraft: false); }
-    private void BeginProfileLoad(FrontendXboxGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = true; _suppressGpuEvents = true; CancelFpsDebounce(); try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; GpuMinimumClockEnabledToggle.IsOn = false; GpuMinimumClockEnabledToggle.IsEnabled = false; PerGameBackButtonMappingEnabledToggle.IsOn = false; PerGameBackButtonMappingEnabledToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = _suppressGpuEvents = false; } SetEditorsEnabled(false); }
+    private void BeginProfileLoad(FrontendXboxGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = true; _suppressGpuEvents = true; CancelFpsDebounce(); try { FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; GpuMinimumClockEnabledToggle.IsOn = false; GpuMinimumClockEnabledToggle.IsEnabled = false; PerGameBackButtonMappingEnabledToggle.IsOn = false; PerGameBackButtonMappingEnabledToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = _suppressGpuEvents = false; } SetEditorsEnabled(false); }
     private async Task CaptureSelectedAsync(string key, bool preserveDirtyTdpDraft = true)
     {
         if (!_active || _frontend is null) return;
@@ -247,14 +247,14 @@ public sealed partial class XboxPage : UserControl
         catch (Exception exception) { if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, key)) ShowError(MainUiStrings.Get("Xbox_Profile_LoadFailed", "XBOX profile settings could not be loaded."), exception); }
         finally { if (ReferenceEquals(_captureCancellation, capture)) _captureCancellation = null; capture.Dispose(); }
     }
-    private void ClearSelection() { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressControllerEvents = true; _suppressGpuEvents = true; try { PerGameBackButtonMappingEnabledToggle.IsOn = false; PerGameBackButtonMappingEnabledToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; GpuMinimumClockEnabledToggle.IsOn = false; GpuMinimumClockEnabledToggle.IsEnabled = false; } finally { _suppressControllerEvents = _suppressGpuEvents = false; } ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
+    private void ClearSelection() { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressControllerEvents = true; _suppressGpuEvents = true; try { PerGameBackButtonMappingEnabledToggle.IsOn = false; PerGameBackButtonMappingEnabledToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; GpuMinimumClockEnabledToggle.IsOn = false; GpuMinimumClockEnabledToggle.IsEnabled = false; } finally { _suppressControllerEvents = _suppressGpuEvents = false; } ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendXboxGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false, bool preserveDirtyGpuDraft = false)
     {
         _snapshot = snapshot; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressFeatureEvents = true;
         try
         {
-            ProfileEnabledToggle.IsOn = snapshot.Enabled; ProfileEnabledToggle.IsEnabled = snapshot.PersistenceWritable; CpuBoostEnabledToggle.IsOn = snapshot.CpuBoost.Enabled; TdpEnabledToggle.IsOn = snapshot.Tdp.Enabled; PowerModeEnabledToggle.IsOn = snapshot.PowerMode?.Enabled == true; FpsEnabledToggle.IsOn = snapshot.FpsLimit?.Enabled == true; CpuBoostEnabledToggle.IsEnabled = TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; PowerModeEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.PowerMode is not null; FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true; _acFpsDraft = snapshot.FpsLimit?.AcFps ?? 60; _dcFpsDraft = snapshot.FpsLimit?.DcFps ?? 60; AcFpsSlider.Value = _acFpsDraft.Value; DcFpsSlider.Value = _dcFpsDraft.Value; AcFpsText.Text = $"{_acFpsDraft} FPS"; DcFpsText.Text = $"{_dcFpsDraft} FPS"; IntelFpsExpander.Description = snapshot.FpsLimit?.Available == true ? MainUiStrings.Get("Xbox_IntelFpsExpander/Description", "Uses Intel's official API. Some games may not support FPS limiting.") : snapshot.FpsLimit?.UnavailableReason ?? MainUiStrings.Get("Xbox_IntelFps_Unavailable", "Intel FPS Limit is unavailable.");
+            CpuBoostEnabledToggle.IsOn = snapshot.CpuBoost.Enabled; TdpEnabledToggle.IsOn = snapshot.Tdp.Enabled; PowerModeEnabledToggle.IsOn = snapshot.PowerMode?.Enabled == true; FpsEnabledToggle.IsOn = snapshot.FpsLimit?.Enabled == true; CpuBoostEnabledToggle.IsEnabled = TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; PowerModeEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.PowerMode is not null; FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true; _acFpsDraft = snapshot.FpsLimit?.AcFps ?? 60; _dcFpsDraft = snapshot.FpsLimit?.DcFps ?? 60; AcFpsSlider.Value = _acFpsDraft.Value; DcFpsSlider.Value = _dcFpsDraft.Value; AcFpsText.Text = $"{_acFpsDraft} FPS"; DcFpsText.Text = $"{_dcFpsDraft} FPS"; IntelFpsExpander.Description = snapshot.FpsLimit?.Available == true ? MainUiStrings.Get("Xbox_IntelFpsExpander/Description", "Uses Intel's official API. Some games may not support FPS limiting.") : snapshot.FpsLimit?.UnavailableReason ?? MainUiStrings.Get("Xbox_IntelFps_Unavailable", "Intel FPS Limit is unavailable.");
             CpuBoostAcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Ac); CpuBoostDcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Dc); PowerModeAcComboBox.SelectedItem = snapshot.PowerMode is { } power ? PowerModes.FirstOrDefault(x => x.Mode == power.Ac) : null; PowerModeDcComboBox.SelectedItem = snapshot.PowerMode is { } powerDc ? PowerModes.FirstOrDefault(x => x.Mode == powerDc.Dc) : null;
             ResolutionComboBox.SelectedItem = ResolutionItems.FirstOrDefault(x => x.Width == snapshot.Resolution?.Width && x.Height == snapshot.Resolution?.Height);
             RenderBackButtonMapping(snapshot);
@@ -270,10 +270,10 @@ public sealed partial class XboxPage : UserControl
         finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressFeatureEvents = false; }
         CpuBoostAcCard.Visibility = CpuBoostDcCard.Visibility = snapshot.CpuBoost.Enabled ? Visibility.Visible : Visibility.Collapsed; TdpAcCard.Visibility = TdpDcCard.Visibility = snapshot.Tdp.Enabled ? Visibility.Visible : Visibility.Collapsed; PowerModeAcCard.Visibility = PowerModeDcCard.Visibility = snapshot.PowerMode?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; GpuMinimumClockAcCard.Visibility = GpuMinimumClockDcCard.Visibility = snapshot.GpuMinimumClock?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; FpsAcCard.Visibility = FpsDcCard.Visibility = snapshot.FpsLimit?.Enabled == true ? Visibility.Visible : Visibility.Collapsed;
         RenderTdpPresentationOnly();
-        SetEditorsEnabled(snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable); ResolutionComboBox.IsEnabled = snapshot.PersistenceWritable; RenderProfileStatus(snapshot);
+        SetEditorsEnabled(snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable); ResolutionComboBox.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; RenderProfileStatus(snapshot);
     }
-    private void RenderProfileStatus(FrontendXboxGameProfileSnapshot snapshot) { if (!snapshot.PersistenceWritable) { ShowError(MainUiStrings.Get("Xbox_Profile_SettingsUnwritable", "Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."), null); return; } if (snapshot.Exists && snapshot.Enabled && snapshot.Limits is null) { ProfileInfoBar.Severity = InfoBarSeverity.Warning; ProfileInfoBar.Message = MainUiStrings.Get("Xbox_Tdp_Unavailable", "TDP Control is unavailable on this device."); ProfileInfoBar.IsOpen = true; return; } ClearError(); }
-    private void SetEditorsEnabled(bool enabled) { var cpu = enabled && _snapshot?.CpuBoost.Enabled == true; CpuBoostAcComboBox.IsEnabled = CpuBoostDcComboBox.IsEnabled = cpu; var powerModeEditable = enabled && _snapshot?.PowerMode is { Enabled: true }; PowerModeAcComboBox.IsEnabled = PowerModeDcComboBox.IsEnabled = powerModeEditable; var tdp = enabled && _snapshot?.Tdp.Enabled == true && _snapshot.Limits is not null; foreach (var slider in new[] { AcPl1Slider, AcPl2Slider, DcPl1Slider, DcPl2Slider }) slider.IsEnabled = tdp; var fps = enabled && _snapshot?.FpsLimit?.Available == true && FpsEnabledToggle.IsOn; AcFpsSlider.IsEnabled = DcFpsSlider.IsEnabled = fps; var gpu = enabled && _snapshot?.GpuMinimumClock is { Available: true, Enabled: true }; GpuMinimumClockAcSlider.IsEnabled = GpuMinimumClockDcSlider.IsEnabled = gpu; GpuMinimumClockEnabledToggle.IsEnabled = enabled && _snapshot?.GpuMinimumClock?.Available == true && !_gpuDraftDirty; ProfileEnabledToggle.IsEnabled = _snapshot?.PersistenceWritable == true && !_gpuDraftDirty; }
+    private void RenderProfileStatus(FrontendXboxGameProfileSnapshot snapshot) { if (!snapshot.PersistenceWritable) { ShowError(MainUiStrings.Get("Xbox_Profile_SettingsUnwritable", "Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."), null); return; } if (!snapshot.Exists) { ProfileInfoBar.Severity = InfoBarSeverity.Warning; ProfileInfoBar.Message = MainUiStrings.Get("Xbox_Profile_InitializationUnavailable", "This game profile could not be initialized because required device settings are unavailable. Editing is disabled."); ProfileInfoBar.IsOpen = true; return; } if (snapshot.Enabled && snapshot.Limits is null) { ProfileInfoBar.Severity = InfoBarSeverity.Warning; ProfileInfoBar.Message = MainUiStrings.Get("Xbox_Tdp_Unavailable", "TDP Control is unavailable on this device."); ProfileInfoBar.IsOpen = true; return; } ClearError(); }
+    private void SetEditorsEnabled(bool enabled) { var profileReady = enabled && _snapshot is { Exists: true, Enabled: true, PersistenceWritable: true }; var cpu = profileReady && _snapshot?.CpuBoost.Enabled == true; CpuBoostAcComboBox.IsEnabled = CpuBoostDcComboBox.IsEnabled = cpu; var powerModeEditable = profileReady && _snapshot?.PowerMode is { Enabled: true }; PowerModeAcComboBox.IsEnabled = PowerModeDcComboBox.IsEnabled = powerModeEditable; var tdp = profileReady && _snapshot?.Tdp.Enabled == true && _snapshot.Limits is not null; foreach (var slider in new[] { AcPl1Slider, AcPl2Slider, DcPl1Slider, DcPl2Slider }) slider.IsEnabled = tdp; var fps = profileReady && _snapshot?.FpsLimit?.Available == true && FpsEnabledToggle.IsOn; AcFpsSlider.IsEnabled = DcFpsSlider.IsEnabled = fps; var gpu = profileReady && _snapshot?.GpuMinimumClock is { Available: true, Enabled: true }; GpuMinimumClockAcSlider.IsEnabled = GpuMinimumClockDcSlider.IsEnabled = gpu; GpuMinimumClockEnabledToggle.IsEnabled = profileReady && _snapshot?.GpuMinimumClock?.Available == true && !_gpuDraftDirty; }
     private void RenderGpuMinimumClock(FrontendXboxGameProfileSnapshot snapshot, bool preserveDraft)
     {
         var gpu = snapshot.GpuMinimumClock;
@@ -320,7 +320,7 @@ public sealed partial class XboxPage : UserControl
 
     private async void GpuMinimumClockEnabledToggle_Toggled(object sender, RoutedEventArgs e)
     {
-        if (!_active || _suppressGpuEvents || _suppressFeatureEvents || _frontend is null || _selectedGame is null || _snapshot?.Enabled != true) return;
+        if (!_active || _suppressGpuEvents || _suppressFeatureEvents || _frontend is null || _selectedGame is null || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return;
         var key = _selectedGame.Key;
         try
         {
@@ -344,7 +344,7 @@ public sealed partial class XboxPage : UserControl
             _acGpuDebounce?.Cancel();
             _acGpuDebounce = new CancellationTokenSource();
             _gpuDraftDirty = true;
-            SetEditorsEnabled(_snapshot.Enabled && _snapshot.PersistenceWritable);
+            SetEditorsEnabled(_snapshot.Exists && _snapshot.Enabled && _snapshot.PersistenceWritable);
             _ = SubmitGpuMinimumClockAfterDelayAsync(ac: true, index, _acGpuGeneration, ++_gpuDraftGeneration, _acGpuDebounce.Token);
         }
         else
@@ -355,7 +355,7 @@ public sealed partial class XboxPage : UserControl
             _dcGpuDebounce?.Cancel();
             _dcGpuDebounce = new CancellationTokenSource();
             _gpuDraftDirty = true;
-            SetEditorsEnabled(_snapshot.Enabled && _snapshot.PersistenceWritable);
+            SetEditorsEnabled(_snapshot.Exists && _snapshot.Enabled && _snapshot.PersistenceWritable);
             _ = SubmitGpuMinimumClockAfterDelayAsync(ac: false, index, _dcGpuGeneration, ++_gpuDraftGeneration, _dcGpuDebounce.Token);
         }
     }
@@ -369,7 +369,7 @@ public sealed partial class XboxPage : UserControl
             await Task.Delay(300, token);
             if ((ac ? generation != _acGpuGeneration : generation != _dcGpuGeneration)
                 || !_active || _frontend is null || _selectedGame?.Key != key
-                || _snapshot is not { Enabled: true, GpuMinimumClock.Enabled: true }) return;
+                || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true, GpuMinimumClock.Enabled: true }) return;
 
             var result = ac
                 ? await _frontend.SetXboxGameProfileGpuMinimumClockAcAsync(key, index)
@@ -400,18 +400,18 @@ public sealed partial class XboxPage : UserControl
         _acGpuDebounce = _dcGpuDebounce = null;
         _gpuDraftDirty = false;
     }
-    private async void FpsEnabledToggle_Toggled(object sender, RoutedEventArgs e) { if (!_active || _suppressFpsEvents || _frontend is null || _selectedGame is null) return; var key = _selectedGame.Key; try { var result = await _frontend.SetXboxGameProfileFpsLimitEnabledAsync(key, FpsEnabledToggle.IsOn); if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Xbox_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), null); } catch (Exception ex) { await RestoreSelectedAfterMutationFailureAsync(key, MainUiStrings.Get("Xbox_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), ex); } }
+    private async void FpsEnabledToggle_Toggled(object sender, RoutedEventArgs e) { if (!_active || _suppressFpsEvents || _frontend is null || _selectedGame is null || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return; var key = _selectedGame.Key; try { var result = await _frontend.SetXboxGameProfileFpsLimitEnabledAsync(key, FpsEnabledToggle.IsOn); if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Xbox_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), null); } catch (Exception ex) { await RestoreSelectedAfterMutationFailureAsync(key, MainUiStrings.Get("Xbox_IntelFps_UpdateFailed", "Intel FPS Limit could not be updated."), ex); } }
     private async void CpuBoostEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync(MainUiStrings.Get("Xbox_CpuBoost_UpdateFailed", "CPU Boost could not be updated."), CpuBoostEnabledToggle.IsOn, (id, value) => _frontend!.SetXboxGameProfileCpuBoostEnabledAsync(id, value));
     private async void TdpEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync(MainUiStrings.Get("Xbox_TdpControl_ToggleUpdateFailed", "TDP Control could not be updated."), TdpEnabledToggle.IsOn, (id, value) => _frontend!.SetXboxGameProfileTdpEnabledAsync(id, value));
     private async void PowerModeEnabledToggle_Toggled(object sender, RoutedEventArgs e) => await MutateFeatureEnabledAsync(MainUiStrings.Get("Xbox_PowerMode_ToggleUpdateFailed", "Windows Power Mode could not be updated."), PowerModeEnabledToggle.IsOn, (id, value) => _frontend!.SetXboxGameProfilePowerModeEnabledAsync(id, value));
     private async Task MutateFeatureEnabledAsync(string failureMessage, bool enabled, Func<string, bool, Task<FrontendXboxGameProfileMutationResult>> mutation)
     {
-        if (!_active || _suppressFeatureEvents || _frontend is null || _selectedGame is null || _snapshot?.Enabled != true) return;
+        if (!_active || _suppressFeatureEvents || _frontend is null || _selectedGame is null || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return;
         var key = _selectedGame.Key;
         try { var result = await mutation(key, enabled); if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? failureMessage, null); }
         catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(key, failureMessage, exception); }
     }
-    private void FpsSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e) { if (!_active || _suppressFpsEvents || _frontend is null || _selectedGame is null) return; var value = Math.Clamp((int)Math.Round(e.NewValue), 40, 120); var ac = ReferenceEquals(sender, AcFpsSlider); if (ac) { _acFpsDraft = value; AcFpsText.Text = $"{value} FPS"; _acFpsGeneration++; _acFpsDebounce?.Cancel(); _acFpsDebounce = new(); _ = SubmitFpsAfterDelayAsync(true, value, _acFpsGeneration, _acFpsDebounce.Token); } else { _dcFpsDraft = value; DcFpsText.Text = $"{value} FPS"; _dcFpsGeneration++; _dcFpsDebounce?.Cancel(); _dcFpsDebounce = new(); _ = SubmitFpsAfterDelayAsync(false, value, _dcFpsGeneration, _dcFpsDebounce.Token); } }
+    private void FpsSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e) { if (!_active || _suppressFpsEvents || _frontend is null || _selectedGame is null || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return; var value = Math.Clamp((int)Math.Round(e.NewValue), 40, 120); var ac = ReferenceEquals(sender, AcFpsSlider); if (ac) { _acFpsDraft = value; AcFpsText.Text = $"{value} FPS"; _acFpsGeneration++; _acFpsDebounce?.Cancel(); _acFpsDebounce = new(); _ = SubmitFpsAfterDelayAsync(true, value, _acFpsGeneration, _acFpsDebounce.Token); } else { _dcFpsDraft = value; DcFpsText.Text = $"{value} FPS"; _dcFpsGeneration++; _dcFpsDebounce?.Cancel(); _dcFpsDebounce = new(); _ = SubmitFpsAfterDelayAsync(false, value, _dcFpsGeneration, _dcFpsDebounce.Token); } }
     private async Task SubmitFpsAfterDelayAsync(bool ac, int value, long generation, CancellationToken token)
     {
         string? key = null;
@@ -443,14 +443,6 @@ public sealed partial class XboxPage : UserControl
     private void CancelFpsDebounce() { _acFpsGeneration++; _dcFpsGeneration++; _acFpsDebounce?.Cancel(); _dcFpsDebounce?.Cancel(); _acFpsDebounce = _dcFpsDebounce = null; }
     private static void ConfigureSlider(Slider slider, int? minimum, int? maximum, int value) { if (minimum is not { } min || maximum is not { } max) { slider.IsEnabled = false; return; } slider.Minimum = min; slider.Maximum = max; slider.StepFrequency = 1; slider.Value = Math.Clamp(value, min, max); }
 
-    private async void ProfileEnabledToggle_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (!_active || _suppressEvents || _frontend is null || _selectedGame is null) return;
-        var key = _selectedGame.Key;
-        CancelTdpDebounce();
-        try { var result = await _frontend.SetXboxGameProfileEnabledAsync(key, ProfileEnabledToggle.IsOn, _selectedGame.DisplayName); if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Xbox_Profile_UpdateFailed", "Profile could not be updated."), null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(key, MainUiStrings.Get("Xbox_Profile_RuntimeInterrupted", "Profile could not be updated because the Runtime connection was interrupted."), exception); }
-    }
-
     private void RenderBackButtonMapping(FrontendXboxGameProfileSnapshot snapshot)
     {
         var configuration = snapshot.BackButtonMapping
@@ -465,15 +457,15 @@ public sealed partial class XboxPage : UserControl
         }
         finally { _suppressControllerEvents = false; }
 
-        PerGameBackButtonMappingEnabledToggle.IsEnabled = snapshot.PersistenceWritable;
+        PerGameBackButtonMappingEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable;
         M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled =
-            snapshot.PersistenceWritable && perGameEnabled;
+            snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && perGameEnabled;
     }
 
     private void PerGameBackButtonMappingEnabledToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (!_active || _suppressControllerEvents || _frontend is null || _selectedGame is null
-            || _snapshot is not { PersistenceWritable: true }) return;
+            || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return;
 
         var perGameEnabled = PerGameBackButtonMappingEnabledToggle.IsOn;
         var mapping = perGameEnabled ? ReadSelectedBackButtonMapping() : null;
@@ -486,14 +478,15 @@ public sealed partial class XboxPage : UserControl
 
         var key = _selectedGame.Key;
         M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled =
-            _snapshot.PersistenceWritable && perGameEnabled;
+            _snapshot.Exists && _snapshot.Enabled && _snapshot.PersistenceWritable && perGameEnabled;
         QueueBackButtonMappingSave(key, mapping);
     }
 
     private void BackButtonTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_active || _suppressControllerEvents || !PerGameBackButtonMappingEnabledToggle.IsOn
-            || _frontend is null || _selectedGame is null || _snapshot is not { PersistenceWritable: true }) return;
+            || _frontend is null || _selectedGame is null
+            || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return;
         if (ReadSelectedBackButtonMapping() is not { } mapping) return;
         QueueBackButtonMappingSave(_selectedGame.Key, mapping);
     }
@@ -553,21 +546,21 @@ public sealed partial class XboxPage : UserControl
     private async void PowerModeDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutatePowerModeAsync(false);
     private async Task MutatePowerModeAsync(bool ac)
     {
-        if (!_active || _suppressEvents || _frontend is null || _selectedGame is null) return;
+        if (!_active || _suppressEvents || _frontend is null || _selectedGame is null || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return;
         var item = (ac ? PowerModeAcComboBox : PowerModeDcComboBox).SelectedItem as PowerModeItem; if (item is null) return;
         var key = _selectedGame.Key;
         try { var result = ac ? await _frontend.SetXboxGameProfilePowerModeAcAsync(key, item.Mode) : await _frontend.SetXboxGameProfilePowerModeDcAsync(key, item.Mode); if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Xbox_PowerMode_UpdateFailed", "Power Mode could not be updated."), null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(key, MainUiStrings.Get("Xbox_PowerMode_UpdateFailed", "Power Mode could not be updated."), exception); }
     }
     private async void ResolutionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_active || _suppressEvents || _frontend is null || _selectedGame is null || ResolutionComboBox.SelectedItem is not ResolutionItem item) return;
+        if (!_active || _suppressEvents || _frontend is null || _selectedGame is null || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true } || ResolutionComboBox.SelectedItem is not ResolutionItem item) return;
         var key = _selectedGame.Key;
         try { var result = await _frontend.SetXboxGameProfileResolutionAsync(key, item.Width is { } w && item.Height is { } h ? new(w, h) : null, _selectedGame.DisplayName); if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Xbox_Resolution_UpdateFailed", "Display resolution could not be updated."), null); }
         catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(key, MainUiStrings.Get("Xbox_Resolution_UpdateFailed", "Display resolution could not be updated."), exception); }
     }
     private async Task MutateCpuAsync(bool acSide)
     {
-        if (!_active || _suppressEvents || _frontend is null || _selectedGame is null) return;
+        if (!_active || _suppressEvents || _frontend is null || _selectedGame is null || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return;
         var mode = (acSide ? CpuBoostAcComboBox : CpuBoostDcComboBox).SelectedItem as CpuBoostModeItem;
         if (mode is null) return;
         var key = _selectedGame.Key;
@@ -575,7 +568,7 @@ public sealed partial class XboxPage : UserControl
     }
     private void TdpSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        if (!_active || _suppressTdpEvents || _selectedGame is null) return; var value = (int)Math.Round(e.NewValue); var slider = (Slider)sender; var ac = ReferenceEquals(slider, AcPl1Slider) || ReferenceEquals(slider, AcPl2Slider); var pl1Edited = ReferenceEquals(slider, AcPl1Slider) || ReferenceEquals(slider, DcPl1Slider); var pl1 = ac ? _acPl1 : _dcPl1; var pl2 = ac ? _acPl2 : _dcPl2; if (pl1Edited) { if (_snapshot?.Limits is { } currentLimits) value = Math.Min(value, currentLimits.Pl1MaximumWatts); pl1 = value; } else pl2 = value;
+        if (!_active || _suppressTdpEvents || _selectedGame is null || _snapshot is not { Exists: true, Enabled: true, PersistenceWritable: true }) return; var value = (int)Math.Round(e.NewValue); var slider = (Slider)sender; var ac = ReferenceEquals(slider, AcPl1Slider) || ReferenceEquals(slider, AcPl2Slider); var pl1Edited = ReferenceEquals(slider, AcPl1Slider) || ReferenceEquals(slider, DcPl1Slider); var pl1 = ac ? _acPl1 : _dcPl1; var pl2 = ac ? _acPl2 : _dcPl2; if (pl1Edited) { if (_snapshot?.Limits is { } currentLimits) value = Math.Min(value, currentLimits.Pl1MaximumWatts); pl1 = value; } else pl2 = value;
         if (_snapshot?.Limits is { } limits) { var adjusted = DevicePage.TdpDraftPolicy.AdjustAfterEdit(pl1Edited, pl1, pl2, limits, exactGap: _simplifiedTdpControls && DevicePage.TdpDraftPolicy.GetKnownTdpGap(limits) > 0); pl1 = adjusted.Pl1Watts; pl2 = adjusted.Pl2Watts; _suppressTdpEvents = true; try { (ac ? AcPl1Slider : DcPl1Slider).Value = pl1 ?? 0; (ac ? AcPl2Slider : DcPl2Slider).Value = pl2 ?? 0; } finally { _suppressTdpEvents = false; } }
         if (ac) { _acPl1 = pl1; _acPl2 = pl2; } else { _dcPl1 = pl1; _dcPl2 = pl2; } _tdpDraftDirty = true; SetTdpText(); _tdpGeneration++; var generation = _tdpGeneration; _tdpDebounce?.Cancel(); _tdpDebounce = new CancellationTokenSource(); _ = SubmitTdpAfterDelayAsync(generation, _tdpDebounce.Token);
     }
@@ -585,7 +578,7 @@ public sealed partial class XboxPage : UserControl
         try
         {
             await Task.Delay(300, token);
-            if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), _snapshot?.Enabled == true && _snapshot.PersistenceWritable)
+            if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), _snapshot is { Exists: true, Enabled: true, PersistenceWritable: true })
                 || _frontend is null || _selectedGame is null
                 || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2)
                 return;

@@ -21,6 +21,11 @@ public sealed record FrontendModelFeatureSupport(
     public static readonly FrontendModelFeatureSupport None = new(false, false, false, false, false, false, false);
 }
 public enum FrontendProfileGameSource { Steam, NonSteam }
+public static class SteamProfileCatalogPolicy
+{
+    public static bool IsHiddenSystemApp(uint appId) => appId is 480 or 228980 or 993090;
+}
+
 public sealed record FrontendProfileGameCatalogEntry(
     uint AppId,
     string Name,

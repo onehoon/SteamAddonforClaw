@@ -105,6 +105,57 @@ public sealed class XboxGameSessionRuntimeHostTests
     }
 
     [Fact]
+    public void Active_game_profile_is_enrolled_before_existing_runtime_owners_reconcile()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs").Replace("\r\n", "\n", StringComparison.Ordinal);
+        var reconcile = Method(host, "private void ReconcileEffectiveGameProfile(string trigger)", "private void OnBigPictureStateChanged(bool active)");
+        var ensure = reconcile.IndexOf("_gameProfileMutations.EnsureProfiles(", StringComparison.Ordinal);
+        var cpu = reconcile.IndexOf("_cpuBoostRuntime.Reconcile()", StringComparison.Ordinal);
+        var power = reconcile.IndexOf("_powerModeRuntime.Reconcile()", StringComparison.Ordinal);
+        var resolution = reconcile.IndexOf("_displayResolutionRuntime.Reconcile()", StringComparison.Ordinal);
+        var tdp = reconcile.IndexOf("_tdpRuntime?.ReconcileCurrent(", StringComparison.Ordinal);
+
+        Assert.True(ensure >= 0 && cpu > ensure && power > ensure && resolution > ensure && tdp > ensure);
+        Assert.Contains("target.Kind == ActiveProfileTargetKind.Steam", reconcile, StringComparison.Ordinal);
+        Assert.Contains("target.Kind == ActiveProfileTargetKind.Xbox", reconcile, StringComparison.Ordinal);
+        Assert.Contains("RequestControllerPresentationReconcile($\"GameProfileActivated:{trigger}\")", reconcile, StringComparison.Ordinal);
+        Assert.Contains("ReconcileEffectiveBackButtonMapping($\"XboxProfileActivated:{trigger}:{xboxKey}\")", reconcile, StringComparison.Ordinal);
+        Assert.DoesNotContain("VIIPER", reconcile, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("HidHide", reconcile, StringComparison.OrdinalIgnoreCase);
+
+        var startup = Method(host, "private void RunAlwaysOnPerformanceSetup(CancellationToken cancellationToken)",
+            "private static readonly IReadOnlyDictionary<uint, string?> EmptySteamProfileTargets");
+        var tdpSeed = startup.IndexOf("var seed = tdpRuntime.SetEnabled(true);", StringComparison.Ordinal);
+        var activeTarget = startup.IndexOf("var activeTarget = CaptureActiveProfileTarget();", StringComparison.Ordinal);
+        var migration = startup.IndexOf("AlwaysOnPerformanceFeatureMigration.Run(", StringComparison.Ordinal);
+        var activeReconcile = startup.IndexOf("ReconcileEffectiveGameProfile(\"DeferredStartupGameProfileActivated\")", StringComparison.Ordinal);
+        Assert.True(tdpSeed >= 0 && activeTarget > tdpSeed && migration > activeTarget && activeReconcile > migration);
+    }
+
+    [Fact]
+    public void Active_profile_enrollment_waits_for_deferred_setup_and_excludes_hidden_steam_targets()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs").Replace("\r\n", "\n", StringComparison.Ordinal);
+        var reconcile = Method(host, "private void ReconcileEffectiveGameProfile(string trigger)", "private void OnBigPictureStateChanged(bool active)");
+        var gate = reconcile.IndexOf("var canEnrollActiveProfile =", StringComparison.Ordinal);
+        var eligibility = reconcile.IndexOf("var canEnrollActiveTarget = canEnrollActiveProfile && (target.Kind switch", StringComparison.Ordinal);
+        var ensure = reconcile.IndexOf("_gameProfileMutations.EnsureProfiles(", StringComparison.Ordinal);
+        var cpu = reconcile.IndexOf("_cpuBoostRuntime.Reconcile()", StringComparison.Ordinal);
+
+        Assert.True(gate >= 0 && eligibility > gate && ensure > eligibility && cpu > ensure);
+        Assert.Contains("Volatile.Read(ref _profileRuntimeStartupReady) != 0", reconcile[gate..eligibility], StringComparison.Ordinal);
+        Assert.Contains("_alwaysOnPerformanceSetupTask is { IsCompleted: true }", reconcile[gate..eligibility], StringComparison.Ordinal);
+        Assert.Contains("if (canEnrollActiveTarget)", reconcile[eligibility..ensure], StringComparison.Ordinal);
+        Assert.Contains("GameProfileEnrollment.CanCreateForActiveSteamTarget(target.SteamAppId)", reconcile[eligibility..ensure], StringComparison.Ordinal);
+        Assert.Contains("_gameProfileMutations.CaptureProfile(target.SteamAppId) is { Exists: true, PersistenceWritable: true }", reconcile[eligibility..ensure], StringComparison.Ordinal);
+
+        var startup = Method(host, "private void RunAlwaysOnPerformanceSetup(CancellationToken cancellationToken)",
+            "private static readonly IReadOnlyDictionary<uint, string?> EmptySteamProfileTargets");
+        Assert.Contains("GameProfileEnrollment.CanCreateForActiveSteamTarget(activeTarget.SteamAppId)", startup, StringComparison.Ordinal);
+        Assert.Contains("includeExistingProfiles: true", ReadSource("src/SteamInputAddonforClaw/Profiles/AlwaysOnPerformanceFeatureMigration.cs"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Active_XBOX_display_name_enrichment_reads_only_the_matching_live_session()
     {
         var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
