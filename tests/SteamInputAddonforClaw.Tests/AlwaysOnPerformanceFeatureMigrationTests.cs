@@ -164,6 +164,84 @@ public sealed class AlwaysOnPerformanceFeatureMigrationTests
     }
 
     [Fact]
+    public void Deferred_migration_enrolls_active_steam_game_from_the_seeded_device_snapshot()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new ProfileStore(Path.Combine(directory.Path, "profiles.json"));
+        var document = BuildDocument();
+        var unseeded = document with
+        {
+            Device = document.Device with
+            {
+                Performance = document.Device.Performance with { Tdp = null }
+            }
+        };
+        store.Save(unseeded);
+
+        var seededTdp = new DeviceTdpSettings
+        {
+            Enabled = true,
+            Ac = new TdpPowerPair { Pl1Watts = 28, Pl2Watts = 35 },
+            Dc = new TdpPowerPair { Pl1Watts = 16, Pl2Watts = 24 }
+        };
+        var seeded = unseeded with
+        {
+            Device = unseeded.Device with
+            {
+                Performance = unseeded.Device.Performance with { Tdp = seededTdp }
+            }
+        };
+        store.Save(seeded);
+
+        var result = AlwaysOnPerformanceFeatureMigration.Run(
+            store,
+            new ProfileMutationGate(),
+            tdpLimits: TdpLimits(),
+            steamGames: new Dictionary<uint, string?> { [303] = null });
+
+        Assert.Equal(AlwaysOnPerformanceFeatureMigrationStatus.Changed, result.Status);
+        var profile = store.Load().Document.Games["303"];
+        Assert.True(profile.Enabled);
+        Assert.Equal(seededTdp.Ac, profile.Performance.Tdp!.Ac);
+        Assert.Equal(seededTdp.Dc, profile.Performance.Tdp.Dc);
+        Assert.Equal(document.Device.Performance.CpuBoost!.Ac, profile.Performance.CpuBoost!.Ac);
+        Assert.Equal(document.Device.Performance.CpuBoost.Dc, profile.Performance.CpuBoost.Dc);
+        Assert.Equal(document.Device.Performance.PowerMode!.Ac, profile.Performance.PowerMode!.Ac);
+        Assert.Equal(document.Device.Performance.PowerMode.Dc, profile.Performance.PowerMode.Dc);
+        Assert.NotEqual(new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 22 }, profile.Performance.Tdp.Ac);
+    }
+
+    [Fact]
+    public void Migration_preserves_an_existing_profile_with_a_hidden_system_app_id()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new ProfileStore(Path.Combine(directory.Path, "profiles.json"));
+        var source = BuildDocument();
+        var persistedProfile = source.Games["202"] with { DisplayName = "Existing Non-Steam shortcut", Favorite = true };
+        var games = new Dictionary<string, GameProfile>(source.Games, StringComparer.Ordinal)
+        {
+            ["993090"] = persistedProfile
+        };
+        store.Save(source with { Games = games });
+
+        var result = AlwaysOnPerformanceFeatureMigration.Run(
+            store,
+            new ProfileMutationGate(),
+            tdpLimits: TdpLimits(),
+            steamGames: new Dictionary<uint, string?>());
+
+        Assert.Equal(AlwaysOnPerformanceFeatureMigrationStatus.Changed, result.Status);
+        var migrated = store.Load().Document.Games["993090"];
+        Assert.True(migrated.Enabled);
+        Assert.Equal("Existing Non-Steam shortcut", migrated.DisplayName);
+        Assert.True(migrated.Favorite);
+        AssertPairEqual(persistedProfile.Performance.Tdp!.Ac, migrated.Performance.Tdp!.Ac);
+        AssertPairEqual(persistedProfile.Performance.Tdp.Dc, migrated.Performance.Tdp.Dc);
+        Assert.Equal(persistedProfile.Performance.CpuBoost!.Ac, migrated.Performance.CpuBoost!.Ac);
+        Assert.Equal(persistedProfile.Performance.CpuBoost.Dc, migrated.Performance.CpuBoost.Dc);
+    }
+
+    [Fact]
     public void Migration_does_not_write_profiles_with_TDP_values_outside_device_limits()
     {
         using var directory = new TemporaryDirectory();

@@ -1,5 +1,6 @@
 using System.Globalization;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Profiles.Performance;
 
 namespace SteamInputAddonforClaw.Profiles;
@@ -8,6 +9,9 @@ internal static class GameProfileEnrollment
 {
     private const int FallbackPl1Watts = 20;
     private const int FallbackPl2Watts = 22;
+
+    internal static bool CanCreateForActiveSteamTarget(uint appId) =>
+        appId != 0 && !SteamProfileCatalogPolicy.IsHiddenSystemApp(appId);
 
     internal static ProfileDocument Ensure(
         ProfileDocument document,

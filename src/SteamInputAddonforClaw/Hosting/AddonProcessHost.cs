@@ -3075,6 +3075,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var activeTarget = CaptureActiveProfileTarget();
             var activeProfileWasEnabled = IsPersistedActiveProfileEnabled(activeTarget);
             var steamTargets = activeTarget.Kind == ActiveProfileTargetKind.Steam
+                && GameProfileEnrollment.CanCreateForActiveSteamTarget(activeTarget.SteamAppId)
                 ? new Dictionary<uint, string?> { [activeTarget.SteamAppId] = null }
                 : EmptySteamProfileTargets;
             var xboxTargets = activeTarget.Kind == ActiveProfileTargetKind.Xbox
@@ -4218,7 +4219,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         AppLog.Debug("Profiles", "Effective game-profile reconcile started.",
             ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
 
-        if (target.Kind != ActiveProfileTargetKind.None)
+        var canEnrollActiveProfile =
+            Volatile.Read(ref _profileRuntimeStartupReady) != 0
+            && _alwaysOnPerformanceSetupTask is { IsCompleted: true };
+        var canEnrollActiveTarget = canEnrollActiveProfile && (target.Kind switch
+        {
+            ActiveProfileTargetKind.Steam =>
+                GameProfileEnrollment.CanCreateForActiveSteamTarget(target.SteamAppId)
+                || _gameProfileMutations.CaptureProfile(target.SteamAppId) is { Exists: true, PersistenceWritable: true },
+            ActiveProfileTargetKind.Xbox => target.XboxGameKey is { Length: > 0 },
+            _ => false
+        });
+
+        if (canEnrollActiveTarget)
         {
             IReadOnlyDictionary<uint, string?> steamGames = target.Kind == ActiveProfileTargetKind.Steam
                 ? new Dictionary<uint, string?> { [target.SteamAppId] = null }
