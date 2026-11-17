@@ -25,6 +25,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public bool ClawHudEnabled => Settings.ClawHudEnabled;
     public bool QuickSettingsCurrentPowerSourceOnly => Settings.QuickSettingsCurrentPowerSourceOnly;
+    public bool SimplifiedTdpControls => Settings.SimplifiedTdpControls;
     public QuickOverlayYButtonTarget YButtonQuickJumpTarget => Settings.YButtonQuickJumpTarget;
     public bool ExperimentalVirtualTouchpadEnabled => Settings.ExperimentalVirtualTouchpadEnabled;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
@@ -253,6 +254,14 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     {
         if (Settings.QuickSettingsCurrentPowerSourceOnly == enabled) return;
         var next = Settings with { QuickSettingsCurrentPowerSourceOnly = enabled };
+        _settingsStore.Save(next);
+        Settings = next;
+    }
+
+    public void ChangeSimplifiedTdpControls(bool enabled)
+    {
+        if (Settings.SimplifiedTdpControls == enabled) return;
+        var next = Settings with { SimplifiedTdpControls = enabled };
         _settingsStore.Save(next);
         Settings = next;
     }

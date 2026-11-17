@@ -430,6 +430,8 @@
   <data name="QuickOverlay_YButtonQuickJump_Off.Content" xml:space="preserve"><value>Off</value></data>
   <data name="QuickOverlay_PowerSourceCard.Header" xml:space="preserve"><value>Show only current power source</value></data>
   <data name="QuickOverlay_PowerSourceCard.Description" xml:space="preserve"><value>Show only the controls for the currently connected power source in Quick Settings Overlay.</value></data>
+  <data name="QuickOverlay_SimplifiedTdpControlsCard.Header" xml:space="preserve"><value>Simplified TDP Controls</value></data>
+  <data name="QuickOverlay_SimplifiedTdpControlsCard.Description" xml:space="preserve"><value>Show PL1 only; PL2 automatically follows PL1 using the device-specific gap.</value></data>
   <data name="QuickOverlay_TabOrderExpander.Header" xml:space="preserve"><value>Quick Overlay Tab Order</value></data>
   <data name="QuickOverlay_TabOrderExpander.Description" xml:space="preserve"><value>Set the tab order and which tab opens first.</value></data>
   <data name="QuickOverlay_TabOrderStatusText.Text" xml:space="preserve"><value>Loading tab order…</value></data>

@@ -588,9 +588,9 @@ public sealed class MainUiLocalizationResourceTests
         var korean = ReadResources(Path.Combine(stringsDirectory, "ko-KR", "Resources.resw"));
         var pagePath = Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml");
         var page = XDocument.Load(pagePath);
-        Assert.Equal(2, page.Descendants().Count(element => element.Name.LocalName == "SettingsCard"));
+        Assert.Equal(3, page.Descendants().Count(element => element.Name.LocalName == "SettingsCard"));
         var tabOrderExpander = Assert.Single(page.Descendants(), element => element.Name.LocalName == "SettingsExpander");
-        Assert.Single(page.Descendants(), element => element.Name.LocalName == "ToggleSwitch");
+        Assert.Equal(2, page.Descendants().Count(element => element.Name.LocalName == "ToggleSwitch"));
         var uidElements = page.Descendants()
             .Where(element => element.Attribute(XamlNamespace + "Uid") is not null)
             .ToArray();
@@ -599,6 +599,7 @@ public sealed class MainUiLocalizationResourceTests
             {
                 "QuickOverlay_PageTitle",
                 "QuickOverlay_PowerSourceCard",
+                "QuickOverlay_SimplifiedTdpControlsCard",
                 "QuickOverlay_TabOrderExpander",
                 "QuickOverlay_TabOrderStatusText",
                 "QuickOverlay_YButtonQuickJumpCard",
@@ -651,6 +652,12 @@ public sealed class MainUiLocalizationResourceTests
         Assert.Equal("현재 전원 방식 옵션만 보기", korean["QuickOverlay_PowerSourceCard.Header"]);
         Assert.Equal("퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.",
             korean["QuickOverlay_PowerSourceCard.Description"]);
+        Assert.Equal("Simplified TDP Controls", english["QuickOverlay_SimplifiedTdpControlsCard.Header"]);
+        Assert.Equal("간편 TDP 설정", korean["QuickOverlay_SimplifiedTdpControlsCard.Header"]);
+        Assert.Equal("Show PL1 only; PL2 automatically follows PL1 using the device-specific gap.",
+            english["QuickOverlay_SimplifiedTdpControlsCard.Description"]);
+        Assert.Equal("PL1만 표시하고 기기별 간격에 따라 PL2를 자동으로 조정합니다.",
+            korean["QuickOverlay_SimplifiedTdpControlsCard.Description"]);
         Assert.Equal("Quick Overlay Tab Order", english["QuickOverlay_TabOrderExpander.Header"]);
         Assert.Equal("퀵 오버레이 탭 순서", korean["QuickOverlay_TabOrderExpander.Header"]);
         Assert.Equal("Set the tab order and which tab opens first.", english["QuickOverlay_TabOrderExpander.Description"]);

@@ -47,6 +47,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     private bool _pendingProductionSettingsIsLed;
     private bool _pendingProductionSettingsIsControllerForSteam;
     private bool _pendingProductionSettingsIsYButtonQuickJump;
+    private bool _pendingProductionSettingsIsSimplifiedTdpControls;
     private TaskCompletionSource<OverlayFrontendSettingsMutationResponse>? _pendingProductionSettingsMutation;
     private readonly SemaphoreSlim _controllerVibrationMutationGate = new(1, 1);
     private readonly object _controllerVibrationMutationSync = new();
@@ -144,6 +145,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                         OverlayWireMessageKind.FrontendSettingsState or OverlayWireMessageKind.ControllerLedMutationResult
                         or OverlayWireMessageKind.CurrentPowerSourceMutationResult or OverlayWireMessageKind.ControllerForSteamMutationResult
                         or OverlayWireMessageKind.YButtonQuickJumpMutationResult
+                        or OverlayWireMessageKind.SimplifiedTdpControlsMutationResult
                         or OverlayWireMessageKind.ControllerVibrationState
                         or OverlayWireMessageKind.ControllerVibrationMutationResult))
                     throw new FrontendProtocolException("Unexpected Overlay production-controls payload.");
@@ -255,15 +257,18 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     ControllerVibrationStateReceived?.Invoke(message.ControllerVibrationState!);
                     continue;
                 }
-                if (message.Kind is OverlayWireMessageKind.ControllerLedMutationResult or OverlayWireMessageKind.CurrentPowerSourceMutationResult or OverlayWireMessageKind.ControllerForSteamMutationResult or OverlayWireMessageKind.YButtonQuickJumpMutationResult)
+                if (message.Kind is OverlayWireMessageKind.ControllerLedMutationResult or OverlayWireMessageKind.CurrentPowerSourceMutationResult or OverlayWireMessageKind.ControllerForSteamMutationResult or OverlayWireMessageKind.YButtonQuickJumpMutationResult or OverlayWireMessageKind.SimplifiedTdpControlsMutationResult)
                 {
                     var led = message.Kind == OverlayWireMessageKind.ControllerLedMutationResult;
                     var controllerForSteam = message.Kind == OverlayWireMessageKind.ControllerForSteamMutationResult;
                     var yButtonQuickJump = message.Kind == OverlayWireMessageKind.YButtonQuickJumpMutationResult;
+                    var simplifiedTdpControls = message.Kind == OverlayWireMessageKind.SimplifiedTdpControlsMutationResult;
                     if (controllerForSteam
                         ? !OverlayProductionControlsWireValidation.IsValidControllerForSteamMutationResult(message)
                         : yButtonQuickJump
                             ? !OverlayProductionControlsWireValidation.IsValidYButtonQuickJumpMutationResult(message)
+                            : simplifiedTdpControls
+                                ? !OverlayProductionControlsWireValidation.IsValidSimplifiedTdpControlsMutationResult(message)
                             : !OverlayProductionControlsWireValidation.IsValidSettingsMutationResult(message, led))
                         throw new FrontendProtocolException("Invalid Overlay frontend settings mutation result.");
                     var response = message.FrontendSettingsMutationResponse!;
@@ -273,7 +278,8 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                         if (response.RequestId == _pendingProductionSettingsRequestId
                             && (controllerForSteam != _pendingProductionSettingsIsControllerForSteam
                                 || yButtonQuickJump != _pendingProductionSettingsIsYButtonQuickJump
-                                || (!controllerForSteam && !yButtonQuickJump && led != _pendingProductionSettingsIsLed)))
+                                || simplifiedTdpControls != _pendingProductionSettingsIsSimplifiedTdpControls
+                                || (!controllerForSteam && !yButtonQuickJump && !simplifiedTdpControls && led != _pendingProductionSettingsIsLed)))
                             throw new FrontendProtocolException("Overlay frontend settings mutation correlation mismatch.");
                         pending = response.RequestId == _pendingProductionSettingsRequestId ? _pendingProductionSettingsMutation : null;
                     }
@@ -556,6 +562,9 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     internal Task<OverlayFrontendSettingsMutationResponse> SendYButtonQuickJumpMutationAsync(QuickOverlayYButtonTarget target, CancellationToken token = default) =>
         SendFrontendSettingsMutationAsync(new OverlayFrontendSettingsMutationRequest(0, YButtonQuickJumpTarget: target), led: false, token, yButtonQuickJump: true);
 
+    internal Task<OverlayFrontendSettingsMutationResponse> SendSimplifiedTdpControlsMutationAsync(bool enabled, CancellationToken token = default) =>
+        SendFrontendSettingsMutationAsync(new OverlayFrontendSettingsMutationRequest(0, SimplifiedTdpControls: enabled), led: false, token, simplifiedTdpControls: true);
+
     internal Task<OverlayFrontendSettingsMutationResponse> SendControllerForSteamMutationAsync(
         SteamVirtualControllerPreference? preference = null,
         bool? gyroscopeEnabled = null,
@@ -563,7 +572,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         SendFrontendSettingsMutationAsync(new OverlayFrontendSettingsMutationRequest(0,
             SteamVirtualController: preference, GyroscopeEnabled: gyroscopeEnabled), led: false, token: token, controllerForSteam: true);
 
-    private async Task<OverlayFrontendSettingsMutationResponse> SendFrontendSettingsMutationAsync(OverlayFrontendSettingsMutationRequest request, bool led, CancellationToken token, bool controllerForSteam = false, bool yButtonQuickJump = false)
+    private async Task<OverlayFrontendSettingsMutationResponse> SendFrontendSettingsMutationAsync(OverlayFrontendSettingsMutationRequest request, bool led, CancellationToken token, bool controllerForSteam = false, bool yButtonQuickJump = false, bool simplifiedTdpControls = false)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         if (led && ControllerLedSettingsValidation.Validate(request.ControllerLed) is not null)
@@ -574,6 +583,8 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
             throw new FrontendProtocolException("Invalid Overlay Controller for Steam settings.");
         if (yButtonQuickJump && (request.YButtonQuickJumpTarget is not { } target || !Enum.IsDefined(target)))
             throw new FrontendProtocolException("Invalid Overlay Y Button Quick Jump target.");
+        if (simplifiedTdpControls && request.SimplifiedTdpControls is null)
+            throw new FrontendProtocolException("Invalid Overlay Simplified TDP Controls setting.");
         var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
         await _productionSettingsMutationGate.WaitAsync(token).ConfigureAwait(false);
         var requestId = Interlocked.Increment(ref _productionSettingsRequestSequence);
@@ -586,11 +597,13 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 _pendingProductionSettingsIsLed = led;
                 _pendingProductionSettingsIsControllerForSteam = controllerForSteam;
                 _pendingProductionSettingsIsYButtonQuickJump = yButtonQuickJump;
+                _pendingProductionSettingsIsSimplifiedTdpControls = simplifiedTdpControls;
                 _pendingProductionSettingsMutation = completion;
             }
             var kind = controllerForSteam
                 ? OverlayWireMessageKind.ControllerForSteamMutationRequest
                 : yButtonQuickJump ? OverlayWireMessageKind.YButtonQuickJumpMutationRequest
+                : simplifiedTdpControls ? OverlayWireMessageKind.SimplifiedTdpControlsMutationRequest
                 : led ? OverlayWireMessageKind.ControllerLedMutationRequest : OverlayWireMessageKind.CurrentPowerSourceMutationRequest;
             var correlated = request with { RequestId = requestId };
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
@@ -606,6 +619,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     _pendingProductionSettingsRequestId = 0;
                     _pendingProductionSettingsIsControllerForSteam = false;
                     _pendingProductionSettingsIsYButtonQuickJump = false;
+                    _pendingProductionSettingsIsSimplifiedTdpControls = false;
                     _pendingProductionSettingsMutation = null;
                 }
             }

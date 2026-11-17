@@ -160,7 +160,11 @@ public sealed record QuickSettingsSliderSpec(
 /// <summary>A narrow linked-slider gap policy (work order section 13): editing <see cref="LowerRowId"/>
 /// or <see cref="UpperRowId"/> should keep at least <see cref="MinimumGap"/> between them. Product
 /// policy data only -- the existing typed Runtime mutation remains the final validity authority.</summary>
-public sealed record QuickSettingsLinkedSliderConstraint(QuickSettingsRowId LowerRowId, QuickSettingsRowId UpperRowId, int MinimumGap);
+public sealed record QuickSettingsLinkedSliderConstraint(QuickSettingsRowId LowerRowId, QuickSettingsRowId UpperRowId, int MinimumGap)
+{
+    /// <summary>When true, editing the lower value sets the upper value to exactly lower + MinimumGap.</summary>
+    public bool ExactGap { get; init; }
+}
 
 /// <summary>One Quick Settings row. Carries only shared product facts -- never a surface-specific
 /// admission/busy/focus fact (work order section 9.3/31).</summary>

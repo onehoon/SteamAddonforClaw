@@ -430,6 +430,8 @@
   <data name="QuickOverlay_YButtonQuickJump_Off.Content" xml:space="preserve"><value>사용 안 함</value></data>
   <data name="QuickOverlay_PowerSourceCard.Header" xml:space="preserve"><value>현재 전원 방식 옵션만 보기</value></data>
   <data name="QuickOverlay_PowerSourceCard.Description" xml:space="preserve"><value>퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.</value></data>
+  <data name="QuickOverlay_SimplifiedTdpControlsCard.Header" xml:space="preserve"><value>간편 TDP 설정</value></data>
+  <data name="QuickOverlay_SimplifiedTdpControlsCard.Description" xml:space="preserve"><value>PL1만 표시하고 기기별 간격에 따라 PL2를 자동으로 조정합니다.</value></data>
   <data name="QuickOverlay_TabOrderExpander.Header" xml:space="preserve"><value>퀵 오버레이 탭 순서</value></data>
   <data name="QuickOverlay_TabOrderExpander.Description" xml:space="preserve"><value>퀵 오버레이 탭 순서와 처음 열리는 탭을 설정합니다.</value></data>
   <data name="QuickOverlay_TabOrderStatusText.Text" xml:space="preserve"><value>탭 순서를 불러오는 중…</value></data>

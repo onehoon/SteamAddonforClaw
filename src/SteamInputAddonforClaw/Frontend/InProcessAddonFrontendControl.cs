@@ -1087,6 +1087,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
+    public Task<FrontendSettingsSnapshot> SetSimplifiedTdpControlsAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_settings.SimplifiedTdpControls != enabled)
+        {
+            _settings.ChangeSimplifiedTdpControls(enabled);
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+        return Task.FromResult(MapSettings());
+    }
+
     public Task<FrontendSettingsSnapshot> SetQuickOverlayYButtonTargetAsync(
         QuickOverlayYButtonTarget target, CancellationToken cancellationToken = default)
     {
@@ -1770,7 +1782,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, FeatureSupport = _featureSupport, YButtonQuickJumpTarget = _settings.YButtonQuickJumpTarget, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, SimplifiedTdpControls = _settings.SimplifiedTdpControls, FeatureSupport = _featureSupport, YButtonQuickJumpTarget = _settings.YButtonQuickJumpTarget, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1
@@ -2450,13 +2462,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     private QuickSettingsPageSnapshot ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPageSnapshot page)
     {
-        if (!_settings.QuickSettingsCurrentPowerSourceOnly)
-            return QuickSettingsPresentation.ApplyPowerSourceVisibility(page, false, null);
-
         AcDcPowerSource? source = null;
-        try { source = _quickSettingsPowerSource(); }
-        catch (Exception exception) { AppLog.Warn("QuickSettings", "AC/DC power source read failed; retaining both power-source rows.", exception); }
-        return QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, source);
+        if (_settings.QuickSettingsCurrentPowerSourceOnly)
+        {
+            try { source = _quickSettingsPowerSource(); }
+            catch (Exception exception) { AppLog.Warn("QuickSettings", "AC/DC power source read failed; retaining both power-source rows.", exception); }
+        }
+
+        var powerSourcePage = QuickSettingsPresentation.ApplyPowerSourceVisibility(
+            page, _settings.QuickSettingsCurrentPowerSourceOnly, source);
+        return QuickSettingsPresentation.ApplySimplifiedTdpControls(
+            powerSourcePage, _settings.SimplifiedTdpControls);
     }
 
     public Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken cancellationToken = default)

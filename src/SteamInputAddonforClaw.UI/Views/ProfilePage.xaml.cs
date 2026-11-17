@@ -45,6 +45,8 @@ public sealed partial class ProfilePage : UserControl
     private CancellationTokenSource? _tdpDebounce;
     private long _tdpGeneration;
     private bool _tdpDraftDirty;
+    private bool _simplifiedTdpControls;
+    private bool? _pendingSimplifiedTdpControls;
     private CancellationTokenSource? _acFpsDebounce, _dcFpsDebounce; private long _acFpsGeneration, _dcFpsGeneration; private int? _acFpsDraft, _dcFpsDraft;
     private static readonly HashSet<uint> HiddenSteamAppIds =
     [
@@ -677,7 +679,46 @@ public sealed partial class ProfilePage : UserControl
 
     private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
     private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = true; CancelFpsDebounce(); try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = false; } SetEditorsEnabled(false); }
-    private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty, _gpuDraftDirty, preservePendingFpsDraft: true); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) { DisableEditorsAfterCaptureFailure(); ShowError(MainUiStrings.Get("Steam_Profile_LoadFailed", "Profile settings could not be loaded."), exception); } } }
+    private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var bootstrap = await _frontend.GetBootstrapAsync(); if (_active) ApplySimplifiedTdpControlsPreference(bootstrap.Settings.SimplifiedTdpControls); var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty, _gpuDraftDirty, preservePendingFpsDraft: true); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) { DisableEditorsAfterCaptureFailure(); ShowError(MainUiStrings.Get("Steam_Profile_LoadFailed", "Profile settings could not be loaded."), exception); } } }
+
+    private void ApplySimplifiedTdpControlsPreference(bool enabled)
+    {
+        if (_tdpDraftDirty)
+        {
+            _pendingSimplifiedTdpControls = enabled;
+            return;
+        }
+        _pendingSimplifiedTdpControls = null;
+        if (_simplifiedTdpControls == enabled) return;
+        _simplifiedTdpControls = enabled;
+        RenderTdpPresentationOnly();
+    }
+
+    private void ApplyPendingSimplifiedTdpControlsPreference()
+    {
+        if (_pendingSimplifiedTdpControls is not { } enabled) return;
+        _pendingSimplifiedTdpControls = null;
+        _simplifiedTdpControls = enabled;
+    }
+
+    private void RenderTdpPresentationOnly()
+    {
+        var exactGapMode = _snapshot?.Limits is { } limits
+            && _simplifiedTdpControls
+            && DevicePage.TdpDraftPolicy.GetKnownTdpGap(limits) > 0;
+        if (_snapshot?.Limits is { } currentLimits)
+        {
+            _suppressTdpEvents = true;
+            try
+            {
+                AcPl1Slider.Maximum = DcPl1Slider.Maximum = exactGapMode
+                    ? currentLimits.Pl1MaximumWatts
+                    : currentLimits.Pl2MaximumWatts;
+            }
+            finally { _suppressTdpEvents = false; }
+        }
+        AcPl2Row.Visibility = DcPl2Row.Visibility = exactGapMode ? Visibility.Collapsed : Visibility.Visible;
+    }
     private void ClearSelection() { CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressEvents = true; try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; } finally { _suppressEvents = false; } ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false, bool preserveDirtyGpuDraft = false, bool preservePendingFpsDraft = false)
@@ -697,12 +738,14 @@ public sealed partial class ProfilePage : UserControl
             if (!preserveDirtyTdpDraft || !_tdpDraftDirty)
             {
                 _acPl1 = snapshot.Tdp.Ac.Pl1Watts; _acPl2 = snapshot.Tdp.Ac.Pl2Watts; _dcPl1 = snapshot.Tdp.Dc.Pl1Watts; _dcPl2 = snapshot.Tdp.Dc.Pl2Watts;
-                ConfigureSlider(AcPl1Slider, snapshot.Limits?.Pl1MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _acPl1.Value); ConfigureSlider(AcPl2Slider, snapshot.Limits?.Pl2MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _acPl2.Value); ConfigureSlider(DcPl1Slider, snapshot.Limits?.Pl1MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _dcPl1.Value); ConfigureSlider(DcPl2Slider, snapshot.Limits?.Pl2MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _dcPl2.Value);
+                var exactGapMode = snapshot.Limits is { } limits && _simplifiedTdpControls && DevicePage.TdpDraftPolicy.GetKnownTdpGap(limits) > 0;
+                ConfigureSlider(AcPl1Slider, snapshot.Limits?.Pl1MinimumWatts, exactGapMode ? snapshot.Limits?.Pl1MaximumWatts : snapshot.Limits?.Pl2MaximumWatts, _acPl1.Value); ConfigureSlider(AcPl2Slider, snapshot.Limits?.Pl2MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _acPl2.Value); ConfigureSlider(DcPl1Slider, snapshot.Limits?.Pl1MinimumWatts, exactGapMode ? snapshot.Limits?.Pl1MaximumWatts : snapshot.Limits?.Pl2MaximumWatts, _dcPl1.Value); ConfigureSlider(DcPl2Slider, snapshot.Limits?.Pl2MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _dcPl2.Value);
                 SetTdpText();
             }
         }
         finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressFeatureEvents = false; }
         CpuBoostAcCard.Visibility = CpuBoostDcCard.Visibility = snapshot.CpuBoost.Enabled ? Visibility.Visible : Visibility.Collapsed; TdpAcCard.Visibility = TdpDcCard.Visibility = snapshot.Tdp.Enabled ? Visibility.Visible : Visibility.Collapsed; PowerModeAcCard.Visibility = PowerModeDcCard.Visibility = snapshot.PowerMode?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; GpuMinimumClockAcCard.Visibility = GpuMinimumClockDcCard.Visibility = snapshot.GpuMinimumClock?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; FpsAcCard.Visibility = FpsDcCard.Visibility = snapshot.FpsLimit?.Enabled == true ? Visibility.Visible : Visibility.Collapsed;
+        RenderTdpPresentationOnly();
         SetEditorsEnabled(snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable); ResolutionComboBox.IsEnabled = snapshot.PersistenceWritable; RenderProfileStatus(snapshot);
     }
     private void RenderProfileStatus(FrontendGameProfileSnapshot snapshot) { if (!snapshot.PersistenceWritable) { ShowError(MainUiStrings.Get("Steam_Profile_SettingsUnwritable", "Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."), null); return; } if (_featureSupport.Tdp && snapshot.Exists && snapshot.Enabled && snapshot.Limits is null) { ProfileInfoBar.Severity = InfoBarSeverity.Warning; ProfileInfoBar.Message = MainUiStrings.Get("Steam_Tdp_Unavailable", "TDP Control is unavailable on this device."); ProfileInfoBar.IsOpen = true; return; } ClearError(); }
@@ -1056,13 +1099,13 @@ public sealed partial class ProfilePage : UserControl
     private void TdpSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
         if (_suppressTdpEvents || _selectedGame is null) return; var value = (int)Math.Round(e.NewValue); var slider = (Slider)sender; var ac = ReferenceEquals(slider, AcPl1Slider) || ReferenceEquals(slider, AcPl2Slider); var pl1Edited = ReferenceEquals(slider, AcPl1Slider) || ReferenceEquals(slider, DcPl1Slider); var pl1 = ac ? _acPl1 : _dcPl1; var pl2 = ac ? _acPl2 : _dcPl2; if (pl1Edited) { if (_snapshot?.Limits is { } currentLimits) value = Math.Min(value, currentLimits.Pl1MaximumWatts); pl1 = value; } else pl2 = value;
-        if (_snapshot?.Limits is { } limits) { var adjusted = DevicePage.TdpDraftPolicy.AdjustAfterEdit(pl1Edited, pl1, pl2, limits); pl1 = adjusted.Pl1Watts; pl2 = adjusted.Pl2Watts; _suppressTdpEvents = true; try { (ac ? AcPl1Slider : DcPl1Slider).Value = pl1 ?? 0; (ac ? AcPl2Slider : DcPl2Slider).Value = pl2 ?? 0; } finally { _suppressTdpEvents = false; } }
+        if (_snapshot?.Limits is { } limits) { var adjusted = DevicePage.TdpDraftPolicy.AdjustAfterEdit(pl1Edited, pl1, pl2, limits, exactGap: _simplifiedTdpControls && DevicePage.TdpDraftPolicy.GetKnownTdpGap(limits) > 0); pl1 = adjusted.Pl1Watts; pl2 = adjusted.Pl2Watts; _suppressTdpEvents = true; try { (ac ? AcPl1Slider : DcPl1Slider).Value = pl1 ?? 0; (ac ? AcPl2Slider : DcPl2Slider).Value = pl2 ?? 0; } finally { _suppressTdpEvents = false; } }
         if (ac) { _acPl1 = pl1; _acPl2 = pl2; } else { _dcPl1 = pl1; _dcPl2 = pl2; } _tdpDraftDirty = true; SetTdpText(); _tdpGeneration++; var generation = _tdpGeneration; _tdpDebounce?.Cancel(); _tdpDebounce = new CancellationTokenSource(); _ = SubmitTdpAfterDelayAsync(generation, _tdpDebounce.Token);
     }
     private async Task SubmitTdpAfterDelayAsync(long generation, CancellationToken token)
     {
         uint? appId = null;
-        try { await Task.Delay(300, token); if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), ProfileEnabledToggle.IsOn) || _frontend is null || _selectedGame is null || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2) return; appId = _selectedGame.AppId; var result = await _frontend.SetGameProfileTdpAsync(appId.Value, new(true, new(ac1, ac2), new(dc1, dc2))); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId.Value)) return; var preserveDraft = ShouldPreserveDirtyTdpDraft(_tdpDraftDirty, generation, _tdpGeneration); if (!preserveDraft) _tdpDraftDirty = false; Render(result.Snapshot, preserveDraft); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_Tdp_UpdateFailed", "TDP could not be updated."), null); } catch (OperationCanceledException) { } catch (Exception exception) { if (appId is { } targetAppId) await RestoreSelectedAfterMutationFailureAsync(targetAppId, MainUiStrings.Get("Steam_Tdp_UpdateFailed", "TDP could not be updated."), exception); }
+        try { await Task.Delay(300, token); if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), ProfileEnabledToggle.IsOn) || _frontend is null || _selectedGame is null || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2) return; appId = _selectedGame.AppId; var result = await _frontend.SetGameProfileTdpAsync(appId.Value, new(true, new(ac1, ac2), new(dc1, dc2))); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId.Value)) return; var preserveDraft = ShouldPreserveDirtyTdpDraft(_tdpDraftDirty, generation, _tdpGeneration); if (!preserveDraft) { _tdpDraftDirty = false; ApplyPendingSimplifiedTdpControlsPreference(); } Render(result.Snapshot, preserveDraft); if (!result.Succeeded) ShowError(result.FailureMessage ?? MainUiStrings.Get("Steam_Tdp_UpdateFailed", "TDP could not be updated."), null); } catch (OperationCanceledException) { } catch (Exception exception) { if (appId is { } targetAppId) { if (generation == Volatile.Read(ref _tdpGeneration)) { _tdpDraftDirty = false; ApplyPendingSimplifiedTdpControlsPreference(); } await RestoreSelectedAfterMutationFailureAsync(targetAppId, MainUiStrings.Get("Steam_Tdp_UpdateFailed", "TDP could not be updated."), exception); } }
     }
     private void SetTdpText() { AcPl1Value.Text = _acPl1 is { } x ? $"{x} W" : "— W"; AcPl2Value.Text = _acPl2 is { } y ? $"{y} W" : "— W"; DcPl1Value.Text = _dcPl1 is { } z ? $"{z} W" : "— W"; DcPl2Value.Text = _dcPl2 is { } w ? $"{w} W" : "— W"; }
     private void CancelTdpDebounce() { _tdpGeneration++; _tdpDebounce?.Cancel(); _tdpDebounce = null; }

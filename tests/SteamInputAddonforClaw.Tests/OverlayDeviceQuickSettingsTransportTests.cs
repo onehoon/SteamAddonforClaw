@@ -41,10 +41,10 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     [Fact]
     public void Overlay_and_frontend_protocols_are_current()
     {
-        Assert.Equal(22, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(23, OverlayTransportProtocol.CurrentVersion);
         // The desktop frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(90, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(91, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]
@@ -62,6 +62,21 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
 
         Assert.True(OverlayProductionControlsWireValidation.IsValidSettingsMutationResult(valid, led: true));
         Assert.False(OverlayProductionControlsWireValidation.IsValidSettingsMutationResult(invalid, led: true));
+    }
+
+    [Fact]
+    public void Simplified_tdp_setting_wire_accepts_only_its_single_typed_field()
+    {
+        var valid = new OverlayWireMessage(OverlayTransportProtocol.CurrentVersion,
+            OverlayWireMessageKind.SimplifiedTdpControlsMutationRequest,
+            FrontendSettingsMutationRequest: new(1, SimplifiedTdpControls: true));
+        var ambiguous = valid with
+        {
+            FrontendSettingsMutationRequest = new(1, CurrentPowerSourceOnly: false, SimplifiedTdpControls: true),
+        };
+
+        Assert.True(OverlayProductionControlsWireValidation.IsValidSimplifiedTdpControlsMutationRequest(valid));
+        Assert.False(OverlayProductionControlsWireValidation.IsValidSimplifiedTdpControlsMutationRequest(ambiguous));
     }
 
     [Fact]
@@ -145,7 +160,9 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
                 settingsRequests.Add(request);
                 settings = request.ControllerLed is { } nextLed
                     ? settings with { ControllerLed = nextLed }
-                    : settings with { QuickSettingsCurrentPowerSourceOnly = request.CurrentPowerSourceOnly!.Value };
+                    : request.SimplifiedTdpControls is { } simplified
+                        ? settings with { SimplifiedTdpControls = simplified }
+                        : settings with { QuickSettingsCurrentPowerSourceOnly = request.CurrentPowerSourceOnly!.Value };
                 return Task.FromResult(new OverlayFrontendSettingsMutationResponse(request.RequestId, true, null, settings, true));
             },
             captureControllerVibration: _ => Task.FromResult(vibration),
@@ -181,6 +198,8 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         Assert.Equal(nextLed, ledResult.Settings.ControllerLed);
         var settingResult = await client.SendCurrentPowerSourceMutationAsync(false);
         Assert.False(settingResult.Settings.QuickSettingsCurrentPowerSourceOnly);
+        var simplifiedResult = await client.SendSimplifiedTdpControlsMutationAsync(true);
+        Assert.True(simplifiedResult.Settings.SimplifiedTdpControls);
         var vibrationResult = await client.SendControllerVibrationMutationAsync(40, 70);
         Assert.Equal(40, vibrationResult.Snapshot.LeftPercent);
         Assert.Equal(70, vibrationResult.Snapshot.RightPercent);
@@ -188,6 +207,9 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         Assert.Null(settingsRequests[0].CurrentPowerSourceOnly);
         Assert.Null(settingsRequests[1].ControllerLed);
         Assert.False(settingsRequests[1].CurrentPowerSourceOnly);
+        Assert.Null(settingsRequests[2].ControllerLed);
+        Assert.Null(settingsRequests[2].CurrentPowerSourceOnly);
+        Assert.True(settingsRequests[2].SimplifiedTdpControls);
         Assert.Equal((40, 70), (vibrationRequests.Single().LeftPercent, vibrationRequests.Single().RightPercent));
 
         Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));

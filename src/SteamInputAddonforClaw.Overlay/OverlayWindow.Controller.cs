@@ -422,6 +422,7 @@ public sealed partial class OverlayWindow
         RenderControllerLedRows();
         RenderControllerVibrationRows();
         ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
+        ApplySimplifiedTdpControls(settings.SimplifiedTdpControls, settingsAvailable);
         ApplyQuickSettingsYButtonQuickJumpTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
         ApplyYButtonQuickJumpFooterTarget(settings.YButtonQuickJumpTarget, settingsAvailable);
         if (settingsAvailable && !_controllerLedVisibilityEligible && IsControllerLedDetailActive())
@@ -440,7 +441,8 @@ public sealed partial class OverlayWindow
         OverlayFrontendSettingsMutationResponse response,
         bool led,
         ControllerForSteamMutationKind? controllerForSteamMutation = null,
-        bool yButtonQuickJumpMutation = false)
+        bool yButtonQuickJumpMutation = false,
+        bool simplifiedTdpControlsMutation = false)
     {
         if (led)
         {
@@ -461,14 +463,17 @@ public sealed partial class OverlayWindow
             SetYButtonQuickJumpMutationInFlight(false);
         var quickSettingsMutation = !led && controllerForSteamMutation is null && !yButtonQuickJumpMutation;
         ApplyFrontendSettingsState(response.Settings, response.ControllerLedAvailable, response.SettingsAvailable);
-        if (quickSettingsMutation)
+        if (simplifiedTdpControlsMutation)
+            SetSimplifiedTdpControlsMutationInFlight(false);
+        else if (quickSettingsMutation)
             SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
     }
 
     internal void ApplyFrontendSettingsMutationFailure(
         bool led,
         ControllerForSteamMutationKind? controllerForSteamMutation = null,
-        bool yButtonQuickJumpMutation = false)
+        bool yButtonQuickJumpMutation = false,
+        bool simplifiedTdpControlsMutation = false)
     {
         if (led)
         {
@@ -491,10 +496,12 @@ public sealed partial class OverlayWindow
             ReconcileRowSelectionIfNeeded(AddonQuickSettingsTabId.Setting);
             return;
         }
+        else if (simplifiedTdpControlsMutation) SetSimplifiedTdpControlsMutationInFlight(false);
         else SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
         RenderControllerForSteamRows();
         RenderControllerLedRows();
         RenderQuickSettingsCurrentPowerSourceRow();
+        RenderSimplifiedTdpControlsRow();
         RenderQuickSettingsYButtonQuickJumpRow();
         ReconcileRowSelectionIfNeeded(_tabState.SelectedTab);
     }

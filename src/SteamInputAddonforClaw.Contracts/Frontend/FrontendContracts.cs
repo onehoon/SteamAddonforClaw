@@ -344,6 +344,7 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
     public bool DeveloperMenuEnabled { get; init; }
     public bool ExperimentalVirtualTouchpadEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
+    public bool SimplifiedTdpControls { get; init; }
     public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
     public QuickOverlayYButtonTarget YButtonQuickJumpTarget { get; init; } = QuickOverlayYButtonTarget.Profile;
     public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
@@ -623,6 +624,8 @@ public interface IAddonFrontendControl
         bool enabled, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Experimental virtual touchpad settings are not supported by this frontend.");
     async Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
+    async Task<FrontendSettingsSnapshot> SetSimplifiedTdpControlsAsync(bool enabled, CancellationToken cancellationToken = default) =>
         (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
     Task<FrontendSettingsSnapshot> SetQuickOverlayYButtonTargetAsync(
         QuickOverlayYButtonTarget target, CancellationToken cancellationToken = default) =>

@@ -69,8 +69,8 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("_pendingSteamControllerPreference = null", controller);
         Assert.Contains("_pendingGyroscopeEnabled = null", controller);
         Assert.Contains("controllerForSteamMutation: mutationKind", app);
-        Assert.Contains("ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation, yButtonQuickJumpMutation)", app);
-        Assert.Contains("ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation, yButtonQuickJumpMutation)", app);
+        Assert.Contains("ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation, yButtonQuickJumpMutation, simplifiedTdpControlsMutation)", app);
+        Assert.Contains("ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation, yButtonQuickJumpMutation, simplifiedTdpControlsMutation)", app);
 
         var mutationResultStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationResult(", StringComparison.Ordinal);
         var mutationFailureStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", mutationResultStart, StringComparison.Ordinal);
@@ -128,6 +128,41 @@ public sealed class OverlayControllerRendererTests
         Assert.True(failure.IndexOf("RenderQuickSettingsYButtonQuickJumpRow();", StringComparison.Ordinal)
             < failure.LastIndexOf("ReconcileRowSelectionIfNeeded(_tabState.SelectedTab);", StringComparison.Ordinal));
         Assert.DoesNotContain("RestoreControllerRowSelection", controller);
+    }
+
+    [Fact]
+    public void Quick_settings_mutation_settlement_reenables_both_preference_rows_without_a_state_broadcast()
+    {
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var currentSourceStart = clawHud.IndexOf("private void SetQuickSettingsCurrentPowerSourceMutationInFlight(", StringComparison.Ordinal);
+        var simplifiedStart = clawHud.IndexOf("private void SetSimplifiedTdpControlsMutationInFlight(", currentSourceStart, StringComparison.Ordinal);
+        var currentSourceSettle = clawHud[currentSourceStart..simplifiedStart];
+        var simplifiedSettleEnd = clawHud.IndexOf("internal void RenderQuickSettingsCurrentPowerSourceRow()", simplifiedStart, StringComparison.Ordinal);
+        var simplifiedSettle = clawHud[simplifiedStart..simplifiedSettleEnd];
+
+        Assert.Contains("_quickSettingsMutationInFlight = inFlight", currentSourceSettle, StringComparison.Ordinal);
+        Assert.Contains("_pendingQuickSettingsCurrentPowerSourceOnly = null", currentSourceSettle, StringComparison.Ordinal);
+        Assert.Contains("RenderQuickSettingsCurrentPowerSourceRow();", currentSourceSettle, StringComparison.Ordinal);
+        Assert.Contains("RenderSimplifiedTdpControlsRow();", currentSourceSettle, StringComparison.Ordinal);
+
+        Assert.Contains("_quickSettingsMutationInFlight = inFlight", simplifiedSettle, StringComparison.Ordinal);
+        Assert.Contains("_pendingQuickSettingsSimplifiedTdpControls = null", simplifiedSettle, StringComparison.Ordinal);
+        Assert.Contains("RenderQuickSettingsCurrentPowerSourceRow();", simplifiedSettle, StringComparison.Ordinal);
+        Assert.Contains("RenderSimplifiedTdpControlsRow();", simplifiedSettle, StringComparison.Ordinal);
+
+        var currentSourceRenderer = clawHud[clawHud.IndexOf("internal void RenderQuickSettingsCurrentPowerSourceRow()", StringComparison.Ordinal)..
+            clawHud.IndexOf("internal void RenderSimplifiedTdpControlsRow()", StringComparison.Ordinal)];
+        var simplifiedRenderer = clawHud[clawHud.IndexOf("internal void RenderSimplifiedTdpControlsRow()", StringComparison.Ordinal)..
+            clawHud.IndexOf("private StackPanel BuildClawHudPage()", StringComparison.Ordinal)];
+        Assert.Contains("_quickSettingsSettingsAvailable && !_quickSettingsMutationInFlight", currentSourceRenderer, StringComparison.Ordinal);
+        Assert.Contains("_quickSettingsSettingsAvailable && !_quickSettingsMutationInFlight", simplifiedRenderer, StringComparison.Ordinal);
+
+        var resultStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationResult(", StringComparison.Ordinal);
+        var failureStart = controller.IndexOf("internal void ApplyFrontendSettingsMutationFailure(", resultStart, StringComparison.Ordinal);
+        var mutationResult = controller[resultStart..failureStart];
+        Assert.Contains("SetQuickSettingsCurrentPowerSourceMutationInFlight(false)", mutationResult, StringComparison.Ordinal);
+        Assert.Contains("SetSimplifiedTdpControlsMutationInFlight(false)", mutationResult, StringComparison.Ordinal);
     }
 
     [Fact]

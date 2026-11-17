@@ -373,6 +373,35 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void SimplifiedTdpControls_DefaultsToFalse_WhenMissingOrMalformed()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+
+        File.WriteAllText(path, "{\"LogLevel\":\"Info\"}");
+        Assert.False(new SettingsStore(path).Load().SimplifiedTdpControls);
+
+        File.WriteAllText(path, "{\"LogLevel\":\"Debug\",\"SimplifiedTdpControls\":\"true\",\"DeveloperMenuEnabled\":true}");
+        var settings = new SettingsStore(path).Load();
+        Assert.False(settings.SimplifiedTdpControls);
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+        Assert.True(settings.DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void SimplifiedTdpControls_RoundTripsAndPersistsThroughCoordinator()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        coordinator.ChangeSimplifiedTdpControls(true);
+
+        Assert.True(coordinator.SimplifiedTdpControls);
+        Assert.True(store.Load().SimplifiedTdpControls);
+        Assert.Contains("\"SimplifiedTdpControls\": true", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
+    }
+
+    [Fact]
     public void YButtonQuickJumpTarget_DefaultsToProfile_WhenMissing()
     {
         var path = Path.Combine(_testDirectory, "settings.json");

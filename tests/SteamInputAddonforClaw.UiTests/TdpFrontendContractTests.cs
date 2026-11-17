@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Xml.Linq;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Views;
 using Xunit;
@@ -111,6 +112,49 @@ public sealed class TdpFrontendContractTests
         Assert.Equal(new(20, null), DevicePage.TdpDraftPolicy.AdjustAfterEdit(true, 20, null, limits));
     }
 
+    [Theory]
+    [InlineData(30, 30, 31)]
+    [InlineData(35, 30, 31)]
+    [InlineData(100, 30, 31)]
+    public void Simplified_a2vm_pl1_edit_sets_exact_one_watt_gap_and_respects_pl1_maximum(int editedPl1, int expectedPl1, int expectedPl2)
+    {
+        var result = DevicePage.TdpDraftPolicy.AdjustAfterEdit(true, editedPl1, 36, new(8, 30, 8, 37), exactGap: true);
+        Assert.Equal(new(expectedPl1, expectedPl2), result);
+    }
+
+    [Theory]
+    [InlineData(35, 35, 37)]
+    [InlineData(100, 35, 37)]
+    public void Simplified_cg3em_pl1_edit_sets_exact_two_watt_gap_and_respects_pl1_maximum(int editedPl1, int expectedPl1, int expectedPl2)
+    {
+        var result = DevicePage.TdpDraftPolicy.AdjustAfterEdit(true, editedPl1, 44, new(8, 35, 8, 45), exactGap: true);
+        Assert.Equal(new(expectedPl1, expectedPl2), result);
+    }
+
+    [Fact]
+    public void Simplified_mode_does_not_change_direct_pl2_edits_or_unknown_model_policy()
+    {
+        var known = new FrontendTdpLimits(8, 30, 8, 37);
+        Assert.Equal(new(20, 31), DevicePage.TdpDraftPolicy.AdjustAfterEdit(false, 20, 31, known, exactGap: true));
+
+        var unknown = new FrontendTdpLimits(8, 32, 8, 40);
+        Assert.Equal(new(20, 35), DevicePage.TdpDraftPolicy.AdjustAfterEdit(true, 20, 35, unknown, exactGap: true));
+    }
+
+    [Fact]
+    public void Simplified_mode_visibility_targets_whole_pl2_rows_in_all_three_main_pages()
+    {
+        var root = Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views");
+        foreach (var file in new[] { "DevicePage.xaml", "ProfilePage.xaml", "XboxPage.xaml" })
+        {
+            var xaml = XDocument.Load(Path.Combine(root, file));
+            Assert.Contains(xaml.Descendants().Where(element => element.Name.LocalName == "Grid"),
+                element => ((string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "AcPl2Row" || ((string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "TdpAcPl2Row");
+            Assert.Contains(xaml.Descendants().Where(element => element.Name.LocalName == "Grid"),
+                element => ((string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "DcPl2Row" || ((string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))) == "TdpDcPl2Row");
+        }
+    }
+
     [Fact]
     public void Existing_independent_pair_is_unchanged_until_a_user_edit()
     {
@@ -127,5 +171,16 @@ public sealed class TdpFrontendContractTests
 
         Assert.False(DevicePage.TdpDraftPolicy.ShouldShowHardwareResult(editedAc: false, hardware));
         Assert.True(DevicePage.TdpDraftPolicy.ShouldShowHardwareResult(editedAc: true, hardware));
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
+                return directory.FullName;
+        }
+
+        throw new DirectoryNotFoundException("Repository root was not found.");
     }
 }
