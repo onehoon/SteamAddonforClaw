@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay;
 using Xunit;
@@ -179,7 +180,7 @@ public sealed class OverlayShortcutQuickSettingsTests
         var unavailableSteam = QuickSettingsPageSnapshot.Unavailable(
             QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(570), "Profile storage is read-only.");
         var noGame = QuickSettingsPageSnapshot.Unavailable(
-            QuickSettingsPageId.Profile, null, "No game is currently running. Start a game to configure its profile.");
+            QuickSettingsPageId.Profile, null, ReadNoGameProfileMessage());
         var unrelatedFailure = QuickSettingsPageSnapshot.Unavailable(
             QuickSettingsPageId.Profile, null, "Active profile capture failed.");
 
@@ -256,6 +257,12 @@ public sealed class OverlayShortcutQuickSettingsTests
     private static QuickSettingsPageSnapshot ProfilePage(QuickSettingsProfileTarget target, string gameName = "") =>
         new(QuickSettingsPageId.Profile, target, true, null,
             [new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, gameName, [])], []);
+
+    private static string ReadNoGameProfileMessage() =>
+        (string?)typeof(OverlayWindow).GetField(
+            "NoActiveGameMessage",
+            BindingFlags.Static | BindingFlags.NonPublic)?.GetRawConstantValue()
+        ?? throw new InvalidOperationException("The no-game profile message is unavailable.");
 
     private static QuickSettingsRow NumericRow(QuickSettingsRowId rowId, string label, int value, bool visible = true) =>
         new(rowId, label, QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(value),

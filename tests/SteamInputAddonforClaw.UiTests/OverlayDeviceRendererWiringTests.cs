@@ -553,7 +553,7 @@ public sealed class OverlayDeviceRendererWiringTests
     [Fact]
     public void Conditional_profile_recheck_only_accepts_the_exact_no_game_page_once_per_selected_entry()
     {
-        const string noGameMessage = "No game is currently running. Start a game to configure its profile.";
+        var noGameMessage = ReadNoGameProfileMessage();
         var noGame = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, noGameMessage);
         var loading = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Loading the active game profile.");
         var activeSteam = new QuickSettingsPageSnapshot(
@@ -1138,6 +1138,12 @@ public sealed class OverlayDeviceRendererWiringTests
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"),
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"),
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
+
+    private static string ReadNoGameProfileMessage() =>
+        (string?)typeof(OverlayWindow).GetField(
+            "NoActiveGameMessage",
+            BindingFlags.Static | BindingFlags.NonPublic)?.GetRawConstantValue()
+        ?? throw new InvalidOperationException("The no-game profile message is unavailable.");
 
     private static string ReadWindowInteropSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "WindowInterop.cs");
 

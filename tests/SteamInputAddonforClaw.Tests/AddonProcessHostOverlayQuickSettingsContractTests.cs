@@ -201,7 +201,6 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Contains("var target = CaptureActiveQuickSettingsProfileTarget();", method);
         Assert.Contains("if (target is null)", method);
         Assert.Contains("QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null,", method);
-        Assert.Contains("No game is currently running. Start a game to configure its profile.", method);
         // The target == null branch returns before this call is ever reached.
         Assert.Contains("return _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, target, token);", method);
     }
