@@ -19,6 +19,19 @@ public sealed class QuickOverlayPageTests
             QuickOverlayPage.ResolveQuickSettingsPowerSourcePreference(lastKnownValue, refreshedValue));
     }
 
+    [Theory]
+    [InlineData(false, null, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    public void Failed_simplified_tdp_mutation_prefers_readback_and_falls_back_to_last_confirmed_value(
+        bool lastKnownValue,
+        bool? refreshedValue,
+        bool expectedValue)
+    {
+        Assert.Equal(expectedValue,
+            QuickOverlayPage.ResolveSimplifiedTdpControlsPreference(lastKnownValue, refreshedValue));
+    }
+
     [Fact]
     public void Initialization_uses_startup_snapshot_and_activation_refreshes_authoritative_state()
     {
@@ -28,6 +41,7 @@ public sealed class QuickOverlayPageTests
         var refresh = ExtractMethod(page, "private async Task RefreshQuickSettingsPowerSourcePreferenceAsync()");
 
         Assert.Contains("bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly", initialize, StringComparison.Ordinal);
+        Assert.Contains("bootstrap.Settings.SimplifiedTdpControls", initialize, StringComparison.Ordinal);
         Assert.Contains("SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly)", initialize, StringComparison.Ordinal);
         Assert.DoesNotContain("GetBootstrapAsync", initialize, StringComparison.Ordinal);
         Assert.Contains("internal void Activate() => RequestRefresh()", page, StringComparison.Ordinal);
@@ -35,10 +49,11 @@ public sealed class QuickOverlayPageTests
         Assert.Contains("_ = RefreshQuickSettingsPowerSourcePreferenceAsync()", requestRefresh, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshTabOrderAsync()", requestRefresh, StringComparison.Ordinal);
         Assert.Contains("await _frontend.GetBootstrapAsync()", refresh, StringComparison.Ordinal);
-        Assert.Contains("_powerSourceMutationInProgress && _yButtonQuickJumpMutationInProgress", refresh, StringComparison.Ordinal);
+        Assert.Contains("_powerSourceMutationInProgress && _yButtonQuickJumpMutationInProgress && _simplifiedTdpControlsMutationInProgress", refresh, StringComparison.Ordinal);
         Assert.Contains("_discardInFlightPowerSourceRefresh = false", refresh, StringComparison.Ordinal);
         Assert.Contains("_lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly", refresh, StringComparison.Ordinal);
         Assert.Contains("bootstrap.Settings.YButtonQuickJumpTarget", refresh, StringComparison.Ordinal);
+        Assert.Contains("bootstrap.Settings.SimplifiedTdpControls", refresh, StringComparison.Ordinal);
         Assert.Contains("catch (Exception exception)", refresh, StringComparison.Ordinal);
         Assert.Contains("finally", refresh, StringComparison.Ordinal);
     }
@@ -49,9 +64,10 @@ public sealed class QuickOverlayPageTests
         var root = FindRepositoryRoot();
         var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml"));
         var cards = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
-        Assert.Equal(2, cards.Length);
+        Assert.Equal(3, cards.Length);
         Assert.Equal("YButtonQuickJumpCard", (string?)cards[0].Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")));
         Assert.Equal("QuickSettingsPowerSourceCard", (string?)cards[1].Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")));
+        Assert.Equal("SimplifiedTdpControlsCard", (string?)cards[2].Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")));
         var expander = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "SettingsExpander");
         Assert.Equal("False", (string?)expander.Attribute("IsExpanded"));
 
@@ -158,6 +174,28 @@ public sealed class QuickOverlayPageTests
         Assert.Contains("QuickSettingsCurrentPowerSourceOnlyRequested", overlayPage, StringComparison.Ordinal);
         Assert.Contains("ApplyQuickSettingsCurrentPowerSourceOnly", overlayPage, StringComparison.Ordinal);
         Assert.Contains("_client!.SendCurrentPowerSourceMutationAsync(enabled)", overlayApp, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Simplified_tdp_toggle_uses_authoritative_runtime_state_and_the_typed_overlay_request()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
+        var handler = ExtractMethod(page, "private async void SimplifiedTdpControlsToggleSwitch_Toggled(");
+        var xaml = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml"));
+        Assert.Contains("await _frontend.SetSimplifiedTdpControlsAsync(", handler, StringComparison.Ordinal);
+        Assert.Contains("settings.SimplifiedTdpControls", handler, StringComparison.Ordinal);
+        Assert.Contains("ResolveSimplifiedTdpControlsPreference(", handler, StringComparison.Ordinal);
+        Assert.Contains("Toggled=\"SimplifiedTdpControlsToggleSwitch_Toggled\"", xaml, StringComparison.Ordinal);
+
+        var overlay = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs"));
+        var app = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs"));
+        var wire = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.FrontendTransport", "OverlayWire.cs"));
+        Assert.Contains("SimplifiedTdpControlsRequested", overlay, StringComparison.Ordinal);
+        Assert.Contains("ApplySimplifiedTdpControls(settings.SimplifiedTdpControls", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs")), StringComparison.Ordinal);
+        Assert.Contains("SendSimplifiedTdpControlsMutationAsync(enabled)", app, StringComparison.Ordinal);
+        Assert.Contains("SimplifiedTdpControlsMutationRequest", wire, StringComparison.Ordinal);
+        Assert.Contains("CurrentVersion = 23", wire, StringComparison.Ordinal);
     }
 
     [Fact]

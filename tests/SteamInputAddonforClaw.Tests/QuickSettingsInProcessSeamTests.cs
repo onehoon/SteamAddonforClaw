@@ -73,6 +73,22 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Simplified_tdp_preference_mutation_persists_and_invalidates_only_on_change()
+    {
+        var control = CreateControl(cpuBoostRuntime: null);
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        var changed = await control.SetSimplifiedTdpControlsAsync(true);
+        var repeated = await control.SetSimplifiedTdpControlsAsync(true);
+
+        Assert.True(changed.SimplifiedTdpControls);
+        Assert.True(repeated.SimplifiedTdpControls);
+        Assert.True((await control.GetBootstrapAsync()).Settings.SimplifiedTdpControls);
+        Assert.Equal(1, invalidations);
+    }
+
+    [Fact]
     public async Task Y_button_quick_jump_preference_persists_projects_and_invalidates_only_on_change()
     {
         var control = CreateControl(cpuBoostRuntime: null);

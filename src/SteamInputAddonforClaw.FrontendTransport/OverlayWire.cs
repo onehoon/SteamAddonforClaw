@@ -45,11 +45,12 @@ internal static class OverlayTransportProtocol
     // Version 20 adds correlated Controller for Steam / gyroscope mutations.
     // Version 21 adds repeat-only semantic Left/Right navigation actions for selected native numeric sliders.
     // Version 22 adds the configured Y-button QuickJump action and its correlated settings mutation.
-    internal const int CurrentVersion = 22;
+    // Version 23 adds the Runtime-owned Simplified TDP Controls setting mutation.
+    internal const int CurrentVersion = 23;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerForSteamMutationRequest, ControllerForSteamMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest, YButtonQuickJumpMutationRequest, YButtonQuickJumpMutationResult }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerForSteamMutationRequest, ControllerForSteamMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest, YButtonQuickJumpMutationRequest, YButtonQuickJumpMutationResult, SimplifiedTdpControlsMutationRequest, SimplifiedTdpControlsMutationResult }
 internal enum OverlayCommand { Show, Hide, Shutdown, ShowActiveProfile }
 internal enum OverlayNavigationAction
 {
@@ -110,7 +111,7 @@ internal sealed record OverlayBackButtonMappingMutationResponse(
     string? FailureMessage,
     OverlayBackButtonMappingState State);
 
-internal sealed record OverlayFrontendSettingsMutationRequest(long RequestId, ControllerLedSettings? ControllerLed = null, bool? CurrentPowerSourceOnly = null, SteamVirtualControllerPreference? SteamVirtualController = null, bool? GyroscopeEnabled = null, QuickOverlayYButtonTarget? YButtonQuickJumpTarget = null);
+internal sealed record OverlayFrontendSettingsMutationRequest(long RequestId, ControllerLedSettings? ControllerLed = null, bool? CurrentPowerSourceOnly = null, SteamVirtualControllerPreference? SteamVirtualController = null, bool? GyroscopeEnabled = null, QuickOverlayYButtonTarget? YButtonQuickJumpTarget = null, bool? SimplifiedTdpControls = null);
 internal sealed record OverlayFrontendSettingsMutationResponse(long RequestId, bool Succeeded, string? FailureMessage, FrontendSettingsSnapshot Settings, bool ControllerLedAvailable, bool SettingsAvailable = true);
 internal sealed record OverlayControllerVibrationMutationRequest(long RequestId, int LeftPercent, int RightPercent);
 internal sealed record OverlayControllerVibrationMutationResponse(long RequestId, FrontendControllerVibrationStrengthMutationResult Result);

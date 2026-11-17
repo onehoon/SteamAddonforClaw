@@ -969,6 +969,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 settings = await control.SetQuickOverlayYButtonTargetAsync(target, token).ConfigureAwait(false);
                 succeeded = settings.YButtonQuickJumpTarget == target;
             }
+            else if (request.SimplifiedTdpControls is { } simplifiedTdpControls)
+            {
+                settings = await control.SetSimplifiedTdpControlsAsync(simplifiedTdpControls, token).ConfigureAwait(false);
+                succeeded = settings.SimplifiedTdpControls == simplifiedTdpControls;
+            }
             else
             {
                 settings = await control.SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value, token).ConfigureAwait(false);

@@ -278,6 +278,46 @@ public sealed class OverlayQuickSettingsPageBindingTests
         Assert.Equal(15, intent.Values.Single(value => value.RowId == QuickSettingsRowId.DeviceTdpDcPl1).Value.IntegerValue);
     }
 
+    [Fact]
+    public async Task Simplified_hidden_pl2_keeps_exact_linked_preview_and_full_grouped_commit()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var linked = new[]
+        {
+            new QuickSettingsLinkedSliderConstraint(
+                QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, 1) { ExactGap = true },
+            new QuickSettingsLinkedSliderConstraint(
+                QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsRowId.DeviceTdpDcPl2, 1) { ExactGap = true },
+        };
+        var source = TdpPage(pl1Ac: 20, pl2Ac: 32, pl1Dc: 15, pl2Dc: 33, linked: linked);
+        var simplified = source with
+        {
+            Sections = source.Sections.Select(section => section with
+            {
+                Rows = section.Rows.Select(row => row.RowId is QuickSettingsRowId.DeviceTdpAcPl2 or QuickSettingsRowId.DeviceTdpDcPl2
+                    ? row with { Visible = false }
+                    : row).ToArray(),
+            }).ToArray(),
+        };
+        using var binding = NewBinding(simplified, mutate.Func, delay.Func);
+
+        Assert.False(binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpAcPl2, QuickSettingsValue.Integer(30)));
+        Assert.True(binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsValue.Integer(24), out var changedRows));
+        Assert.Equal(new[] { QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2 }, changedRows.Order());
+        Assert.True(binding.TryGetPendingValue(QuickSettingsRowId.DeviceTdpAcPl2, out var previewPl2));
+        Assert.Equal(25, previewPl2.IntegerValue);
+        Assert.True(binding.TryGetPendingValue(QuickSettingsRowId.DeviceTdpDcPl2, out var unchangedDcPl2));
+        Assert.Equal(33, unchangedDcPl2.IntegerValue);
+
+        delay.Elapse();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "simplified grouped TDP mutation submitted");
+        var intent = Assert.Single(mutate.Calls);
+        Assert.Equal(5, intent.Values.Count);
+        Assert.Equal(25, intent.Values.Single(value => value.RowId == QuickSettingsRowId.DeviceTdpAcPl2).Value.IntegerValue);
+        Assert.Equal(33, intent.Values.Single(value => value.RowId == QuickSettingsRowId.DeviceTdpDcPl2).Value.IntegerValue);
+    }
+
     // --- Independent slider intent (section 47.C) ---------------------------------------------
 
     [Fact]

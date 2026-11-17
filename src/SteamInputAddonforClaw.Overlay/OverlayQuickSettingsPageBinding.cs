@@ -423,7 +423,14 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
             var gap = constraint.MinimumGap;
             if (gap <= 0) continue;
 
-            if (constraint.LowerRowId == editedRowId && upper < lower + gap)
+            if (constraint.LowerRowId == editedRowId && constraint.ExactGap)
+            {
+                var exactLower = Math.Min(lower, Math.Min(lowerSpec.Maximum, upperSpec.Maximum - gap));
+                exactLower = Math.Max(exactLower, lowerSpec.Minimum);
+                values[constraint.LowerRowId] = QuickSettingsValue.Integer(exactLower);
+                values[constraint.UpperRowId] = QuickSettingsValue.Integer(exactLower + gap);
+            }
+            else if (constraint.LowerRowId == editedRowId && upper < lower + gap)
             {
                 if (lower + gap <= upperSpec.Maximum)
                     values[constraint.UpperRowId] = QuickSettingsValue.Integer(lower + gap);

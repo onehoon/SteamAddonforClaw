@@ -33,6 +33,7 @@ public partial class App : Application
         _window.ControllerForSteamEditRequested += OnControllerForSteamEditRequested;
         _window.ControllerVibrationStrengthEditRequested += OnControllerVibrationStrengthEditRequested;
         _window.QuickSettingsCurrentPowerSourceOnlyRequested += OnQuickSettingsCurrentPowerSourceOnlyRequested;
+        _window.SimplifiedTdpControlsRequested += OnSimplifiedTdpControlsRequested;
         _window.YButtonQuickJumpTargetRequested += OnYButtonQuickJumpTargetRequested;
         _window.NoRunningGameProfileRecheckRequested += OnNoRunningGameProfileRecheckRequested;
         _window.ClawHudEnabledRequested += OnClawHudEnabledRequested;
@@ -254,6 +255,9 @@ public partial class App : Application
     private void OnQuickSettingsCurrentPowerSourceOnlyRequested(bool enabled) => _ = SendFrontendSettingsMutationAsync(
         () => _client!.SendCurrentPowerSourceMutationAsync(enabled), led: false);
 
+    private void OnSimplifiedTdpControlsRequested(bool enabled) => _ = SendFrontendSettingsMutationAsync(
+        () => _client!.SendSimplifiedTdpControlsMutationAsync(enabled), led: false, simplifiedTdpControlsMutation: true);
+
     private void OnYButtonQuickJumpTargetRequested(QuickOverlayYButtonTarget target) => _ = SendFrontendSettingsMutationAsync(
         () => _client!.SendYButtonQuickJumpMutationAsync(target), led: false, yButtonQuickJumpMutation: true);
 
@@ -277,7 +281,8 @@ public partial class App : Application
         Func<Task<OverlayFrontendSettingsMutationResponse>> send,
         bool led,
         ControllerForSteamMutationKind? controllerForSteamMutation = null,
-        bool yButtonQuickJumpMutation = false)
+        bool yButtonQuickJumpMutation = false,
+        bool simplifiedTdpControlsMutation = false)
     {
         try
         {
@@ -285,12 +290,12 @@ public partial class App : Application
             var result = await send().ConfigureAwait(false);
             if (!result.Succeeded)
                 OverlayLog.Warn("Controller", result.FailureMessage ?? "Frontend settings update was not accepted.");
-            await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation, yButtonQuickJumpMutation)).ConfigureAwait(false);
+            await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationResult(result, led, controllerForSteamMutation, yButtonQuickJumpMutation, simplifiedTdpControlsMutation)).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
             OverlayLog.Warn("Controller", "Frontend settings mutation failed.", null, ("ExceptionType", exception.GetType().Name));
-            try { await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation, yButtonQuickJumpMutation)).ConfigureAwait(false); }
+            try { await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationFailure(led, controllerForSteamMutation, yButtonQuickJumpMutation, simplifiedTdpControlsMutation)).ConfigureAwait(false); }
             catch { OverlayLog.Warn("Controller", "Could not enqueue frontend settings failure state."); }
         }
     }

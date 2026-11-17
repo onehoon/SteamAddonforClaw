@@ -43,6 +43,21 @@
                     Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard
+                x:Name="SimplifiedTdpControlsCard"
+                x:Uid="QuickOverlay_SimplifiedTdpControlsCard"
+                Description="Show PL1 only; PL2 automatically follows PL1 using the device-specific gap."
+                Header="Simplified TDP Controls">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71B;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="SimplifiedTdpControlsToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="SimplifiedTdpControlsToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsExpander
                 x:Name="QuickOverlayTabOrderExpander"
                 x:Uid="QuickOverlay_TabOrderExpander"

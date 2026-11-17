@@ -32,6 +32,9 @@ public sealed partial class OverlayWindow
     private OverlayToggleRow? _quickSettingsCurrentPowerSourceOnlyRow;
     private bool _quickSettingsCurrentPowerSourceOnly;
     private bool? _pendingQuickSettingsCurrentPowerSourceOnly;
+    private OverlayToggleRow? _quickSettingsSimplifiedTdpControlsRow;
+    private bool _quickSettingsSimplifiedTdpControls;
+    private bool? _pendingQuickSettingsSimplifiedTdpControls;
     private bool _quickSettingsSettingsAvailable;
     private bool _quickSettingsMutationInFlight;
     private readonly OverlayClawHudMutationState _clawHudMutation = new();
@@ -39,6 +42,7 @@ public sealed partial class OverlayWindow
     internal event Action<bool>? ClawHudEnabledRequested;
     internal event Action<FrontendClawHudMutationIntent>? ClawHudSettingMutationRequested;
     internal event Action<bool>? QuickSettingsCurrentPowerSourceOnlyRequested;
+    internal event Action<bool>? SimplifiedTdpControlsRequested;
     internal event Action<QuickOverlayYButtonTarget>? YButtonQuickJumpTargetRequested;
 
     private FrameworkElement BuildSettingPage(List<OverlayRow> rows)
@@ -211,7 +215,8 @@ public sealed partial class OverlayWindow
 
         return detail == SettingDetailId.QuickSettings && _quickSettingsMutationInFlight &&
             _quickSettingsSettingsAvailable &&
-            ReferenceEquals(container, _quickSettingsCurrentPowerSourceOnlyRow?.Container);
+            (ReferenceEquals(container, _quickSettingsCurrentPowerSourceOnlyRow?.Container) ||
+             ReferenceEquals(container, _quickSettingsSimplifiedTdpControlsRow?.Container));
     }
 
     private StackPanel BuildQuickSettingsPage()
@@ -237,6 +242,15 @@ public sealed partial class OverlayWindow
             new OverlayRow(_quickSettingsCurrentPowerSourceOnlyRow.Container, _quickSettingsCurrentPowerSourceOnlyRow.Capabilities),
             SettingDetailId.QuickSettings));
         RegisterRowPointerSelection(_quickSettingsCurrentPowerSourceOnlyRow.Container);
+
+        _quickSettingsSimplifiedTdpControlsRow = new OverlayToggleRow(
+            "Simplified TDP Controls", RequestSimplifiedTdpControls);
+        OverlayRowChrome.ApplyDetailPadding(_quickSettingsSimplifiedTdpControlsRow.Container);
+        section.Children.Add(_quickSettingsSimplifiedTdpControlsRow.Container);
+        _quickSettingsRows.Add(CreateSettingDetailRow(
+            new OverlayRow(_quickSettingsSimplifiedTdpControlsRow.Container, _quickSettingsSimplifiedTdpControlsRow.Capabilities),
+            SettingDetailId.QuickSettings));
+        RegisterRowPointerSelection(_quickSettingsSimplifiedTdpControlsRow.Container);
         return section;
     }
 
@@ -245,6 +259,13 @@ public sealed partial class OverlayWindow
         _quickSettingsCurrentPowerSourceOnly = enabled;
         _quickSettingsSettingsAvailable = available;
         RenderQuickSettingsCurrentPowerSourceRow();
+    }
+
+    internal void ApplySimplifiedTdpControls(bool enabled, bool available)
+    {
+        _quickSettingsSimplifiedTdpControls = enabled;
+        _quickSettingsSettingsAvailable = available;
+        RenderSimplifiedTdpControlsRow();
     }
 
     internal void ApplyQuickSettingsYButtonQuickJumpTarget(QuickOverlayYButtonTarget target, bool available)
@@ -335,6 +356,19 @@ public sealed partial class OverlayWindow
         QuickSettingsCurrentPowerSourceOnlyRequested?.Invoke(enabled);
     }
 
+    private void RequestSimplifiedTdpControls(bool enabled)
+    {
+        if (!_quickSettingsSettingsAvailable || _quickSettingsMutationInFlight)
+        {
+            RenderSimplifiedTdpControlsRow();
+            return;
+        }
+        _quickSettingsMutationInFlight = true;
+        _pendingQuickSettingsSimplifiedTdpControls = enabled;
+        RenderSimplifiedTdpControlsRow();
+        SimplifiedTdpControlsRequested?.Invoke(enabled);
+    }
+
     private void SetQuickSettingsCurrentPowerSourceMutationInFlight(bool inFlight)
     {
         _quickSettingsMutationInFlight = inFlight;
@@ -343,11 +377,26 @@ public sealed partial class OverlayWindow
         RenderQuickSettingsCurrentPowerSourceRow();
     }
 
+    private void SetSimplifiedTdpControlsMutationInFlight(bool inFlight)
+    {
+        _quickSettingsMutationInFlight = inFlight;
+        if (!inFlight)
+            _pendingQuickSettingsSimplifiedTdpControls = null;
+        RenderSimplifiedTdpControlsRow();
+    }
+
     internal void RenderQuickSettingsCurrentPowerSourceRow()
     {
         _quickSettingsCurrentPowerSourceOnlyRow?.ApplyState(
             _quickSettingsSettingsAvailable && !_quickSettingsMutationInFlight,
             _pendingQuickSettingsCurrentPowerSourceOnly ?? _quickSettingsCurrentPowerSourceOnly);
+    }
+
+    internal void RenderSimplifiedTdpControlsRow()
+    {
+        _quickSettingsSimplifiedTdpControlsRow?.ApplyState(
+            _quickSettingsSettingsAvailable && !_quickSettingsMutationInFlight,
+            _pendingQuickSettingsSimplifiedTdpControls ?? _quickSettingsSimplifiedTdpControls);
     }
 
     private StackPanel BuildClawHudPage()

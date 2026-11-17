@@ -50,6 +50,37 @@ internal static class QuickSettingsPresentation
         };
     }
 
+    internal static QuickSettingsPageSnapshot ApplySimplifiedTdpControls(
+        QuickSettingsPageSnapshot page,
+        bool simplifiedTdpControls)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        if (!simplifiedTdpControls || page.LinkedSliderConstraints.Count == 0)
+            return page;
+
+        var supportedConstraints = page.LinkedSliderConstraints
+            .Where(constraint => constraint.MinimumGap > 0)
+            .ToArray();
+        if (supportedConstraints.Length == 0)
+            return page;
+
+        var hiddenUpperRows = supportedConstraints
+            .Select(constraint => constraint.UpperRowId)
+            .ToHashSet();
+        return page with
+        {
+            Sections = page.Sections.Select(section => section with
+            {
+                Rows = section.Rows.Select(row => hiddenUpperRows.Contains(row.RowId)
+                    ? row with { Visible = false }
+                    : row).ToArray()
+            }).ToArray(),
+            LinkedSliderConstraints = page.LinkedSliderConstraints
+                .Select(constraint => constraint with { ExactGap = constraint.MinimumGap > 0 })
+                .ToArray()
+        };
+    }
+
     private static bool IsVisibleForPowerSource(QuickSettingsRowId rowId, AcDcPowerSource source) => rowId switch
     {
         QuickSettingsRowId.DeviceTdpAcPl1 or QuickSettingsRowId.DeviceTdpAcPl2

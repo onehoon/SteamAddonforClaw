@@ -30,6 +30,9 @@ public sealed record AppSettings(
     /// side. The complete saved configuration is always retained.</summary>
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
 
+    /// <summary>Shows only PL1 for supported Quick Settings TDP controls and derives PL2 from the model gap.</summary>
+    public bool SimplifiedTdpControls { get; init; }
+
     /// <summary>Persisted destination for Y-button Quick Jump while the Addon Overlay is captured.</summary>
     public QuickOverlayYButtonTarget YButtonQuickJumpTarget { get; init; } = QuickOverlayYButtonTarget.Profile;
 

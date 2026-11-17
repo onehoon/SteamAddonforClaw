@@ -97,6 +97,61 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
+    public void Simplified_device_projection_hides_only_pl2_rows_and_marks_exact_gap_without_removing_group_values()
+    {
+        var page = QuickSettingsPresentation.ApplySimplifiedTdpControls(QuickSettingsPresentation.BuildDevice(EnabledSnapshot()), true);
+        var section = page.Sections.Single(item => item.SectionId == QuickSettingsSectionId.DeviceTdp);
+
+        Assert.Equal(5, section.Rows.Count);
+        Assert.True(FindRow(page, QuickSettingsRowId.DeviceTdpAcPl1).Visible);
+        Assert.False(FindRow(page, QuickSettingsRowId.DeviceTdpAcPl2).Visible);
+        Assert.True(FindRow(page, QuickSettingsRowId.DeviceTdpDcPl1).Visible);
+        Assert.False(FindRow(page, QuickSettingsRowId.DeviceTdpDcPl2).Visible);
+        Assert.Equal(2, page.LinkedSliderConstraints.Count);
+        Assert.All(page.LinkedSliderConstraints, constraint => Assert.True(constraint.ExactGap));
+        Assert.All(section.Rows.Where(row => row.RowId != QuickSettingsRowId.DeviceTdpEnabled), row =>
+        {
+            Assert.Equal(QuickSettingsCommitGroupId.DeviceTdpConfiguration, row.CommitGroupId);
+            Assert.NotNull(row.Value);
+        });
+    }
+
+    [Fact]
+    public void Simplified_profile_projection_hides_pl2_but_retains_the_full_group()
+    {
+        var page = QuickSettingsPresentation.ApplySimplifiedTdpControls(QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot()), true);
+        var section = page.Sections.Single(item => item.SectionId == QuickSettingsSectionId.ProfileTdp);
+
+        Assert.Equal(5, section.Rows.Count);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileTdpAcPl2).Visible);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileTdpDcPl2).Visible);
+        Assert.All(page.LinkedSliderConstraints, constraint => Assert.True(constraint.ExactGap));
+        Assert.All(section.Rows.Where(row => row.RowId != QuickSettingsRowId.ProfileTdpEnabled), row =>
+        {
+            Assert.Equal(QuickSettingsCommitGroupId.ProfileTdpConfiguration, row.CommitGroupId);
+            Assert.NotNull(row.Value);
+        });
+    }
+
+    [Fact]
+    public void Simplified_and_current_power_source_filters_compose_and_unknown_models_remain_advanced()
+    {
+        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
+        var acOnly = QuickSettingsPresentation.ApplySimplifiedTdpControls(
+            QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.AC), true);
+
+        Assert.True(FindRow(acOnly, QuickSettingsRowId.DeviceTdpAcPl1).Visible);
+        Assert.False(FindRow(acOnly, QuickSettingsRowId.DeviceTdpAcPl2).Visible);
+        Assert.False(FindRow(acOnly, QuickSettingsRowId.DeviceTdpDcPl1).Visible);
+        Assert.False(FindRow(acOnly, QuickSettingsRowId.DeviceTdpDcPl2).Visible);
+
+        var unknown = QuickSettingsPresentation.ApplySimplifiedTdpControls(
+            QuickSettingsPresentation.BuildDevice(EnabledSnapshot(new(8, 32, 8, 40))), true);
+        Assert.Empty(unknown.LinkedSliderConstraints);
+        Assert.All(unknown.Sections.SelectMany(section => section.Rows), row => Assert.True(row.Visible));
+    }
+
+    [Fact]
     public void Power_source_projection_applies_to_profile_rows_without_removing_hidden_companions()
     {
         var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(42), true, null,

@@ -241,7 +241,10 @@ public sealed class XboxCatalogPageUiTests
         Assert.Contains("else if (wasXbox) _xboxContent?.Deactivate()", showPage, StringComparison.Ordinal);
         Assert.Contains("GetOrCreateXboxPage()", materialize, StringComparison.Ordinal);
         Assert.DoesNotContain(".Activate()", materialize, StringComparison.Ordinal);
-        Assert.DoesNotContain("StateInvalidated", pageCode, StringComparison.Ordinal);
+        var stateInvalidation = Method(pageCode, "private void OnStateInvalidated", "private async Task RefreshSimplifiedTdpControlsPreferenceAsync");
+        Assert.Contains("RefreshSimplifiedTdpControlsPreferenceAsync", stateInvalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshGamesAsync", stateInvalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureSelectedAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("PackageCatalog", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("Timer", pageCode, StringComparison.Ordinal);
     }
@@ -392,7 +395,10 @@ public sealed class XboxCatalogPageUiTests
 
         Assert.False(XboxPage.ShouldPreserveDirtyTdpDraft(true, 5, 5));
         Assert.True(XboxPage.ShouldPreserveDirtyTdpDraft(true, 5, 6));
-        Assert.DoesNotContain("StateInvalidated", code, StringComparison.Ordinal);
+        var stateInvalidation = Method(code, "private void OnStateInvalidated", "private async Task RefreshSimplifiedTdpControlsPreferenceAsync");
+        Assert.Contains("RefreshSimplifiedTdpControlsPreferenceAsync", stateInvalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshGamesAsync", stateInvalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureSelectedAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("ActualRunningAppId", code, StringComparison.Ordinal);
         Assert.DoesNotContain("Reconcile", code, StringComparison.Ordinal);
     }
