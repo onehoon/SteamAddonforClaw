@@ -144,6 +144,7 @@ public sealed partial class OverlayWindow
     // Reset selection to the first tab in the current order before every visual reveal.
     private void ResetUiForShow()
     {
+        ResetShortcutQuickSettingsForShow();
         PrepareActiveProfileFirstShow();
         ResetDetailForTabChangeOrShow();
         _tabState.ResetForShow();
@@ -285,6 +286,17 @@ public sealed partial class OverlayWindow
         foreach (var (id, page) in _tabPages)
             page.Visibility = id == selected ? Visibility.Visible : Visibility.Collapsed;
 
+        if (selected == AddonQuickSettingsTabId.Shortcut)
+        {
+            _shortcutUserNavigatedThisEntry = false;
+            RefreshShortcutQuickSettingsView();
+        }
+        else
+        {
+            _shortcutSettingsSelected = false;
+            RestoreShortcutQuickSettingsHome();
+        }
+
         try
         {
             BodyScroll.ChangeView(null, 0, null, disableAnimation: true);
@@ -294,14 +306,19 @@ public sealed partial class OverlayWindow
             OverlayLog.Warn("Shell", "Could not reset the body scroll position on tab change.", exception);
         }
 
-        _rowSelection.SetRows(CapabilitiesFor(selected));
-        ApplyRowSelectionVisual();
-
-        // Shortcut has its own bounded two-dimensional selection model; the shared row-selection
-        // model remains empty for this page.
         if (selected == AddonQuickSettingsTabId.Shortcut)
         {
             ResetShortcutSelection();
+            _shortcutSettingsSelected = CapabilitiesFor(selected).Any(capability => capability.IsSelectable());
+            _rowSelection.SetRows(_shortcutSettingsSelected ? CapabilitiesFor(selected) : []);
+        }
+        else
+            _rowSelection.SetRows(CapabilitiesFor(selected));
+        ApplyRowSelectionVisual();
+
+        // The Shortcut tab has two adjacent areas, each retaining its existing local selection model.
+        if (selected == AddonQuickSettingsTabId.Shortcut)
+        {
             ApplyShortcutSelectionVisual();
         }
 

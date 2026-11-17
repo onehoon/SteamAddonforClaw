@@ -301,7 +301,8 @@ public sealed class OverlayDeviceRendererWiringTests
             rebuild.IndexOf("else", rebuild.IndexOf("if (!page.Available)", StringComparison.Ordinal), StringComparison.Ordinal)];
 
         Assert.Contains("Content = content", build);
-        Assert.Contains("return content", build);
+        Assert.Contains("HomeHost = homeHost", build);
+        Assert.Contains("return homeHost", build);
         Assert.DoesNotContain("TextBlock", build);
         Assert.Contains("surface.Content.Children.Clear()", rebuild);
         Assert.Contains("surface.RenderedAvailable = false", unavailable);
@@ -348,7 +349,7 @@ public sealed class OverlayDeviceRendererWiringTests
             source.IndexOf("private void ReconcileQuickSettingsSections", StringComparison.Ordinal)];
         var reconcile = source[source.IndexOf("private void ReconcileQuickSettingsSections", StringComparison.Ordinal)..
             source.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal)];
-        var separatorPolicy = source[source.IndexOf("private static void ApplyQuickSettingsSectionSeparators", StringComparison.Ordinal)..
+        var separatorPolicy = source[source.IndexOf("private void ApplyQuickSettingsSectionSeparators", StringComparison.Ordinal)..
             source.IndexOf("private static Border CreateOverlaySectionCard", StringComparison.Ordinal)];
 
         Assert.Contains("ApplyQuickSettingsSectionSeparators(surface, page);", rebuild);
@@ -361,7 +362,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("SetOverlaySectionSeparator(rendered.Card, hasFeature)", separatorPolicy);
         Assert.True(separatorPolicy.IndexOf("SetOverlaySectionSeparator(rendered.Card, hasFeature)", StringComparison.Ordinal)
             < separatorPolicy.IndexOf("hasFeature = true", StringComparison.Ordinal));
-        Assert.DoesNotContain("QuickSettingsSectionId.ProfileTdp", separatorPolicy);
+        Assert.Contains("OverlayShortcutQuickSettingsProjection.SelectPerformanceSections(page)", separatorPolicy);
     }
 
     [Fact]
@@ -374,7 +375,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("oldRows[selectedIndex].QuickSettingsRowId", selection);
         Assert.Contains("_pageRows[surface.TabId] = rows;", selection);
         Assert.Contains("FindPreferredRowIndex(rowIds, preferredRowId)", selection);
-        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(surface.TabId), preferredIndex);", selection);
+        Assert.Contains("var tab = SelectionTabFor(surface);", selection);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(tab), preferredIndex);", selection);
         Assert.Contains("ApplyRowSelectionVisual();", selection);
         Assert.Contains("selectedRowId != preferredRowId", selection);
         Assert.DoesNotContain("selectedIndex != previousSelection", selection);
