@@ -41,8 +41,8 @@ internal static class QuickSettingsPresentation
                     Rows = section.Rows
                         .Select(row => row with
                         {
-                            Visible = !currentPowerSourceOnly || source is null
-                                || IsVisibleForPowerSource(row.RowId, source.Value),
+                            Visible = row.Visible && (!currentPowerSourceOnly || source is null
+                                || IsVisibleForPowerSource(row.RowId, source.Value)),
                         })
                         .ToArray(),
                 })
@@ -275,7 +275,7 @@ internal static class QuickSettingsPresentation
         {
             return new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control",
                 [new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle,
-                    Available: false, Writable: false, Value: null, SliderSpec: null, CommitPolicy: QuickSettingsCommitPolicy.Immediate)],
+                    Available: false, Writable: false, Value: null, SliderSpec: null, CommitPolicy: QuickSettingsCommitPolicy.Immediate) { Visible = false }],
                 "TDP limits are unavailable.");
         }
         var writable = snapshot.PersistenceWritable && snapshot.Enabled;
@@ -286,7 +286,7 @@ internal static class QuickSettingsPresentation
                 Writable: writable,
                 Value: QuickSettingsValue.Boolean(snapshot.Tdp.Enabled),
                 SliderSpec: null,
-                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate) { Visible = false },
         };
 
         if (snapshot.Tdp.Enabled)
@@ -321,7 +321,7 @@ internal static class QuickSettingsPresentation
                 Writable: writable,
                 Value: QuickSettingsValue.Boolean(snapshot.CpuBoost.Enabled),
                 SliderSpec: null,
-                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate) { Visible = false },
         };
 
         if (snapshot.CpuBoost.Enabled)
@@ -352,7 +352,7 @@ internal static class QuickSettingsPresentation
                 Writable: writable,
                 Value: QuickSettingsValue.Boolean(powerMode.Enabled),
                 SliderSpec: null,
-                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate) { Visible = false },
         };
 
         if (powerMode.Enabled)
@@ -496,7 +496,7 @@ internal static class QuickSettingsPresentation
                 Writable: tdp.Available && tdp.PersistenceWritable,
                 Value: tdp.Available ? QuickSettingsValue.Boolean(tdp.Configuration?.Enabled ?? false) : null,
                 SliderSpec: null,
-                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate) { Visible = false },
         };
 
         // Section 18.3: never fabricate slider values/ranges when TDP is enabled but the
@@ -567,7 +567,7 @@ internal static class QuickSettingsPresentation
                 Writable: available && cpuBoost.PersistenceWritable,
                 Value: available ? QuickSettingsValue.Boolean(cpuBoost.Enabled) : null,
                 SliderSpec: null,
-                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate) { Visible = false },
         };
 
         if (available && cpuBoost.Enabled)
@@ -611,7 +611,7 @@ internal static class QuickSettingsPresentation
                 Writable: writable,
                 Value: available ? QuickSettingsValue.Boolean(powerMode.Enabled) : null,
                 SliderSpec: null,
-                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate) { Visible = false },
         };
 
         if (available && powerMode.Enabled)

@@ -756,7 +756,7 @@ public sealed partial class DevicePage : UserControl
                 await Task.Delay(300, cts.Token);
                 DispatcherQueue.TryEnqueue(() =>
                 {
-                    if (!TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpEditGeneration), TdpEnabledToggleSwitch.IsOn)) return;
+                    if (!TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpEditGeneration), _tdpSnapshot.Configuration?.Enabled == true)) return;
                     var configuration = BuildTdpConfiguration(true);
                     if (configuration is not null) _ = RunTdpMutationAsync(configuration, generation, editedAc);
                 });

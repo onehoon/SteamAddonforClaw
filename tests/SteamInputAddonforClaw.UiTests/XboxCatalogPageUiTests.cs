@@ -70,6 +70,50 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
+    public void Performance_feature_toggles_are_hidden_but_profile_master_switches_remain_visible()
+    {
+        var pages = new[]
+        {
+            ("DevicePage.xaml",
+                new[] { "TdpEnabledToggleSwitch", "CpuBoostEnabledToggleSwitch", "PowerModeEnabledToggleSwitch" },
+                new[] { "TdpExpander", "TdpAcPl1Slider", "TdpDcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
+            ("ProfilePage.xaml",
+                new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle" },
+                new[] { "TdpExpander", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
+            ("XboxPage.xaml",
+                new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle" },
+                new[] { "TdpExpander", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
+        };
+        XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        foreach (var (pageName, toggleNames, retainedControls) in pages)
+        {
+            var document = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", pageName));
+            var controlNames = document.Descendants()
+                .Select(element => (string?)element.Attribute(xamlNamespace + "Name"))
+                .OfType<string>()
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var toggleName in toggleNames)
+            {
+                var toggle = document.Descendants().Single(element => element.Name.LocalName == "ToggleSwitch"
+                    && (string?)element.Attribute(xamlNamespace + "Name") == toggleName);
+                Assert.Equal("Collapsed", (string?)toggle.Attribute("Visibility"));
+                Assert.Null(toggle.Attribute("Toggled"));
+            }
+            Assert.All(retainedControls, name => Assert.Contains(name, controlNames));
+
+            if (pageName != "DevicePage.xaml")
+            {
+                var profileMaster = document.Descendants().Single(element =>
+                    element.Name.LocalName == "ToggleSwitch"
+                    && (string?)element.Attribute(xamlNamespace + "Name") == "ProfileEnabledToggle");
+                Assert.NotEqual("Collapsed", (string?)profileMaster.Attribute("Visibility"));
+                Assert.Equal("ProfileEnabledToggle_Toggled", (string?)profileMaster.Attribute("Toggled"));
+            }
+        }
+    }
+
+    [Fact]
     public void Steam_and_Xbox_game_pages_edit_minimum_gpu_clock_with_driver_indexes_and_cancel_stale_drafts()
     {
         var steamXaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml")).ToString();

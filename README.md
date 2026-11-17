@@ -117,13 +117,13 @@ The Device page shows the detected manufacturer and model, compatibility status,
 
 The page also provides device-wide performance and battery controls:
 
-- **TDP Control** — enables processor power-limit management. **PL1** is the sustained power limit and **PL2** is the higher short-duration limit. Values are separate for **Plugged in** and **On battery**. Available ranges depend on the detected Claw model. When available, the first setup may start from the existing MSI Center M Manual TDP values.
-- **CPU Boost** — enables management of the Windows processor boost mode, separately for plugged-in and battery use. Choices are **Disabled**, **Enabled**, **Aggressive**, **Efficient Enabled**, **Efficient Aggressive**, **Aggressive At Guaranteed**, and **Efficient Aggressive At Guaranteed**.
+- **TDP Control** — manages processor power limits using separate **Plugged in** and **On battery** values. **PL1** is the sustained power limit and **PL2** is the higher short-duration limit. Available ranges depend on the detected Claw model. When available, first setup uses valid MSI Center M Manual TDP values.
+- **CPU Boost** — manages the Windows processor boost mode separately for plugged-in and battery use. Choices are **Disabled**, **Enabled**, **Aggressive**, **Efficient Enabled**, **Efficient Aggressive**, **Aggressive At Guaranteed**, and **Efficient Aggressive At Guaranteed**. **Disabled** is a CPU mode choice, not an Addon management toggle.
 - **Maximum Processor State** — optionally sets the Windows maximum processor performance state to **99%** or **100%** separately for AC and DC. It is off for new users, is not a CPU-utilization limit, and is independent of CPU Boost. Turning it off stops the Addon from applying the setting; it does not restore the previous Windows value.
-- **Windows Power Mode** — enables management of the Windows power mode, separately for each power source: **Best power efficiency**, **Balanced**, or **Best performance**.
+- **Windows Power Mode** — manages the Windows power mode separately for each power source: **Best power efficiency**, **Balanced**, or **Best performance**.
 - **Battery charge limit** — enables a charging limit from 60% to 100% in 5% steps, when the device supports it.
 
-For **TDP Control**, **CPU Boost**, **Maximum Processor State**, and **Windows Power Mode**, turning the feature off means the Addon stops managing that setting. It does not necessarily restore the exact Windows or MSI value that existed before the Addon managed it. Your saved choices are kept so you can enable the feature again later.
+TDP Control, CPU Boost, and Windows Power Mode are managed whenever their valid settings are configured; they do not have individual on/off switches. The Addon does not necessarily restore the exact Windows or MSI value that existed before management began. **Maximum Processor State** remains an optional setting that can be turned off; turning it off does not restore the previous Windows value.
 
 **Battery charge limit** is different: its switch directly enables or disables the MSI charge-limit function. The selected percentage remains saved for later use.
 
@@ -172,7 +172,7 @@ Per-game options include:
 - **Intel FPS Limit** — a per-power-source target from 40 to 120 FPS in 1 FPS steps. It uses Intel's FPS-limiting support; some games may not support it.
 - **Resolution** — **Do not change**, 1920 × 1200, 1920 × 1080, 1680 × 1050, or 1440 × 900.
 
-For **TDP Control**, **CPU Boost**, and **Windows Power Mode**, an enabled profile setting takes priority over the matching Device setting. If one of those profile settings is off, an enabled Device setting can continue to apply. **Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls and do not have Device-level fallback settings. When the game is no longer active, the profile-only controls stop applying and enabled Device settings for TDP, CPU Boost, and Windows Power Mode become effective again. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
+When the game profile is enabled and active, its configured **TDP Control**, **CPU Boost**, and **Windows Power Mode** values take priority over the matching Device values. When there is no active enabled game profile, the Device values apply. These three settings are managed when configured and have no per-feature on/off switch. **Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls and do not have Device-level fallback settings. When the game is no longer active, the profile-only controls stop applying and the Device values become effective again. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
 
 ### XBOX
 
@@ -180,7 +180,7 @@ The **XBOX** page lists recognized installed Xbox/Microsoft Store games availabl
 
 The performance options match the Steam profile options: TDP Control, CPU Boost, Windows Power Mode, Minimum GPU Clock, Intel FPS Limit, and Resolution. The XBOX profile also has a controller section for **Use global M1 / M2 mapping**. Turn that off to choose per-game Xbox 360 targets for M1 and M2. Steam Deck presentation still keeps M1 as R4 and M2 as L4.
 
-As with Steam, you can prepare a profile before the game starts. Its enabled settings apply when the Addon recognizes the corresponding XBOX title as active. For TDP Control, CPU Boost, and Windows Power Mode, an enabled Device setting can continue to apply when the corresponding profile setting is off. Minimum GPU Clock, Intel FPS Limit, and Resolution are game-profile-only and have no Device-level fallback.
+As with Steam, you can prepare a profile before the game starts. When the profile is enabled and the Addon recognizes the corresponding XBOX title as active, its configured TDP Control, CPU Boost, and Windows Power Mode values take priority over Device values. With no active enabled profile, Device values apply. Minimum GPU Clock, Intel FPS Limit, and Resolution are game-profile-only and have no Device-level fallback.
 
 ### ClawHUD
 
@@ -259,22 +259,21 @@ You can create and edit Steam and XBOX game profiles before starting a game. Sav
 
 A Steam game's **Virtual Controller** choice is available only while its master profile is enabled. **Use default** or a disabled/missing profile inherits the global **Controller → Controller for Steam Game** choice. When a game starts in Big Picture, its enabled explicit choice is selected automatically; when it ends and Big Picture stays open, the global choice resumes. Manual global and per-game controller choices are locked while any Steam game or Big Picture Mode is active. Turning a profile off keeps its saved controller choice for when the profile is enabled again.
 
-**TDP Control**, **CPU Boost**, and **Windows Power Mode** exist at both Device and game-profile level. When one of these settings is enabled in the active game profile, the profile value takes priority. If that profile setting is off, the enabled Device setting can continue to apply.
+**TDP Control**, **CPU Boost**, and **Windows Power Mode** are managed settings at both Device and game-profile level. When an enabled game profile is active, its configured values take priority over Device values. When there is no active enabled game profile, Device values apply. These three settings do not have individual on/off switches.
 
 **Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls. They do not fall back to a Device setting when disabled or when no matching game profile is active. **Battery charge limit** and **Maximum Processor State** are Device-only and are not part of a game profile.
 
 ```text
 Recognized active game + enabled profile
-    -> enabled TDP / CPU Boost / Power Mode profile settings override Device
+    -> profile TDP / CPU Boost / Power Mode values override Device
     -> enabled GPU Clock / FPS Limit / Resolution profile settings apply for that game
-    -> disabled TDP / CPU Boost / Power Mode profile settings can use enabled Device settings
 
 No active matching profile
-    -> enabled Device settings continue for Device-level features
+    -> Device TDP / CPU Boost / Power Mode values apply when configured
     -> no game-profile-only setting is active
 ```
 
-When the game stops being active, the profile-only settings stop applying and enabled Device settings become effective again where a Device-level counterpart exists. Turning TDP Control, CPU Boost, or Windows Power Mode off at Device level stops the Addon from managing that Device setting; it does not promise to restore a previous Windows or MSI value. Battery charge limit uses its own direct enable/disable behavior described in the Device section.
+When the game stops being active, the profile-only settings stop applying and configured Device values become effective again where a Device-level counterpart exists. The Addon does not promise to restore a previous Windows or MSI value. Battery charge limit uses its own direct enable/disable behavior described in the Device section.
 
 ## Non-Steam games
 
@@ -363,7 +362,7 @@ Check that the button you are pressing is assigned to **Quick Settings Overlay**
 
 ### A game profile does not apply
 
-In **Steam** or **XBOX**, select the correct game and confirm that its profile and the specific feature you want are enabled. For Steam, confirm Steam still recognizes the game as active. Check whether the setting is for **Plugged in** or **On battery**. TDP Control, CPU Boost, and Windows Power Mode override their Device counterparts only when enabled in the active profile. Minimum GPU Clock, Intel FPS Limit, and Resolution are profile-only settings and apply only when their profile controls are enabled.
+In **Steam** or **XBOX**, select the correct game and confirm its profile master switch is enabled. For Steam, confirm Steam still recognizes the game as active. Check whether the setting is for **Plugged in** or **On battery**. Configured TDP Control, CPU Boost, and Windows Power Mode values in the active profile take priority over Device values. Minimum GPU Clock, Intel FPS Limit, and Resolution are profile-only settings and apply only when their feature controls are enabled.
 
 ### A Non-Steam profile stops applying after a launcher closes
 

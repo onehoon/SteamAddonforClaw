@@ -81,10 +81,10 @@ public sealed class QuickSettingsPresentationTests
         {
             Assert.Equal(allRows[row.RowId].Value, row.Value);
             Assert.Equal(allRows[row.RowId].CommitGroupId, row.CommitGroupId);
-            Assert.Equal(IsAcRow(row.RowId) || !IsDcRow(row.RowId), row.Visible);
+            Assert.Equal(allRows[row.RowId].Visible && (IsAcRow(row.RowId) || !IsDcRow(row.RowId)), row.Visible);
         }
         foreach (var row in dc.Sections.SelectMany(section => section.Rows))
-            Assert.Equal(!IsAcRow(row.RowId) || IsDcRow(row.RowId), row.Visible);
+            Assert.Equal(allRows[row.RowId].Visible && (!IsAcRow(row.RowId) || IsDcRow(row.RowId)), row.Visible);
     }
 
     [Fact]
@@ -92,8 +92,13 @@ public sealed class QuickSettingsPresentationTests
     {
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
 
-        Assert.All(QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, null).Sections.SelectMany(section => section.Rows), row => Assert.True(row.Visible));
-        Assert.All(QuickSettingsPresentation.ApplyPowerSourceVisibility(page, false, AcDcPowerSource.DC).Sections.SelectMany(section => section.Rows), row => Assert.True(row.Visible));
+        var unknownPowerSource = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, null);
+        var filteringDisabled = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, false, AcDcPowerSource.DC);
+        foreach (var row in page.Sections.SelectMany(section => section.Rows))
+        {
+            Assert.Equal(row.Visible, FindRow(unknownPowerSource, row.RowId).Visible);
+            Assert.Equal(row.Visible, FindRow(filteringDisabled, row.RowId).Visible);
+        }
     }
 
     [Fact]
@@ -148,7 +153,39 @@ public sealed class QuickSettingsPresentationTests
         var unknown = QuickSettingsPresentation.ApplySimplifiedTdpControls(
             QuickSettingsPresentation.BuildDevice(EnabledSnapshot(new(8, 32, 8, 40))), true);
         Assert.Empty(unknown.LinkedSliderConstraints);
-        Assert.All(unknown.Sections.SelectMany(section => section.Rows), row => Assert.True(row.Visible));
+        Assert.All(unknown.Sections.SelectMany(section => section.Rows.Where(row => row.RowId is not QuickSettingsRowId.DeviceTdpEnabled and not QuickSettingsRowId.DeviceCpuBoostEnabled and not QuickSettingsRowId.DevicePowerModeEnabled)), row => Assert.True(row.Visible));
+        Assert.False(FindRow(unknown, QuickSettingsRowId.DeviceTdpEnabled).Visible);
+
+    }
+
+    [Fact]
+    public void Feature_enabled_toggle_rows_remain_in_device_and_profile_contracts_but_stay_hidden()
+    {
+        var device = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
+        var profile = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+        var toggleRows = new[]
+        {
+            (device, QuickSettingsRowId.DeviceTdpEnabled),
+            (device, QuickSettingsRowId.DeviceCpuBoostEnabled),
+            (device, QuickSettingsRowId.DevicePowerModeEnabled),
+            (profile, QuickSettingsRowId.ProfileTdpEnabled),
+            (profile, QuickSettingsRowId.ProfileCpuBoostEnabled),
+            (profile, QuickSettingsRowId.ProfilePowerModeEnabled),
+        };
+
+        foreach (var (page, rowId) in toggleRows)
+        {
+            var row = FindRow(page, rowId);
+            Assert.Equal(QuickSettingsControlKind.Toggle, row.ControlKind);
+            Assert.True(row.Value!.BooleanValue);
+            Assert.False(row.Visible);
+            Assert.False(FindRow(QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.AC), rowId).Visible);
+        }
+
+        Assert.All(device.Sections.Single(section => section.SectionId == QuickSettingsSectionId.DeviceTdp).Rows.Skip(1), row => Assert.True(row.Visible));
+        Assert.Equal(4, device.Sections.Single(section => section.SectionId == QuickSettingsSectionId.DeviceTdp).Rows.Count - 1);
+        Assert.Equal(2, profile.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileCpuBoost).Rows.Count - 1);
+        Assert.Equal(2, profile.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfilePowerMode).Rows.Count - 1);
     }
 
     [Fact]
