@@ -23,6 +23,18 @@ public sealed class MainUiLocalizationResourceTests
         "Content", "Text", "Header", "Description", "Title", "Message",
         "PlaceholderText", "ToolTip", "Label", "OffContent", "OnContent"
     };
+    private static readonly IReadOnlyDictionary<string, string[]> ResourceOnlyXamlUidSuffixes =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            // QuickOverlayPage sets this resource-only automation name in code-behind.
+            ["QuickOverlay_YButtonQuickJumpComboBox"] = ["_A11y"]
+        };
+    private static readonly IReadOnlyDictionary<string, string> XamlPropertyResourceKeyOverrides =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // SettingsPage updates this description from code-behind to show authoritative theme-save failures.
+            ["Settings_AppThemeCard.Description"] = "Settings_AppTheme_Description"
+        };
 
     [Fact]
     public void Supported_resource_files_share_keys_and_keep_every_value_nonempty()
@@ -51,27 +63,7 @@ public sealed class MainUiLocalizationResourceTests
                      .Where(IsSourceFile))
         {
             var document = XDocument.Load(file);
-            foreach (var element in document.Descendants())
-            {
-                var uid = (string?)element.Attribute(XamlNamespace + "Uid");
-                if (string.IsNullOrWhiteSpace(uid))
-                    continue;
-
-                foreach (var attribute in element.Attributes())
-                {
-                    if (!LocalizableXamlProperties.Contains(attribute.Name.LocalName)
-                        || string.IsNullOrWhiteSpace(attribute.Value)
-                        || attribute.Value.StartsWith('{'))
-                    {
-                        continue;
-                    }
-
-                    var property = attribute.Name.LocalName;
-                    var key = $"{uid}.{property}";
-                    if (resources.Values.Any(language => language.ContainsKey(key)))
-                        AssertResourceExists(resources, key);
-                }
-            }
+            AssertXamlLocalizationResourcesExist(document, resources);
         }
 
         var sourceFiles = Directory.EnumerateFiles(uiRoot, "*.cs", SearchOption.AllDirectories)
@@ -115,6 +107,26 @@ public sealed class MainUiLocalizationResourceTests
                     Assert.False(string.IsNullOrWhiteSpace(entry.Value), $"{language}:{entry.Key}"));
             }
         }
+    }
+
+    [Fact]
+    public void Xaml_localization_keys_missing_from_every_locale_are_rejected()
+    {
+        var resources = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal)
+        {
+            ["en-US"] = new Dictionary<string, string>(StringComparer.Ordinal),
+            ["ko-KR"] = new Dictionary<string, string>(StringComparer.Ordinal)
+        };
+
+        var inlineFallbackDocument = XDocument.Parse(
+            """<TextBlock xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Uid="MissingKey" Text="Fallback" />""");
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(
+            () => AssertXamlLocalizationResourcesExist(inlineFallbackDocument, resources));
+
+        var resourceOnlyDocument = XDocument.Parse(
+            """<ComboBox xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Uid="QuickOverlay_YButtonQuickJumpComboBox" />""");
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(
+            () => AssertXamlLocalizationResourcesExist(resourceOnlyDocument, resources));
     }
 
     [Fact]
@@ -260,6 +272,43 @@ public sealed class MainUiLocalizationResourceTests
             Assert.True(values.TryGetValue(key, out var value), $"{language}:{key}");
             Assert.False(string.IsNullOrWhiteSpace(value), $"{language}:{key}");
         }
+    }
+
+    private static void AssertXamlLocalizationResourcesExist(
+        XDocument document,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> resources)
+    {
+        var referencedKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var element in document.Descendants())
+        {
+            var uid = (string?)element.Attribute(XamlNamespace + "Uid");
+            if (string.IsNullOrWhiteSpace(uid))
+                continue;
+
+            foreach (var attribute in element.Attributes())
+            {
+                if (!LocalizableXamlProperties.Contains(attribute.Name.LocalName)
+                    || string.IsNullOrWhiteSpace(attribute.Value)
+                    || attribute.Value.StartsWith('{'))
+                {
+                    continue;
+                }
+
+                var key = $"{uid}.{attribute.Name.LocalName}";
+                referencedKeys.Add(XamlPropertyResourceKeyOverrides.TryGetValue(key, out var resourceKey)
+                    ? resourceKey
+                    : key);
+            }
+
+            if (ResourceOnlyXamlUidSuffixes.TryGetValue(uid, out var suffixes))
+            {
+                foreach (var suffix in suffixes)
+                    referencedKeys.Add(uid + suffix);
+            }
+        }
+
+        foreach (var key in referencedKeys.OrderBy(key => key, StringComparer.Ordinal))
+            AssertResourceExists(resources, key);
     }
 
     private static Dictionary<string, IReadOnlyDictionary<string, string>> ReadAllResources()
