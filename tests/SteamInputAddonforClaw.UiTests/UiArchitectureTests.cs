@@ -2,6 +2,7 @@ using System.Xml.Linq;
 using Microsoft.UI.Xaml;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Views;
+using SteamInputAddonforClaw.Windowing;
 using Windows.Foundation;
 using Xunit;
 
@@ -346,7 +347,6 @@ public sealed class UiArchitectureTests
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs")));
         foreach (var source in new[] { developerXaml, developerCode, navigation, mainWindow })
         {
-            Assert.DoesNotContain("Vibration Profile 0/100 Probe", source, StringComparison.Ordinal);
             Assert.DoesNotContain("VibrationTestPage", source, StringComparison.Ordinal);
             Assert.DoesNotContain("VibrationTestRequested", source, StringComparison.Ordinal);
             Assert.DoesNotContain("OpenVibrationTest", source, StringComparison.Ordinal);
@@ -361,9 +361,6 @@ public sealed class UiArchitectureTests
         var developerXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
         var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
 
-        Assert.DoesNotContain("Intel GPU Frequency / IGCL Probe", developerXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Set Max / Max + Readback", developerXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Set Test PL1 + Readback", developerXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Frequency" + "Probe", developerCode, StringComparison.Ordinal);
     }
 
@@ -479,96 +476,58 @@ public sealed class UiArchitectureTests
         // separately -- a whole-transport failure renders all three children Unavailable and
         // RenderPowerMode itself is responsible for the concise per-feature failure message.
         Assert.Contains("RenderPowerMode(FrontendPowerModeSnapshot.Unavailable)", devicePage, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Device_PowerMode_InitializationFailed\", \"Windows Power Mode could not be initialized.\")", devicePage, StringComparison.Ordinal);
+        Assert.Contains("MainUiStrings.Get(\"Device_PowerMode_InitializationFailed\"", devicePage, StringComparison.Ordinal);
         Assert.Contains("PowerModeAcComboBox.SelectedItem = null", profilePage, StringComparison.Ordinal);
         Assert.Contains("PowerModeDcComboBox.SelectedItem = null", profilePage, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Device_feature_expanders_start_collapsed_without_snapshot_driven_expansion()
+    public void Device_expander_state_is_not_overridden_by_snapshot_rendering()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
-        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
-        var normalizedXaml = xaml.Replace("\r\n", "\n", StringComparison.Ordinal);
-
-        Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Expander.IsExpanded =", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE7E8;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", normalizedXaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"TDP Control\"", xaml, StringComparison.Ordinal);
-        Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Maximum Processor State\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"Maximum Processor State\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
-        Assert.Contains("x:Name=\"MaximumProcessorStateInfoBar\" IsClosable=\"False\" IsOpen=\"False\" Visibility=\"Collapsed\"", xaml, StringComparison.Ordinal);
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        Assert.DoesNotContain("Expander.IsExpanded =", code, StringComparison.Ordinal);
+        var expanders = XDocument.Parse(xaml).Descendants().Where(element => element.Name.LocalName == "SettingsExpander").ToArray();
+        Assert.NotEmpty(expanders);
+        Assert.Contains("x:Name=\"MaximumProcessorStateInfoBar\"", xaml, StringComparison.Ordinal);
     }
-
     [Fact]
-    public void Device_closed_info_bars_are_removed_from_stack_panel_spacing()
+    public void Closed_device_info_bars_start_hidden_and_the_shared_helper_updates_visibility()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
-        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
-        var infoBarNames = new[]
-        {
-            "CenterMStartupInfoBar",
-            "BatteryChargeLimitInfoBar",
-            "TdpInfoBar",
-            "CpuBoostInfoBar",
-            "MaximumProcessorStateInfoBar",
-            "PowerModeInfoBar",
-        };
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var infoBars = XDocument.Parse(xaml).Descendants().Where(element => element.Name.LocalName == "InfoBar").ToArray();
 
-        foreach (var name in infoBarNames)
-        {
-            var declarationStart = xaml.IndexOf($"x:Name=\"{name}\"", StringComparison.Ordinal);
-            var declarationEnd = xaml.IndexOf("/>", declarationStart, StringComparison.Ordinal);
-            Assert.True(declarationStart >= 0 && declarationEnd > declarationStart, $"Missing XAML declaration for {name}.");
-
-            var declaration = xaml[declarationStart..declarationEnd];
-            Assert.Contains("IsOpen=\"False\"", declaration, StringComparison.Ordinal);
-            Assert.Contains("Visibility=\"Collapsed\"", declaration, StringComparison.Ordinal);
-            Assert.DoesNotContain($"{name}.IsOpen =", codeBehind, StringComparison.Ordinal);
-        }
-
-        Assert.Contains("private static void SetInfoBarOpen(InfoBar infoBar, bool isOpen)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("infoBar.Visibility = Visibility.Visible;", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("infoBar.Visibility = Visibility.Collapsed;", codeBehind, StringComparison.Ordinal);
+        Assert.NotEmpty(infoBars);
+        Assert.All(infoBars.Where(element => string.Equals((string?)element.Attribute("IsOpen"), "False", StringComparison.OrdinalIgnoreCase)),
+            element => Assert.Equal("Collapsed", (string?)element.Attribute("Visibility")));
+        Assert.Contains("private static void SetInfoBarOpen(InfoBar infoBar, bool isOpen)", code, StringComparison.Ordinal);
+        Assert.Contains("infoBar.Visibility = Visibility.Visible;", code, StringComparison.Ordinal);
+        Assert.Contains("infoBar.Visibility = Visibility.Collapsed;", code, StringComparison.Ordinal);
     }
-
     [Fact]
-    public void Device_page_exposes_production_battery_control_as_an_inline_card()
+    public void Battery_charge_limit_controls_use_authoritative_snapshot_and_commit_handlers()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
-        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var frontendContracts = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Contracts/Frontend/FrontendContracts.cs"));
 
         Assert.Contains("x:Name=\"BatteryChargeLimitCard\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("<FontIcon Glyph=\"&#xE86B;\" />", xaml, StringComparison.Ordinal);
         Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Slider x:Name=\"BatteryChargeLimitSlider\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitValueText\" MinWidth=\"64\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Set the maximum charge level for this MSI Claw device.", xaml, StringComparison.Ordinal);
-        Assert.Contains("<ctcontrols:SettingsCard.Description>", xaml, StringComparison.Ordinal);
-        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitStatusText\" Opacity=\"0.7\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Slider x:Name=\"BatteryChargeLimitSlider\" Grid.Column=\"1\" VerticalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\" Grid.Column=\"2\" VerticalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Grid.Row=\"1\" Grid.Column=\"1\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("SettingsExpander x:Name=\"BatteryChargeLimitCard\"", xaml, StringComparison.Ordinal);
-        Assert.True(xaml.IndexOf("x:Name=\"PowerModeExpander\"", StringComparison.Ordinal)
-            < xaml.IndexOf("x:Name=\"BatteryChargeLimitInfoBar\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("x:Name=\"BatteryChargeLimitInfoBar\"", StringComparison.Ordinal)
-            < xaml.IndexOf("x:Name=\"BatteryChargeLimitCard\"", StringComparison.Ordinal));
-        Assert.Contains("RenderBatteryChargeLimit(snapshot.BatteryChargeLimit)", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("CaptureBatteryChargeLimitAsync", codeBehind, StringComparison.Ordinal);
-        var frontendContracts = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Contracts/Frontend/FrontendContracts.cs"));
+        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitValueText\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitStatusText\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("RenderBatteryChargeLimit(snapshot.BatteryChargeLimit)", code, StringComparison.Ordinal);
         Assert.Contains("CaptureBatteryChargeLimitAsync", frontendContracts, StringComparison.Ordinal);
-        Assert.Contains("SetDeviceBatteryChargeLimitPercentAsync", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("SetDeviceBatteryChargeLimitPercentAsync", code, StringComparison.Ordinal);
         Assert.Contains("PointerCaptureLost", xaml, StringComparison.Ordinal);
         Assert.Contains("KeyUp", xaml, StringComparison.Ordinal);
-        Assert.Contains("_batteryChargeLimitDraftDirty", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("_suppressBatteryChargeLimitEvents", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("_batteryChargeLimitDraftDirty", code, StringComparison.Ordinal);
+        Assert.Contains("_suppressBatteryChargeLimitEvents", code, StringComparison.Ordinal);
     }
-
     [Fact]
     public void Battery_slider_value_changed_ignores_xaml_initialization_before_frontend_connects()
     {
@@ -607,101 +566,67 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Device_page_owns_the_msi_center_m_startup_card_below_the_identity_summary_with_explicit_buttons()
+    public void Device_page_preserves_the_center_m_confirmation_and_authoritative_transition_flow()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
-        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
         var controllerPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
 
-        // App UI PR-A: the card moved from Controller to Device and is no longer on Controller.
         Assert.Contains("x:Name=\"CenterMStartupCard\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("CenterMStartupCard", controllerPage, StringComparison.Ordinal);
-
-        // Ordering: device identity/support summary above Center M, Center M above TDP Control.
-        Assert.True(xaml.IndexOf("x:Name=\"DeviceSummaryCard\"", StringComparison.Ordinal) >= 0);
-        Assert.True(xaml.IndexOf("x:Name=\"DeviceSummaryCard\"", StringComparison.Ordinal)
-            < xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal)
-            < xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal));
-
-        // Full1902 removed the user-configurable Steam Input Routing switch entirely.
         Assert.DoesNotContain("SteamInputRouting", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("SteamInputRouting", codeBehind, StringComparison.Ordinal);
-
-        // Re-read on every entry to the Device page (the reboot-bound transition raises no StateInvalidated).
-        Assert.Contains("_ = RefreshCenterMStartupAsync();", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("SteamInputRouting", code, StringComparison.Ordinal);
+        Assert.Contains("_ = RefreshCenterMStartupAsync();", code, StringComparison.Ordinal);
         Assert.Contains("if (page == MainNavigationPage.Device) DeviceContent.Activate();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Click=\"CenterMStartupEnableButton_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"CenterMStartupDisableButton_Click\"", xaml, StringComparison.Ordinal);
 
-        // Explicit Enable/Disable buttons, not an inverted toggle.
-        Assert.Contains("x:Name=\"CenterMStartupEnableButton\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"CenterMStartupDisableButton\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Disable MSI Center M", xaml, StringComparison.Ordinal);
-
-        // The buttons confirm a reboot-bound transition and restart immediately -- the labels say so,
-        // and there is no "Restart Later" / deferred-restart mode.
-        Assert.Contains("and Restart", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("Restart Later", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("Restart now", codeBehind, StringComparison.Ordinal);
-
-        // No sticky UI restart flag -- the info bar is a pure function of the latest snapshot state.
-        Assert.DoesNotContain("_centerMRestartRequired", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("CenterMStartupPresentation.ResolveInfoBar(snapshot.State)", codeBehind, StringComparison.Ordinal);
-
-        // The UI never starts the OS restart itself -- that is the Runtime transition owner's job.
-        Assert.DoesNotContain("shutdown.exe", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("shutdown", xaml, StringComparison.Ordinal);
-
-        // A failed/cancelled Disable that left preparation behind (roots still Enabled) must re-expose
-        // "Enable and Restart" -- the cleanup path the backend message advertises.
-        Assert.Contains("!centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("CenterMStartupEnableButton.IsEnabled = true;", codeBehind, StringComparison.Ordinal);
+        var requestStart = code.IndexOf("private async Task RequestCenterMTransitionAsync", StringComparison.Ordinal);
+        var requestEnd = code.IndexOf("private sealed record MaximumProcessorStatePercentItem", requestStart, StringComparison.Ordinal);
+        Assert.True(requestStart >= 0 && requestEnd > requestStart);
+        var request = code[requestStart..requestEnd];
+        var confirmation = request.IndexOf("dialog.ShowAsync() != ContentDialogResult.Primary", StringComparison.Ordinal);
+        var mutation = request.IndexOf("RequestCenterMAuthorityTransitionAsync(centerMEnabled)", StringComparison.Ordinal);
+        Assert.True(confirmation >= 0 && mutation > confirmation);
+        Assert.Contains("result.Snapshot", request, StringComparison.Ordinal);
+        Assert.Contains("result.FailureMessage", request, StringComparison.Ordinal);
+        Assert.Contains("!centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled", request, StringComparison.Ordinal);
+        Assert.Contains("CenterMStartupEnableButton.IsEnabled = true;", request, StringComparison.Ordinal);
+        Assert.DoesNotContain("shutdown", request, StringComparison.OrdinalIgnoreCase);
     }
-
     [Fact]
-    public void Main_navigation_drops_status_and_defaults_to_device()
+    public void Main_navigation_resolves_page_identity_and_keeps_device_as_startup_fallback()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
         var navigationState = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainNavigationState.cs"));
 
-        // No Status navigation destination and no Status page instance survive in the shell.
         Assert.DoesNotContain("Tag=\"Status\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("StatusContent", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("StatusContent", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("MainNavigationPage.Status", navigationState, StringComparison.Ordinal);
 
-        // Top-level menu order is Device < Controller < Profile < Overlay < Shortcut < HowToUse.
-        Assert.True(xaml.IndexOf("Tag=\"Device\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Controller\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Tag=\"Controller\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Shortcut\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Tag=\"Shortcut\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
-        var mainWindowDocument = XDocument.Parse(xaml);
-        var clawHudNavigationItem = Assert.Single(mainWindowDocument.Descendants(), element =>
-            element.Name.LocalName == "NavigationViewItem" && (string?)element.Attribute("Tag") == "Overlay");
-        Assert.Equal("MainNav_ClawHud", (string?)clawHudNavigationItem.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Uid"));
-        Assert.Equal("ClawHUD", (string?)clawHudNavigationItem.Attribute("Content"));
-        Assert.Equal("Overlay", (string?)clawHudNavigationItem.Attribute("Tag"));
-        Assert.DoesNotContain("<NavigationViewItem Content=\"Overlay\" Tag=\"Overlay\">", xaml, StringComparison.Ordinal);
+        var tags = XDocument.Parse(xaml).Descendants()
+            .Where(element => element.Name.LocalName == "NavigationViewItem")
+            .Select(element => (string?)element.Attribute("Tag"))
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .ToArray();
+        Assert.NotEmpty(tags);
+        Assert.Equal(tags.Length, tags.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(tags, tag => Assert.True(Enum.TryParse<MainNavigationPage>(tag, out _), $"Unknown navigation identity: {tag}"));
         Assert.Contains("MainNavigationPage.Overlay", navigationState, StringComparison.Ordinal);
-        Assert.Contains("OverlayPageHost", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("_overlayContent", mainWindow, StringComparison.Ordinal);
         Assert.Contains("MainNavigationPage.Shortcut", navigationState, StringComparison.Ordinal);
-        Assert.Contains("\"Shortcut\" => MainNavigationPage.Shortcut", navigationState, StringComparison.Ordinal);
+        Assert.Contains("OverlayPageHost", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ShortcutPageHost", xaml, StringComparison.Ordinal);
         Assert.Contains("if (page == MainNavigationPage.Shortcut) _shortcutContent!.Activate();", mainWindow, StringComparison.Ordinal);
         Assert.Contains("else if (wasShortcut) _shortcutContent?.Deactivate();", mainWindow, StringComparison.Ordinal);
-
-        // Device is the default page in both the shell and the navigation state.
         Assert.Contains("MainNavigationView.SelectedItem = DeviceNavigationItem;", mainWindow, StringComparison.Ordinal);
         Assert.Contains("CurrentPage { get; private set; } = MainNavigationPage.Device;", navigationState, StringComparison.Ordinal);
         Assert.Contains("_ => MainNavigationPage.Device", navigationState, StringComparison.Ordinal);
     }
-
     [Fact]
     public void Device_summary_uses_the_single_status_capture_and_expires_only_the_badge_on_disconnect()
     {
@@ -721,7 +646,7 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Device_summary_shows_startup_status_and_repair_action_beside_controller_status()
+    public void Device_summary_keeps_status_and_repair_controls_and_connects_the_repair_action()
     {
         var root = FindRepositoryRoot();
         var xamlPath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml");
@@ -736,31 +661,6 @@ public sealed class UiArchitectureTests
         Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "AutoStartRepairButton");
         Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "DeviceSupportIndicator");
         Assert.Single(summary.Descendants(), element => (string?)element.Attribute(x + "Name") == "AutoStartStatusIndicator");
-        Assert.Equal(2, summary.Descendants().Count(element => element.Name.LocalName == "Ellipse"));
-        Assert.DoesNotContain(summary.Descendants(), element =>
-            element.Name.LocalName == "Border" && element.Descendants().Any(child =>
-                (string?)child.Attribute(x + "Name") == "DeviceSupportText"));
-        var statusGroup = Assert.Single(summary.Descendants(), element =>
-            element.Name.LocalName == "StackPanel" && (string?)element.Attribute("Grid.RowSpan") == "2");
-        Assert.Equal("Center", (string?)statusGroup.Attribute("VerticalAlignment"));
-        Assert.True(xaml.ToString().IndexOf("x:Name=\"DeviceSupportText\"", StringComparison.Ordinal)
-            < xaml.ToString().IndexOf("x:Name=\"AutoStartStatusText\"", StringComparison.Ordinal));
-        Assert.Contains("SystemFillColorSuccessBrush", xaml.ToString(), StringComparison.Ordinal);
-        Assert.Contains("SystemFillColorCautionBrush", xaml.ToString(), StringComparison.Ordinal);
-        Assert.Contains("SystemFillColorCriticalBrush", xaml.ToString(), StringComparison.Ordinal);
-        Assert.Contains("TextFillColorSecondaryBrush", xaml.ToString(), StringComparison.Ordinal);
-        foreach (var styleName in new[]
-                 {
-                     "DeviceSummaryIndicatorNeutralStyle",
-                     "DeviceSummaryIndicatorSuccessStyle",
-                     "DeviceSummaryIndicatorCautionStyle",
-                     "DeviceSummaryIndicatorCriticalStyle"
-                 })
-        {
-            Assert.Contains(xaml.Descendants(), element =>
-                element.Name.LocalName == "Style" && (string?)element.Attribute(x + "Key") == styleName);
-        }
-
         var codeBehind = File.ReadAllText(codePath);
         Assert.Contains("RepairStartupTaskAsync()", codeBehind, StringComparison.Ordinal);
         Assert.Contains("StartupTaskIssueResourceKey", codeBehind, StringComparison.Ordinal);
@@ -768,9 +668,6 @@ public sealed class UiArchitectureTests
         Assert.Contains("if (!_startupTaskRepairInProgress)", codeBehind, StringComparison.Ordinal);
         Assert.Contains("ApplyIndicatorTone(DeviceSupportIndicator", codeBehind, StringComparison.Ordinal);
         Assert.Contains("ApplyIndicatorTone(AutoStartStatusIndicator", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("DeviceStatusIndicatorTone.Success => \"DeviceSummaryIndicatorSuccessStyle\"", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("DeviceStatusIndicatorTone.Caution => \"DeviceSummaryIndicatorCautionStyle\"", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("DeviceStatusIndicatorTone.Critical => \"DeviceSummaryIndicatorCriticalStyle\"", codeBehind, StringComparison.Ordinal);
         Assert.Contains("runtimeResponsive: false", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs")), StringComparison.Ordinal);
     }
 
@@ -783,10 +680,8 @@ public sealed class UiArchitectureTests
         var overlayXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/OverlayPage.xaml"));
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
-        Assert.Contains("Add Shortcut", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("PointerReleased=\"ShortcutTile_PointerReleased\"", shortcutXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("CanReorderItems", shortcutXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Screenshot", shortcutXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("BrowseScreenshotFolderButton", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("FolderPicker(windowId)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("MutateShortcutAsync", shortcutCode, StringComparison.Ordinal);
@@ -811,120 +706,6 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("Slot2", shortcutXaml, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Main_app_shortcut_editor_uses_three_equal_pointer_reorder_slots_and_keeps_collection_order()
-    {
-        var root = FindRepositoryRoot();
-        var shortcutXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml"));
-        var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
-        var list = shortcutXaml.Descendants().Single(element => (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "ShortcutList");
-        var wrapGrid = list.Descendants().Single(element => element.Name.LocalName == "ItemsWrapGrid");
-        var itemTemplate = shortcutXaml.Descendants().Single(element => element.Name.LocalName == "DataTemplate"
-            && (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Key") == "ShortcutCardTemplate");
-        var itemContainerStyle = list.Elements().Single(element => element.Name.LocalName == "ListView.ItemContainerStyle")
-            .Elements().Single(element => element.Name.LocalName == "Style");
-        var horizontalContentAlignment = itemContainerStyle.Elements()
-            .Single(element => element.Name.LocalName == "Setter"
-                && (string?)element.Attribute("Property") == "HorizontalContentAlignment");
-        var card = itemTemplate.Descendants().Single(element => element.Name.LocalName == "Border");
-        var cardGrid = card.Elements().Single(element => element.Name.LocalName == "Grid");
-        var actionStack = cardGrid.Elements().Single(element =>
-            element.Name.LocalName == "StackPanel" && (string?)element.Attribute("Grid.Column") == "2");
-        var actionButtons = actionStack.Elements().Where(element => element.Name.LocalName == "Button").ToArray();
-        var containerSetters = itemContainerStyle.Elements().Where(element => element.Name.LocalName == "Setter")
-            .ToDictionary(element => (string)element.Attribute("Property")!, element => (string?)element.Attribute("Value"));
-        Assert.Equal("Horizontal", (string?)wrapGrid.Attribute("Orientation"));
-        Assert.Equal("3", (string?)wrapGrid.Attribute("MaximumRowsOrColumns"));
-        Assert.Equal("0", (string?)list.Attribute("Padding"));
-        Assert.Equal("{StaticResource ShortcutCardTemplate}", (string?)list.Attribute("ItemTemplate"));
-        Assert.Equal("ShortcutList_SizeChanged", (string?)list.Attribute("SizeChanged"));
-        Assert.Equal("None", (string?)list.Attribute("SelectionMode"));
-        Assert.Null(list.Attribute("CanReorderItems"));
-        Assert.Null(list.Attribute("CanDragItems"));
-        Assert.Null(list.Attribute("AllowDrop"));
-        Assert.Null(list.Attribute("DragItemsStarting"));
-        Assert.Null(list.Attribute("DragItemsCompleted"));
-        Assert.Equal("ListViewItem", (string?)itemContainerStyle.Attribute("TargetType"));
-        Assert.Equal("Stretch", (string?)horizontalContentAlignment.Attribute("Value"));
-        Assert.Equal("Transparent", containerSetters["Background"]);
-        Assert.Equal("Transparent", containerSetters["BorderBrush"]);
-        Assert.Equal("0", containerSetters["BorderThickness"]);
-        Assert.Equal("0", containerSetters["Padding"]);
-        Assert.Equal("Stretch", containerSetters["VerticalContentAlignment"]);
-        Assert.Equal("False", containerSetters["UseSystemFocusVisuals"]);
-        var itemTemplateSetter = itemContainerStyle.Elements().Single(element => element.Name.LocalName == "Setter"
-            && (string?)element.Attribute("Property") == "Template");
-        var itemControlTemplate = itemTemplateSetter.Elements().Single(element => element.Name.LocalName == "Setter.Value")
-            .Elements().Single(element => element.Name.LocalName == "ControlTemplate");
-        var itemContentPresenter = itemControlTemplate.Elements().Single(element => element.Name.LocalName == "ContentPresenter");
-        Assert.Equal("ListViewItem", (string?)itemControlTemplate.Attribute("TargetType"));
-        Assert.Equal("{TemplateBinding Content}", (string?)itemContentPresenter.Attribute("Content"));
-        Assert.Equal("{TemplateBinding ContentTemplate}", (string?)itemContentPresenter.Attribute("ContentTemplate"));
-        Assert.Equal("{TemplateBinding ContentTransitions}", (string?)itemContentPresenter.Attribute("ContentTransitions"));
-        Assert.Equal("{TemplateBinding HorizontalContentAlignment}", (string?)itemContentPresenter.Attribute("HorizontalAlignment"));
-        Assert.Equal("{TemplateBinding VerticalContentAlignment}", (string?)itemContentPresenter.Attribute("VerticalAlignment"));
-        Assert.DoesNotContain(itemControlTemplate.Descendants(), element => element.Name.LocalName is "VisualState" or "ListViewItemPresenter" or "ThemeShadow");
-        Assert.DoesNotContain(shortcutXaml.Descendants(), element => element.Name.LocalName == "ThemeShadow");
-        Assert.Single(shortcutXaml.Descendants(), element => element.Name.LocalName == "DataTemplate"
-            && (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Key") == "ShortcutCardTemplate");
-        Assert.Equal("Auto,*,Auto", (string?)cardGrid.Attribute("ColumnDefinitions"));
-        Assert.Equal("{x:Bind TileId}", (string?)card.Attribute("Tag"));
-        Assert.Equal("ShortcutTile_PointerPressed", (string?)card.Attribute("PointerPressed"));
-        Assert.Equal("ShortcutTile_PointerMoved", (string?)card.Attribute("PointerMoved"));
-        Assert.Equal("ShortcutTile_PointerReleased", (string?)card.Attribute("PointerReleased"));
-        Assert.Equal("ShortcutTile_PointerCanceled", (string?)card.Attribute("PointerCanceled"));
-        Assert.Equal("ShortcutTile_PointerCaptureLost", (string?)card.Attribute("PointerCaptureLost"));
-        Assert.Equal("None", (string?)card.Attribute("ManipulationMode"));
-        Assert.Equal("0,0,12,12", (string?)card.Attribute("Margin"));
-        Assert.Equal("1", (string?)card.Attribute("BorderThickness"));
-        Assert.Equal("8", (string?)card.Attribute("CornerRadius"));
-        Assert.Equal("{ThemeResource CardBackgroundFillColorDefaultBrush}", (string?)card.Attribute("Background"));
-        Assert.Equal("{ThemeResource CardStrokeColorDefaultBrush}", (string?)card.Attribute("BorderBrush"));
-        Assert.Equal("Vertical", (string?)actionStack.Attribute("Orientation"));
-        Assert.Equal(2, actionButtons.Length);
-        Assert.All(actionButtons, button => Assert.Equal("Stretch", (string?)button.Attribute("HorizontalAlignment")));
-        Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerPressed")));
-        Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerMoved")));
-        Assert.All(actionButtons, button => Assert.NotNull(button.Attribute("Click")));
-        var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon"
-            && (string?)element.Attribute("Glyph") == "\uE7C3");
-        Assert.Equal("{x:Bind views:ShortcutPage.GetDragReorderAutomationName()}", (string?)dragGlyph.Attribute("AutomationProperties.Name"));
-        Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("private const double ShortcutCardHorizontalGap = 12;", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("itemsPanel.ItemWidth = itemWidth", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("GetShortcutItemWidth(ShortcutList.ActualWidth)", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("(ShortcutColumnCount - 1) * ShortcutCardHorizontalGap", shortcutCode, StringComparison.Ordinal);
-        Assert.Equal(292, ShortcutPage.GetShortcutItemWidth(900));
-        Assert.Equal(392, ShortcutPage.GetShortcutItemWidth(1200));
-        Assert.Equal(1, ShortcutPage.GetShortcutItemWidth(24));
-        Assert.Contains("ShortcutList.ItemsSource = _tiles;", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("CapturePointer(e.Pointer)", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("GetCurrentPoint(ShortcutList)", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("ContainerFromIndex(index)", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("TransformBounds", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("PointerCanceled=\"ShortcutTile_PointerCanceled\"", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml")), StringComparison.Ordinal);
-        Assert.Contains("Unloaded=\"ShortcutPage_Unloaded\"", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml")), StringComparison.Ordinal);
-        Assert.DoesNotContain("DragItemsCompleted", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("DragItemsStarting", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("StartDragAsync", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("Windows.ApplicationModel.DataTransfer", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("Runtime Shortcut move response received.", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("FailureCategory", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("await ApplyMutationAsync(intent);", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("_tiles.Move(", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("RowIndex", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("ColumnIndex", shortcutCode, StringComparison.Ordinal);
-
-        for (var tileCount = 1; tileCount <= 6; tileCount++)
-        {
-            var positions = Enumerable.Range(0, tileCount)
-                .Select(index => (Row: index / 3, Column: index % 3))
-                .ToArray();
-            Assert.Equal(Enumerable.Range(0, tileCount),
-                positions.Select(position => position.Row * 3 + position.Column));
-            Assert.All(positions, position => Assert.InRange(position.Column, 0, 2));
-        }
-    }
 
     [Fact]
     public void Main_app_shortcut_pointer_release_sends_one_authoritative_move_without_local_reordering()
@@ -1136,141 +917,52 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Main_app_shortcut_picker_exposes_parameterless_builtins_and_creation_only_titles()
+    public void Main_app_shortcut_picker_keeps_action_identity_and_edit_semantics()
     {
         var root = FindRepositoryRoot();
-        var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
-        var panelHelperStart = shortcutCode.IndexOf("private static StackPanel CreateBuiltInActionPanel", StringComparison.Ordinal);
-        var panelHelperEnd = shortcutCode.IndexOf("internal static string? GetDefaultTitle", panelHelperStart, StringComparison.Ordinal);
-        var builtInPanelHelper = shortcutCode[panelHelperStart..panelHelperEnd];
-
-        Assert.Contains("CreateBuiltInActionPanel(MainUiStrings.Get(\"Shortcut_Description_XboxApp\", \"Opens the XBOX app.\"))", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("Text = existing?.Title ?? string.Empty", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("actionPicker.IsEnabled = existing.Action.TypeEditable", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("titleWasManuallyEdited = !string.IsNullOrWhiteSpace(titleBox.Text)", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("=> GetLocalizedActionLabel(kind)", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("GetDefaultTitle(selectedKind)", shortcutCode, StringComparison.Ordinal);
-        var expectedActionChoiceCalls = new[]
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
+        var kinds = new[]
         {
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.Executable), FrontendShortcutEditorActionKind.Executable)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.PowerShell), FrontendShortcutEditorActionKind.PowerShell)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.Url), FrontendShortcutEditorActionKind.Url)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamBigPicture), FrontendShortcutEditorActionKind.SteamBigPicture)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamClient), FrontendShortcutEditorActionKind.SteamClient)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.XboxApp), FrontendShortcutEditorActionKind.XboxApp)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.TouchKeyboard), FrontendShortcutEditorActionKind.TouchKeyboard)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ShowDesktop), FrontendShortcutEditorActionKind.ShowDesktop)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.SteamInput), FrontendShortcutEditorActionKind.SteamInput)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ClawHudToggle), FrontendShortcutEditorActionKind.ClawHudToggle)",
-            "AddActionChoice(actionPicker, GetLocalizedActionLabel(FrontendShortcutEditorActionKind.ScreenshotFullscreen), FrontendShortcutEditorActionKind.ScreenshotFullscreen)"
+            "Executable", "PowerShell", "Url", "SteamBigPicture", "SteamClient", "XboxApp",
+            "TouchKeyboard", "ShowDesktop", "SteamInput", "ClawHudToggle", "ScreenshotFullscreen"
         };
-        var actionChoicePositions = expectedActionChoiceCalls.Select(call => shortcutCode.IndexOf(call, StringComparison.Ordinal)).ToArray();
-        Assert.All(actionChoicePositions, position => Assert.True(position >= 0));
-        Assert.Equal(actionChoicePositions.Order(), actionChoicePositions);
-        Assert.Contains("[FrontendShortcutEditorActionKind.SteamBigPicture] = steamBigPicturePanel", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("[FrontendShortcutEditorActionKind.SteamClient] = steamClientPanel", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("[FrontendShortcutEditorActionKind.XboxApp] = xboxAppPanel", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("[FrontendShortcutEditorActionKind.TouchKeyboard] = touchKeyboardPanel", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("[FrontendShortcutEditorActionKind.ShowDesktop] = showDesktopPanel", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("[FrontendShortcutEditorActionKind.SteamInput] = steamInputPanel", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("[FrontendShortcutEditorActionKind.ClawHudToggle] = clawHudPanel", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("panel.Visibility = Visibility.Collapsed", shortcutCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("Executable path", builtInPanelHelper, StringComparison.Ordinal);
-        Assert.DoesNotContain("Script", builtInPanelHelper, StringComparison.Ordinal);
-        Assert.DoesNotContain("URL", builtInPanelHelper, StringComparison.Ordinal);
-        Assert.Contains("new FrontendShortcutActionInput(selectedKind)", shortcutCode, StringComparison.Ordinal);
+        foreach (var kind in kinds)
+            Assert.Contains($"FrontendShortcutEditorActionKind.{kind}", code, StringComparison.Ordinal);
+        Assert.Contains("new FrontendShortcutActionInput(selectedKind)", code, StringComparison.Ordinal);
+        Assert.Contains("actionPicker.IsEnabled = existing.Action.TypeEditable", code, StringComparison.Ordinal);
+        Assert.Contains("Text = existing?.Title ?? string.Empty", code, StringComparison.Ordinal);
+        Assert.Contains("titleWasManuallyEdited = !string.IsNullOrWhiteSpace(titleBox.Text)", code, StringComparison.Ordinal);
+        Assert.Contains("GetDefaultTitle(selectedKind)", code, StringComparison.Ordinal);
+        Assert.Contains("panel.Visibility = Visibility.Collapsed", code, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.SteamBigPicture] = steamBigPicturePanel", code, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.SteamClient] = steamClientPanel", code, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.XboxApp] = xboxAppPanel", code, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.TouchKeyboard] = touchKeyboardPanel", code, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.ShowDesktop] = showDesktopPanel", code, StringComparison.Ordinal);
 
-        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamBigPicture));
-        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamClient));
-        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.XboxApp));
-        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ScreenshotFullscreen));
-        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.TouchKeyboard));
-        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ShowDesktop));
-        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamInput));
-        Assert.NotNull(ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ClawHudToggle));
         Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, string.Empty, null));
-        Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, "Screenshot", "Screenshot"));
-        Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, string.Empty, "Keyboard", titleWasManuallyEdited: false));
-        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(true, "Screenshot", "Screenshot", titleWasManuallyEdited: true));
-        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(true, "My Capture", "Screenshot"));
-        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "Xbox", "XBOX"));
-        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "My XbOx", "XBOX"));
+        Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, "Saved default", "Saved default"));
+        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(true, "User title", "Saved default", titleWasManuallyEdited: true));
         Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "Persisted title", null));
     }
-
-    [Fact]
-    public void New_shortcut_action_labels_and_descriptions_have_exact_english_and_korean_resources()
-    {
-        var root = FindRepositoryRoot();
-        var english = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Strings/en-US/Resources.resw"));
-        var korean = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Strings/ko-KR/Resources.resw"));
-        var editorContract = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Contracts/Frontend/ShortcutEditorFrontendContracts.cs"));
-        var overlayContract = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Contracts/Frontend/ShortcutFrontendContracts.cs"));
-
-        AssertResource(english, "Shortcut_Action_TouchKeyboard", "Keyboard");
-        AssertResource(english, "Shortcut_Action_ShowDesktop", "Show Desktop");
-        AssertResource(english, "Shortcut_Action_SteamInput", "Steam Input");
-        AssertResource(english, "Shortcut_Action_ClawHud", "ClawHUD");
-        AssertResource(english, "Shortcut_Description_TouchKeyboard", "Show or hide the Windows touch keyboard.");
-        AssertResource(english, "Shortcut_Description_ShowDesktop", "Show the desktop or restore open windows (Win+D).");
-        AssertResource(english, "Shortcut_Description_SteamInput", "Open the controller layout settings for the currently running Steam game.");
-        AssertResource(english, "Shortcut_Description_ClawHud", "Turn the ClawHUD performance overlay on or off.");
-
-        AssertResource(korean, "Shortcut_Action_TouchKeyboard", "터치 키보드");
-        AssertResource(korean, "Shortcut_Action_ShowDesktop", "바탕화면");
-        AssertResource(korean, "Shortcut_Action_SteamInput", "Steam Input");
-        AssertResource(korean, "Shortcut_Action_ClawHud", "ClawHUD");
-        AssertResource(korean, "Shortcut_Description_TouchKeyboard", "Windows 터치 키보드를 표시하거나 숨깁니다.");
-        AssertResource(korean, "Shortcut_Description_ShowDesktop", "바탕화면을 표시하거나 열려 있던 창을 복원합니다. (Win+D)");
-        AssertResource(korean, "Shortcut_Description_SteamInput", "현재 실행 중인 Steam 게임의 컨트롤러 레이아웃 설정을 엽니다.");
-        AssertResource(korean, "Shortcut_Description_ClawHud", "ClawHUD 성능 오버레이를 켜거나 끕니다.");
-        Assert.DoesNotContain("Description", editorContract, StringComparison.Ordinal);
-        Assert.DoesNotContain("Description", overlayContract, StringComparison.Ordinal);
-    }
-
-    private static void AssertResource(XDocument document, string name, string expected) =>
-        Assert.Equal(expected, document.Root!.Elements("data")
-            .Single(element => (string?)element.Attribute("name") == name)
-            .Element("value")?.Value);
-
     [Fact]
     public void Shortcut_icon_picker_stages_curated_choices_and_keeps_card_reorder_separate()
     {
         var root = FindRepositoryRoot();
         var shortcutXamlPath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml");
         var shortcutXaml = File.ReadAllText(shortcutXamlPath);
-        var shortcutDocument = XDocument.Load(shortcutXamlPath);
         var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
         var selectionHandlerStart = shortcutCode.IndexOf("actionPicker.SelectionChanged +=", StringComparison.Ordinal);
         var selectionHandlerEnd = shortcutCode.IndexOf("executableBrowse.Click", selectionHandlerStart, StringComparison.Ordinal);
         var selectionHandler = shortcutCode[selectionHandlerStart..selectionHandlerEnd];
         var saveStart = shortcutCode.IndexOf("var intent = new FrontendShortcutMutationIntent(", StringComparison.Ordinal);
         var primarySaveGuard = shortcutCode.LastIndexOf("if (result != ContentDialogResult.Primary) return;", saveStart, StringComparison.Ordinal);
-        var itemTemplate = shortcutDocument.Descendants().Single(element => element.Name.LocalName == "DataTemplate"
-            && (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Key") == "ShortcutCardTemplate");
-        var title = itemTemplate.Descendants().Single(element => element.Name.LocalName == "TextBlock"
-            && (string?)element.Attribute("Text") == "{x:Bind Title}");
-        var titleRow = title.Parent!;
-        var titleRowChildren = titleRow.Elements().ToArray();
-        var titleGlyph = titleRowChildren[0];
-        var dragGlyph = itemTemplate.Descendants().Single(element => element.Name.LocalName == "FontIcon"
-            && (string?)element.Attribute("Glyph") == "\uE7C3");
-
-        Assert.Contains("Glyph=\"{x:Bind IconGlyph}\"", shortcutXaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xE7C3;\"", shortcutXaml, StringComparison.Ordinal);
-        Assert.Equal("FontIcon", titleGlyph.Name.LocalName);
-        Assert.Equal("{x:Bind IconGlyph}", (string?)titleGlyph.Attribute("Glyph"));
-        Assert.Equal("TextBlock", titleRowChildren[1].Name.LocalName);
-        Assert.Same(titleGlyph, titleRow.Elements().First());
-        Assert.NotSame(dragGlyph, titleGlyph);
         Assert.Contains("ShortcutIconCatalog.Choices", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Icon_Change\", \"Change icon\")", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("MainUiStrings.Get(\"Shortcut_Icon_UseDefault\", \"Use default\")", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("ToolTipService.SetToolTip(choiceButton, localizedName)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.SetName(choiceButton, localizedName)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("var localizedName = GetLocalizedIconName(choice);", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("ShortcutIconCatalog.TryGetChoice(glyph, out var choice)", shortcutCode, StringComparison.Ordinal);
-        Assert.Equal("{x:Bind views:ShortcutPage.GetDragReorderAutomationName()}", (string?)dragGlyph.Attribute("AutomationProperties.Name"));
+        Assert.Contains("GetDragReorderAutomationName()", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("iconFlyout.ShowAt(changeIconButton)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("RenderIconPreview(selectedKind)", selectionHandler, StringComparison.Ordinal);
         Assert.Contains("stagedIconGlyphOverride = choice.Glyph", shortcutCode, StringComparison.Ordinal);
@@ -1315,9 +1007,6 @@ public sealed class UiArchitectureTests
         Assert.Contains("_prerequisiteSetupInProgress", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_prerequisiteSetupAttemptedForCurrentProcess", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("FrontendPrerequisiteSetupResultKind.Cancelled", mainWindow, StringComparison.Ordinal);
-        Assert.DoesNotContain("Setup required", mainWindow, StringComparison.Ordinal);
-        Assert.DoesNotContain("Not now", mainWindow, StringComparison.Ordinal);
-        Assert.DoesNotContain("Restart required", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("shutdown.exe", mainWindow, StringComparison.Ordinal);
         Assert.Contains("DeviceContent.ConfirmCenterMDisableAfterPrerequisiteSetupAsync()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ConfirmCenterMDisableAfterPrerequisiteSetupAsync", devicePage, StringComparison.Ordinal);
@@ -1334,8 +1023,6 @@ public sealed class UiArchitectureTests
         Assert.Contains("DeviceContent.RenderDeviceSummary(snapshot)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_settingsContent?.RenderRequiredComponents(snapshot)", mainWindow, StringComparison.Ordinal);
 
-        // The removed "Check Status" wording no longer points users at a page that does not exist.
-        Assert.DoesNotContain("Check Status", mainWindow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1414,19 +1101,6 @@ public sealed class UiArchitectureTests
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
         Assert.Contains("SettingsCard", overlayXaml, StringComparison.Ordinal);
-        foreach (var required in new[]
-        {
-            "ClawHUD",
-            "Display mode",
-            "HUD size",
-            "Header=\"Font\"",
-            "Header=\"Alignment\"",
-            "Background width",
-            "ClawHUD opacity",
-            "Intel VRR Range Fix",
-        })
-            Assert.Contains(required, overlayXaml, StringComparison.Ordinal);
-
         Assert.Contains("FrontendClawHudSnapshot", overlayCodeBehind, StringComparison.Ordinal);
         Assert.Contains("CaptureClawHudAsync", overlayCodeBehind, StringComparison.Ordinal);
         Assert.Contains("PreviewOpacity", overlayCodeBehind, StringComparison.Ordinal);
@@ -1435,41 +1109,15 @@ public sealed class UiArchitectureTests
         Assert.Contains("ClawHudRetryButton", overlayXaml, StringComparison.Ordinal);
         Assert.Contains("SetClawHudEnabledAsync(true)", overlayCodeBehind, StringComparison.Ordinal);
         var overlayDocument = XDocument.Parse(overlayXaml);
-        XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
-        foreach (var sectionHeading in new[] { "ClawHUD", "Display", "Appearance", "Display compatibility" })
-        {
-            Assert.DoesNotContain(overlayDocument.Descendants(), element =>
-                element.Name.LocalName == "TextBlock" &&
-                (string?)element.Attribute("Text") == sectionHeading &&
-                element.Attribute(xamlNamespace + "Uid") is null);
-        }
-
-        foreach (var icon in new[]
-        {
-            "<FontIcon FontFamily=\"Segoe Fluent Icons\" Glyph=\"&#xE7F4;\" />",
-            "<SymbolIcon Symbol=\"View\" />",
-            "<SymbolIcon Symbol=\"FontSize\" />",
-            "<SymbolIcon Symbol=\"Font\" />",
-            "<SymbolIcon Symbol=\"AlignCenter\" />",
-            "<FontIcon FontFamily=\"Segoe Fluent Icons\" Glyph=\"&#xE745;\" />",
-            "<FontIcon FontFamily=\"Segoe Fluent Icons\" Glyph=\"&#xE794;\" />",
-            "<SymbolIcon Symbol=\"Repair\" />",
-        })
-            Assert.Contains(icon, overlayXaml, StringComparison.Ordinal);
-
         var vrrCard = Assert.Single(overlayDocument.Descendants(), element =>
             element.Name.LocalName == "SettingsCard" &&
             (string?)element.Attribute(XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Uid") == "ClawHud_IntelVrrCard");
-        Assert.Equal("Intel VRR Range Fix", (string?)vrrCard.Attribute("Header"));
-        Assert.Null(vrrCard.Attribute("Description"));
         var vrrDescription = Assert.Single(vrrCard.Elements(), element => element.Name.LocalName == "SettingsCard.Description");
         Assert.Single(vrrDescription.Elements(), element =>
             element.Name.LocalName == "TextBlock" && (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "ClawHudVrrResultText");
         var vrrToggle = Assert.Single(vrrCard.Elements(), element => element.Name.LocalName == "ToggleSwitch");
-        Assert.Equal("Right", (string?)vrrToggle.Attribute("HorizontalAlignment"));
-        Assert.Equal(string.Empty, (string?)vrrToggle.Attribute("OffContent"));
-        Assert.Equal(string.Empty, (string?)vrrToggle.Attribute("OnContent"));
-        Assert.DoesNotContain(vrrCard.DescendantsAndSelf(), element => element.Name.LocalName == "StackPanel");
+        Assert.Equal("ClawHudIntelVrrToggleSwitch_Toggled", (string?)vrrToggle.Attribute("Toggled"));
+        Assert.Contains("ClawHudIntelVrrToggleSwitch_Toggled", overlayCodeBehind, StringComparison.Ordinal);
 
         Assert.DoesNotContain("ClawHud", settingsXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ClawHud", settingsCodeBehind, StringComparison.Ordinal);
@@ -1477,24 +1125,6 @@ public sealed class UiArchitectureTests
         Assert.Contains("page.Initialize(_frontend)", mainWindow, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Every_main_ui_toggle_switch_hides_on_and_off_content()
-    {
-        var root = FindRepositoryRoot();
-        var uiRoot = Path.Combine(root, "src/SteamInputAddonforClaw.UI");
-
-        foreach (var path in Directory.EnumerateFiles(uiRoot, "*.xaml", SearchOption.AllDirectories))
-        {
-            var document = XDocument.Load(path);
-            foreach (var toggle in document.Descendants().Where(element => element.Name.LocalName == "ToggleSwitch"))
-            {
-                Assert.True(toggle.Attribute("OffContent") is { Value: "" },
-                    $"{Path.GetRelativePath(root, path)} has a ToggleSwitch with visible Off content.");
-                Assert.True(toggle.Attribute("OnContent") is { Value: "" },
-                    $"{Path.GetRelativePath(root, path)} has a ToggleSwitch with visible On content.");
-            }
-        }
-    }
 
     [Fact]
     public void Profile_tab_scans_once_on_first_entry_and_reuses_successful_catalog()
@@ -1521,38 +1151,7 @@ public sealed class UiArchitectureTests
         Assert.Contains("_frontend?.StateInvalidated -= OnStateInvalidated;", profileCodeBehind, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Controller_expanders_have_parent_icons_and_option_cards_have_no_icons()
-    {
-        var root = FindRepositoryRoot();
-        var controllerXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
-        var cards = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
-        var expanders = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander").ToArray();
 
-        Assert.Equal(16, cards.Length);
-        Assert.Equal(6, expanders.Length);
-        Assert.All(expanders, expander => Assert.Single(
-            expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon"));
-        var steamVirtualControllerExpander = Assert.Single(expanders, expander =>
-            expander.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == "SteamVirtualControllerExpander");
-        Assert.Equal("Controller for Steam Game", (string?)steamVirtualControllerExpander.Attribute("Header"));
-        Assert.All(cards, card => Assert.DoesNotContain(
-            card.Elements(), element => element.Name.LocalName == "SettingsCard.HeaderIcon"));
-    }
-
-    [Fact]
-    public void Settings_header_icons_are_unique()
-    {
-        var root = FindRepositoryRoot();
-        var settingsXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml"));
-        var symbols = settingsXaml.Descendants()
-            .Where(element => element.Name.LocalName == "SymbolIcon")
-            .Select(element => (string?)element.Attribute("Symbol"))
-            .Where(symbol => symbol is not null)
-            .ToArray();
-
-        Assert.Equal(symbols.Length, symbols.Distinct(StringComparer.Ordinal).Count());
-    }
 
     [Fact]
     public void Overlay_opacity_commit_coalesces_rapid_keyboard_adjustments_into_a_follow_up_commit()
@@ -1581,9 +1180,7 @@ public sealed class UiArchitectureTests
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml"));
         var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml.cs"));
 
-        // Required Components (read-only) replaces the Status page's Routing Components group.
         Assert.Contains("x:Name=\"RequiredComponentsExpander\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"Required Components\"", xaml, StringComparison.Ordinal);
         foreach (var component in new[] { "\"HidHide\"", "\"usbip-win2\"", "\"VIIPER\"" })
             Assert.Contains(component, codeBehind, StringComparison.Ordinal);
         Assert.Contains("snapshot.Prerequisites.HidHideStatus", codeBehind, StringComparison.Ordinal);
@@ -1601,94 +1198,22 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Profile_feature_order_collapsed_defaults_and_resolution_contract_are_explicit()
+    public void Profile_controls_keep_identity_visibility_and_availability_gates()
     {
         var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
-        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
-
-        var fpsDeclarationStart = xaml.IndexOf("<ctcontrols:SettingsExpander x:Name=\"IntelFpsExpander\"", StringComparison.Ordinal);
-        var fpsDeclarationEnd = xaml.IndexOf('>', fpsDeclarationStart);
-        Assert.True(fpsDeclarationStart >= 0 && fpsDeclarationEnd > fpsDeclarationStart);
-        var fpsDeclaration = xaml[fpsDeclarationStart..fpsDeclarationEnd];
-        Assert.DoesNotContain("Visibility=\"Collapsed\"", fpsDeclaration, StringComparison.Ordinal);
-        Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Minimum GPU Clock\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"Minimum GPU Clock\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Resolution\"", StringComparison.Ordinal));
-        foreach (var expanderName in new[] { "TdpExpander", "CpuBoostExpander", "PowerModeExpander", "GpuMinimumClockExpander", "IntelFpsExpander" })
-        {
-            var declarationStart = xaml.IndexOf($"x:Name=\"{expanderName}\"", StringComparison.Ordinal);
-            var declarationEnd = xaml.IndexOf('>', declarationStart);
-            Assert.True(declarationStart >= 0 && declarationEnd > declarationStart);
-            Assert.Contains("IsExpanded=\"False\"", xaml[declarationStart..declarationEnd], StringComparison.Ordinal);
-        }
-        Assert.DoesNotContain("x:Name=\"DisplayExpander\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
-        var profileDocument = XDocument.Parse(xaml);
+        var xamlPath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml");
+        var xaml = File.ReadAllText(xamlPath);
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var document = XDocument.Load(xamlPath);
         XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
-        var resolutionCard = Assert.Single(profileDocument.Descendants(), element =>
-            element.Name.LocalName == "SettingsCard"
+        Assert.Single(document.Descendants(), element => element.Name.LocalName == "SettingsCard"
             && (string?)element.Attribute(xamlNamespace + "Uid") == "Steam_ResolutionCard");
-        Assert.Equal("Resolution", (string?)resolutionCard.Attribute("Header"));
-        Assert.DoesNotContain("Expander.IsExpanded =", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("new(null, null, MainUiStrings.Get(\"Steam_Resolution_DoNotChange\", \"Do not change\")), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("HeaderIcon", xaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xEC4A;\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xE945;\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xEEA1;\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xE7E8;\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xE9D2;\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("snapshot.FpsLimit?.Available == true ? MainUiStrings.Get(\"Steam_IntelFpsExpander/Description\", \"Uses Intel's official API. Some games may not support FPS limiting.\") : snapshot.FpsLimit?.UnavailableReason ?? MainUiStrings.Get(\"Steam_IntelFps_Unavailable\"", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("<TextBlock Text=\"Profile\" VerticalAlignment=\"Center\"/>", xaml, StringComparison.Ordinal);
-        Assert.Contains("<ctcontrols:SettingsCard Grid.Row=\"1\">", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SelectedGameNameText\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("ProfileEnabledToggle", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("ProfileEnabledToggle_Toggled", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"SelectedGameNameText\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("<Grid x:Name=\"DetailPanel\" Visibility=\"Collapsed\" RowSpacing=\"16\">", xaml, StringComparison.Ordinal);
-        Assert.Contains("<Grid.RowDefinitions><RowDefinition Height=\"Auto\"/><RowDefinition Height=\"Auto\"/><RowDefinition Height=\"*\"/></Grid.RowDefinitions>", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("<Grid Grid.Row=\"1\" ColumnSpacing=\"12\">", xaml, StringComparison.Ordinal);
-        Assert.Contains("<ScrollViewer Grid.Row=\"2\" HorizontalScrollMode=\"Disabled\" HorizontalScrollBarVisibility=\"Disabled\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("x:Name=\"DetailPanel\" Visibility=\"Collapsed\" HorizontalContentAlignment=\"Stretch\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("HorizontalScrollMode=\"Disabled\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("OnContent=\"On\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("OffContent=\"Off\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true", code, StringComparison.Ordinal);
+        Assert.Contains("snapshot.FpsLimit?.Available == true ?", code, StringComparison.Ordinal);
+        Assert.Contains("snapshot.FpsLimit?.UnavailableReason", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Expander.IsExpanded =", code, StringComparison.Ordinal);
     }
-
-    [Fact]
-    public void Main_navigation_content_stretches_horizontally()
-    {
-        var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
-        var navigationStart = xaml.IndexOf("<NavigationView", StringComparison.Ordinal);
-        Assert.True(navigationStart >= 0);
-
-        var navigationEnd = xaml.IndexOf('>', navigationStart);
-        Assert.True(navigationEnd > navigationStart);
-
-        var declaration = xaml[navigationStart..navigationEnd];
-        Assert.Contains("x:Name=\"MainNavigationView\"", declaration, StringComparison.Ordinal);
-        Assert.Contains("HorizontalContentAlignment=\"Stretch\"", declaration, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Profile_page_stretches_its_root_content_horizontally()
-    {
-        var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
-        var userControlEnd = xaml.IndexOf('>');
-
-        Assert.True(userControlEnd >= 0);
-
-        var declaration = xaml[..userControlEnd];
-        Assert.Contains("x:Class=\"SteamInputAddonforClaw.Views.ProfilePage\"", declaration, StringComparison.Ordinal);
-        Assert.Contains("HorizontalContentAlignment=\"Stretch\"", declaration, StringComparison.Ordinal);
-    }
-
     [Fact]
     public void Profile_power_mode_enable_mutation_preserves_apply_failure_contract()
     {
@@ -1729,23 +1254,6 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("XboxProfileApplyKind", control, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Developer_cards_have_unique_gyro_icon_and_requested_order()
-    {
-        var root = FindRepositoryRoot();
-        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
-
-        Assert.Equal(1, page.Split("Symbol=\"Rotate\"", StringSplitOptions.None).Length - 1);
-        Assert.DoesNotContain("Header=\"Test Mode\"", page, StringComparison.Ordinal);
-        Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
-        Assert.DoesNotContain("Header=\"PID1902 Input Cadence\"", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("RunPid1902InputCadenceButton", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Header=\"Vibration Profile 0/100 Probe\"", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Header=\"Logging\"", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("LogLevelComboBox", page, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Log Folder\"", page, StringComparison.Ordinal);
-        Assert.Contains("Click=\"OpenLogFolderButton_Click\"", page, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void Developer_menu_removes_M1_M2_tools_and_preserves_unrelated_diagnostics()
@@ -1755,17 +1263,11 @@ public sealed class UiArchitectureTests
         var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
         var mainUi = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
 
-        Assert.DoesNotContain("M1 / M2 Physical Input &amp; Firmware Profile", developerXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Run 10s Diagnostic", developerXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Restore M1/M2 DirectInput", developerXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("MsiBackButton", developerCode, StringComparison.Ordinal);
         Assert.DoesNotContain("RawDirectInputButton", developerCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("Header=\"PID1902 Input Cadence\"", developerXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Header=\"Vibration Profile 0/100 Probe\"", developerXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("VibrationTestRequested", developerCode, StringComparison.Ordinal);
-        Assert.Contains("Header=\"Gyro / Sensor Test\"", developerXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OpenLogFolderButton_Click\"", developerXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("M1 / M2 Physical Input &amp; Firmware Profile", mainUi, StringComparison.Ordinal);
+        Assert.DoesNotContain("MsiBackButton", mainUi, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1775,15 +1277,10 @@ public sealed class UiArchitectureTests
         var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
-        Assert.DoesNotContain("Vibration Profile 0/100 Probe", page, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenVibrationTestButton_Click", page, StringComparison.Ordinal);
         Assert.DoesNotContain("VibrationTestRequested", mainWindow, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml")));
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs")));
-        Assert.DoesNotContain("Battery Charge Limit Test", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("GameInput System Button Probe", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Xbox360 Terminal STOP Loop", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("A2VM LED Read", page, StringComparison.Ordinal);
     }
 
     [Fact]

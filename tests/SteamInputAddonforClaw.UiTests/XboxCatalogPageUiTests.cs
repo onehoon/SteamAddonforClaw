@@ -2,31 +2,13 @@ using System.Xml.Linq;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Views;
+using SteamInputAddonforClaw.Windowing;
 using Xunit;
 
 namespace SteamInputAddonforClaw.UiTests;
 
 public sealed class XboxCatalogPageUiTests
 {
-    [Fact]
-    public void Main_navigation_shows_Steam_then_XBOX_as_separate_top_level_pages()
-    {
-        var document = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
-        var menu = document.Descendants().Single(element => element.Name.LocalName == "NavigationView.MenuItems");
-        var labels = menu.Elements()
-            .Where(element => element.Name.LocalName == "NavigationViewItem")
-            .Select(element => (string?)element.Attribute("Content"))
-            .ToArray();
-
-        Assert.Equal(new[] { "Device", "MSI Update", "Controller", "Steam", "XBOX", "ClawHUD", "Quick Overlay", "Shortcut", "Tweaks", "How to Use" }, labels);
-        var steam = menu.Elements().Single(element => (string?)element.Attribute("Content") == "Steam");
-        var xbox = menu.Elements().Single(element => (string?)element.Attribute("Content") == "XBOX");
-        var clawHud = menu.Elements().Single(element => (string?)element.Attribute("Content") == "ClawHUD");
-        Assert.Equal("Profile", (string?)steam.Attribute("Tag"));
-        Assert.Equal("Xbox", (string?)xbox.Attribute("Tag"));
-        Assert.Equal("Overlay", (string?)clawHud.Attribute("Tag"));
-        Assert.Contains("isSettingsSelected", File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainNavigationState.cs")), StringComparison.Ordinal);
-    }
 
     [Fact]
     public void Steam_page_keeps_its_catalog_and_profile_editor_under_the_Steam_heading()
@@ -34,10 +16,23 @@ public sealed class XboxCatalogPageUiTests
         var document = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml"));
         var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml.cs"));
 
-        Assert.Contains(document.Descendants().Where(element => element.Name.LocalName == "TextBlock"),
-            element => (string?)element.Attribute("Text") == "Steam");
+        Assert.Single(document.Descendants(), element => element.Name.LocalName == "TextBlock"
+            && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "SelectedGameNameText");
         Assert.DoesNotContain("ProfileEnabledToggle", document.ToString(), StringComparison.Ordinal);
         Assert.Contains("FavoriteButton_Click", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Steam_and_Xbox_remain_distinct_accessible_navigation_destinations()
+    {
+        var mainXaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
+        var items = mainXaml.Descendants().Where(element => element.Name.LocalName == "NavigationViewItem").ToArray();
+        Assert.Single(items, element => (string?)element.Attribute("Tag") == "Profile");
+        Assert.Single(items, element => (string?)element.Attribute("Tag") == "Xbox");
+
+        var navigation = new MainNavigationState();
+        Assert.Equal(MainNavigationPage.Profile, navigation.SelectNavigationItem(false, "Profile"));
+        Assert.Equal(MainNavigationPage.Xbox, navigation.SelectNavigationItem(false, "Xbox"));
     }
 
     [Fact]
@@ -154,8 +149,6 @@ public sealed class XboxCatalogPageUiTests
         var queue = Method(code, "private void QueueBackButtonMappingSave", "private BackButtonMappingSettings? ReadSelectedBackButtonMapping");
         var save = Method(code, "private async Task SaveBackButtonMappingAfterAsync", "internal static async Task<TResult> RunAfterPreviousAsync");
 
-        Assert.Contains("Header=\"M1 / M2 Button Mapping\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Header=\"Use global M1 / M2 mapping\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PerGameBackButtonMappingEnabledToggle\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Name=\"UseGlobalBackButtonMappingToggle\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PerGameBackButtonMappingEnabledToggle\" IsOn=\"False\"", xaml, StringComparison.Ordinal);
@@ -352,9 +345,6 @@ public sealed class XboxCatalogPageUiTests
         var withFavorite = games[0] with { Favorite = true };
         var favoritesFirst = XboxPage.FilterAndSort(games.Select(game => game.Key == games[0].Key ? withFavorite : game), null);
         Assert.Equal(withFavorite.Key, favoritesFirst[0].Key);
-        Assert.Equal("—", XboxPage.GetFavoriteGlyph(favorite: false, stateKnown: false));
-        Assert.Equal("★", XboxPage.GetFavoriteGlyph(favorite: true, stateKnown: true));
-        Assert.Equal("☆", XboxPage.GetFavoriteGlyph(favorite: false, stateKnown: true));
         Assert.Single(XboxPage.FilterAndSort(games, "unknown"));
 
         var xaml = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml"));

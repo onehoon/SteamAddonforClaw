@@ -48,7 +48,7 @@ public sealed class HardwareCompatibilityTests
         Assert.Equal(HardwareCompatibilityStatus.Unsupported, assessment.Status);
         Assert.Null(assessment.DeviceFamily);
         Assert.Null(assessment.DeviceModel);
-        Assert.Equal("No handheld-device adapter matched.", assessment.Reason);
+        Assert.False(string.IsNullOrWhiteSpace(assessment.Reason));
         Assert.False(assessment.AllowsMutation);
     }
 

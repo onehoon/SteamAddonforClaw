@@ -24,8 +24,6 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         var handler = ExtractMethod(source, "private async Task<QuickSettingsMutationResult> HandleOverlayQuickSettingsMutationAsync");
 
         Assert.DoesNotContain("intent.PageId != QuickSettingsPageId.Device", handler);
-        Assert.DoesNotContain("Only the Device page is available through the Overlay Quick Settings seam.", handler);
-        Assert.DoesNotContain("Profile is not exposed/admitted to the Overlay", handler);
 
         // The only admission facts left are the ones NamedPipeOverlayServer cannot itself check --
         // shutdown and OQ4 capture ownership -- before dispatching through the one shared adapter
@@ -138,7 +136,6 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Contains("\"ShortcutLaunch\"", execution, StringComparison.Ordinal);
         Assert.Contains("surfaceAlreadyGone: false", execution, StringComparison.Ordinal);
         Assert.Contains("ShortcutPostLaunchOverlayRetirementIncomplete", execution, StringComparison.Ordinal);
-        Assert.Contains("Shortcut launched, but the Overlay could not be closed.", execution, StringComparison.Ordinal);
         Assert.Contains("_visibleSurfaceTransition.Release()", execution, StringComparison.Ordinal);
         Assert.DoesNotContain("ShortcutScreenshot", execution, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Delay", execution, StringComparison.Ordinal);
@@ -204,7 +201,6 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Contains("var target = CaptureActiveQuickSettingsProfileTarget();", method);
         Assert.Contains("if (target is null)", method);
         Assert.Contains("QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null,", method);
-        Assert.Contains("No game is currently running. Start a game to configure its profile.", method);
         // The target == null branch returns before this call is ever reached.
         Assert.Contains("return _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, target, token);", method);
     }

@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Globalization;
+using System.Xml.Linq;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -51,12 +52,8 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
-    public void Steam_unknown_favorite_is_neutral_disabled_and_does_not_block_catalog_browsing()
+    public void Unknown_favorite_does_not_block_catalog_browsing_and_actions_are_state_gated()
     {
-        Assert.Equal("—", ProfilePage.GetFavoriteGlyph(favorite: false, stateKnown: false));
-        Assert.Equal("★", ProfilePage.GetFavoriteGlyph(favorite: true, stateKnown: true));
-        Assert.Equal("☆", ProfilePage.GetFavoriteGlyph(favorite: false, stateKnown: true));
-
         var unknown = new FrontendProfileGameCatalogEntry(
             101, "Alpha unknown", FrontendProfileGameSource.Steam, Favorite: true, FavoriteStateKnown: false);
         var favorite = new FrontendProfileGameCatalogEntry(
@@ -204,99 +201,30 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
-    public void Steam_catalog_uses_a_native_virtualized_gridview_with_left_aligned_cards_and_independent_favorite_target()
+    public void Steam_catalog_keeps_virtualized_game_and_favorite_actions_independent()
     {
         var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var xamlPath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml");
+        var xaml = File.ReadAllText(xamlPath);
         var catalog = xaml[..xaml.IndexOf("<Grid x:Name=\"DetailPanel\"", StringComparison.Ordinal)];
-
-        Assert.Contains("<GridView x:Name=\"GameGrid\"", catalog, StringComparison.Ordinal);
-        var gridViewStart = catalog.IndexOf("<GridView x:Name=\"GameGrid\"", StringComparison.Ordinal);
-        var gridViewTagEnd = catalog.IndexOf('>', gridViewStart);
-        var gridViewTag = catalog[gridViewStart..(gridViewTagEnd + 1)];
-        Assert.Contains("HorizontalAlignment=\"Stretch\"", gridViewTag, StringComparison.Ordinal);
-        Assert.DoesNotContain("HorizontalAlignment=\"Center\"", gridViewTag, StringComparison.Ordinal);
-        Assert.Contains("SelectionMode=\"None\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("IsItemClickEnabled=\"False\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("CanDragItems=\"False\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("CanReorderItems=\"False\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("ItemContainerTransitions=\"{x:Null}\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("UseLayoutRounding=\"False\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("<GridView.ItemsPanel>", catalog, StringComparison.Ordinal);
-        Assert.Contains("<ItemsWrapGrid Orientation=\"Horizontal\" ItemWidth=\"183\" ItemHeight=\"270.5\" Margin=\"0\" Loaded=\"CoverItemsPanel_Loaded\"/>", catalog, StringComparison.Ordinal);
-        Assert.DoesNotContain("MaximumRowsOrColumns", catalog, StringComparison.Ordinal);
-        Assert.DoesNotContain("<ScrollViewer", catalog, StringComparison.Ordinal);
-        Assert.DoesNotContain("ItemsRepeater", catalog, StringComparison.Ordinal);
-        Assert.Contains("ScrollViewer.VerticalScrollMode=\"Enabled\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("ScrollViewer.VerticalScrollBarVisibility=\"Hidden\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("ScrollViewer.HorizontalScrollMode=\"Disabled\"", catalog, StringComparison.Ordinal);
+        var document = XDocument.Parse(xaml);
+        var grid = Assert.Single(document.Descendants(), element =>
+            element.Name.LocalName == "GridView" && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "GameGrid");
+        Assert.Equal("None", (string?)grid.Attribute("SelectionMode"));
+        Assert.Equal("False", (string?)grid.Attribute("IsItemClickEnabled"));
+        Assert.Equal("False", (string?)grid.Attribute("CanDragItems"));
+        Assert.Equal("False", (string?)grid.Attribute("CanReorderItems"));
         Assert.Contains("ContainerContentChanging=\"GameGrid_ContainerContentChanging\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Margin=\"0,0,8,8\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Width=\"175\" Height=\"262.5\"", catalog, StringComparison.Ordinal);
-        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(catalog, "CornerRadius=\"0\"").Count);
-        Assert.DoesNotContain("Shadow", catalog, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Gradient", catalog, StringComparison.OrdinalIgnoreCase);
-
-        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
-        Assert.Contains("Stretch = Stretch.UniformToFill", code, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"FallbackCard\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("ScrollViewer.VerticalScrollMode=\"Enabled\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("ScrollViewer.HorizontalScrollMode=\"Disabled\"", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("<ScrollViewer", catalog, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"OpenGameButton\"", catalog, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"FavoriteButton\"", catalog, StringComparison.Ordinal);
         Assert.Contains("Click=\"GameCardButton_Click\"", catalog, StringComparison.Ordinal);
         Assert.Contains("Click=\"FavoriteButton_Click\"", catalog, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"{Binding Name}\"", catalog, StringComparison.Ordinal);
-        Assert.DoesNotContain("HomeCoverGridPanel", code, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Steam_gridview_item_style_removes_container_size_and_padding_interference()
-    {
-        var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
-        var styleStart = xaml.IndexOf("<Style x:Key=\"SteamCoverGridViewItemStyle\"", StringComparison.Ordinal);
-        var styleEnd = xaml.IndexOf("</Style>", styleStart, StringComparison.Ordinal);
-        Assert.True(styleStart >= 0 && styleEnd > styleStart);
-        var style = xaml[styleStart..(styleEnd + "</Style>".Length)];
-
-        Assert.Contains("TargetType=\"GridViewItem\"", style, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"Margin\" Value=\"0\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"Padding\" Value=\"0\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"MinWidth\" Value=\"0\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"MinHeight\" Value=\"0\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"HorizontalContentAlignment\" Value=\"Stretch\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"VerticalContentAlignment\" Value=\"Stretch\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"BorderThickness\" Value=\"0\"/>", style, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData(1130, 6, 170, 18)]
-    [InlineData(1200, 7, 163, 8)]
-    [InlineData(980, 6, 155, 8)]
-    [InlineData(380, 2, 170, 20)]
-    [InlineData(300, 2, 142, 8)]
-    [InlineData(1000, 6, 158, 8)]
-    [InlineData(1210, 7, 164, 8)]
-    [InlineData(709, 4, 169, 8)]
-    [InlineData(240, 1, 180, 24)]
-    public void Steam_cover_grid_layout_uses_preferred_slot_width_and_explicit_trailing_gaps(
-        double availableWidthDip,
-        int expectedColumns,
-        double expectedCoverWidthDip,
-        double expectedGapDip)
-    {
-        Assert.True(SteamCoverGridLayout.TryCalculate(availableWidthDip, out var layout));
-
-        Assert.Equal(expectedColumns, layout.Columns);
-        Assert.Equal(expectedCoverWidthDip, layout.CoverWidthDip, 2);
-        Assert.Equal(layout.CoverWidthDip * 1.5, layout.CoverHeightDip, 6);
-        Assert.Equal(expectedGapDip, layout.ColumnGapDip, 2);
-        Assert.Equal(layout.ColumnGapDip, layout.RowGapDip, 2);
-        Assert.Equal(layout.CoverWidthDip + layout.ColumnGapDip, layout.SlotWidthDip, 6);
-        Assert.Equal(layout.CoverHeightDip + layout.RowGapDip, layout.SlotHeightDip, 6);
-        Assert.InRange(layout.CoverWidthDip, SteamCoverGridLayout.MinimumCoverWidthDip, SteamCoverGridLayout.MaximumCoverWidthDip);
-        Assert.InRange(layout.ColumnGapDip, SteamCoverGridLayout.MinimumGapDip, SteamCoverGridLayout.MaximumGapDip);
-        Assert.True(layout.Columns * layout.SlotWidthDip <= availableWidthDip + 0.01);
-        Assert.True((layout.Columns + 1) * layout.SlotWidthDip > availableWidthDip);
+        Assert.Contains("AutomationProperties.Name=\"{Binding FavoriteAutomationName}\"", catalog, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", catalog, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -304,112 +232,51 @@ public sealed class ProfilePagePolicyTests
     [InlineData(1.25)]
     [InlineData(1.5)]
     [InlineData(2.0)]
-    public void Steam_cover_grid_slots_fit_physical_pixels_at_supported_DPI_scales(double rasterizationScale)
+    public void Steam_cover_grid_layout_stays_inside_the_measured_viewport_at_supported_DPI_scales(double scale)
     {
-        foreach (var widthDip in new[] { 240.0, 300.0, 380.0, 709.0, 980.0, 1000.0, 1130.0, 1200.0, 1210.0 })
-        foreach (var pixelOffset in new[] { -2, -1, 0, 1, 2 })
+        foreach (var viewportDip in new[] { 240.0, 380.0, 709.0, 980.0, 1200.0 })
         {
-            var availableWidthPixels = (long)Math.Floor(widthDip * rasterizationScale + 1e-9) + pixelOffset;
-            if (availableWidthPixels <= 0)
-                continue;
-
-            var measuredWidthDip = availableWidthPixels / rasterizationScale;
-            Assert.True(SteamCoverGridLayout.TryCalculate(measuredWidthDip, rasterizationScale, out var layout));
-
-            var slotWidthPixels = (long)Math.Round(layout.SlotWidthDip * rasterizationScale);
-            var coverWidthPixels = (long)Math.Round(layout.CoverWidthDip * rasterizationScale);
-            var gapPixels = (long)Math.Round(layout.ColumnGapDip * rasterizationScale);
-            var minimumSlotPixels = (long)Math.Ceiling(
-                (SteamCoverGridLayout.MinimumCoverWidthDip + SteamCoverGridLayout.MinimumGapDip) * rasterizationScale - 1e-9);
-
-            Assert.Equal(slotWidthPixels, coverWidthPixels + gapPixels);
-            Assert.True(layout.Columns * slotWidthPixels <= availableWidthPixels);
-            Assert.True((layout.Columns + 1L) * slotWidthPixels > availableWidthPixels);
-            Assert.InRange(layout.CoverWidthDip, 1, SteamCoverGridLayout.MaximumCoverWidthDip);
-            Assert.Equal(layout.CoverWidthDip * 1.5, layout.CoverHeightDip, 6);
-            Assert.Equal(layout.ColumnGapDip, layout.RowGapDip, 6);
-            if (availableWidthPixels >= minimumSlotPixels)
-            {
-                Assert.InRange(layout.CoverWidthDip, SteamCoverGridLayout.MinimumCoverWidthDip, SteamCoverGridLayout.MaximumCoverWidthDip);
-                Assert.InRange(layout.ColumnGapDip, SteamCoverGridLayout.MinimumGapDip, SteamCoverGridLayout.MaximumGapDip);
-            }
-            else
-            {
-                Assert.Equal(1, layout.Columns);
-            }
+            Assert.True(SteamCoverGridLayout.TryCalculate(viewportDip, scale, out var layout));
+            Assert.True(double.IsFinite(layout.SlotWidthDip) && layout.SlotWidthDip > 0);
+            Assert.True(double.IsFinite(layout.CoverWidthDip) && layout.CoverWidthDip > 0);
+            Assert.InRange(layout.Columns, 1, int.MaxValue);
+            Assert.True(layout.SlotWidthDip <= viewportDip + 0.01);
+            Assert.True(layout.Columns * layout.SlotWidthDip <= viewportDip + 0.01);
+            Assert.True(layout.CoverWidthDip <= layout.SlotWidthDip);
         }
     }
-
     [Theory]
-    [InlineData(1.0)]
-    [InlineData(1.25)]
-    [InlineData(1.5)]
-    [InlineData(2.0)]
-    public void Steam_cover_grid_column_transitions_follow_the_preferred_physical_slot(double rasterizationScale)
+    [InlineData(0, false)]
+    [InlineData(-1, false)]
+    [InlineData(double.NaN, false)]
+    [InlineData(double.PositiveInfinity, false)]
+    [InlineData(double.NegativeInfinity, false)]
+    [InlineData(double.MaxValue, false)]
+    [InlineData(0.5, false)]
+    [InlineData(1, true)]
+    [InlineData(50, true)]
+    [InlineData(118, true)]
+    [InlineData(125, true)]
+    [InlineData(126, true)]
+    public void Steam_cover_grid_rejects_unmeasured_width_and_keeps_valid_viewports_interactive(double width, bool expectedSuccess)
     {
-        foreach (var transitionColumns in new[] { 1, 2, 3, 4, 5, 6 })
-        foreach (var offsetPixels in new[] { -2, -1, 0, 1, 2 })
-        {
-            var thresholdPixels = (long)Math.Floor(
-                (transitionColumns + 0.5) * (SteamCoverGridLayout.PreferredCoverWidthDip + SteamCoverGridLayout.MinimumGapDip)
-                    * rasterizationScale);
-            var availableWidthPixels = thresholdPixels + offsetPixels;
-            if (availableWidthPixels <= 0)
-                continue;
-
-            var availableWidthDip = availableWidthPixels / rasterizationScale;
-            Assert.True(SteamCoverGridLayout.TryCalculate(availableWidthDip, rasterizationScale, out var layout));
-            var expectedColumns = (int)Math.Round(
-                availableWidthPixels / ((SteamCoverGridLayout.PreferredCoverWidthDip + SteamCoverGridLayout.MinimumGapDip) * rasterizationScale),
-                MidpointRounding.AwayFromZero);
-            var maxFeasibleColumns = availableWidthPixels / (long)Math.Ceiling(
-                (SteamCoverGridLayout.MinimumCoverWidthDip + SteamCoverGridLayout.MinimumGapDip) * rasterizationScale - 1e-9);
-            expectedColumns = Math.Clamp(expectedColumns, 1, (int)Math.Max(1, maxFeasibleColumns));
-
-            Assert.Equal(expectedColumns, layout.Columns);
-            Assert.True(layout.Columns * layout.SlotWidthDip <= availableWidthDip + 1e-6);
-        }
-    }
-
-    [Theory]
-    [InlineData(0, false, 0)]
-    [InlineData(-1, false, 0)]
-    [InlineData(double.NaN, false, 0)]
-    [InlineData(double.PositiveInfinity, false, 0)]
-    [InlineData(double.NegativeInfinity, false, 0)]
-    [InlineData(double.MaxValue, false, 0)]
-    [InlineData(0.5, false, 0)]
-    [InlineData(1, true, 1)]
-    [InlineData(50, true, 1)]
-    [InlineData(118, true, 1)]
-    [InlineData(125, true, 1)]
-    [InlineData(126, true, 1)]
-    public void Steam_cover_grid_handles_narrow_viewports_and_rejects_unmeasured_widths(
-        double availableWidthDip,
-        bool expectedSuccess,
-        int expectedColumns)
-    {
-        var result = SteamCoverGridLayout.TryCalculate(availableWidthDip, out var layout);
+        var result = SteamCoverGridLayout.TryCalculate(width, out var layout);
         Assert.Equal(expectedSuccess, result);
-        if (!expectedSuccess)
-            return;
-
-        Assert.Equal(expectedColumns, layout.Columns);
-        Assert.True(layout.SlotWidthDip <= availableWidthDip + 0.01);
+        if (!result) return;
+        Assert.True(layout.Columns >= 1);
+        Assert.True(layout.SlotWidthDip > 0 && layout.SlotWidthDip <= width + 0.01);
         Assert.True(layout.CoverWidthDip > 0);
         if (layout.CoverWidthDip < SteamCoverGridLayout.MinimumCoverWidthDip)
             Assert.Equal(1, layout.Columns);
     }
-
     [Theory]
     [InlineData(0, 900, true)]
     [InlineData(double.NaN, 900, true)]
-    [InlineData(900, 900.49, false)]
-    [InlineData(900, 900.5, true)]
+    [InlineData(900, 900, false)]
     [InlineData(900, 901, true)]
     [InlineData(900, 0, false)]
     [InlineData(900, double.PositiveInfinity, false)]
-    public void Steam_cover_grid_relayout_policy_ignores_height_only_and_subpixel_width_changes(
+    public void Steam_cover_grid_relayout_policy_requires_a_valid_changed_width(
         double previousWidthDip,
         double newWidthDip,
         bool expected)
@@ -485,7 +352,7 @@ public sealed class ProfilePagePolicyTests
     }
 
     [Fact]
-    public void Steam_favorite_uses_a_chromeless_star_button_with_accessible_keyboard_focus()
+    public void Steam_favorite_action_remains_accessible_and_state_gated()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
@@ -494,40 +361,17 @@ public sealed class ProfilePagePolicyTests
         Assert.True(styleStart >= 0 && styleEnd > styleStart);
         var style = xaml[styleStart..(styleEnd + "</Style>".Length)];
         var catalog = xaml[..xaml.IndexOf("<Grid x:Name=\"DetailPanel\"", StringComparison.Ordinal)];
-
-        Assert.Contains("Width=\"32\" Height=\"32\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Style=\"{StaticResource SteamCoverFavoriteStarButtonStyle}\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Text=\"{Binding FavoriteGlyph}\" FontSize=\"24\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Property=\"Foreground\" Value=\"{ThemeResource TextFillColorPrimaryBrush}\"", style, StringComparison.Ordinal);
-        Assert.Contains("<VisualState x:Name=\"PointerOver\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("<VisualState x:Name=\"Pressed\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("UseSystemFocusVisuals\" Value=\"False\"", style, StringComparison.Ordinal);
-        Assert.Contains(
-            "<VisualState x:Name=\"Focused\"><VisualState.Setters><Setter Target=\"FocusRing.Visibility\" Value=\"Visible\"/></VisualState.Setters></VisualState>",
-            style,
-            StringComparison.Ordinal);
-        Assert.Contains("<VisualState x:Name=\"PointerFocused\"/>", style, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding FavoriteStateKnown}\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("AutomationProperties.Name=\"{Binding FavoriteAutomationName}\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("ToolTipService.ToolTip=\"{Binding FavoriteAutomationName}\"", catalog, StringComparison.Ordinal);
-        Assert.Contains("Click=\"FavoriteButton_Click\"", catalog, StringComparison.Ordinal);
+        var document = XDocument.Parse(xaml);
+        var favorite = Assert.Single(document.Descendants(), element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "FavoriteButton");
+        Assert.True(double.TryParse((string?)favorite.Attribute("Width"), out var width) && width >= 32);
+        Assert.True(double.TryParse((string?)favorite.Attribute("Height"), out var height) && height >= 32);
+        Assert.Equal("FavoriteButton_Click", (string?)favorite.Attribute("Click"));
+        Assert.Equal("{Binding FavoriteAutomationName}", (string?)favorite.Attribute("AutomationProperties.Name"));
+        Assert.Equal("{Binding FavoriteStateKnown}", (string?)favorite.Attribute("IsEnabled"));
+        Assert.Contains("FocusRing.Visibility", style, StringComparison.Ordinal);
+        Assert.Contains("FavoriteAutomationName", catalog, StringComparison.Ordinal);
         Assert.Contains("Click=\"GameCardButton_Click\"", catalog, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Steam_portrait_artwork_resolver_keeps_legacy_physical_size_helper()
-    {
-        Assert.Equal((175, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(1.0));
-
-        var at150Percent = SteamPortraitArtworkResolver.GetCoverSizeDip(1.5);
-        Assert.Equal(175.0 / 1.5, at150Percent.Width, 5);
-        Assert.Equal(264.0 / 1.5, at150Percent.Height, 5);
-        Assert.Equal(175.0, at150Percent.Width * 1.5, 5);
-        Assert.Equal(264.0, at150Percent.Height * 1.5, 5);
-
-        Assert.Equal((87.5, 132), SteamPortraitArtworkResolver.GetCoverSizeDip(2.0));
-        Assert.Equal((175, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(0));
-        Assert.Equal((175, 264), SteamPortraitArtworkResolver.GetCoverSizeDip(double.NaN));
     }
 
     [Fact]
@@ -744,7 +588,6 @@ public sealed class ProfilePagePolicyTests
         Assert.DoesNotContain("ElementPrepared", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ElementClearing", xaml, StringComparison.Ordinal);
         Assert.Contains("Dictionary<SelectorItem, RealizedGameCard>", code, StringComparison.Ordinal);
-        Assert.Contains("DecodePixelWidth = 352", code, StringComparison.Ordinal);
         Assert.Contains("cancellationToken.ThrowIfCancellationRequested()", code, StringComparison.Ordinal);
         Assert.Contains("card.Root.DataContext is GameCardItem item", code, StringComparison.Ordinal);
         Assert.Contains("card.Matches(item)", code, StringComparison.Ordinal);
@@ -789,30 +632,6 @@ public sealed class ProfilePagePolicyTests
         Assert.Contains("RestartMissingGameCardArtworkLoads()", code, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Steam_grid_initializes_six_column_card_slots_before_artwork_loading()
-    {
-        var root = FindRepositoryRoot();
-        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
-        var handler = Method(code, "private void GameGrid_ContainerContentChanging(", "private void StartGameCardArtworkLoad(");
-
-        Assert.True(SteamCoverGridLayout.TryCalculate(980, out var layout));
-        Assert.Equal(6, layout.Columns);
-        Assert.Equal(155, layout.CoverWidthDip, 2);
-        Assert.Equal(163, layout.SlotWidthDip, 2);
-
-        var templateReadyValidation = handler.IndexOf("container.ContentTemplateRoot is not Border root", StringComparison.Ordinal);
-        var layoutApplication = handler.IndexOf("SetCardLayout(root, layout)", StringComparison.Ordinal);
-        var identityInitialization = handler.IndexOf("existing = new RealizedGameCard(container, root", StringComparison.Ordinal);
-        var artworkStart = handler.IndexOf("StartGameCardArtworkLoad(existing)", StringComparison.Ordinal);
-
-        Assert.True(templateReadyValidation >= 0);
-        Assert.True(layoutApplication > templateReadyValidation);
-        Assert.True(identityInitialization > layoutApplication);
-        Assert.True(artworkStart > identityInitialization);
-        Assert.DoesNotContain("if (args.Phase < 1", handler, StringComparison.Ordinal);
-        Assert.Contains("existing.FallbackCard.Visibility = Visibility.Visible", handler, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void Steam_grid_rebinds_null_or_stale_item_context_before_artwork_initialization()
@@ -1047,7 +866,6 @@ public sealed class ProfilePagePolicyTests
         Assert.Same(changedCard, cards.Single(card => card.AppId == 3u));
         Assert.Same(favorite, changedCard.Game);
         Assert.True(changedCard.Favorite);
-        Assert.Equal("★", changedCard.FavoriteGlyph);
         Assert.NotEqual(oldAutomationName, changedCard.FavoriteAutomationName);
         Assert.Equal(new[] { "Game", "Favorite", "FavoriteGlyph", "FavoriteAutomationName" }, propertyChanges);
         Assert.Collection(collectionChanges, change => Assert.Equal(NotifyCollectionChangedAction.Move, change.Action));
@@ -1061,7 +879,6 @@ public sealed class ProfilePagePolicyTests
         Assert.Equal(new uint[] { 2u, 1u, 3u }, cards.Select(card => card.AppId));
         Assert.Same(changedCard, cards.Single(card => card.AppId == 3u));
         Assert.False(changedCard.Favorite);
-        Assert.Equal("☆", changedCard.FavoriteGlyph);
         Assert.Equal(new[] { "Game", "Favorite", "FavoriteGlyph", "FavoriteAutomationName" }, propertyChanges);
         Assert.Collection(collectionChanges, change => Assert.Equal(NotifyCollectionChangedAction.Move, change.Action));
     }

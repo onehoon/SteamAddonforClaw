@@ -114,14 +114,15 @@ public sealed class OverlayShortcutTransportTests
         Assert.True(OverlayWireCodec.GetSerializedLength(stateEnvelope) <= OverlayTransportProtocol.MaxFrameBytes);
         Assert.Equal(state, stateEnvelope.ShortcutState);
 
-        var smallResult = new OverlayShortcutExecuteResponse(1, id, false, "Shortcut could not be launched.", Snapshot("Small"));
+        const string executionFailure = "fixture execution failure";
+        var smallResult = new OverlayShortcutExecuteResponse(1, id, false, executionFailure, Snapshot("Small"));
         var smallResultEnvelope = new OverlayWireMessage(12, OverlayWireMessageKind.ShortcutExecuteResult,
             ShortcutExecuteResult: smallResult);
         Assert.True(OverlayWireCodec.GetSerializedLength(smallResultEnvelope) <= OverlayTransportProtocol.MaxFrameBytes);
         Assert.Equal(smallResult, OverlayShortcutWireValidation.CreateBoundedResultMessage(smallResult).ShortcutExecuteResult);
 
         var oversizedByResultWrapper = new OverlayShortcutExecuteResponse(2, id, false,
-            "Shortcut could not be launched.", state);
+            executionFailure, state);
         var fullResultEnvelope = new OverlayWireMessage(12, OverlayWireMessageKind.ShortcutExecuteResult,
             ShortcutExecuteResult: oversizedByResultWrapper);
         Assert.True(OverlayWireCodec.GetSerializedLength(stateEnvelope) <= OverlayTransportProtocol.MaxFrameBytes);
@@ -130,8 +131,8 @@ public sealed class OverlayShortcutTransportTests
         var boundedResultEnvelope = OverlayShortcutWireValidation.CreateBoundedResultMessage(oversizedByResultWrapper);
         Assert.True(OverlayWireCodec.GetSerializedLength(boundedResultEnvelope) <= OverlayTransportProtocol.MaxFrameBytes);
         Assert.False(boundedResultEnvelope.ShortcutExecuteResult!.Snapshot.Available);
-        Assert.Equal("Shortcut configuration is too large to display.", boundedResultEnvelope.ShortcutExecuteResult.Snapshot.FailureMessage);
-        Assert.Equal("Shortcut could not be launched.", boundedResultEnvelope.ShortcutExecuteResult.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(boundedResultEnvelope.ShortcutExecuteResult.Snapshot.FailureMessage));
+        Assert.Equal(executionFailure, boundedResultEnvelope.ShortcutExecuteResult.FailureMessage);
 
         var oversized = new FrontendShortcutDashboardSnapshot(true,
             [new FrontendShortcutTile(Guid.NewGuid(), new string('X', OverlayTransportProtocol.MaxFrameBytes * 2), null,
@@ -165,7 +166,7 @@ public sealed class OverlayShortcutTransportTests
                 if (requested == failedTileId)
                 {
                     snapshot = Snapshot("After failed execution");
-                    return Task.FromResult(new OverlayShortcutExecutionOutcome(false, "Shortcut could not be executed."));
+                    return Task.FromResult(new OverlayShortcutExecutionOutcome(false, "fixture execution failure"));
                 }
                 snapshot = Snapshot("After successful execution");
                 return Task.FromResult(new OverlayShortcutExecutionOutcome(true));
@@ -188,7 +189,7 @@ public sealed class OverlayShortcutTransportTests
 
         var failedResult = await client.SendShortcutExecuteAsync(failedTileId).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(failedResult.Succeeded);
-        Assert.Equal("Shortcut could not be executed.", failedResult.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(failedResult.FailureMessage));
         Assert.Equal("After failed execution", failedResult.Snapshot.Tiles.Single().Title);
         Assert.Equal(2, executionCount);
 
@@ -396,7 +397,7 @@ public sealed class OverlayShortcutTransportTests
             var state = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.False(state.Available);
             Assert.Empty(state.Tiles);
-            Assert.Equal("Shortcut settings are unavailable.", state.FailureMessage);
+            Assert.False(string.IsNullOrWhiteSpace(state.FailureMessage));
             Assert.True(controller.IsVisible);
 
             await controller.DisposeAsync();

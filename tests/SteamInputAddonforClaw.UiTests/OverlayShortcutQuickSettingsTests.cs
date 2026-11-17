@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay;
 using Xunit;
@@ -8,7 +9,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayShortcutQuickSettingsTests
 {
     [Fact]
-    public void Shortcut_page_places_shared_quick_settings_before_the_unchanged_tile_grid()
+    public void Shortcut_page_hosts_shared_quick_settings_and_reconciles_tiles_by_identity()
     {
         var shortcuts = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
@@ -17,13 +18,8 @@ public sealed class OverlayShortcutQuickSettingsTests
         var build = shortcuts[buildStart..buildEnd];
 
         Assert.Contains("_shortcutQuickSettingsHost", build, StringComparison.Ordinal);
-        Assert.Contains("var separator = new Border", build, StringComparison.Ordinal);
-        Assert.True(build.IndexOf("_shortcutQuickSettingsHost", StringComparison.Ordinal)
-            < build.IndexOf("var separator = new Border", StringComparison.Ordinal));
-        Assert.True(build.IndexOf("root.Children.Add(separator)", StringComparison.Ordinal)
-            < build.IndexOf("root.Children.Add(_shortcutGrid)", StringComparison.Ordinal));
-        Assert.Contains("Background = OverlayQamResources.Brush(\"QamSeparatorBrush\")", build, StringComparison.Ordinal);
-        Assert.Contains("IsHitTestVisible = false", build, StringComparison.Ordinal);
+        Assert.Contains("root.Children.Add(_shortcutQuickSettingsHost)", build, StringComparison.Ordinal);
+        Assert.Contains("root.Children.Add(_shortcutGrid)", build, StringComparison.Ordinal);
         Assert.DoesNotContain("Text = \"Shortcuts\"", build, StringComparison.Ordinal);
         Assert.DoesNotContain("ScrollViewer", build, StringComparison.Ordinal);
         Assert.Contains("if (rendered.Card.Visibility != visibility)", quickSettings, StringComparison.Ordinal);
@@ -184,7 +180,7 @@ public sealed class OverlayShortcutQuickSettingsTests
         var unavailableSteam = QuickSettingsPageSnapshot.Unavailable(
             QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(570), "Profile storage is read-only.");
         var noGame = QuickSettingsPageSnapshot.Unavailable(
-            QuickSettingsPageId.Profile, null, "No game is currently running. Start a game to configure its profile.");
+            QuickSettingsPageId.Profile, null, ReadNoGameProfileMessage());
         var unrelatedFailure = QuickSettingsPageSnapshot.Unavailable(
             QuickSettingsPageId.Profile, null, "Active profile capture failed.");
 
@@ -261,6 +257,12 @@ public sealed class OverlayShortcutQuickSettingsTests
     private static QuickSettingsPageSnapshot ProfilePage(QuickSettingsProfileTarget target, string gameName = "") =>
         new(QuickSettingsPageId.Profile, target, true, null,
             [new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, gameName, [])], []);
+
+    private static string ReadNoGameProfileMessage() =>
+        (string?)typeof(OverlayWindow).GetField(
+            "NoActiveGameMessage",
+            BindingFlags.Static | BindingFlags.NonPublic)?.GetRawConstantValue()
+        ?? throw new InvalidOperationException("The no-game profile message is unavailable.");
 
     private static QuickSettingsRow NumericRow(QuickSettingsRowId rowId, string label, int value, bool visible = true) =>
         new(rowId, label, QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(value),

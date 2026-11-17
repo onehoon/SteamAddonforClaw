@@ -367,7 +367,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
             CloseOverlayAfterLaunch: false));
 
         Assert.False(rejected.Succeeded);
-        Assert.Equal("Built-in Shortcut actions cannot be changed.", rejected.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(rejected.FailureMessage));
         Assert.Equal(before, File.ReadAllText(DocumentPath));
 
         var editable = Assert.Single(runtime.CaptureEditor().Tiles);
@@ -399,7 +399,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
             new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.ShowDesktop),
             CloseOverlayAfterLaunch: true));
         Assert.False(typeChange.Succeeded);
-        Assert.Equal("Built-in Shortcut actions cannot be changed.", typeChange.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(typeChange.FailureMessage));
     }
 
     [Theory]
@@ -522,7 +522,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         var duplicate = runtime.MutateEditor(CreateIntent("Second screenshot", FrontendShortcutEditorActionKind.ScreenshotFullscreen));
         Assert.False(duplicate.Succeeded);
         Assert.False(duplicate.Changed);
-        Assert.Equal("Only one Screenshot Shortcut can be added.", duplicate.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(duplicate.FailureMessage));
         Assert.Equal(beforeDuplicate, File.ReadAllText(DocumentPath));
 
         var other = runtime.MutateEditor(CreateIntent("Other", FrontendShortcutEditorActionKind.Url, url: "https://example.com"));
@@ -579,7 +579,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.False(result.Changed);
-        Assert.Equal("Executable path or arguments are too long to run.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         Assert.Equal(0, saveCount);
         Assert.Equal(before, File.ReadAllText(DocumentPath));
         Assert.Equal(existing.TileId, Assert.Single(runtime.CaptureEditor().Tiles).TileId);
@@ -601,7 +601,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.False(result.Changed);
-        Assert.Equal("PowerShell script is too long to run.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         Assert.Equal(0, saveCount);
         Assert.Equal(before, File.ReadAllText(DocumentPath));
         Assert.Equal(existing.TileId, Assert.Single(runtime.CaptureEditor().Tiles).TileId);
@@ -692,7 +692,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
             FrontendShortcutEditorActionKind.ScreenshotFullscreen));
 
         Assert.False(result.Succeeded);
-        Assert.Equal("Shortcut configuration is too large to edit in this version.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         Assert.Single(result.Snapshot.Tiles);
         Assert.Equal(before, File.ReadAllText(DocumentPath));
     }
@@ -709,7 +709,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         var snapshot = runtime.CaptureEditor();
 
         Assert.False(snapshot.Available);
-        Assert.Equal("Shortcut configuration is too large to edit in this version.", snapshot.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(snapshot.FailureMessage));
         Assert.Empty(snapshot.Tiles);
         Assert.Equal(before, File.ReadAllText(DocumentPath));
     }

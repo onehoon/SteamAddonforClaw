@@ -1,10 +1,9 @@
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>App UI PR-C section 22.9: the Controller mapping surface shows Gamebar Button before
-/// Center M Button, exposes both presentation domains, and never surfaces the retired
-/// WING / None / Remapping Enabled / Steam Input Routing vocabulary as user labels.</summary>
+/// <summary>Controller mapping UI preserves front-button domains, supported actions, and mutation semantics.</summary>
 public sealed class FrontButtonUiLayoutTests
 {
     private static string Read(string relative)
@@ -15,36 +14,29 @@ public sealed class FrontButtonUiLayoutTests
     }
 
     [Fact]
-    public void Controller_page_lists_gamebar_before_center_m_with_both_domains()
+    public void Controller_page_exposes_both_front_button_domains_by_identity()
     {
         var xaml = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
-
-        Assert.Contains("Button Mapping", xaml, StringComparison.Ordinal);
-        var gamebar = xaml.IndexOf("Header=\"XBOX Gamebar Button\"", StringComparison.Ordinal);
-        var centerM = xaml.IndexOf("Header=\"Center M Button\"", StringComparison.Ordinal);
-        Assert.True(gamebar >= 0 && centerM >= 0);
-        Assert.True(gamebar < centerM);
-        Assert.Contains("Header=\"Normal\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"Steam Game / Big Picture\"", xaml, StringComparison.Ordinal);
+        var code = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
+        Assert.Contains("x:Uid=\"Controller_GamebarExpander\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Uid=\"Controller_CenterMExpander\"", xaml, StringComparison.Ordinal);
+        foreach (var control in new[] { "GamebarNormalActionComboBox", "GamebarSteamActionComboBox",
+                     "CenterMNormalActionComboBox", "CenterMSteamActionComboBox" })
+            Assert.Contains($"x:Name=\"{control}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FrontButtonActionCapabilities.ActionsFor(domain)", code, StringComparison.Ordinal);
+        foreach (var domain in Enum.GetValues<FrontButtonDomain>())
+        foreach (var action in FrontButtonActionCapabilities.ActionsFor(domain))
+            Assert.True(FrontButtonActionCapabilities.Supports(action, domain));
     }
-
     [Fact]
-    public void Controller_mapping_surface_does_not_use_the_retired_vocabulary()
+    public void Front_button_action_catalog_excludes_unsupported_no_op_actions()
     {
-        var xaml = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml");
-        var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
-
-        foreach (var forbidden in new[] { "WING", "Remapping Enabled", "RemappingEnabled", "Steam Input Routing", "SteamInputRouting" })
+        foreach (var domain in Enum.GetValues<FrontButtonDomain>())
         {
-            Assert.DoesNotContain(forbidden, xaml, StringComparison.Ordinal);
-            Assert.DoesNotContain(forbidden, codeBehind, StringComparison.Ordinal);
+            Assert.DoesNotContain((FrontButtonAction)99, FrontButtonActionCapabilities.ActionsFor(domain));
+            Assert.False(FrontButtonActionCapabilities.Supports((FrontButtonAction)99, domain));
         }
-
-        // No "None" action label offered anywhere in the mapping editor.
-        Assert.DoesNotContain("\"None\"", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("FrontButtonAction.None", codeBehind, StringComparison.Ordinal);
     }
-
     [Fact]
     public void The_editor_cannot_leave_a_gamebar_win_g_hotkey_selected()
     {
@@ -58,14 +50,14 @@ public sealed class FrontButtonUiLayoutTests
     }
 
     [Fact]
-    public void Xbox_is_labeled_and_both_domain_editors_use_the_shared_capability_catalog()
+    public void Xbox_action_uses_the_shared_domain_capability_catalog()
     {
-        var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
-
-        Assert.Contains("FrontButtonAction.XboxApp => MainUiStrings.Get(\"Controller_Action_Xbox\", \"XBOX\")", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("FrontButtonActionCapabilities.ActionsFor(domain)", codeBehind, StringComparison.Ordinal);
+        var code = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
+        Assert.Contains("FrontButtonActionCapabilities.ActionsFor(domain)", code, StringComparison.Ordinal);
+        Assert.Contains("actionComboBox.Items.Add(new ComboBoxItem { Content = DescribeAction(action), Tag = action })", code, StringComparison.Ordinal);
+        Assert.Contains(FrontButtonAction.XboxApp, FrontButtonActionCapabilities.ActionsFor(FrontButtonDomain.Normal));
+        Assert.DoesNotContain(FrontButtonAction.XboxApp, FrontButtonActionCapabilities.ActionsFor(FrontButtonDomain.Steam));
     }
-
     [Fact]
     public void The_center_m_button_detail_page_is_gone()
     {

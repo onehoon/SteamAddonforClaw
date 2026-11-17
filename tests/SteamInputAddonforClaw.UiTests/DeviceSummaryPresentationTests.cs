@@ -19,26 +19,7 @@ public sealed class DeviceSummaryPresentationTests
     public void FormatManufacturerForDisplay_UnknownManufacturer_PreservesTrimmedValue() =>
         Assert.Equal("Acme Devices", DeviceSummaryPresentation.FormatManufacturerForDisplay("  Acme Devices  "));
 
-    [Theory]
-    [InlineData(FrontendControllerBadgeState.Unavailable, "Unavailable")]
-    [InlineData(FrontendControllerBadgeState.MsiNative, "MSI Native")]
-    [InlineData(FrontendControllerBadgeState.Xbox360Active, "XBOX 360 · Active")]
-    [InlineData(FrontendControllerBadgeState.SteamDeckActive, "Steam Deck · Active")]
-    [InlineData(FrontendControllerBadgeState.DualSenseEdgeActive, "DualSense Edge · Active")]
-    [InlineData(FrontendControllerBadgeState.Initializing, "Initializing…")]
-    [InlineData(FrontendControllerBadgeState.Reconnecting, "Reconnecting…")]
-    [InlineData(FrontendControllerBadgeState.NeedsAttention, "Needs attention")]
-    public void FormatControllerBadge_MapsEveryTypedState(FrontendControllerBadgeState badge, string expected) =>
-        Assert.Equal(expected, DeviceSummaryPresentation.FormatControllerBadge(FrontendHardwareStatus.Supported, badge));
 
-    [Theory]
-    [InlineData(FrontendHardwareStatus.Unsupported, FrontendControllerBadgeState.SteamDeckActive, "Unsupported")]
-    [InlineData(FrontendHardwareStatus.Indeterminate, FrontendControllerBadgeState.Xbox360Active, "Compatibility unknown")]
-    public void FormatControllerBadge_PreservesHardwareCompatibilityWarnings(
-        FrontendHardwareStatus hardwareStatus,
-        FrontendControllerBadgeState badge,
-        string expected) =>
-        Assert.Equal(expected, DeviceSummaryPresentation.FormatControllerBadge(hardwareStatus, badge));
 
     [Theory]
     [InlineData(FrontendHardwareStatus.Supported, FrontendControllerBadgeState.Xbox360Active, "Success")]

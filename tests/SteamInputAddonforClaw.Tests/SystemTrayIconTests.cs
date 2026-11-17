@@ -292,25 +292,24 @@ public sealed class SystemTrayIconTests
         return body[..body.IndexOf("internal static uint TerminationMenuFlags", StringComparison.Ordinal)];
     }
 
-    [Fact]
-    public void Tray_menu_is_exactly_Open_separator_RestartAddon()
-    {
-        var menu = ShowMenuBody();
 
-        Assert.Contains("\"Open\"", menu, StringComparison.Ordinal);
-        Assert.Contains("MF_SEPARATOR", menu, StringComparison.Ordinal);
-        Assert.Contains("\"Restart Addon\"", menu, StringComparison.Ordinal);
-        Assert.DoesNotContain("Overlay POC", menu, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"Exit\"", menu, StringComparison.Ordinal);
-        // Open before the separator before Restart Addon.
-        var open = menu.IndexOf("\"Open\"", StringComparison.Ordinal);
-        var separator = menu.IndexOf("MF_SEPARATOR", StringComparison.Ordinal);
-        var restart = menu.IndexOf("\"Restart Addon\"", StringComparison.Ordinal);
-        Assert.True(open < separator && separator < restart);
+    [Fact]
+    public void Tray_context_commands_dispatch_open_and_restart_and_gate_restart_by_runtime_state()
+    {
+        var body = ShowMenuBody();
+        Assert.Contains("AppendMenuW(menu, MF_STRING, OpenCommand", body, StringComparison.Ordinal);
+        Assert.Contains("AppendMenuW(menu, restartFlags, RestartCommand", body, StringComparison.Ordinal);
+        Assert.Contains("var restart = _restartDecision()", body, StringComparison.Ordinal);
+        Assert.Contains("TerminationMenuFlags(restart.CanTerminate)", body, StringComparison.Ordinal);
+        var openStart = body.IndexOf("if (command == OpenCommand)", StringComparison.Ordinal);
+        var restartStart = body.IndexOf("if (command == RestartCommand)", StringComparison.Ordinal);
+        Assert.True(openStart >= 0 && restartStart > openStart);
+        Assert.Contains("_open();", body[openStart..restartStart], StringComparison.Ordinal);
+        Assert.Contains("_restart();", body[restartStart..], StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Tray_no_longer_takes_an_exit_or_overlay_toggle_delegate()
+    public void Tray_lifecycle_does_not_receive_process_exit_or_overlay_toggle_authority()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;

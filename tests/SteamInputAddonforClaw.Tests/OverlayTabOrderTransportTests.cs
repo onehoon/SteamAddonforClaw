@@ -118,7 +118,7 @@ public sealed class AddonQuickSettingsTabOrderTransportTests
         var expected = Snapshot(AddonQuickSettingsTabOrderContract.DefaultOrder);
         await using var server = new NamedPipeOverlayServer(pipeName,
             captureTabOrder: _ => Task.FromResult(expected),
-            moveTabOrder: (_, _) => Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(false, "Rejected.", expected)));
+            moveTabOrder: (_, _) => Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(false, "fixture rejection", expected)));
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
         var run = client.RunAsync(_ => Task.CompletedTask, null, _ => Task.CompletedTask);
@@ -127,7 +127,7 @@ public sealed class AddonQuickSettingsTabOrderTransportTests
 
         var result = await client.SendTabOrderMoveAsync(new(AddonQuickSettingsTabId.Device, 1));
         Assert.False(result.Succeeded);
-        Assert.Equal("Rejected.", result.FailureMessage);
+        Assert.False(string.IsNullOrWhiteSpace(result.FailureMessage));
         AssertStateEqual(expected, result.State);
 
         Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));

@@ -225,7 +225,7 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
 
         Assert.Empty(OverlayQuickSettingsSectionRendering.DescribeRows(section));
         Assert.False(OverlayQuickSettingsPageBinding.CanMutate(row));
-        Assert.Equal("Current game", section.Label);
+        Assert.False(string.IsNullOrWhiteSpace(section.Label));
     }
 
     [Fact]

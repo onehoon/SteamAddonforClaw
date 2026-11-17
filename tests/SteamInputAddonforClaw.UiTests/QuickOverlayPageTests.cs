@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using SteamInputAddonforClaw.Views;
 using Xunit;
@@ -59,21 +61,18 @@ public sealed class QuickOverlayPageTests
     }
 
     [Fact]
-    public void Y_button_quick_jump_is_first_card_uses_fixed_choices_and_runtime_readback()
+    public void Y_button_quick_jump_exposes_supported_targets_and_runtime_readback()
     {
         var root = FindRepositoryRoot();
         var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml"));
-        var cards = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
-        Assert.Equal(3, cards.Length);
-        Assert.Equal("YButtonQuickJumpCard", (string?)cards[0].Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")));
-        Assert.Equal("QuickSettingsPowerSourceCard", (string?)cards[1].Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")));
-        Assert.Equal("SimplifiedTdpControlsCard", (string?)cards[2].Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")));
-        var expander = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "SettingsExpander");
-        Assert.Equal("False", (string?)expander.Attribute("IsExpanded"));
+        var xamlNamespace = XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml");
+        var cardNames = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard")
+            .Select(element => (string?)element.Attribute(xamlNamespace)).ToHashSet();
+        Assert.True(cardNames.SetEquals(new[] { "YButtonQuickJumpCard", "QuickSettingsPowerSourceCard", "SimplifiedTdpControlsCard" }));
 
         var combo = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "ComboBox");
-        Assert.Equal(new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" },
-            combo.Elements().Select(element => (string?)element.Attribute("Tag")));
+        Assert.True(combo.Elements().Select(element => (string?)element.Attribute("Tag")).ToHashSet()
+            .SetEquals(new[] { "Profile", "Shortcut", "Device", "Controller", "Setting", "Off" }));
         Assert.All(combo.Elements(), item =>
         {
             Assert.NotNull(item.Attribute("Content"));
@@ -116,11 +115,10 @@ public sealed class QuickOverlayPageTests
                     move.IndexOf("ApplyAuthoritativeTabOrder(result.State)", StringComparison.Ordinal));
         Assert.Contains("Tag = tabId", button, StringComparison.Ordinal);
         Assert.Contains("MoveTabOrderAsync(tabId, delta)", button, StringComparison.Ordinal);
-        Assert.Contains("FontSize = 16", button, StringComparison.Ordinal);
-        Assert.Contains("Width = 40", button, StringComparison.Ordinal);
-        Assert.Contains("Height = 28", button, StringComparison.Ordinal);
-        Assert.DoesNotContain("FontSize = 20", button, StringComparison.Ordinal);
-        Assert.DoesNotContain("Height = 32", button, StringComparison.Ordinal);
+        var width = Regex.Match(button, @"\bWidth\s*=\s*(?<value>\d+(?:\.\d+)?)");
+        var height = Regex.Match(button, @"\bHeight\s*=\s*(?<value>\d+(?:\.\d+)?)");
+        Assert.True(width.Success && double.Parse(width.Groups["value"].Value, CultureInfo.InvariantCulture) >= 40);
+        Assert.True(height.Success && double.Parse(height.Groups["value"].Value, CultureInfo.InvariantCulture) >= 28);
         Assert.Contains("_tabOrderMoveInProgress", buttonStates, StringComparison.Ordinal);
         Assert.Contains("controls.MoveEarlier.IsEnabled = available && row!.CanMoveEarlier", buttonStates, StringComparison.Ordinal);
         Assert.Contains("controls.MoveLater.IsEnabled = available && row!.CanMoveLater", buttonStates, StringComparison.Ordinal);

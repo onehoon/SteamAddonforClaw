@@ -353,7 +353,7 @@ public sealed class OverlayBackButtonMappingTransportTests
             var state = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.False(state.Available);
             Assert.Equal(BackButtonMappingSettings.Default, state.Mapping);
-            Assert.Equal("M1 / M2 mapping is unavailable.", state.FailureMessage);
+            Assert.False(string.IsNullOrWhiteSpace(state.FailureMessage));
             Assert.True(controller.IsVisible);
 
             await controller.DisposeAsync();

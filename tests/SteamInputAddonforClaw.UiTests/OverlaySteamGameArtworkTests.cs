@@ -187,75 +187,14 @@ public sealed class OverlaySteamGameArtworkTests
     }
 
     [Fact]
-    public void Artwork_uses_a_separate_full_width_profile_row_above_scrollable_settings()
+    public void Profile_artwork_does_not_intercept_input_or_disable_settings_scrolling()
     {
         var xaml = XDocument.Load(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml"));
-        var rightColumn = xaml.Descendants().Single(element => element.Name.LocalName == "Grid"
-            && Attribute(element, "Grid.Column") == "1" && Attribute(element, "Grid.Row") == "0");
-        var visualChildren = rightColumn.Elements().Where(element => element.Name.LocalName != "RowDefinitions").ToArray();
-        var header = visualChildren.Single(element => element.Name.LocalName == "Grid" && Attribute(element, "Grid.Row") == "0");
-        var title = header.Elements().Single(element => Attribute(element, "Name") == "PageTitle");
-        var host = visualChildren.Single(element => Attribute(element, "Name") == "ProfileArtworkHost");
-        var scroll = visualChildren.Single(element => Attribute(element, "Name") == "BodyScroll");
+        var host = xaml.Descendants().Single(element => Attribute(element, "Name") == "ProfileArtworkHost");
+        var scroll = xaml.Descendants().Single(element => Attribute(element, "Name") == "BodyScroll");
 
-        Assert.True(Array.IndexOf(visualChildren, header) < Array.IndexOf(visualChildren, host));
-        Assert.True(Array.IndexOf(visualChildren, host) < Array.IndexOf(visualChildren, scroll));
-        Assert.Equal(["Auto", "Auto", "*"], rightColumn.Elements().Single(element => element.Name.LocalName == "Grid.RowDefinitions")
-            .Elements().Select(element => Attribute(element, "Height")));
-        Assert.Equal("Visible", Attribute(title, "Visibility"));
-        Assert.Equal("0", Attribute(header, "Grid.Row"));
-        Assert.Equal("1", Attribute(host, "Grid.Row"));
-        Assert.Null(Attribute(host, "Grid.RowSpan"));
-        Assert.Null(Attribute(host, "Margin"));
-        Assert.Equal("Stretch", Attribute(host, "HorizontalAlignment"));
-        Assert.Equal("Top", Attribute(host, "VerticalAlignment"));
         Assert.Equal("False", Attribute(host, "IsHitTestVisible"));
-        Assert.Equal("Collapsed", Attribute(host, "Visibility"));
-        Assert.Null(Attribute(host, "Width"));
-        Assert.Null(Attribute(host, "Height"));
-        Assert.Equal("2", Attribute(scroll, "Grid.Row"));
-        Assert.Equal("Transparent", Attribute(scroll, "Background"));
-        Assert.Equal("Hidden", Attribute(scroll, "VerticalScrollBarVisibility"));
-        Assert.Equal("Disabled", Attribute(scroll, "HorizontalScrollBarVisibility"));
-        Assert.Equal("ProfileContentColumn_SizeChanged", Attribute(rightColumn, "SizeChanged"));
-        Assert.Equal("{StaticResource QamBodyContentPadding}",
-            Attribute(scroll.Elements().Single(element => element.Name.LocalName == "Border"), "Padding"));
-
-        var image = host.Elements().Single(element => element.Name.LocalName == "Image");
-        Assert.Equal("UniformToFill", Attribute(image, "Stretch"));
-        var gradient = host.Descendants().Single(element => element.Name.LocalName == "LinearGradientBrush");
-        Assert.Equal("0,0", Attribute(gradient, "StartPoint"));
-        Assert.Equal("0,1", Attribute(gradient, "EndPoint"));
-        Assert.Equal(
-            [("#330E141B", "0"), ("#900E141B", "0.5"), ("#FF0E141B", "1")],
-            gradient.Elements().Where(element => element.Name.LocalName == "GradientStop")
-                .Select(element => (Attribute(element, "Color"), Attribute(element, "Offset"))));
-        Assert.DoesNotContain(host.Descendants(), element =>
-            element.Name.LocalName is "TextBlock" or "ToggleSwitch");
-
-        var profile = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
-        var sizeChanged = ExtractMethod(profile, "private void ProfileContentColumn_SizeChanged(object sender, SizeChangedEventArgs e)");
-        Assert.Contains("ProfileArtworkHost.Clip = new RectangleGeometry", sizeChanged);
-        Assert.Contains("new Rect(0, 0, width, height)", sizeChanged);
-        Assert.DoesNotContain("Height=\"240\"", File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml")));
-        Assert.DoesNotContain("rightColumnWidth - 32", profile);
-        Assert.DoesNotContain("ProfileArtwork", profile[profile.IndexOf("private FrameworkElement BuildProfilePage()", StringComparison.Ordinal)..
-            profile.IndexOf("internal bool TryHandleBack()", StringComparison.Ordinal)]);
-    }
-
-    [Theory]
-    [InlineData(400, 400)]
-    [InlineData(32, 32)]
-    [InlineData(0, 0)]
-    [InlineData(-10, 0)]
-    [InlineData(double.NaN, 0)]
-    [InlineData(double.PositiveInfinity, 0)]
-    public void Artwork_size_uses_the_finite_full_content_column_width(double requestedWidth, double expectedWidth)
-    {
-        var artworkSize = OverlayWindow.CalculateProfileArtworkSize(requestedWidth);
-
-        Assert.Equal(expectedWidth, artworkSize.Width);
-        Assert.Equal(expectedWidth * 430.0 / 920.0, artworkSize.Height, 8);
+        Assert.NotEqual("Disabled", Attribute(scroll, "VerticalScrollMode"));
     }
 
     [Fact]

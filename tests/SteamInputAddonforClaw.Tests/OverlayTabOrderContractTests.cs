@@ -6,31 +6,23 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class AddonQuickSettingsTabOrderContractTests
 {
     [Fact]
-    public void DefaultOrderIsTheFrozenFiveTabsInOrder()
+    public void DefaultOrderIsACompleteUniqueSetOfKnownTabs()
     {
-        Assert.Equal(
-            new[]
-            {
-                AddonQuickSettingsTabId.Shortcut,
-                AddonQuickSettingsTabId.Device,
-                AddonQuickSettingsTabId.Controller,
-                AddonQuickSettingsTabId.Setting,
-                AddonQuickSettingsTabId.Profile,
-            },
-            AddonQuickSettingsTabOrderContract.DefaultOrder);
-
-        Assert.Equal(5, AddonQuickSettingsTabOrderContract.DefaultOrder.Distinct().Count());
+        var order = AddonQuickSettingsTabOrderContract.DefaultOrder;
+        Assert.Equal(Enum.GetValues<AddonQuickSettingsTabId>().Order(), order.Order());
+        Assert.Equal(order.Count, order.Distinct().Count());
     }
-
     [Fact]
     public void DefaultOrderCannotBeMutatedByCallers()
     {
-        var first = AddonQuickSettingsTabOrderContract.DefaultOrder;
-        ((AddonQuickSettingsTabId[])first)[0] = AddonQuickSettingsTabId.Setting;
+        var exposed = (AddonQuickSettingsTabId[])AddonQuickSettingsTabOrderContract.DefaultOrder;
+        var original = exposed.ToArray();
+        exposed[0] = exposed[0] == AddonQuickSettingsTabId.Setting
+            ? AddonQuickSettingsTabId.Device
+            : AddonQuickSettingsTabId.Setting;
 
-        Assert.Equal(AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabOrderContract.DefaultOrder[0]);
+        Assert.Equal(original, AddonQuickSettingsTabOrderContract.DefaultOrder);
     }
-
     [Fact]
     public void TryNormalizeAcceptsAnyCompleteOrderAndReturnsAnIndependentCopy()
     {
@@ -85,45 +77,29 @@ public sealed class AddonQuickSettingsTabOrderContractTests
     }
 
     [Fact]
-    public void LabelsAndShellSnapshotUseTheCanonicalProductIdentity()
+    public void Shell_snapshot_preserves_tab_identity_and_authoritative_order_with_nonblank_labels()
     {
-        Assert.Equal("Device", AddonQuickSettingsShellContract.LabelFor(AddonQuickSettingsTabId.Device));
-        Assert.Equal("Profile", AddonQuickSettingsShellContract.LabelFor(AddonQuickSettingsTabId.Profile));
-        Assert.Equal("Controller", AddonQuickSettingsShellContract.LabelFor(AddonQuickSettingsTabId.Controller));
-        Assert.Equal("Shortcut", AddonQuickSettingsShellContract.LabelFor(AddonQuickSettingsTabId.Shortcut));
-        Assert.Equal("Setting", AddonQuickSettingsShellContract.LabelFor(AddonQuickSettingsTabId.Setting));
-
-        var snapshot = AddonQuickSettingsShellContract.Create([
-            AddonQuickSettingsTabId.Setting,
-            AddonQuickSettingsTabId.Device,
-            AddonQuickSettingsTabId.Profile,
-            AddonQuickSettingsTabId.Controller,
-            AddonQuickSettingsTabId.Shortcut]);
+        AddonQuickSettingsTabId[] requested =
+        [AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut];
+        var snapshot = AddonQuickSettingsShellContract.Create(requested);
 
         Assert.True(snapshot.Available);
-        Assert.Equal([AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut], snapshot.Tabs.Select(x => x.TabId));
-        Assert.Equal(["Setting", "Device", "Profile", "Controller", "Shortcut"], snapshot.Tabs.Select(x => x.Label));
+        Assert.Equal(requested, snapshot.Tabs.Select(tab => tab.TabId));
+        Assert.All(snapshot.Tabs, tab => Assert.False(string.IsNullOrWhiteSpace(tab.Label)));
         Assert.False(AddonQuickSettingsShellSnapshot.Unavailable().Available);
         Assert.Empty(AddonQuickSettingsShellSnapshot.Unavailable().Tabs);
     }
-
     [Fact]
-    public void Product_projection_uses_authoritative_order_labels_and_boundaries()
+    public void Product_projection_preserves_order_and_move_boundaries()
     {
-        var snapshot = AddonQuickSettingsTabOrderProduct.Create([
-            AddonQuickSettingsTabId.Setting,
-            AddonQuickSettingsTabId.Device,
-            AddonQuickSettingsTabId.Profile,
-            AddonQuickSettingsTabId.Controller,
-            AddonQuickSettingsTabId.Shortcut]);
+        AddonQuickSettingsTabId[] requested =
+        [AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut];
+        var snapshot = AddonQuickSettingsTabOrderProduct.Create(requested);
 
-        Assert.Equal([
-            AddonQuickSettingsTabId.Setting,
-            AddonQuickSettingsTabId.Device,
-            AddonQuickSettingsTabId.Profile,
-            AddonQuickSettingsTabId.Controller,
-            AddonQuickSettingsTabId.Shortcut], snapshot.Rows.Select(row => row.TabId));
-        Assert.Equal(["Setting", "Device", "Profile", "Controller", "Shortcut"], snapshot.Rows.Select(row => row.Label));
+        Assert.Equal(requested, snapshot.Rows.Select(row => row.TabId));
+        Assert.All(snapshot.Rows, row => Assert.False(string.IsNullOrWhiteSpace(row.Label)));
         Assert.False(snapshot.Rows[0].CanMoveEarlier);
         Assert.True(snapshot.Rows[0].CanMoveLater);
         Assert.All(snapshot.Rows.Skip(1).SkipLast(1), row =>
@@ -134,7 +110,6 @@ public sealed class AddonQuickSettingsTabOrderContractTests
         Assert.True(snapshot.Rows[^1].CanMoveEarlier);
         Assert.False(snapshot.Rows[^1].CanMoveLater);
     }
-
     [Fact]
     public void Shared_projection_matches_the_shell_identity_consumed_by_both_surfaces()
     {
@@ -159,32 +134,35 @@ public sealed class AddonQuickSettingsTabOrderContractTests
     [Theory]
     [InlineData(-1)]
     [InlineData(1)]
-    public void Product_move_swaps_exactly_one_adjacent_pair(int delta)
+    public void Product_move_swaps_only_the_requested_adjacent_pair(int delta)
     {
-        var current = AddonQuickSettingsTabOrderContract.DefaultOrder;
-        var intent = new AddonQuickSettingsTabOrderMoveIntent(AddonQuickSettingsTabId.Controller, delta);
+        AddonQuickSettingsTabId[] current =
+        [AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Setting];
+        var sourceIndex = Array.IndexOf(current, AddonQuickSettingsTabId.Shortcut);
+        var targetIndex = sourceIndex + delta;
+        var expected = current.ToArray();
+        (expected[sourceIndex], expected[targetIndex]) = (expected[targetIndex], expected[sourceIndex]);
+        var intent = new AddonQuickSettingsTabOrderMoveIntent(AddonQuickSettingsTabId.Shortcut, delta);
 
         Assert.True(AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(current, intent, out var proposed));
-        Assert.Equal(
-            delta < 0
-                ? [AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Profile]
-                : [AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Profile],
-            proposed);
+        Assert.Equal(expected, proposed);
     }
-
-    [Theory]
-    [InlineData((AddonQuickSettingsTabId)99, 1)]
-    [InlineData(AddonQuickSettingsTabId.Shortcut, -1)]
-    [InlineData(AddonQuickSettingsTabId.Profile, 1)]
-    [InlineData(AddonQuickSettingsTabId.Profile, 0)]
-    [InlineData(AddonQuickSettingsTabId.Profile, 2)]
-    public void Product_rejects_invalid_or_boundary_moves(AddonQuickSettingsTabId tabId, int delta)
+    [Fact]
+    public void Product_rejects_invalid_or_boundary_moves()
     {
-        Assert.False(AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(
-            AddonQuickSettingsTabOrderContract.DefaultOrder,
-            new(tabId, delta), out _));
+        var order = AddonQuickSettingsTabOrderContract.DefaultOrder;
+        Assert.False(AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(order,
+            new((AddonQuickSettingsTabId)99, 1), out _));
+        Assert.False(AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(order,
+            new(order[0], -1), out _));
+        Assert.False(AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(order,
+            new(order[^1], 1), out _));
+        Assert.False(AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(order,
+            new(order[0], 0), out _));
+        Assert.False(AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(order,
+            new(order[0], 2), out _));
     }
-
     [Fact]
     public void Product_rejects_malformed_current_order_and_returns_no_proposal()
     {

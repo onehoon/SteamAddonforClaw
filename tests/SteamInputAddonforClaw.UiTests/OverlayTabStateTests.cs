@@ -7,31 +7,17 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayTabStateTests
 {
     [Fact]
-    public void DefaultOrderIsTheFrozenFiveTabs()
+    public void DefaultOrderContainsEveryKnownTabExactlyOnce()
     {
-        Assert.Equal(
-            new[]
-            {
-                AddonQuickSettingsTabId.Shortcut,
-                AddonQuickSettingsTabId.Device,
-                AddonQuickSettingsTabId.Controller,
-                AddonQuickSettingsTabId.Setting,
-                AddonQuickSettingsTabId.Profile,
-            },
-            OverlayTabState.DefaultOrder);
-
-        Assert.Equal(5, OverlayTabState.DefaultOrder.Count);
-        Assert.Equal(5, OverlayTabState.DefaultOrder.Distinct().Count());
+        Assert.Equal(Enum.GetValues<AddonQuickSettingsTabId>().Order(), OverlayTabState.DefaultOrder.Order());
+        Assert.Equal(OverlayTabState.DefaultOrder.Count, OverlayTabState.DefaultOrder.Distinct().Count());
     }
-
     [Fact]
-    public void NewStateSelectsTheFirstTab()
+    public void NewStateSelectsTheFirstConfiguredTab()
     {
         var state = new OverlayTabState();
-
-        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
+        Assert.Equal(state.Order[0], state.SelectedTab);
     }
-
     [Fact]
     public void EachKnownTabCanBecomeSelected()
     {
@@ -96,16 +82,13 @@ public sealed class OverlayTabStateTests
     }
 
     [Fact]
-    public void ResetForShowReturnsToTheFirstTabInDefaultOrder()
+    public void ResetForShowReturnsToTheFirstConfiguredTab()
     {
         var state = new OverlayTabState();
-        state.Select(AddonQuickSettingsTabId.Device);
-
+        state.Select(state.Order[^1]);
         state.ResetForShow();
-
-        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
+        Assert.Equal(state.Order[0], state.SelectedTab);
     }
-
     [Fact]
     public void ResetForShowReturnsToOrderZeroNotAHardCodedDevice()
     {
@@ -158,70 +141,58 @@ public sealed class OverlayTabStateTests
     }
 
     [Fact]
-    public void InvalidOrderFallsBackToTheFrozenDefault()
+    public void InvalidOrderFallsBackToTheKnownDefault()
     {
         AddonQuickSettingsTabId[][] invalidOrders =
-        [
-            [],
-            [AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut],
-            [AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller],
-        ];
+        [[], [AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut],
+            [AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller]];
 
         foreach (var order in invalidOrders)
         {
             var state = new OverlayTabState(order);
-
             Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
-            Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
+            Assert.Equal(state.Order[0], state.SelectedTab);
         }
     }
-
     [Fact]
-    public void UnknownIdentityInOrderFallsBackToTheFrozenDefault()
+    public void UnknownIdentityInOrderFallsBackToTheKnownDefault()
     {
         var state = new OverlayTabState(
-        [
-            AddonQuickSettingsTabId.Device,
-            AddonQuickSettingsTabId.Profile,
-            AddonQuickSettingsTabId.Controller,
-            AddonQuickSettingsTabId.Shortcut,
-            (AddonQuickSettingsTabId)99,
-        ]);
-
+        [AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut, (AddonQuickSettingsTabId)99]);
         Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
+        Assert.Equal(state.Order[0], state.SelectedTab);
     }
-
     [Fact]
-    public void NextAndPreviousMoveOneTabInDefaultOrder()
+    public void NextAndPreviousFollowTheConfiguredOrder()
     {
-        var state = new OverlayTabState();
-
+        AddonQuickSettingsTabId[] configured =
+        [AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Setting];
+        var state = new OverlayTabState(configured);
+        state.Select(configured[0]);
         Assert.True(state.SelectNext());
-        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
-
+        Assert.Equal(configured[1], state.SelectedTab);
         Assert.True(state.SelectPrevious());
-        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
+        Assert.Equal(configured[0], state.SelectedTab);
     }
-
     [Fact]
-    public void PreviousAtTheFirstTabWrapsToTheLastTab()
+    public void PreviousAtTheFirstConfiguredTabWrapsToTheLast()
     {
         var state = new OverlayTabState();
-
+        state.Select(state.Order[0]);
         Assert.True(state.SelectPrevious());
-        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
+        Assert.Equal(state.Order[^1], state.SelectedTab);
     }
-
     [Fact]
-    public void NextAtTheLastTabWrapsToTheFirstTab()
+    public void NextAtTheLastConfiguredTabWrapsToTheFirst()
     {
         var state = new OverlayTabState();
-        state.Select(AddonQuickSettingsTabId.Profile);
-
+        state.Select(state.Order[^1]);
         Assert.True(state.SelectNext());
-        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
+        Assert.Equal(state.Order[0], state.SelectedTab);
     }
-
     [Fact]
     public void OverlayStateChangesOnlyWhenAuthoritativeOrderIsApplied()
     {

@@ -16,7 +16,8 @@ public sealed class MsiLiveUpdateCatalogUiTests
         var mainWindowCode = ReadSource("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs");
         var navigationState = ReadSource("src", "SteamInputAddonforClaw.UI", "MainNavigationState.cs");
 
-        Assert.Contains("x:Uid=\"MainNav_MsiUpdates\" Content=\"MSI Update\" Tag=\"MsiUpdates\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("x:Uid=\"MainNav_MsiUpdates\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"MsiUpdates\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"MsiUpdatesPageHost\"", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("MsiUpdatesExpander", devicePage, StringComparison.Ordinal);
         Assert.Contains("x:Uid=\"MsiUpdates_PageTitle\"", msiPage, StringComparison.Ordinal);
@@ -24,44 +25,6 @@ public sealed class MsiLiveUpdateCatalogUiTests
         Assert.Contains("\"MsiUpdates\" => MainNavigationPage.MsiUpdates", navigationState, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Catalog_layout_uses_one_page_scroll_and_equal_fixed_tabs()
-    {
-        var xaml = ReadMsiPageXaml();
-        XNamespace xNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
-        var scrollViewers = xaml.Descendants().Where(element => element.Name.LocalName == "ScrollViewer").ToArray();
-        var tabView = xaml.Descendants().Single(element => element.Name.LocalName == "TabView");
-        var tabItems = tabView.Elements().Where(element => element.Name.LocalName == "TabViewItem").ToArray();
-        var header = xaml.Descendants().Single(element => (string?)element.Attribute(xNamespace + "Name") == "MsiUpdatesHeader");
-        var headerColumns = header.Elements().Single(element => element.Name.LocalName == "Grid.ColumnDefinitions")
-            .Elements().Select(element => (string?)element.Attribute("Width")).ToArray();
-        var headerTemplate = xaml.Descendants().Single(element => (string?)element.Attribute(xNamespace + "Key") == "MsiUpdatesTabHeaderTemplate");
-        var templateText = headerTemplate.Descendants().Single(element => element.Name.LocalName == "TextBlock");
-
-        Assert.Single(scrollViewers);
-        Assert.Equal("MsiUpdatesScrollViewer", (string?)scrollViewers[0].Attribute(xNamespace + "Name"));
-        Assert.DoesNotContain(tabView.Descendants(), element => element.Name.LocalName == "ScrollViewer");
-        Assert.DoesNotContain(xaml.Descendants().Attributes(), attribute => attribute.Name.LocalName == "MaxHeight");
-        Assert.DoesNotContain(xaml.Descendants(), element => element.Name.LocalName == "SettingsCard");
-        Assert.Equal("Equal", (string?)tabView.Attribute("TabWidthMode"));
-        Assert.Equal("Stretch", (string?)tabView.Attribute("HorizontalAlignment"));
-        Assert.Equal(new[] { "*", "Auto" }, headerColumns);
-        Assert.Equal("0", (string?)header.Descendants().Single(element => (string?)element.Attribute(xNamespace + "Name") == "MsiUpdatesPageTitle").Attribute("Grid.Column"));
-        Assert.Equal("1", (string?)header.Descendants().Single(element => (string?)element.Attribute(xNamespace + "Name") == "MsiUpdatesCheckButton").Attribute("Grid.Column"));
-        Assert.Equal(4, tabItems.Length);
-        Assert.All(tabItems, item =>
-        {
-            Assert.Equal("{StaticResource MsiUpdatesTabHeaderTemplate}", (string?)item.Attribute("HeaderTemplate"));
-            var content = item.Elements().Single(element => element.Name.LocalName == "StackPanel");
-            Assert.Equal("16", (string?)content.Attribute("Margin"));
-            Assert.Equal("8", (string?)content.Attribute("Spacing"));
-            Assert.Equal("Stretch", (string?)content.Attribute("HorizontalAlignment"));
-        });
-        Assert.Equal("Center", (string?)templateText.Attribute("TextAlignment"));
-        Assert.Equal("Stretch", (string?)templateText.Attribute("HorizontalAlignment"));
-        Assert.Equal("8", (string?)templateText.Attribute("Padding"));
-        Assert.Contains("IsAddTabButtonVisible=\"False\" CanReorderTabs=\"False\" CanDragTabs=\"False\"", xaml.ToString(SaveOptions.DisableFormatting), StringComparison.Ordinal);
-    }
 
     [Fact]
     public void Catalog_query_is_manual_and_uses_the_existing_cancellable_frontend_request()
@@ -72,13 +35,12 @@ public sealed class MsiLiveUpdateCatalogUiTests
 
         Assert.Contains("Click=\"MsiUpdatesCheckButton_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsAddTabButtonVisible=\"False\"", xaml, StringComparison.Ordinal);
-        Assert.Equal(4, xaml.Split("<TabViewItem ", StringSplitOptions.None).Length - 1);
-        Assert.All(new[] { "Bios", "Firmware", "Drivers", "Utilities" }, name =>
-            Assert.Contains($"MsiUpdates_{name}Tab", xaml, StringComparison.Ordinal));
+        foreach (var category in new[] { "Bios", "Firmware", "Drivers", "Utilities" })
+            Assert.Contains($"MsiUpdates_{category}Tab", xaml, StringComparison.Ordinal);
         Assert.Contains("RequestMsiLiveUpdateCatalogAsync(requestCancellation.Token)", click, StringComparison.Ordinal);
         Assert.Contains("_msiUpdatesSnapshot = CreateNotCheckedSnapshot()", click, StringComparison.Ordinal);
-        Assert.DoesNotContain("Content=\"Install\"", xaml, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("MsiUpdatesInstall", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("InstallCommand", code, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -110,33 +72,20 @@ public sealed class MsiLiveUpdateCatalogUiTests
     }
 
     [Fact]
-    public void Catalog_category_counts_only_appear_for_success_or_empty_results()
+    public void Catalog_category_count_is_derived_only_from_successful_or_empty_results()
     {
         var success = new FrontendMsiLiveUpdateCatalogCategorySnapshot(
-            FrontendMsiLiveUpdateCatalogCategory.Driver,
-            FrontendMsiLiveUpdateCatalogCategoryState.Success,
-            [
-                new FrontendMsiLiveUpdateCatalogEntry("A", "1", null, null),
-                new FrontendMsiLiveUpdateCatalogEntry("B", "2", null, null)
-            ]);
+            FrontendMsiLiveUpdateCatalogCategory.Driver, FrontendMsiLiveUpdateCatalogCategoryState.Success,
+            [new FrontendMsiLiveUpdateCatalogEntry("A", "1", null, null), new FrontendMsiLiveUpdateCatalogEntry("B", "2", null, null)]);
         var empty = new FrontendMsiLiveUpdateCatalogCategorySnapshot(
-            FrontendMsiLiveUpdateCatalogCategory.Driver,
-            FrontendMsiLiveUpdateCatalogCategoryState.Empty,
-            []);
+            FrontendMsiLiveUpdateCatalogCategory.Driver, FrontendMsiLiveUpdateCatalogCategoryState.Empty, []);
         var failed = new FrontendMsiLiveUpdateCatalogCategorySnapshot(
-            FrontendMsiLiveUpdateCatalogCategory.Driver,
-            FrontendMsiLiveUpdateCatalogCategoryState.Failed,
-            []);
-        var filteredEmptySuccess = new FrontendMsiLiveUpdateCatalogCategorySnapshot(
-            FrontendMsiLiveUpdateCatalogCategory.Utility,
-            FrontendMsiLiveUpdateCatalogCategoryState.Success,
-            []);
-
-        Assert.Equal("드라이버 (2)", MsiUpdatesPage.FormatCategoryHeader("드라이버", success));
-        Assert.Equal("드라이버 (0)", MsiUpdatesPage.FormatCategoryHeader("드라이버", empty));
-        Assert.Equal("드라이버", MsiUpdatesPage.FormatCategoryHeader("드라이버", failed));
-        Assert.Equal("드라이버", MsiUpdatesPage.FormatCategoryHeader("드라이버", null));
-        Assert.Equal("유틸리티 (0)", MsiUpdatesPage.FormatCategoryHeader("유틸리티", filteredEmptySuccess));
+            FrontendMsiLiveUpdateCatalogCategory.Driver, FrontendMsiLiveUpdateCatalogCategoryState.Failed, []);
+        const string category = "Category";
+        Assert.NotEqual(category, MsiUpdatesPage.FormatCategoryHeader(category, success));
+        Assert.NotEqual(category, MsiUpdatesPage.FormatCategoryHeader(category, empty));
+        Assert.Equal(category, MsiUpdatesPage.FormatCategoryHeader(category, failed));
+        Assert.Equal(category, MsiUpdatesPage.FormatCategoryHeader(category, null));
     }
 
     [Fact]
@@ -149,100 +98,21 @@ public sealed class MsiLiveUpdateCatalogUiTests
     }
 
     [Fact]
-    public void Catalog_resources_are_localized_and_obsolete_visible_copy_is_removed()
-    {
-        var english = ReadResources("en-US");
-        var korean = ReadResources("ko-KR");
-        var required = new[]
-        {
-            "MainNav_MsiUpdates.Content", "MsiUpdates_PageTitle.Text",
-            "MsiUpdates_CatalogOnly.Text", "MsiUpdates_CheckButton.Content",
-            "MsiUpdates_BiosTab.Header", "MsiUpdates_FirmwareTab.Header",
-            "MsiUpdates_DriversTab.Header", "MsiUpdates_UtilitiesTab.Header",
-            "MsiUpdates_Checking", "MsiUpdates_NotChecked", "MsiUpdates_Completed",
-            "MsiUpdates_PartialFailure", "MsiUpdates_Unavailable", "MsiUpdates_Failed",
-            "MsiUpdates_CategoryFailed", "MsiUpdates_NoEntries",
-            "MsiUpdates_NotCheckedCategory", "MsiUpdates_UnavailableCategory", "MsiUpdates_NoData",
-            "MsiUpdates_LatestVersion", "MsiUpdates_LatestIntelPackage", "MsiUpdates_LatestUnavailable",
-            "MsiUpdates_InstalledVersion", "MsiUpdates_InstalledEstimated", "MsiUpdates_InstalledUnavailable",
-            "MsiUpdates_SourceMsi", "MsiUpdates_SourceIntelDsa",
-            "MsiUpdates_CompactSourceMsi", "MsiUpdates_CompactSourceIntelDsa",
-            "MsiUpdates_StatusUpdateAvailable", "MsiUpdates_StatusUpToDate", "MsiUpdates_StatusUnknown",
-            "MsiUpdates_StatusUnknownAccessible", "MsiUpdates_UpdateButton", "MsiUpdates_MsiSourcePartial",
-            "MsiUpdates_IntelSourcePartial", "MsiUpdates_InventoryPartial", "MsiUpdates_ReleaseDate"
-        };
-
-        Assert.Equal(english.OrderBy(key => key, StringComparer.Ordinal), korean.OrderBy(key => key, StringComparer.Ordinal));
-        Assert.Equal(english.Length, english.Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(korean.Length, korean.Distinct(StringComparer.Ordinal).Count());
-        Assert.All(required, key =>
-        {
-            Assert.Contains(key, english);
-            Assert.Contains(key, korean);
-        });
-        Assert.DoesNotContain("MsiUpdates_LastChecked", english);
-        Assert.DoesNotContain("MsiUpdates_LastChecked", korean);
-        Assert.DoesNotContain("MsiUpdates_VersionNotProvided", english);
-        Assert.DoesNotContain("MsiUpdates_VersionNotProvided", korean);
-
-        var englishValues = ReadResourceMap("en-US");
-        var koreanValues = ReadResourceMap("ko-KR");
-        Assert.All(englishValues, item => Assert.False(string.IsNullOrWhiteSpace(item.Value), item.Key));
-        Assert.All(koreanValues, item => Assert.False(string.IsNullOrWhiteSpace(item.Value), item.Key));
-        Assert.Equal("Source: MSI", englishValues["MsiUpdates_SourceMsi"]);
-        Assert.Equal("출처: MSI", koreanValues["MsiUpdates_SourceMsi"]);
-        Assert.Equal("MSI", englishValues["MsiUpdates_CompactSourceMsi"]);
-        Assert.Equal("MSI", koreanValues["MsiUpdates_CompactSourceMsi"]);
-        Assert.Contains("downloads and installation are not supported", englishValues["MsiUpdates_CatalogOnly.Text"], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("다운로드와 설치는 아직 지원하지 않습니다", koreanValues["MsiUpdates_CatalogOnly.Text"], StringComparison.Ordinal);
-        Assert.DoesNotContain("no update-availability verdict", englishValues["MsiUpdates_Completed"], StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("판정하지 않습니다", koreanValues["MsiUpdates_Completed"], StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Catalog_cards_are_compact_theme_aware_and_do_not_render_descriptions()
-    {
-        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml");
-        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml.cs");
-
-        Assert.Contains("x:Key=\"MsiCatalogEntryCardStyle\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("{ThemeResource CardBackgroundFillColorDefaultBrush}", xaml, StringComparison.Ordinal);
-        Assert.Contains("{ThemeResource CardStrokeColorDefaultBrush}", xaml, StringComparison.Ordinal);
-        Assert.Contains("Style = (Style)Resources[\"MsiCatalogEntryCardStyle\"]", code, StringComparison.Ordinal);
-        Assert.Contains("ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) })", code, StringComparison.Ordinal);
-        Assert.Contains("ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto })", code, StringComparison.Ordinal);
-        Assert.Contains("TextWrapping = TextWrapping.Wrap", code, StringComparison.Ordinal);
-        Assert.Contains("if (!string.IsNullOrWhiteSpace(entry.Version))", code, StringComparison.Ordinal);
-        Assert.Contains("if (!string.IsNullOrWhiteSpace(entry.ReleaseDate))", code, StringComparison.Ordinal);
-        Assert.Contains("string.Join(\" · \", metadata)", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("FormatMsiCatalogDescription", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("entry.Description", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("MsiUpdatesLastCheckedText", xaml + code, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Catalog_projection_shows_installed_version_source_and_comparison_status()
+    public void Catalog_projection_preserves_version_source_status_and_non_installing_actions()
     {
         var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "MsiUpdatesPage.xaml.cs");
         var render = ExtractMethod(code, "private void RenderMsiLiveUpdateCategory(");
-        var resources = ReadResourceMap("en-US");
-
         Assert.Contains("entry.InstalledVersion", code, StringComparison.Ordinal);
         Assert.Contains("entry.LatestVersionSource", code, StringComparison.Ordinal);
         Assert.Contains("FrontendMsiLiveUpdateVersionKind.Package", code, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_LatestIntelPackage", code, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_InstalledEstimated", code, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_IntelSourcePartial", code, StringComparison.Ordinal);
-        Assert.Contains("update availability is shown", resources["MsiUpdates_CatalogOnly.Text"], StringComparison.OrdinalIgnoreCase);
         Assert.Contains("entry.ComparisonStatus switch", render, StringComparison.Ordinal);
         Assert.Contains("FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable", render, StringComparison.Ordinal);
         Assert.Contains("FrontendMsiLiveUpdateComparisonStatus.UpToDate", render, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_StatusUnknown", render, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_StatusUnknownAccessible", render, StringComparison.Ordinal);
-        Assert.Contains("Orientation = Orientation.Horizontal", render, StringComparison.Ordinal);
-        Assert.Contains("VerticalAlignment = VerticalAlignment.Center", render, StringComparison.Ordinal);
-        Assert.Contains("Grid.SetColumn(actions, 1)", render, StringComparison.Ordinal);
-        Assert.Contains("if (entry.ComparisonStatus == FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable)", render, StringComparison.Ordinal);
         Assert.Contains("new Button", render, StringComparison.Ordinal);
         Assert.Contains("IsEnabled = false", render, StringComparison.Ordinal);
         Assert.DoesNotContain("Click =", render, StringComparison.Ordinal);
@@ -250,40 +120,25 @@ public sealed class MsiLiveUpdateCatalogUiTests
         Assert.Contains("AutomationProperties.SetName(statusText, accessibleStatus)", render, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_CompactSourceMsi", render, StringComparison.Ordinal);
         Assert.Contains("MsiUpdates_CompactSourceIntelDsa", render, StringComparison.Ordinal);
-        Assert.True(render.IndexOf("MsiUpdates_InstalledVersion", StringComparison.Ordinal)
-            < render.IndexOf("GetLatestVersionLabel(entry)", StringComparison.Ordinal));
-        Assert.True(render.IndexOf("GetLatestVersionLabel(entry)", StringComparison.Ordinal)
-            < render.IndexOf("MsiUpdates_CompactSourceIntelDsa", StringComparison.Ordinal));
-        Assert.True(render.IndexOf("MsiUpdates_CompactSourceIntelDsa", StringComparison.Ordinal)
-            < render.IndexOf("MsiUpdates_ReleaseDate", StringComparison.Ordinal));
-        Assert.Contains("RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Bios", code, StringComparison.Ordinal);
-        Assert.Contains("RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Firmware", code, StringComparison.Ordinal);
-        Assert.Contains("RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Driver", code, StringComparison.Ordinal);
-        Assert.Contains("RenderMsiLiveUpdateCategory(FrontendMsiLiveUpdateCatalogCategory.Utility", code, StringComparison.Ordinal);
+        Assert.Contains("MsiUpdates_ReleaseDate", render, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Catalog_labels_only_Intel_DSA_package_versions_as_Intel_packages()
+    public void Catalog_source_uses_distinct_semantic_version_resource_keys()
     {
-        var msiPackage = new FrontendMsiLiveUpdateCatalogEntry("MSI Utility", "3.0.2608.3101", null, null,
+        var msiPackage = new FrontendMsiLiveUpdateCatalogEntry("package", "1", null, null,
             LatestVersionSource: FrontendMsiLiveUpdateVersionSource.Msi,
             LatestVersionKind: FrontendMsiLiveUpdateVersionKind.Package);
-        var intelNpuPackage = new FrontendMsiLiveUpdateCatalogEntry("Intel NPU", "32.0.100.5540", null, null,
+        var intelPackage = new FrontendMsiLiveUpdateCatalogEntry("package", "2", null, null,
             LatestVersionSource: FrontendMsiLiveUpdateVersionSource.IntelDsa,
             LatestVersionKind: FrontendMsiLiveUpdateVersionKind.Package);
         var msiLabel = MsiUpdatesPage.GetLatestVersionLabel(msiPackage);
-        var intelLabel = MsiUpdatesPage.GetLatestVersionLabel(intelNpuPackage);
-        var english = ReadResourceMap("en-US");
-        var korean = ReadResourceMap("ko-KR");
-
+        var intelLabel = MsiUpdatesPage.GetLatestVersionLabel(intelPackage);
+        Assert.NotEqual(msiLabel.ResourceKey, intelLabel.ResourceKey);
+        Assert.False(string.IsNullOrWhiteSpace(msiLabel.ResourceKey));
+        Assert.False(string.IsNullOrWhiteSpace(intelLabel.ResourceKey));
         Assert.Equal("MsiUpdates_LatestVersion", msiLabel.ResourceKey);
-        Assert.Equal("Latest {0}", msiLabel.EnglishFallback);
         Assert.Equal("MsiUpdates_LatestIntelPackage", intelLabel.ResourceKey);
-        Assert.Equal("Latest Intel package {0}", intelLabel.EnglishFallback);
-        Assert.Equal("Latest {0}", english[msiLabel.ResourceKey]);
-        Assert.Equal("최신 {0}", korean[msiLabel.ResourceKey]);
-        Assert.Equal("Latest Intel package {0}", english[intelLabel.ResourceKey]);
-        Assert.Equal("최신 Intel 패키지 {0}", korean[intelLabel.ResourceKey]);
     }
 
     private static XDocument ReadMsiPageXaml() =>

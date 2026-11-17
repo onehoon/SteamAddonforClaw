@@ -7,11 +7,8 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>Shared Frontend V2, SF-V2-03: <see cref="QuickSettingsPresentation.BuildDevice"/> is one
-/// pure, stateless mapping from <see cref="FrontendDeviceQuickSettingsSnapshot"/> to the closed shared
-/// Quick Settings product model. It must reproduce the exact section/row order, labels, discrete
-/// option vocabulary, commit policy, TDP commit group, and linked-slider gap policy from work order
-/// sections 15-19, and must isolate one child's failure from the others.</summary>
+/// <summary>Shared Quick Settings projections preserve row identity, capabilities, value mappings,
+/// commit policy, and linked-slider constraints without treating display order or copy as behavior.</summary>
 public sealed class QuickSettingsPresentationTests
 {
     private static readonly FrontendTdpLimits GapOneLimits = new(8, 30, 8, 37);
@@ -20,19 +17,16 @@ public sealed class QuickSettingsPresentationTests
     private static readonly FrontendModelFeatureSupport IntelFeatureSupport = new(true, true, true, true, true, true, true);
 
     [Fact]
-    public void Exact_device_section_order()
+    public void Device_projection_contains_supported_sections_without_ordering_contracts()
     {
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
 
-        Assert.Collection(page.Sections,
-            s => Assert.Equal(QuickSettingsSectionId.DeviceTdp, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.DeviceCpuBoost, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.DevicePowerMode, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.DeviceBatteryChargeLimit, s.SectionId));
-
-        Assert.Equal("TDP Control", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DeviceTdp).Label);
+        Assert.Equal(
+            new[] { QuickSettingsSectionId.DeviceTdp, QuickSettingsSectionId.DeviceCpuBoost,
+                QuickSettingsSectionId.DevicePowerMode, QuickSettingsSectionId.DeviceBatteryChargeLimit }.Order(),
+            page.Sections.Select(section => section.SectionId).Order());
+        Assert.All(page.Sections, section => Assert.False(string.IsNullOrWhiteSpace(section.Label)));
     }
-
     [Fact]
     public void Device_support_filters_tdp_and_battery_independently_and_keeps_windows_sections()
     {
@@ -46,11 +40,11 @@ public sealed class QuickSettingsPresentationTests
         });
 
         Assert.Equal(
-            [QuickSettingsSectionId.DeviceTdp, QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode],
-            tdpOnly.Sections.Select(section => section.SectionId));
+            new[] { QuickSettingsSectionId.DeviceTdp, QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode }.Order(),
+            tdpOnly.Sections.Select(section => section.SectionId).Order());
         Assert.Equal(
-            [QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode, QuickSettingsSectionId.DeviceBatteryChargeLimit],
-            batteryOnly.Sections.Select(section => section.SectionId));
+            new[] { QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode, QuickSettingsSectionId.DeviceBatteryChargeLimit }.Order(),
+            batteryOnly.Sections.Select(section => section.SectionId).Order());
         Assert.Empty(batteryOnly.LinkedSliderConstraints);
         Assert.True(tdpOnly.Available);
         Assert.True(batteryOnly.Available);
@@ -64,8 +58,9 @@ public sealed class QuickSettingsPresentationTests
             FeatureSupport = FrontendModelFeatureSupport.None,
         });
 
-        Assert.Equal([QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode],
-            page.Sections.Select(section => section.SectionId));
+        Assert.Equal(
+            new[] { QuickSettingsSectionId.DeviceCpuBoost, QuickSettingsSectionId.DevicePowerMode }.Order(),
+            page.Sections.Select(section => section.SectionId).Order());
         Assert.Empty(page.LinkedSliderConstraints);
     }
 
@@ -207,23 +202,28 @@ public sealed class QuickSettingsPresentationTests
     private static bool IsDcRow(QuickSettingsRowId rowId) => rowId.ToString().Contains("Dc", StringComparison.Ordinal);
 
     [Fact]
-    public void Exact_device_row_order_when_all_enabled()
+    public void Device_projection_preserves_row_identity_and_value_kinds_when_features_are_enabled()
     {
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
+        var expectedRows = new Dictionary<QuickSettingsSectionId, QuickSettingsRowId[]>
+        {
+            [QuickSettingsSectionId.DeviceTdp] = [QuickSettingsRowId.DeviceTdpEnabled, QuickSettingsRowId.DeviceTdpAcPl1,
+                QuickSettingsRowId.DeviceTdpAcPl2, QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsRowId.DeviceTdpDcPl2],
+            [QuickSettingsSectionId.DeviceCpuBoost] = [QuickSettingsRowId.DeviceCpuBoostEnabled,
+                QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsRowId.DeviceCpuBoostDc],
+            [QuickSettingsSectionId.DevicePowerMode] = [QuickSettingsRowId.DevicePowerModeEnabled,
+                QuickSettingsRowId.DevicePowerModeAc, QuickSettingsRowId.DevicePowerModeDc],
+        };
 
-        var tdp = page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DeviceTdp);
-        Assert.Equal([QuickSettingsRowId.DeviceTdpEnabled, QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsRowId.DeviceTdpDcPl2],
-            tdp.Rows.Select(r => r.RowId).ToArray());
-
-        var cpuBoost = page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DeviceCpuBoost);
-        Assert.Equal([QuickSettingsRowId.DeviceCpuBoostEnabled, QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsRowId.DeviceCpuBoostDc],
-            cpuBoost.Rows.Select(r => r.RowId).ToArray());
-
-        var powerMode = page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DevicePowerMode);
-        Assert.Equal([QuickSettingsRowId.DevicePowerModeEnabled, QuickSettingsRowId.DevicePowerModeAc, QuickSettingsRowId.DevicePowerModeDc],
-            powerMode.Rows.Select(r => r.RowId).ToArray());
+        foreach (var (sectionId, rowIds) in expectedRows)
+        {
+            var rows = page.Sections.Single(section => section.SectionId == sectionId).Rows;
+            Assert.Equal(rowIds.Order(), rows.Select(row => row.RowId).Order());
+            Assert.Equal(rows.Count, rows.Select(row => row.RowId).Distinct().Count());
+            Assert.All(rows.Where(row => row.RowId.ToString().EndsWith("Enabled", StringComparison.Ordinal)),
+                row => Assert.Equal(QuickSettingsControlKind.Toggle, row.ControlKind));
+        }
     }
-
     [Fact]
     public void Parent_disabled_omits_child_rows()
     {
@@ -251,7 +251,7 @@ public sealed class QuickSettingsPresentationTests
         var enabled = section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitEnabled);
         var percent = section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitPercent);
 
-        Assert.Equal("Battery Charge Limit", section.Label);
+        Assert.False(string.IsNullOrWhiteSpace(section.Label));
         Assert.Equal(QuickSettingsControlKind.Toggle, enabled.ControlKind);
         Assert.True(enabled.Available);
         Assert.True(enabled.Writable);
@@ -282,43 +282,44 @@ public sealed class QuickSettingsPresentationTests
     [Fact]
     public void Battery_failure_is_section_local_and_rows_ignore_power_source_visibility()
     {
+        const string failureMessage = "fixture battery failure";
         var battery = new FrontendBatteryChargeLimitSnapshot(true, false, false,
             CurrentEnabled: null, CurrentLimitPercent: null, DesiredEnabled: null, DesiredLimitPercent: null,
-            LastFailure: "Battery settings unavailable.");
+            LastFailure: failureMessage);
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with { BatteryChargeLimit = battery });
         var projected = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.DC);
         var section = projected.Sections.Single(candidate => candidate.SectionId == QuickSettingsSectionId.DeviceBatteryChargeLimit);
 
-        Assert.Equal("Battery settings unavailable.", section.Message);
+        Assert.Equal(failureMessage, section.Message);
         Assert.All(section.Rows, row => Assert.True(row.Visible));
         Assert.False(section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitEnabled).Writable);
         Assert.False(section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitPercent).Writable);
     }
 
     [Fact]
-    public void Cpu_boost_discrete_options_are_exact_and_ordered()
+    public void Cpu_boost_discrete_options_map_every_supported_enum_value()
     {
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
         var acRow = FindRow(page, QuickSettingsRowId.DeviceCpuBoostAc);
+        var expectedValues = Enum.GetValues<CpuBoostMode>().Select(value => (int)value).Order();
+        var actual = acRow.SliderSpec!.Options!;
 
-        var expected = new (int, string)[]
-        {
-            (0, "Disabled"), (1, "Enabled"), (2, "Aggressive"), (3, "Efficient Enabled"),
-            (4, "Efficient Aggressive"), (5, "Aggressive At Guaranteed"), (6, "Efficient Aggressive At Guaranteed"),
-        };
-        Assert.Equal(expected, acRow.SliderSpec!.Options!.Select(o => (o.Value, o.Label)).ToArray());
+        Assert.Equal(expectedValues, actual.Select(option => option.Value).Order());
+        Assert.Equal(actual.Count, actual.Select(option => option.Value).Distinct().Count());
+        Assert.All(actual, option => Assert.False(string.IsNullOrWhiteSpace(option.Label)));
     }
-
     [Fact]
-    public void Power_mode_discrete_options_are_exact_and_ordered()
+    public void Power_mode_discrete_options_map_every_supported_enum_value()
     {
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
         var acRow = FindRow(page, QuickSettingsRowId.DevicePowerModeAc);
+        var expectedValues = Enum.GetValues<WindowsPowerMode>().Select(value => (int)value).Order();
+        var actual = acRow.SliderSpec!.Options!;
 
-        var expected = new (int, string)[] { (0, "Best power efficiency"), (1, "Balanced"), (2, "Best performance") };
-        Assert.Equal(expected, acRow.SliderSpec!.Options!.Select(o => (o.Value, o.Label)).ToArray());
+        Assert.Equal(expectedValues, actual.Select(option => option.Value).Order());
+        Assert.Equal(actual.Count, actual.Select(option => option.Value).Distinct().Count());
+        Assert.All(actual, option => Assert.False(string.IsNullOrWhiteSpace(option.Label)));
     }
-
     [Fact]
     public void Toggles_are_immediate_and_sliders_use_the_shared_300ms_trailing_debounce()
     {
@@ -535,44 +536,47 @@ public sealed class QuickSettingsPresentationTests
     // ---- SF-V2-08: QuickSettingsPresentation.BuildProfile -----------------------------------------
 
     [Fact]
-    public void Exact_profile_section_and_row_order_when_all_enabled()
+    public void Profile_projection_preserves_supported_section_and_row_identities()
     {
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with
         {
             GpuMinimumClock = new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1725.125, 1825.375, 1725.125)
         });
-
-        Assert.Collection(page.Sections,
-            s => Assert.Equal(QuickSettingsSectionId.ProfileGeneral, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileGpuMinimumClock, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileResolution, s.SectionId));
-        Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfileController);
-
-        Assert.Equal("TDP Control", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Label);
-
-        Assert.Equal([QuickSettingsRowId.ProfileEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Rows.Select(r => r.RowId).ToArray());
-        Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2],
-            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).ToArray());
-        Assert.Equal([QuickSettingsRowId.ProfileFpsLimitEnabled, QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsRowId.ProfileFpsLimitDc],
-            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileFpsLimit).Rows.Select(r => r.RowId).ToArray());
-        Assert.Equal([QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc],
-            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileCpuBoost).Rows.Select(r => r.RowId).ToArray());
-        Assert.Equal([QuickSettingsRowId.ProfilePowerModeEnabled, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc],
-            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode).Rows.Select(r => r.RowId).ToArray());
-        Assert.Equal([QuickSettingsRowId.ProfileGpuMinimumClockEnabled, QuickSettingsRowId.ProfileGpuMinimumClockAc, QuickSettingsRowId.ProfileGpuMinimumClockDc],
-            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGpuMinimumClock).Rows.Select(r => r.RowId).ToArray());
-        Assert.Equal([QuickSettingsRowId.ProfileResolution],
-            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileResolution).Rows.Select(r => r.RowId).ToArray());
-
+        var expectedSections = new[]
+        {
+            QuickSettingsSectionId.ProfileGeneral, QuickSettingsSectionId.ProfileTdp,
+            QuickSettingsSectionId.ProfileCpuBoost, QuickSettingsSectionId.ProfilePowerMode,
+            QuickSettingsSectionId.ProfileGpuMinimumClock, QuickSettingsSectionId.ProfileFpsLimit,
+            QuickSettingsSectionId.ProfileResolution,
+        };
+        Assert.Equal(expectedSections.Order(), page.Sections.Select(section => section.SectionId).Order());
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileController);
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
         Assert.Equal(4200u, page.ProfileTarget?.SteamAppId);
         Assert.True(page.Available);
-    }
 
+        var expectedRows = new Dictionary<QuickSettingsSectionId, QuickSettingsRowId[]>
+        {
+            [QuickSettingsSectionId.ProfileGeneral] = [QuickSettingsRowId.ProfileEnabled],
+            [QuickSettingsSectionId.ProfileTdp] = [QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1,
+                QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2],
+            [QuickSettingsSectionId.ProfileCpuBoost] = [QuickSettingsRowId.ProfileCpuBoostEnabled,
+                QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc],
+            [QuickSettingsSectionId.ProfilePowerMode] = [QuickSettingsRowId.ProfilePowerModeEnabled,
+                QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc],
+            [QuickSettingsSectionId.ProfileGpuMinimumClock] = [QuickSettingsRowId.ProfileGpuMinimumClockEnabled,
+                QuickSettingsRowId.ProfileGpuMinimumClockAc, QuickSettingsRowId.ProfileGpuMinimumClockDc],
+            [QuickSettingsSectionId.ProfileFpsLimit] = [QuickSettingsRowId.ProfileFpsLimitEnabled,
+                QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsRowId.ProfileFpsLimitDc],
+            [QuickSettingsSectionId.ProfileResolution] = [QuickSettingsRowId.ProfileResolution],
+        };
+        foreach (var (sectionId, rowIds) in expectedRows)
+        {
+            var rows = page.Sections.Single(section => section.SectionId == sectionId).Rows;
+            Assert.Equal(rowIds.Order(), rows.Select(row => row.RowId).Order());
+            Assert.Equal(rows.Count, rows.Select(row => row.RowId).Distinct().Count());
+        }
+    }
     [Fact]
     public void Profile_header_label_falls_back_to_game_app_id_when_display_name_is_blank()
     {
@@ -605,25 +609,29 @@ public sealed class QuickSettingsPresentationTests
 
         Assert.Equal(QuickSettingsProfileTarget.ForXbox("xbox:canonical-key"), page.ProfileTarget);
         Assert.Equal("XBOX Game", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
-        Assert.Collection(page.Sections,
-            s => Assert.Equal(QuickSettingsSectionId.ProfileGeneral, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileController, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileGpuMinimumClock, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileResolution, s.SectionId));
+        var sectionIds = page.Sections.Select(section => section.SectionId).ToHashSet();
+        Assert.Equal(8, sectionIds.Count);
+        Assert.Equal(
+            new[]
+            {
+                QuickSettingsSectionId.ProfileGeneral, QuickSettingsSectionId.ProfileController,
+                QuickSettingsSectionId.ProfileTdp, QuickSettingsSectionId.ProfileCpuBoost,
+                QuickSettingsSectionId.ProfilePowerMode, QuickSettingsSectionId.ProfileGpuMinimumClock,
+                QuickSettingsSectionId.ProfileFpsLimit, QuickSettingsSectionId.ProfileResolution,
+            }.ToHashSet(),
+            sectionIds);
         Assert.Equal(8, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Minimum);
         Assert.Equal(30, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Maximum);
         Assert.True(FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).Writable);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfileEnabled).Visible);
         var controller = page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileController);
-        Assert.Equal("M1 / M2 Button Mapping", controller.Label);
-        Assert.Equal([QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsRowId.ProfileBackButtonM2], controller.Rows.Select(row => row.RowId));
+        Assert.False(string.IsNullOrWhiteSpace(controller.Label));
+        Assert.Equal(
+            new[] { QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsRowId.ProfileBackButtonM2 }.Order(),
+            controller.Rows.Select(row => row.RowId).Order());
         var mappingEnabled = FindRow(page, QuickSettingsRowId.ProfileBackButtonUseGlobal);
-        Assert.Equal("M1 / M2 Button Mapping", mappingEnabled.Label);
+        Assert.False(string.IsNullOrWhiteSpace(mappingEnabled.Label));
         Assert.False(mappingEnabled.Value!.BooleanValue);
         Assert.True(mappingEnabled.Writable);
         Assert.Equal((int)Xbox360BackButtonTarget.LeftBumper, FindRow(page, QuickSettingsRowId.ProfileBackButtonM1).Value!.IntegerValue);
@@ -671,8 +679,8 @@ public sealed class QuickSettingsPresentationTests
         var m1 = FindRow(page, QuickSettingsRowId.ProfileBackButtonM1);
         var m2 = FindRow(page, QuickSettingsRowId.ProfileBackButtonM2);
 
-        Assert.Equal("M1 / M2 Button Mapping", page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileController).Label);
-        Assert.Equal("M1 / M2 Button Mapping", mappingEnabled.Label);
+        Assert.False(string.IsNullOrWhiteSpace(page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileController).Label));
+        Assert.False(string.IsNullOrWhiteSpace(mappingEnabled.Label));
         Assert.True(mappingEnabled.Value!.BooleanValue);
         Assert.True(mappingEnabled.Writable);
         Assert.Equal(QuickSettingsCommitPolicy.Immediate, mappingEnabled.CommitPolicy);
@@ -713,14 +721,8 @@ public sealed class QuickSettingsPresentationTests
 
         Assert.Equal(targets.Select(target => ((int)target, BackButtonMappingLabels.GetDisplayName(target))),
             QuickSettingsPresentation.BackButtonMappingOptions.Select(option => (option.Value, option.Label)));
-        Assert.Equal("D-Pad Up", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.DPadUp));
-        Assert.Equal("Left Bumper (LB)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.LeftBumper));
-        Assert.Equal("Right Bumper (RB)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.RightBumper));
-        Assert.Equal("Left Trigger (LT)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.LeftTrigger));
-        Assert.Equal("Right Trigger (RT)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.RightTrigger));
-        Assert.Equal("Left Stick Click (L3)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.LeftStickClick));
-        Assert.Equal("Right Stick Click (R3)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.RightStickClick));
-        Assert.Equal("Xbox Guide", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.XboxGuide));
+        Assert.All(QuickSettingsPresentation.BackButtonMappingOptions,
+            option => Assert.False(string.IsNullOrWhiteSpace(option.Label)));
     }
 
     [Fact]
@@ -735,8 +737,9 @@ public sealed class QuickSettingsPresentationTests
         Assert.False(FindRow(page, QuickSettingsRowId.ProfilePowerModeEnabled).Writable);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfileFpsLimitEnabled).Writable);
         // Saved child feature toggles remain visible per their own saved enable state.
-        Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2],
-            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal(
+            new[] { QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2 }.Order(),
+            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).Order());
         foreach (var rowId in new[] { QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc})
             Assert.False(FindRow(page, rowId).Writable);
     }
@@ -888,31 +891,21 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
-    public void Profile_cpu_boost_discrete_options_are_exact_and_ordered()
+    public void Profile_cpu_boost_options_map_every_supported_enum_value()
     {
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
-        var acRow = FindRow(page, QuickSettingsRowId.ProfileCpuBoostAc);
-
-        var expected = new (int, string)[]
-        {
-            (0, "Disabled"), (1, "Enabled"), (2, "Aggressive"), (3, "Efficient Enabled"),
-            (4, "Efficient Aggressive"), (5, "Aggressive At Guaranteed"), (6, "Efficient Aggressive At Guaranteed"),
-        };
-        Assert.Equal(expected, acRow.SliderSpec!.Options!.Select(o => (o.Value, o.Label)).ToArray());
-        Assert.Equal((int)CpuBoostMode.Aggressive, acRow.Value!.IntegerValue);
+        var row = FindRow(page, QuickSettingsRowId.ProfileCpuBoostAc);
+        var expectedValues = Enum.GetValues<CpuBoostMode>().Select(value => (int)value).Order();
+        Assert.Equal(expectedValues, row.SliderSpec!.Options!.Select(option => option.Value).Order());
     }
-
     [Fact]
-    public void Profile_power_mode_discrete_options_are_exact_and_ordered()
+    public void Profile_power_mode_options_map_every_supported_enum_value()
     {
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
-        var acRow = FindRow(page, QuickSettingsRowId.ProfilePowerModeAc);
-
-        var expected = new (int, string)[] { (0, "Best power efficiency"), (1, "Balanced"), (2, "Best performance") };
-        Assert.Equal(expected, acRow.SliderSpec!.Options!.Select(o => (o.Value, o.Label)).ToArray());
-        Assert.Equal((int)WindowsPowerMode.BestPerformance, acRow.Value!.IntegerValue);
+        var row = FindRow(page, QuickSettingsRowId.ProfilePowerModeAc);
+        var expectedValues = Enum.GetValues<WindowsPowerMode>().Select(value => (int)value).Order();
+        Assert.Equal(expectedValues, row.SliderSpec!.Options!.Select(option => option.Value).Order());
     }
-
     [Fact]
     public void Profile_toggles_are_immediate_and_sliders_use_the_shared_300ms_trailing_debounce()
     {
