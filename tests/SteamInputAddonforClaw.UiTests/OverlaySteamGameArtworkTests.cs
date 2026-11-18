@@ -205,7 +205,35 @@ public sealed class OverlaySteamGameArtworkTests
         Assert.False(OverlayWindow.IsProfileArtworkCacheCompatible(570, 690, 1.5, 570, 691, 1.5));
         Assert.False(OverlayWindow.IsProfileArtworkCacheCompatible(570, 690, 1.5, 570, 690, 2.0));
         Assert.Equal(750, OverlayWindow.ProfileArtworkDecodePixelWidth(500, 1.5));
-        Assert.Equal(960, OverlayWindow.ProfileArtworkDecodePixelWidth(0, 1.5));
+        Assert.Null(OverlayWindow.ProfileArtworkDecodePixelWidth(0, 1.5));
+        Assert.Null(OverlayWindow.ProfileArtworkDecodePixelWidth(double.NaN, 1.5));
+        Assert.Null(OverlayWindow.ProfileArtworkDecodePixelWidth(double.PositiveInfinity, 1.5));
+        Assert.Null(OverlayWindow.ProfileArtworkDecodePixelWidth(500, 0));
+    }
+
+    [Fact]
+    public void First_profile_snapshot_waits_for_real_layout_and_rechecks_on_size_or_raster_scale_change()
+    {
+        var profile = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
+        var update = ExtractMethod(profile, "private void UpdateProfileArtwork(QuickSettingsPageSnapshot? page)");
+        var currentKey = ExtractMethod(profile, "private (double RasterizationScale, int? DecodePixelWidth) CurrentProfileArtworkDecodeKey()");
+        var sizeChanged = ExtractMethod(profile, "private void ProfileContentColumn_SizeChanged(");
+        var recheck = ExtractMethod(profile, "private void ReevaluateProfileArtworkForCurrentPage()");
+        var loaded = ExtractMethod(profile, "private void ProfileArtworkHost_Loaded(");
+
+        var noLayoutGuard = update.IndexOf("if (requestedDecodePixelWidth is not { } decodePixelWidth)", StringComparison.Ordinal);
+        var resolveRequest = update.IndexOf("ResolveAndApplyProfileArtworkAsync(", StringComparison.Ordinal);
+        Assert.True(noLayoutGuard >= 0 && resolveRequest > noLayoutGuard);
+        Assert.DoesNotContain("960", update + currentKey, StringComparison.Ordinal);
+        var explicitWidth = currentKey.IndexOf("var explicitWidth = ProfileArtworkHost.Width;", StringComparison.Ordinal);
+        var measuredFallback = currentKey.IndexOf(": ProfileArtworkHost.ActualWidth;", StringComparison.Ordinal);
+        Assert.True(explicitWidth >= 0 && measuredFallback > explicitWidth);
+        Assert.Contains("xamlRoot.RasterizationScale", currentKey, StringComparison.Ordinal);
+        Assert.Contains("ReevaluateProfileArtworkForCurrentPage();", sizeChanged, StringComparison.Ordinal);
+        Assert.Contains("ObserveProfileArtworkXamlRoot(ProfileArtworkHost.XamlRoot);", loaded, StringComparison.Ordinal);
+        Assert.Contains("_profileArtworkObservedXamlRoot.Changed += ProfileArtworkXamlRoot_Changed;", profile, StringComparison.Ordinal);
+        Assert.Contains("ReevaluateProfileArtworkForCurrentPage();", profile, StringComparison.Ordinal);
+        Assert.Contains("UpdateProfileArtwork(surface.Binding?.AuthoritativePage);", recheck, StringComparison.Ordinal);
     }
 
     [Fact]

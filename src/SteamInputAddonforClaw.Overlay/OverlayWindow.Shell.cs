@@ -144,6 +144,7 @@ public sealed partial class OverlayWindow
     // Reset selection to the first tab in the current order before every visual reveal.
     private void ResetUiForShow()
     {
+        _shortcutTileReadyLoggedThisShow = false;
         ResetShortcutQuickSettingsForShow();
         PrepareActiveProfileFirstShow();
         ResetDetailForTabChangeOrShow();

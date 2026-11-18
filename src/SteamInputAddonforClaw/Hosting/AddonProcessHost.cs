@@ -2662,13 +2662,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // Publication is now paused. Cancel motion readers promptly, without delaying Overlay
             // dismissal while a sensor worker completes its bounded shutdown.
             _ = StopMotionSourceAsync("OverlayCaptureCommitted");
+            // The ordered Shortcut tile snapshot is the visible navigation surface; request it
+            // first so the grid can populate before the slower shared performance snapshots.
+            _ = _overlayController.RefreshShortcutAsync();
             // SF-V2-02/09 section 16.2/8: Device+Profile state publish happens strictly AFTER capture
             // is committed, and is fire-and-forget -- a slow/failed snapshot must never extend how
             // long this method (and the _visibleSurfaceTransition it holds) delays a concurrent Hide.
             _ = _overlayController.RefreshQuickSettingsAsync(preferActiveProfile);
             _ = _overlayController.RefreshTabOrderAsync();
             _ = _overlayController.RefreshClawHudAsync();
-            _ = _overlayController.RefreshShortcutAsync();
             _ = _overlayController.RefreshBackButtonMappingAsync();
             _ = _overlayController.RefreshFrontendSettingsAsync();
             _ = _overlayController.RefreshControllerVibrationAsync();

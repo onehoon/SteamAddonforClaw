@@ -33,22 +33,57 @@ public sealed partial class OverlayWindow
     private int _profileArtworkCachedDecodePixelWidth;
     private double _profileArtworkCachedRasterizationScale;
     private BitmapImage? _profileArtworkCachedBitmap;
+    private XamlRoot? _profileArtworkObservedXamlRoot;
 
     internal event Action? NoRunningGameProfileRecheckRequested;
 
     private void ProfileContentColumn_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         var (width, height) = CalculateProfileArtworkSize(e.NewSize.Width);
-        if (Math.Abs(ProfileArtworkHost.Width - width) < 0.0001
-            && Math.Abs(ProfileArtworkHost.Height - height) < 0.0001)
+        if (Math.Abs(ProfileArtworkHost.Width - width) >= 0.0001
+            || Math.Abs(ProfileArtworkHost.Height - height) >= 0.0001)
+        {
+            ProfileArtworkHost.Width = width;
+            ProfileArtworkHost.Height = height;
+            ProfileArtworkHost.Clip = new RectangleGeometry
+            {
+                Rect = new Rect(0, 0, width, height)
+            };
+        }
+
+        if (double.IsFinite(e.NewSize.Width) && e.NewSize.Width > 0)
+            ReevaluateProfileArtworkForCurrentPage();
+    }
+
+    private void ProfileArtworkHost_Loaded(object sender, RoutedEventArgs e)
+    {
+        ObserveProfileArtworkXamlRoot(ProfileArtworkHost.XamlRoot);
+        ReevaluateProfileArtworkForCurrentPage();
+    }
+
+    private void ProfileArtworkHost_Unloaded(object sender, RoutedEventArgs e) =>
+        ObserveProfileArtworkXamlRoot(null);
+
+    private void ProfileArtworkXamlRoot_Changed(XamlRoot sender, XamlRootChangedEventArgs e) =>
+        ReevaluateProfileArtworkForCurrentPage();
+
+    private void ObserveProfileArtworkXamlRoot(XamlRoot? xamlRoot)
+    {
+        if (ReferenceEquals(_profileArtworkObservedXamlRoot, xamlRoot)) return;
+        if (_profileArtworkObservedXamlRoot is not null)
+            _profileArtworkObservedXamlRoot.Changed -= ProfileArtworkXamlRoot_Changed;
+        _profileArtworkObservedXamlRoot = xamlRoot;
+        if (_profileArtworkObservedXamlRoot is not null)
+            _profileArtworkObservedXamlRoot.Changed += ProfileArtworkXamlRoot_Changed;
+    }
+
+    private void ReevaluateProfileArtworkForCurrentPage()
+    {
+        if (!_isVisible || !_profilePageReceivedThisShow || !IsProfileArtworkPresentationTab(_tabState.SelectedTab)
+            || !_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface))
             return;
 
-        ProfileArtworkHost.Width = width;
-        ProfileArtworkHost.Height = height;
-        ProfileArtworkHost.Clip = new RectangleGeometry
-        {
-            Rect = new Rect(0, 0, width, height)
-        };
+        UpdateProfileArtwork(surface.Binding?.AuthoritativePage);
     }
 
     internal static (double Width, double Height) CalculateProfileArtworkSize(double rightColumnWidth)
@@ -130,7 +165,8 @@ public sealed partial class OverlayWindow
         RenderQuickSettingsPage(surface);
         var renderPath = surface.LastRenderPath;
         ApplyProfilePresentation(page);
-        UpdateProfileArtwork(page);
+        if (_tabState.SelectedTab != AddonQuickSettingsTabId.Shortcut)
+            UpdateProfileArtwork(page);
         TryRequestNoRunningGameRecheck(page);
         RefreshShortcutQuickSettingsView(preferredShortcutRowId);
         return renderPath;
@@ -151,18 +187,24 @@ public sealed partial class OverlayWindow
             return;
         }
 
-        var (rasterizationScale, decodePixelWidth) = CurrentProfileArtworkDecodeKey();
-        var cachedBitmap = _profileArtworkCachedBitmap;
-        var cacheHit = cachedBitmap is not null
-            && IsProfileArtworkCacheCompatible(
-                _profileArtworkCachedAppId, _profileArtworkCachedDecodePixelWidth, _profileArtworkCachedRasterizationScale,
-                appId.Value, decodePixelWidth, rasterizationScale);
-
         if (!IsProfileArtworkPresentationTab(_tabState.SelectedTab))
         {
             HideProfileArtworkPreservingCache();
             return;
         }
+
+        var (rasterizationScale, requestedDecodePixelWidth) = CurrentProfileArtworkDecodeKey();
+        if (requestedDecodePixelWidth is not { } decodePixelWidth)
+        {
+            HideProfileArtworkPreservingCache();
+            return;
+        }
+
+        var cachedBitmap = _profileArtworkCachedBitmap;
+        var cacheHit = cachedBitmap is not null
+            && IsProfileArtworkCacheCompatible(
+                _profileArtworkCachedAppId, _profileArtworkCachedDecodePixelWidth, _profileArtworkCachedRasterizationScale,
+                appId.Value, decodePixelWidth, rasterizationScale);
 
         if (cacheHit)
         {
@@ -398,10 +440,17 @@ public sealed partial class OverlayWindow
     internal static bool IsProfileArtworkPresentationTab(AddonQuickSettingsTabId tab) =>
         tab is AddonQuickSettingsTabId.Profile or AddonQuickSettingsTabId.Shortcut;
 
-    internal static int ProfileArtworkDecodePixelWidth(double widthDip, double rasterizationScale) =>
-        widthDip > 0
-            ? Math.Clamp((int)Math.Ceiling(widthDip * rasterizationScale), 1, 1200)
-            : 960;
+    internal static int? ProfileArtworkDecodePixelWidth(double widthDip, double rasterizationScale)
+    {
+        if (!double.IsFinite(widthDip) || widthDip <= 0
+            || !double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
+            return null;
+
+        var pixelWidth = Math.Ceiling(widthDip * rasterizationScale);
+        return double.IsFinite(pixelWidth)
+            ? (int)Math.Clamp(pixelWidth, 1, 1200)
+            : null;
+    }
 
     internal static bool IsProfileArtworkCacheCompatible(
         uint? cachedAppId,
@@ -414,11 +463,19 @@ public sealed partial class OverlayWindow
         && cachedDecodePixelWidth == requestedDecodePixelWidth
         && Math.Abs(cachedRasterizationScale - requestedRasterizationScale) < 0.0001;
 
-    private (double RasterizationScale, int DecodePixelWidth) CurrentProfileArtworkDecodeKey()
+    private (double RasterizationScale, int? DecodePixelWidth) CurrentProfileArtworkDecodeKey()
     {
-        var scale = ProfileArtworkHost.XamlRoot?.RasterizationScale ?? 1.0;
-        if (!double.IsFinite(scale) || scale <= 0) scale = 1.0;
-        return (scale, ProfileArtworkDecodePixelWidth(ProfileArtworkHost.ActualWidth, scale));
+        if (ProfileArtworkHost.XamlRoot is not { } xamlRoot)
+            return (0, null);
+
+        var scale = xamlRoot.RasterizationScale;
+        // SizeChanged assigns this explicit width from the current profile column. During that
+        // callback ActualWidth can still describe the preceding layout pass.
+        var explicitWidth = ProfileArtworkHost.Width;
+        var width = double.IsFinite(explicitWidth)
+            ? explicitWidth
+            : ProfileArtworkHost.ActualWidth;
+        return (scale, ProfileArtworkDecodePixelWidth(width, scale));
     }
 
     private void ApplyProfileArtwork(uint appId, BitmapImage bitmap)

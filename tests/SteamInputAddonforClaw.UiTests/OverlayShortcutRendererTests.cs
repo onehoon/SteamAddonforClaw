@@ -90,7 +90,7 @@ public sealed class OverlayShortcutRendererTests
     {
         var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
         var buildStart = renderer.IndexOf("private FrameworkElement BuildShortcutPage()", StringComparison.Ordinal);
-        var buildEnd = renderer.IndexOf("internal void ApplyShortcutState(", buildStart, StringComparison.Ordinal);
+        var buildEnd = renderer.IndexOf("internal bool ApplyShortcutState(", buildStart, StringComparison.Ordinal);
         var build = renderer[buildStart..buildEnd];
         var renderStart = renderer.IndexOf("private void RenderShortcutSnapshot()", StringComparison.Ordinal);
         var renderEnd = renderer.IndexOf("private ShortcutTileControls CreateShortcutTile(", renderStart, StringComparison.Ordinal);

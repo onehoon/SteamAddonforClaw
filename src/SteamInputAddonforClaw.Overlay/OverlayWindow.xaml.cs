@@ -21,6 +21,8 @@ public sealed partial class OverlayWindow : Window
     {
         _startupClawHudSettings = startupClawHudSettings;
         InitializeComponent();
+        ProfileArtworkHost.Loaded += ProfileArtworkHost_Loaded;
+        ProfileArtworkHost.Unloaded += ProfileArtworkHost_Unloaded;
         _rowSelectedBrush = OverlayQamResources.Brush("QamFocusBorderBrush");
         _rowSelectedFillBrush = OverlayQamResources.Brush("QamSelectedFillBrush");
         TabRailCluster.RenderTransform = new TranslateTransform { Y = QuickJumpFooter.Height / 2.0 };
@@ -28,6 +30,7 @@ public sealed partial class OverlayWindow : Window
         Closed += (_, _) =>
         {
             StopRailClockUpdates();
+            ObserveProfileArtworkXamlRoot(null);
             ClearProfileArtwork();
             CancelPendingControllerVibrationDraft();
             foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.Dispose();

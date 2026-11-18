@@ -280,21 +280,37 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
 
         FrontendShortcutDashboardSnapshot snapshot;
+        var captureStopwatch = Stopwatch.StartNew();
+        var captureFailed = false;
         try { snapshot = await capture(CancellationToken.None).ConfigureAwait(false); }
         catch (Exception exception)
         {
+            captureFailed = true;
             AppLog.Warn("Overlay", "Overlay Shortcut capture failed.", null,
                 ("ExceptionType", exception.GetType().Name));
             snapshot = FrontendShortcutDashboardSnapshot.Unavailable("Shortcut settings are unavailable.");
         }
 
+        AppLog.Debug("Overlay", "Shortcut dashboard snapshot captured.",
+            ("Event", "OverlayShortcutCapture"), ("ElapsedMs", captureStopwatch.Elapsed.TotalMilliseconds),
+            ("TileCount", snapshot.Tiles.Count), ("Available", snapshot.Available),
+            ("Outcome", captureFailed ? "ExceptionFallback" : snapshot.Available ? "Available" : "Unavailable"));
+
+        var sendStopwatch = Stopwatch.StartNew();
         try
         {
-            if (!await server.SendShortcutStateAsync(snapshot).ConfigureAwait(false))
+            var accepted = await server.SendShortcutStateAsync(snapshot).ConfigureAwait(false);
+            AppLog.Debug("Overlay", "Shortcut dashboard snapshot publish completed.",
+                ("Event", "OverlayShortcutSend"), ("ElapsedMs", sendStopwatch.Elapsed.TotalMilliseconds),
+                ("Outcome", accepted ? "Accepted" : "Declined"));
+            if (!accepted)
                 AppLog.Warn("Overlay", "Overlay Shortcut state publish was not accepted.");
         }
         catch (Exception exception)
         {
+            AppLog.Debug("Overlay", "Shortcut dashboard snapshot publish completed.",
+                ("Event", "OverlayShortcutSend"), ("ElapsedMs", sendStopwatch.Elapsed.TotalMilliseconds),
+                ("Outcome", "Declined"), ("ExceptionType", exception.GetType().Name));
             AppLog.Warn("Overlay", "Overlay Shortcut state publish failed.", null,
                 ("ExceptionType", exception.GetType().Name));
         }

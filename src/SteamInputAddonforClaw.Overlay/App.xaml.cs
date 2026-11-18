@@ -212,11 +212,28 @@ public partial class App : Application
 
     private Task HandleShortcutStateAsync(FrontendShortcutDashboardSnapshot snapshot)
     {
+        var receivedAt = Stopwatch.GetTimestamp();
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
         {
-            try { _window?.ApplyShortcutState(snapshot); completion.TrySetResult(); }
-            catch (Exception exception) { completion.TrySetException(exception); }
+            try
+            {
+                var applied = _window?.ApplyShortcutState(snapshot) ?? false;
+                var outcome = !applied ? "Rejected"
+                    : !snapshot.Available ? "Unavailable"
+                    : snapshot.Tiles.Count == 0 ? "Empty"
+                    : "Applied";
+                OverlayLog.Debug("Performance", "OverlayShortcutUiApply",
+                    ("ElapsedMs", Stopwatch.GetElapsedTime(receivedAt).TotalMilliseconds),
+                    ("TileCount", snapshot.Available ? snapshot.Tiles.Count : 0),
+                    ("Available", snapshot.Available), ("Outcome", outcome));
+                completion.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                OverlayLog.Error("Shortcut", "Applying the Shortcut dashboard state failed.", exception);
+                completion.TrySetException(exception);
+            }
         }))
             completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Shortcut state application."));
         return completion.Task;
