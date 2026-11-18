@@ -171,14 +171,15 @@ Per-game options include:
 - **Minimum GPU Clock** — a selectable Intel GPU clock floor for each power source, when available. Power or thermal limits can still keep the actual clock below the selected floor.
 - **Intel FPS Limit** — a per-power-source target from 40 to 120 FPS in 1 FPS steps. It uses Intel's FPS-limiting support; some games may not support it.
 - **Resolution** — **Do not change**, 1920 × 1200, 1920 × 1080, 1680 × 1050, or 1440 × 900.
+- **Display Scaling to 100%** — an optional switch that temporarily sets the primary monitor's Windows desktop scale to 100% while the game profile is active. The Addon captures and restores the prior scale when the profile stops applying, during shutdown, or during startup recovery. This uses undocumented Windows display packets; unsupported systems fail closed and may leave recovery pending rather than changing another display.
 
-When the game profile is active, its configured **TDP Control**, **CPU Boost**, and **Windows Power Mode** values take priority over the matching Device values. When there is no active game profile, the Device values apply. These three settings are managed when configured and have no per-feature on/off switch. **Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls and do not have Device-level fallback settings. When the game is no longer active, the profile-only controls stop applying and the Device values become effective again. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
+When the game profile is active, its configured **TDP Control**, **CPU Boost**, and **Windows Power Mode** values take priority over the matching Device values. When there is no active game profile, the Device values apply. These three settings are managed when configured and have no per-feature on/off switch. **Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**, and **Display Scaling to 100%** are game-profile-only controls and do not have Device-level fallback settings. When the game is no longer active, the profile-only controls stop applying and the Device values become effective again. Display scaling restores the captured scale as part of its display recovery; an unsupported or failed Windows operation keeps recovery pending. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
 
 ### XBOX
 
 The **XBOX** page lists recognized installed Xbox/Microsoft Store games available to the current Windows user. Use **Refresh**, search, and favorites, then select a game to edit its profile. Recognized games receive an enabled profile automatically, so you can configure it before launch. The profile takes a one-time snapshot of the current Device performance values when it is created; later Device changes do not overwrite that game-specific snapshot. Not every Store app or Game Pass title is necessarily recognized by the catalog.
 
-The performance options match the Steam profile options: TDP Control, CPU Boost, Windows Power Mode, Minimum GPU Clock, Intel FPS Limit, and Resolution. The XBOX profile also has a controller section for **Use global M1 / M2 mapping**. Turn that off to choose per-game Xbox 360 targets for M1 and M2. Steam Deck presentation still keeps M1 as R4 and M2 as L4.
+The performance options match the Steam profile options: TDP Control, CPU Boost, Windows Power Mode, Minimum GPU Clock, Intel FPS Limit, Resolution, and **Display Scaling to 100%**. The XBOX profile also has a controller section for **Use global M1 / M2 mapping**. Turn that off to choose per-game Xbox 360 targets for M1 and M2. Steam Deck presentation still keeps M1 as R4 and M2 as L4.
 
 As with Steam, you can prepare a profile before the game starts. When the Addon recognizes the corresponding XBOX title as active, its configured TDP Control, CPU Boost, and Windows Power Mode values take priority over Device values. With no active game profile, Device values apply. Minimum GPU Clock, Intel FPS Limit, and Resolution are game-profile-only and have no Device-level fallback.
 
@@ -261,7 +262,7 @@ A Steam game's **Virtual Controller** choice is available while Steam / Big Pict
 
 **TDP Control**, **CPU Boost**, and **Windows Power Mode** are managed settings at both Device and game-profile level. When an enabled game profile is active, its configured values take priority over Device values. When there is no active enabled game profile, Device values apply. These three settings do not have individual on/off switches.
 
-**Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls. They do not fall back to a Device setting when disabled or when no matching game profile is active. **Battery charge limit** and **Maximum Processor State** are Device-only and are not part of a game profile.
+**Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**, and **Display Scaling to 100%** are game-profile-only controls. They do not fall back to a Device setting when disabled or when no matching game profile is active. Display scaling is off for existing and new profiles by default and temporarily affects the primary monitor only while the matching profile is active. Its Windows setter is undocumented; if Windows rejects a change or restoration, the Addon keeps recovery pending and blocks another display override. **Battery charge limit** and **Maximum Processor State** are Device-only and are not part of a game profile.
 
 ```text
 Recognized active game + enabled profile
@@ -273,7 +274,7 @@ No active matching profile
     -> no game-profile-only setting is active
 ```
 
-When the game stops being active, the profile-only settings stop applying and configured Device values become effective again where a Device-level counterpart exists. The Addon does not promise to restore a previous Windows or MSI value. Battery charge limit uses its own direct enable/disable behavior described in the Device section.
+When the game stops being active, the profile-only settings stop applying and configured Device values become effective again where a Device-level counterpart exists. Per-game display scaling is the exception: it captures and restores the primary monitor's previous Windows scale. Other Windows or MSI values are not promised to return to their prior state. Battery charge limit uses its own direct enable/disable behavior described in the Device section.
 
 ## Non-Steam games
 

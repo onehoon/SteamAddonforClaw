@@ -691,6 +691,37 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void SetScalingTo100Percent_PersistsIndependentlyAndPreservesResolutionAndExtensionData()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var store = new ProfileStore(ProfilesPath);
+        var extension = System.Text.Json.JsonDocument.Parse("42").RootElement.Clone();
+        store.Save(new ProfileDocument
+        {
+            Games = new Dictionary<string, GameProfile>
+            {
+                ["123"] = new()
+                {
+                    Enabled = false,
+                    Display = new GameDisplayOverrides
+                    {
+                        Resolution = new GameDisplayResolution { Width = 1920, Height = 1080 },
+                        ExtensionData = new() { ["future"] = extension },
+                    },
+                },
+            },
+        });
+        var mutations = new GameProfileMutations(store, tdpLimits: TdpLimits());
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetScalingTo100Percent(123, true, "Game"));
+
+        var saved = store.Load().Document.Games["123"];
+        Assert.True(saved.Display.ScalingTo100Percent);
+        Assert.Equal(new GameDisplayResolution { Width = 1920, Height = 1080 }, saved.Display.Resolution);
+        Assert.Equal(42, saved.Display.ExtensionData!["future"].GetInt32());
+    }
+
+    [Fact]
     public void Load_LegacySchemaOneWithoutXboxGamesDefaultsToEmptyAndKeepsSchema()
     {
         Directory.CreateDirectory(_testDirectory);
@@ -702,6 +733,20 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(1, loaded.Document.SchemaVersion);
         Assert.Empty(loaded.Document.XboxGames);
         Assert.Equal("Dota 2", loaded.Document.Games["570"].DisplayName);
+        Assert.False(loaded.Document.Games["570"].Display.ScalingTo100Percent);
+    }
+
+    [Fact]
+    public void Load_LegacyXboxProfileWithoutDisplayScalingDefaultsToOff()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath,
+            "{\"schemaVersion\":1,\"device\":{},\"games\":{},\"xboxGames\":{\"store:9PK8PHLCQDF6\":{\"displayName\":\"Legacy Xbox Game\"}}}");
+
+        var loaded = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Equal(ProfileLoadStatus.Loaded, loaded.Status);
+        Assert.False(loaded.Document.XboxGames["store:9PK8PHLCQDF6"].Display.ScalingTo100Percent);
     }
 
     [Fact]

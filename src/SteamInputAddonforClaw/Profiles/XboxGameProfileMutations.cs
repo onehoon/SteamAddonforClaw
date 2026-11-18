@@ -194,6 +194,28 @@ internal sealed class XboxGameProfileMutations
         return MutationChange.ChangedSuccessfully;
     });
 
+    internal MutationOutcome SetScalingTo100Percent(string key, bool enabled, string? displayName) => Mutate(key, (document, canonicalKey) =>
+    {
+        if (!document.XboxGames.TryGetValue(canonicalKey, out var current))
+        {
+            if (!enabled) return MutationChange.NoChange;
+            current = new XboxGameProfile();
+        }
+        if (!current.Enabled)
+        {
+            if (!GameProfileEnrollment.TryComplete(current, document.Device, _tdpLimits, out var completed))
+                return MutationChange.InvalidTarget;
+            current = completed;
+        }
+        if (current.Display.ScalingTo100Percent == enabled) return MutationChange.NoChange;
+        document.XboxGames[canonicalKey] = current with
+        {
+            Display = current.Display with { ScalingTo100Percent = enabled },
+            DisplayName = SelectDisplayName(current.DisplayName, displayName)
+        };
+        return MutationChange.ChangedSuccessfully;
+    });
+
     internal MutationOutcome SetBackButtonMapping(string key, BackButtonMappingSettings? mapping)
     {
         if (mapping is not null && !BackButtonMappingValidation.IsValid(mapping))

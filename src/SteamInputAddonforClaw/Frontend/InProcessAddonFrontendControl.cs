@@ -544,6 +544,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         MutateXboxGame(key, cancellationToken, mutations => mutations.SetResolution(key,
             resolution is { } value ? new GameDisplayResolution { Width = value.Width, Height = value.Height } : null, displayName), ProfileApplyKind.Resolution);
 
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileScalingTo100PercentAsync(string key, bool enabled, string? displayName, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetScalingTo100Percent(key, enabled, displayName), ProfileApplyKind.Resolution);
+
     [Flags]
     private enum ProfileApplyKind
     {
@@ -724,7 +727,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 : null,
             _featureSupport.IntelGpuMinimumClock
                 ? CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock)
-                : null)
+                : null,
+            ScalingTo100Percent: profile.Display.ScalingTo100Percent)
         {
             BackButtonMapping = _frontButtonMappingAvailable
                 ? new(storedMapping is null, storedMapping ?? _settings.BackButtonMapping)
@@ -902,6 +906,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return MutateGame(appId, _gameProfileMutations?.SetResolution(appId, target, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.Resolution);
     }
 
+    public Task<FrontendGameProfileMutationResult> SetGameProfileScalingTo100PercentAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return MutateGame(appId, _gameProfileMutations?.SetScalingTo100Percent(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.Resolution);
+    }
+
     private Task<FrontendGameProfileMutationResult> MutateCpuBoostAfterShutdownCheck(uint appId, Func<GameProfileMutations, uint, CpuBoostMode, GameProfileMutations.MutationOutcome> mutation, CpuBoostMode mode)
     {
         ThrowIfShuttingDown();
@@ -930,7 +940,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 : null,
             _featureSupport.IntelGpuMinimumClock
                 ? CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock)
-                : null)
+                : null,
+            ScalingTo100Percent: profile.Display.ScalingTo100Percent)
         {
             SteamVirtualController = profile.SteamVirtualController,
             FeatureSupport = _featureSupport,

@@ -1207,7 +1207,15 @@ public sealed class UiArchitectureTests
         var document = XDocument.Load(xamlPath);
         XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
         Assert.Single(document.Descendants(), element => element.Name.LocalName == "SettingsCard"
-            && (string?)element.Attribute(xamlNamespace + "Uid") == "Steam_ResolutionCard");
+            && (string?)element.Attribute(xamlNamespace + "Uid") == "Steam_DisplayCard");
+        Assert.Contains("x:Name=\"DisplayScaling100Toggle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ToggleSwitch", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Right\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("OffContent=\"\" OnContent=\"\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("DisplayScaling100Toggle_Toggled", code, StringComparison.Ordinal);
+        Assert.Contains("SetGameProfileScalingTo100PercentAsync", code, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ResolutionComboBox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Steam_DisplayScaling_UpdateFailed", code, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SelectedGameNameText\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true", code, StringComparison.Ordinal);
         Assert.Contains("snapshot.FpsLimit?.Available == true ?", code, StringComparison.Ordinal);

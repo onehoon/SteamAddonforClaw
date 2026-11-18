@@ -730,7 +730,7 @@ public sealed class QuickSettingsMutationAdapterTests
     }
 
     [Fact]
-    public async Task Profile_resolution_maps_the_closed_option_to_the_typed_mutation()
+    public async Task Stale_profile_resolution_intent_is_rejected_after_resolution_leaves_quick_settings()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true) };
         var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileResolution,
@@ -738,8 +738,8 @@ public sealed class QuickSettingsMutationAdapterTests
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
 
-        Assert.Equal(["ProfileResolution:111:1920x1080"], control.ProfileCalls);
-        Assert.True(result.Succeeded);
+        Assert.Empty(control.ProfileCalls);
+        Assert.False(result.Succeeded);
     }
 
     [Fact]
@@ -899,7 +899,6 @@ public sealed class QuickSettingsMutationAdapterTests
             (QuickSettingsRowId.ProfileFpsLimitEnabled, [new(QuickSettingsRowId.ProfileFpsLimitEnabled, QuickSettingsValue.Boolean(true))], "ProfileFpsLimitEnabled:111:True", "XboxProfileFpsLimitEnabled:xbox:test:True"),
             (QuickSettingsRowId.ProfileFpsLimitAc, [new(QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsValue.Integer(120))], "ProfileFpsLimitAc:111:120", "XboxProfileFpsLimitAc:xbox:test:120"),
             (QuickSettingsRowId.ProfileFpsLimitDc, [new(QuickSettingsRowId.ProfileFpsLimitDc, QuickSettingsValue.Integer(60))], "ProfileFpsLimitDc:111:60", "XboxProfileFpsLimitDc:xbox:test:60"),
-            (QuickSettingsRowId.ProfileResolution, [new(QuickSettingsRowId.ProfileResolution, QuickSettingsValue.Integer(2))], "ProfileResolution:111:1920x1080", "XboxProfileResolution:xbox:test:1920x1080"),
         };
 
         foreach (var target in new[] { QuickSettingsProfileTarget.ForSteam(111), QuickSettingsProfileTarget.ForXbox("xbox:test") })

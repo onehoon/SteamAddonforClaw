@@ -281,7 +281,10 @@
   <data name="Steam_RefreshGamesButton.Content" xml:space="preserve"><value>↻ Refresh</value></data>
   <data name="Steam_Resolution_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
   <data name="Steam_Resolution_UpdateFailed" xml:space="preserve"><value>Display resolution could not be updated.</value></data>
-  <data name="Steam_ResolutionCard.Header" xml:space="preserve"><value>Resolution</value></data>
+  <data name="Steam_DisplayCard.Header" xml:space="preserve"><value>디스플레이</value></data>
+  <data name="Steam_DisplayResolutionLabel.Text" xml:space="preserve"><value>해상도</value></data>
+  <data name="Steam_DisplayScaling100Label.Text" xml:space="preserve"><value>디스플레이 배율을 100%로 설정</value></data>
+  <data name="Steam_DisplayScaling_UpdateFailed" xml:space="preserve"><value>디스플레이 배율을 변경하지 못했습니다.</value></data>
   <data name="Steam_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
   <data name="Steam_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
   <data name="Steam_TdpAcRailLabel.Text" xml:space="preserve"><value>AC</value></data>
@@ -367,7 +370,10 @@
   <data name="Xbox_RefreshGamesButton.Content" xml:space="preserve"><value>↻ 새로고침</value></data>
   <data name="Xbox_Resolution_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
   <data name="Xbox_Resolution_UpdateFailed" xml:space="preserve"><value>Display resolution could not be updated.</value></data>
-  <data name="Xbox_ResolutionCard.Header" xml:space="preserve"><value>Resolution</value></data>
+  <data name="Xbox_DisplayCard.Header" xml:space="preserve"><value>디스플레이</value></data>
+  <data name="Xbox_DisplayResolutionLabel.Text" xml:space="preserve"><value>해상도</value></data>
+  <data name="Xbox_DisplayScaling100Label.Text" xml:space="preserve"><value>디스플레이 배율을 100%로 설정</value></data>
+  <data name="Xbox_DisplayScaling_UpdateFailed" xml:space="preserve"><value>디스플레이 배율을 변경하지 못했습니다.</value></data>
   <data name="Xbox_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
   <data name="Xbox_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
   <data name="Xbox_TdpAcRailLabel.Text" xml:space="preserve"><value>AC</value></data>

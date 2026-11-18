@@ -300,6 +300,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileSteamVirtualControllerAsync(FrontendWireCodec.Decode<SetGameProfileSteamVirtualControllerRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileSteamVirtualControllerRequest>(p).Preference, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileResolution
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileResolutionAsync(FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileScalingTo100Percent
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileScalingTo100PercentAsync(FrontendWireCodec.Decode<SetGameProfileScalingTo100PercentRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileScalingTo100PercentRequest>(p).Enabled, FrontendWireCodec.Decode<SetGameProfileScalingTo100PercentRequest>(p).DisplayName, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileCpuBoostEnabled
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileCpuBoostEnabledAsync(FrontendWireCodec.Decode<SetGameProfileCpuBoostEnabledRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileCpuBoostEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileTdpEnabled
@@ -403,6 +405,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileGpuMinimumClockDcAsync(FrontendWireCodec.Decode<SetXboxGameProfileGpuMinimumClockIndexRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileGpuMinimumClockIndexRequest>(p).SelectableClockIndex, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetXboxGameProfileResolution
         ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileResolutionAsync(FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileScalingTo100Percent
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileScalingTo100PercentAsync(FrontendWireCodec.Decode<SetXboxGameProfileScalingTo100PercentRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileScalingTo100PercentRequest>(p).Enabled, FrontendWireCodec.Decode<SetXboxGameProfileScalingTo100PercentRequest>(p).DisplayName, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetXboxGameProfileBackButtonMapping
         ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileBackButtonMappingAsync(FrontendWireCodec.Decode<SetXboxGameProfileBackButtonMappingRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileBackButtonMappingRequest>(p).Mapping, t).ConfigureAwait(false))
         : m switch

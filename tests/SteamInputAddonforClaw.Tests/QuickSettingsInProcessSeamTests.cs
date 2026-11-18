@@ -219,6 +219,23 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Display_scaling_mutation_persists_and_projects_on_the_steam_profile_snapshot()
+    {
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath), tdpLimits: TdpLimits());
+        mutations.SetEnabled(4000u, true, "Offline Game");
+        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 4000u);
+
+        var result = await control.SetGameProfileScalingTo100PercentAsync(4000u, true, "Offline Game");
+        var snapshot = await control.CaptureGameProfileAsync(4000u);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Snapshot.ScalingTo100Percent);
+        Assert.True(snapshot.ScalingTo100Percent);
+        Assert.Null(snapshot.Resolution);
+    }
+
+    [Fact]
     public async Task Capture_profile_page_without_context_uses_the_shared_no_game_message()
     {
         var control = CreateControl(cpuBoostRuntime: null);

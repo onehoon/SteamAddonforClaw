@@ -278,6 +278,35 @@ internal sealed class GameProfileMutations
         }
     }
 
+    internal MutationOutcome SetScalingTo100Percent(uint appId, bool enabled, string? displayName)
+    {
+        if (appId == 0) return MutationOutcome.InvalidTarget;
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var current))
+            {
+                if (!enabled) return MutationOutcome.Succeeded;
+                current = new GameProfile();
+            }
+            if (!current.Enabled)
+            {
+                if (!GameProfileEnrollment.TryComplete(current, loaded.Document.Device, _tdpLimits, out var completed))
+                    return MutationOutcome.InvalidTarget;
+                current = completed;
+            }
+            if (current.Display.ScalingTo100Percent == enabled) return MutationOutcome.Succeeded;
+            loaded.Document.Games[key] = current with
+            {
+                Display = current.Display with { ScalingTo100Percent = enabled },
+                DisplayName = SelectDisplayName(current.DisplayName, displayName)
+            };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+
     private MutationOutcome SetCpuBoost(uint appId, Func<GameCpuBoostSettings, GameCpuBoostSettings> update)
     {
         lock (_gate.Sync)
