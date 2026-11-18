@@ -355,6 +355,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         NamedPipeOverlayServer server, QuickSettingsPageId pageId, Func<CancellationToken, Task<QuickSettingsPageSnapshot>> capture)
     {
         QuickSettingsPageSnapshot page;
+        var captureTimer = Stopwatch.StartNew();
         try { page = await capture(CancellationToken.None).ConfigureAwait(false); }
         catch (Exception exception)
         {
@@ -365,10 +366,20 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             AppLog.Warn("Overlay", "Overlay Quick Settings page capture failed.", exception, ("PageId", pageId));
             page = QuickSettingsPageSnapshot.Unavailable(pageId);
         }
+        AppLog.Debug("Overlay", "OverlayQuickSettingsCapture",
+            ("PageId", pageId), ("Available", page.Available),
+            ("TargetKind", page.ProfileTarget?.Kind.ToString() ?? "None"),
+            ("ElapsedMs", captureTimer.Elapsed.TotalMilliseconds));
+        var sendTimer = Stopwatch.StartNew();
         try { await server.SendQuickSettingsPageStateAsync(page).ConfigureAwait(false); }
         catch (Exception exception)
         {
             AppLog.Warn("Overlay", "Overlay Quick Settings page publish failed.", exception, ("PageId", pageId));
+        }
+        finally
+        {
+            AppLog.Debug("Overlay", "OverlayQuickSettingsSend",
+                ("PageId", pageId), ("ElapsedMs", sendTimer.Elapsed.TotalMilliseconds));
         }
     }
 
@@ -377,7 +388,12 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         await _transition.WaitAsync().ConfigureAwait(false);
         try
         {
-            lock (_sync) if (_stopping) return false;
+            bool warmProcess;
+            lock (_sync)
+            {
+                if (_stopping) return false;
+                warmProcess = _process is { HasExited: false } && _server?.IsReady == true;
+            }
             if (!await StartAsyncUnderTransitionAsync().ConfigureAwait(false)) return false;
 
             NamedPipeOverlayServer? server;
@@ -404,6 +420,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             }
             lock (_sync) _visible = show;
             AppLog.Info("Overlay", "Overlay command acknowledged.", ("Command", command), ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds));
+            if (show)
+                AppLog.Debug("Overlay", "OverlayShowCommand",
+                    ("ElapsedMs", requested.Elapsed.TotalMilliseconds), ("Process", warmProcess ? "Warm" : "Cold"),
+                    ("PID", pid), ("Command", command));
             return true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

@@ -203,6 +203,98 @@ public sealed class OverlayShortcutQuickSettingsTests
     }
 
     [Fact]
+    public void New_show_retains_quick_settings_controls_but_hides_them_until_fresh_pages_arrive()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var reset = ExtractMethod(quickSettings, "private void ResetShortcutQuickSettingsForShow()");
+        var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
+        var applyDevice = ExtractMethod(quickSettings, "internal string ApplyQuickSettingsPage(QuickSettingsPageSnapshot page)");
+        var applyProfile = ExtractMethod(profile, "internal string ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
+        var refresh = ExtractMethod(quickSettings, "private void RefreshShortcutQuickSettingsView(QuickSettingsRowId? preferredShortcutRowId)");
+        var show = ExtractMethod(presentation, "internal async Task ShowForPocAsync()");
+        var hide = ExtractMethod(presentation, "internal Task HideForPocAsync()");
+
+        Assert.Contains("_devicePageReceivedThisShow = false;", reset);
+        Assert.Contains("_profilePageReceivedThisShow = false;", reset);
+        Assert.Contains("deviceSurface.Content.Visibility = Visibility.Collapsed;", reset);
+        Assert.Contains("deviceSurface.LoadingStatus", reset);
+        Assert.DoesNotContain("ApplyAuthoritativePage", prepare);
+        Assert.DoesNotContain("RenderQuickSettingsPage", prepare);
+        Assert.Contains("surface.Content.Visibility = Visibility.Collapsed;", prepare);
+        Assert.Contains("HideProfileArtworkPreservingCache();", prepare);
+
+        var profileGate = refresh.IndexOf("var profilePage = _profilePageReceivedThisShow", StringComparison.Ordinal);
+        var deviceGate = refresh.IndexOf("var devicePage = _devicePageReceivedThisShow", StringComparison.Ordinal);
+        Assert.True(profileGate >= 0 && deviceGate > profileGate);
+        Assert.Contains("if (!_profilePageReceivedThisShow || profilePage is null)",
+            ExtractMethod(quickSettings, "private string? ResolveShortcutQuickSettingsStatus("));
+        Assert.Contains("ApplyQuickSettingsSurfacePresentation(surface, page.Available, page.Message);", applyDevice);
+        Assert.Contains("surface.Content.Visibility = HasRenderableActiveProfile(page) ? Visibility.Visible : Visibility.Collapsed;", applyProfile);
+        Assert.Contains("ValueOnly", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
+        Assert.Contains("SectionReconcile", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
+        Assert.Contains("FullRebuild", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
+
+        Assert.Contains("_showStartedTimestamp = Stopwatch.GetTimestamp();", show);
+        Assert.Contains("OverlayShortcutContentReady", refresh);
+        Assert.Contains("Stopwatch.GetElapsedTime(_showStartedTimestamp)", refresh);
+        Assert.Contains("HideProfileArtworkPreservingCache();", hide);
+        Assert.DoesNotContain("ClearProfileArtwork();", hide);
+    }
+
+    [Theory]
+    [InlineData(AddonQuickSettingsTabId.Device)]
+    [InlineData(AddonQuickSettingsTabId.Profile)]
+    public void Retained_rows_are_not_actionable_until_the_current_show_receives_the_page(
+        AddonQuickSettingsTabId tab)
+    {
+        var mutationRequests = 0;
+        var retainedRows = new OverlayRowCapabilities[]
+        {
+            new(() => true, () => mutationRequests++, _ => mutationRequests++, AllowsDpadHoldRepeat: true),
+        };
+        var selection = new OverlayRowSelection();
+        var repeatTarget = new OverlayNumericSliderRepeatTarget();
+        repeatTarget.Arm(tab, retainedRows[0], delta: 1);
+
+        selection.SetRows(OverlayShortcutQuickSettingsProjection.FilterInputCapabilitiesForCurrentShow(
+            tab, retainedRows, devicePageReceivedThisShow: false, profilePageReceivedThisShow: false));
+        Assert.Null(selection.SelectedCapabilities);
+        Assert.False(repeatTarget.TryAdjust(tab, selection.SelectedCapabilities, delta: 1));
+        selection.ActivateSelected();
+        selection.AdjustSelected(1);
+        Assert.Equal(0, mutationRequests);
+
+        var deviceReceived = tab == AddonQuickSettingsTabId.Device;
+        var profileReceived = tab == AddonQuickSettingsTabId.Profile;
+        selection.SetRows(OverlayShortcutQuickSettingsProjection.FilterInputCapabilitiesForCurrentShow(
+            tab, retainedRows, deviceReceived, profileReceived));
+        Assert.NotNull(selection.SelectedCapabilities);
+        selection.ActivateSelected();
+        selection.AdjustSelected(1);
+        repeatTarget.Arm(tab, selection.SelectedCapabilities, delta: 1);
+        Assert.True(repeatTarget.TryAdjust(tab, selection.SelectedCapabilities, delta: 1));
+        Assert.Equal(3, mutationRequests);
+    }
+
+    [Fact]
+    public void Active_quick_settings_capability_selection_uses_current_show_receipt_gates()
+    {
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var capabilitiesFor = ExtractMethod(navigation, "private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(");
+
+        Assert.Contains("FilterInputCapabilitiesForCurrentShow", capabilitiesFor, StringComparison.Ordinal);
+        Assert.Contains("_devicePageReceivedThisShow", capabilitiesFor, StringComparison.Ordinal);
+        Assert.Contains("_profilePageReceivedThisShow", capabilitiesFor, StringComparison.Ordinal);
+        Assert.Contains("if ((tab == AddonQuickSettingsTabId.Device && !devicePageReceivedThisShow)",
+            quickSettings, StringComparison.Ordinal);
+        Assert.Contains("tab == AddonQuickSettingsTabId.Profile && !profilePageReceivedThisShow",
+            quickSettings, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Shortcut_section_projection_keeps_original_hidden_rows_and_group_constraints()
     {
         var hiddenEnabled = new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP", QuickSettingsControlKind.Toggle,

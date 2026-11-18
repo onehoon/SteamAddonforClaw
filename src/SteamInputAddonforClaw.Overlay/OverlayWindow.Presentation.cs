@@ -32,6 +32,7 @@ public sealed partial class OverlayWindow
 
     internal async Task ShowForPocAsync()
     {
+        _showStartedTimestamp = Stopwatch.GetTimestamp();
         // Commit the configured first tab before any visual work so a warm process that was
         // previously showing another tab never flashes it for a frame during the reveal.
         ResetUiForShow();
@@ -97,7 +98,7 @@ public sealed partial class OverlayWindow
         }
         finally
         {
-            ClearProfileArtwork();
+            HideProfileArtworkPreservingCache();
             try
             {
                 SetHiddenVisualState();

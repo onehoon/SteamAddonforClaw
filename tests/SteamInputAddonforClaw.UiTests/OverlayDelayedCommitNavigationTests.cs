@@ -163,7 +163,7 @@ public sealed class OverlayDelayedCommitNavigationTests
             "try",
             "WindowInterop.Hide(this);",
             "finally",
-            "ClearProfileArtwork();",
+            "HideProfileArtworkPreservingCache();",
             "SetHiddenVisualState();",
             "return Task.CompletedTask;",
         };

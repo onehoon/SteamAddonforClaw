@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
+using System.Diagnostics;
 using System.Threading;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
@@ -165,12 +166,16 @@ public partial class App : Application
     {
         OverlayLog.Debug("QuickSettings", "Quick Settings page received.",
             ("PageId", page.PageId), ("Available", page.Available), ("SectionCount", page.Sections.Count));
+        var receivedAt = Stopwatch.GetTimestamp();
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
         {
             try
             {
-                _window?.ApplyQuickSettingsPage(page);
+                var renderPath = _window?.ApplyQuickSettingsPage(page) ?? "NoWindow";
+                OverlayLog.Debug("Performance", "OverlayQuickSettingsUiApply",
+                    ("PageId", page.PageId), ("Available", page.Available), ("RenderPath", renderPath),
+                    ("ElapsedMs", Stopwatch.GetElapsedTime(receivedAt).TotalMilliseconds));
                 completion.TrySetResult();
             }
             catch (Exception exception)

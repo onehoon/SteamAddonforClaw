@@ -174,11 +174,14 @@ public sealed class Oem1GestureRecognizerTests
         var delay = new ControlledDelay();
         using var recognizer = Create(true, delay);
         var results = Collect(recognizer);
+        var gestureDelivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        recognizer.GestureRecognized += _ => gestureDelivered.TrySetResult();
 
         recognizer.OnPress();
         recognizer.Reset();
         recognizer.OnPress();
         await delay.CompleteNextAsync();
+        await gestureDelivered.Task;
 
         Assert.Equal([Oem1Gesture.Single], results);
     }

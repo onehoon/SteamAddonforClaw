@@ -244,7 +244,7 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Unavailable_quick_settings_page_clears_controls_without_adding_a_message_element()
+    public void Device_unavailable_page_uses_prebuilt_loading_status_without_rebuilding_message_elements()
     {
         var source = ReadOverlayWindowSource();
         var build = source[source.IndexOf("private FrameworkElement BuildQuickSettingsPage(", StringComparison.Ordinal)..
@@ -256,13 +256,16 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("Content = content", build);
         Assert.Contains("HomeHost = homeHost", build);
+        Assert.Contains("if (pageId == QuickSettingsPageId.Device)", build);
+        Assert.Contains("LoadingStatus = loadingStatus", build);
+        Assert.Contains("homeHost.Children.Add(loadingStatus)", build);
         Assert.Contains("return homeHost", build);
-        Assert.DoesNotContain("TextBlock", build);
         Assert.Contains("surface.Content.Children.Clear()", rebuild);
         Assert.Contains("surface.RenderedAvailable = false", unavailable);
         Assert.DoesNotContain("TextBlock", unavailable);
         Assert.DoesNotContain("Children.Add", unavailable);
-        Assert.DoesNotContain("page.Message", source);
+        Assert.DoesNotContain("page.Message", unavailable);
+        Assert.Contains("status.Text = available ? string.Empty : message", source);
     }
 
     // SectionId is the local view identity. A structural update replaces only the changed section;
@@ -491,33 +494,34 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Profile_initial_load_stays_blank_until_an_authoritative_profile_page_is_applied()
+    public void Profile_initial_load_preserves_authority_and_hides_old_controls_until_a_fresh_page_arrives()
     {
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
         var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
         var presentation = ExtractMethod(profile, "private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)");
-        var apply = ExtractMethod(profile, "internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
+        var apply = ExtractMethod(profile, "internal string ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
 
-        var retireRowsIndex = prepare.IndexOf("surface.Binding?.ApplyAuthoritativePage(page);", StringComparison.Ordinal);
-        var renderIndex = prepare.IndexOf("RenderQuickSettingsPage(surface);", StringComparison.Ordinal);
-        var applyIndex = prepare.IndexOf("ApplyProfilePresentation(page);", StringComparison.Ordinal);
         Assert.Contains("private bool _activeProfileInitialLoadPending;", profile);
         Assert.Contains("_activeProfileInitialLoadPending = true;", prepare);
-        Assert.True(retireRowsIndex >= 0 && retireRowsIndex < renderIndex && renderIndex < applyIndex);
+        Assert.DoesNotContain("surface.Binding?.ApplyAuthoritativePage(page);", prepare);
+        Assert.DoesNotContain("RenderQuickSettingsPage(surface);", prepare);
+        Assert.Contains("surface.Content.Visibility = Visibility.Collapsed;", prepare);
+        Assert.Contains("HideProfileArtworkPreservingCache();", prepare);
+        Assert.Contains("ApplyProfilePresentation(page);", prepare);
 
         var pendingIndex = presentation.IndexOf("if (_activeProfileInitialLoadPending)", StringComparison.Ordinal);
         var readyIndex = presentation.IndexOf("var activeProfileReady = HasRenderableActiveProfile(page);", StringComparison.Ordinal);
         Assert.True(pendingIndex >= 0 && pendingIndex < readyIndex);
         Assert.Contains("_profileDetailRoot.Visibility = Visibility.Collapsed;", presentation);
-        Assert.Contains("_profileStatusMessage.Visibility = Visibility.Collapsed;", presentation);
+        Assert.Contains("_profileStatusMessage.Text = \"Loading the active game profile.\";", presentation);
+        Assert.Contains("_profileStatusMessage.Visibility = Visibility.Visible;", presentation[..readyIndex]);
         Assert.Contains("return;", presentation[..readyIndex]);
-        Assert.DoesNotContain("ResolveProfileStatusMessage", presentation[..readyIndex]);
-        Assert.DoesNotContain("Visibility = Visibility.Visible", presentation[..readyIndex]);
 
         var clearPendingIndex = apply.IndexOf("_activeProfileInitialLoadPending = false;", StringComparison.Ordinal);
         var applyPageIndex = apply.IndexOf("surface.Binding?.ApplyAuthoritativePage(page);", StringComparison.Ordinal);
-        Assert.True(clearPendingIndex >= 0 && clearPendingIndex < applyPageIndex);
-        Assert.Contains("if (page.PageId != QuickSettingsPageId.Profile) return;", apply);
+        var renderIndex = apply.IndexOf("RenderQuickSettingsPage(surface);", StringComparison.Ordinal);
+        Assert.True(clearPendingIndex >= 0 && clearPendingIndex < applyPageIndex && applyPageIndex < renderIndex);
+        Assert.Contains("if (page.PageId != QuickSettingsPageId.Profile) return \"Ignored\";", apply);
     }
 
     [Fact]
@@ -583,7 +587,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var client = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "NamedPipeOverlayClient.cs");
         var entry = ExtractMethod(profile, "private void OnProfileTabSelectionChanged(bool selected)");
         var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
-        var apply = ExtractMethod(profile, "internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
+        var apply = ExtractMethod(profile, "internal string ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
         var showReset = ExtractMethod(shell, "private void ResetUiForShow()");
 
         Assert.Contains("_noGameRecheckRequestedForThisEntry = false;", entry);
