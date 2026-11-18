@@ -203,6 +203,47 @@ public sealed class OverlayShortcutQuickSettingsTests
     }
 
     [Fact]
+    public void New_show_retains_quick_settings_controls_but_hides_them_until_fresh_pages_arrive()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var reset = ExtractMethod(quickSettings, "private void ResetShortcutQuickSettingsForShow()");
+        var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
+        var applyDevice = ExtractMethod(quickSettings, "internal string ApplyQuickSettingsPage(QuickSettingsPageSnapshot page)");
+        var applyProfile = ExtractMethod(profile, "internal string ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
+        var refresh = ExtractMethod(quickSettings, "private void RefreshShortcutQuickSettingsView(QuickSettingsRowId? preferredShortcutRowId)");
+        var show = ExtractMethod(presentation, "internal async Task ShowForPocAsync()");
+        var hide = ExtractMethod(presentation, "internal Task HideForPocAsync()");
+
+        Assert.Contains("_devicePageReceivedThisShow = false;", reset);
+        Assert.Contains("_profilePageReceivedThisShow = false;", reset);
+        Assert.Contains("deviceSurface.Content.Visibility = Visibility.Collapsed;", reset);
+        Assert.Contains("deviceSurface.LoadingStatus", reset);
+        Assert.DoesNotContain("ApplyAuthoritativePage", prepare);
+        Assert.DoesNotContain("RenderQuickSettingsPage", prepare);
+        Assert.Contains("surface.Content.Visibility = Visibility.Collapsed;", prepare);
+        Assert.Contains("HideProfileArtworkPreservingCache();", prepare);
+
+        var profileGate = refresh.IndexOf("var profilePage = _profilePageReceivedThisShow", StringComparison.Ordinal);
+        var deviceGate = refresh.IndexOf("var devicePage = _devicePageReceivedThisShow", StringComparison.Ordinal);
+        Assert.True(profileGate >= 0 && deviceGate > profileGate);
+        Assert.Contains("if (!_profilePageReceivedThisShow || profilePage is null)",
+            ExtractMethod(quickSettings, "private string? ResolveShortcutQuickSettingsStatus("));
+        Assert.Contains("ApplyQuickSettingsSurfacePresentation(surface, page.Available, page.Message);", applyDevice);
+        Assert.Contains("surface.Content.Visibility = HasRenderableActiveProfile(page) ? Visibility.Visible : Visibility.Collapsed;", applyProfile);
+        Assert.Contains("ValueOnly", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
+        Assert.Contains("SectionReconcile", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
+        Assert.Contains("FullRebuild", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
+
+        Assert.Contains("_showStartedTimestamp = Stopwatch.GetTimestamp();", show);
+        Assert.Contains("OverlayShortcutContentReady", refresh);
+        Assert.Contains("Stopwatch.GetElapsedTime(_showStartedTimestamp)", refresh);
+        Assert.Contains("HideProfileArtworkPreservingCache();", hide);
+        Assert.DoesNotContain("ClearProfileArtwork();", hide);
+    }
+
+    [Fact]
     public void Shortcut_section_projection_keeps_original_hidden_rows_and_group_constraints()
     {
         var hiddenEnabled = new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP", QuickSettingsControlKind.Toggle,

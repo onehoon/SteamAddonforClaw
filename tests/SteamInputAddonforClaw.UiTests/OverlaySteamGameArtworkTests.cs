@@ -198,7 +198,18 @@ public sealed class OverlaySteamGameArtworkTests
     }
 
     [Fact]
-    public void Artwork_visibility_and_retry_are_scoped_to_the_current_profile_entry()
+    public void Artwork_cache_reuses_only_the_same_game_and_compatible_decode_key()
+    {
+        Assert.True(OverlayWindow.IsProfileArtworkCacheCompatible(570, 690, 1.5, 570, 690, 1.5));
+        Assert.False(OverlayWindow.IsProfileArtworkCacheCompatible(570, 690, 1.5, 571, 690, 1.5));
+        Assert.False(OverlayWindow.IsProfileArtworkCacheCompatible(570, 690, 1.5, 570, 691, 1.5));
+        Assert.False(OverlayWindow.IsProfileArtworkCacheCompatible(570, 690, 1.5, 570, 690, 2.0));
+        Assert.Equal(750, OverlayWindow.ProfileArtworkDecodePixelWidth(500, 1.5));
+        Assert.Equal(960, OverlayWindow.ProfileArtworkDecodePixelWidth(0, 1.5));
+    }
+
+    [Fact]
+    public void Artwork_visibility_retry_and_cache_lifecycle_stay_scoped_to_the_fresh_profile()
     {
         var profile = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
         var entry = ExtractMethod(profile, "private void OnProfileTabSelectionChanged(bool selected)");
@@ -206,21 +217,32 @@ public sealed class OverlaySteamGameArtworkTests
         var resolve = ExtractMethod(profile, "private async Task ResolveAndApplyProfileArtworkAsync(");
         var loader = ExtractMethod(profile, "private async Task<BitmapImage?> TryLoadProfileArtworkAsync(");
         var clear = ExtractMethod(profile, "private void ClearProfileArtwork()");
+        var detach = ExtractMethod(profile, "private void HideProfileArtworkPreservingCache()");
+        var cacheDiscard = ExtractMethod(profile, "private void DiscardCachedProfileArtwork()");
+        var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
+        var currentTarget = ExtractMethod(profile, "private bool IsCurrentProfileArtworkTarget(uint appId)");
         var presentation = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"));
         var hide = ExtractMethod(presentation, "internal Task HideForPocAsync()");
-        const string source = "ProfileArtworkImage.Source = bitmap;";
+        var closed = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"));
+        const string source = "ApplyProfileArtwork(appId, bitmap);";
         const string showHero = "ProfileArtworkHost.Visibility = Visibility.Visible;";
         const string hideTitle = "PageTitle.Visibility = Visibility.Collapsed;";
 
         Assert.Contains("if (!selected)", entry);
-        Assert.Contains("ClearProfileArtwork();", entry);
+        Assert.Contains("HideProfileArtworkPreservingCache();", entry);
         Assert.Contains("UpdateProfileArtwork(surface.Binding?.AuthoritativePage);", entry);
-        Assert.Contains("if (_profileArtworkRequestedAppId == appId)", update);
+        Assert.Contains("if (!_isVisible || !_profilePageReceivedThisShow)", update);
+        Assert.Contains("SteamGameArtworkResolver.EligibleSteamAppId(page)", update);
+        Assert.Contains("IsProfileArtworkCacheCompatible(", update);
+        Assert.Contains("ApplyProfileArtwork(appId.Value, cachedBitmap!)", update);
+        Assert.Contains("DiscardCachedProfileArtwork();", update);
         Assert.Contains("new CancellationTokenSource()", update);
         Assert.Contains("ProfileArtworkMaximumAttempts = 2", profile);
         Assert.Contains("ProfileArtworkRetryDelay = TimeSpan.FromMilliseconds(750)", profile);
         Assert.Contains("for (var attempt = 0; attempt < ProfileArtworkMaximumAttempts; attempt++)", resolve);
         Assert.Contains("Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(page))", resolve);
+        Assert.Contains("OverlayArtworkLookup", resolve);
+        Assert.Contains("OverlayArtwork", resolve);
         Assert.Contains("CandidateCount", resolve);
         Assert.Contains("\"NoCandidate\"", resolve);
         Assert.Contains("\"OpenOrDecodeFailed\"", resolve);
@@ -228,11 +250,17 @@ public sealed class OverlaySteamGameArtworkTests
         Assert.Contains("Task.Delay(ProfileArtworkRetryDelay, cancellationToken)", resolve);
         Assert.Contains("if (attempt == 0)", resolve);
         var currentRequest = ExtractMethod(profile, "private bool IsCurrentProfileArtworkRequest(");
+        var applyBitmap = ExtractMethod(profile, "private void ApplyProfileArtwork(uint appId, BitmapImage bitmap)");
         Assert.Contains("IsCurrentProfileArtworkRequest(appId, requestCancellation)", resolve);
         Assert.Contains("IsCurrentProfileArtworkTarget(appId)", currentRequest);
-        Assert.Equal(1, profile.Split("PageTitle.Visibility = Visibility.Collapsed;", StringSplitOptions.None).Length - 1);
+        Assert.Contains("_profilePageReceivedThisShow", currentTarget);
+        Assert.Contains("if (!IsCurrentProfileArtworkTarget(appId)) return;", applyBitmap);
+        Assert.Contains("_profileArtworkCachedBitmap = bitmap;", resolve);
+        Assert.Equal(1, profile.Split("private BitmapImage? _profileArtworkCachedBitmap;", StringSplitOptions.None).Length - 1);
+        Assert.Contains("surface.Binding?.AuthoritativePage", currentTarget);
         Assert.Contains("cancellationToken.ThrowIfCancellationRequested();", loader);
         Assert.Contains("foreach (var path in paths)", loader);
+        Assert.Contains("int decodePixelWidth", loader);
         Assert.Contains("await bitmap.SetSourceAsync(stream);", loader);
         Assert.Contains("catch (Exception", loader);
         Assert.Contains("return null;", loader);
@@ -240,16 +268,23 @@ public sealed class OverlaySteamGameArtworkTests
         var targetGuardIndex = resolve.LastIndexOf("if (!IsCurrentProfileArtworkRequest(appId, requestCancellation))", sourceIndex, StringComparison.Ordinal);
         Assert.True(resolve.IndexOf("if (bitmap is not null)", StringComparison.Ordinal) < sourceIndex);
         Assert.True(targetGuardIndex >= 0 && targetGuardIndex < sourceIndex);
-        Assert.True(resolve.IndexOf(source, StringComparison.Ordinal)
-            < resolve.IndexOf(showHero, StringComparison.Ordinal));
-        Assert.True(resolve.IndexOf(showHero, StringComparison.Ordinal)
-            < resolve.IndexOf(hideTitle, StringComparison.Ordinal));
-        Assert.Contains("PageTitle.Visibility = Visibility.Visible;", clear);
-        Assert.Contains("ProfileArtworkHost.Visibility = Visibility.Collapsed;", clear);
-        Assert.Contains("ProfileArtworkImage.Source = null;", clear);
-        Assert.Contains("_profileArtworkRequestedAppId = null;", clear);
-        Assert.Contains("_profileArtworkRequestCancellation?.Cancel();", clear);
-        Assert.Contains("ClearProfileArtwork();", hide);
+        Assert.True(applyBitmap.IndexOf("ProfileArtworkImage.Source = bitmap;", StringComparison.Ordinal)
+            < applyBitmap.IndexOf(showHero, StringComparison.Ordinal));
+        Assert.True(applyBitmap.IndexOf(showHero, StringComparison.Ordinal)
+            < applyBitmap.IndexOf(hideTitle, StringComparison.Ordinal));
+        Assert.Contains("HideProfileArtworkPreservingCache();", clear);
+        Assert.Contains("DiscardCachedProfileArtwork();", clear);
+        Assert.Contains("PageTitle.Visibility = Visibility.Visible;", detach);
+        Assert.Contains("ProfileArtworkHost.Visibility = Visibility.Collapsed;", detach);
+        Assert.Contains("ProfileArtworkImage.Source = null;", detach);
+        Assert.Contains("_profileArtworkRequestedAppId = null;", detach);
+        Assert.Contains("_profileArtworkRequestCancellation?.Cancel();", profile);
+        Assert.Contains("surface.Content.Visibility = Visibility.Collapsed;", prepare);
+        Assert.Contains("HideProfileArtworkPreservingCache();", prepare);
+        Assert.Contains("HideProfileArtworkPreservingCache();", hide);
+        Assert.DoesNotContain("ClearProfileArtwork();", hide);
+        Assert.Contains("ClearProfileArtwork();", closed);
+        Assert.Contains("_profileArtworkCachedBitmap = null;", cacheDiscard);
     }
 
     private static QuickSettingsPageSnapshot SteamPage(uint appId) => new(

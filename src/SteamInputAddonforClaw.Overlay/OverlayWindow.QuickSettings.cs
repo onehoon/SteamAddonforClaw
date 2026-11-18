@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -224,12 +225,14 @@ public sealed partial class OverlayWindow
         internal required AddonQuickSettingsTabId TabId { get; init; }
         internal required Grid HomeHost { get; init; }
         internal required StackPanel Content { get; init; }
+        internal TextBlock? LoadingStatus { get; init; }
         internal OverlayQuickSettingsPageBinding? Binding { get; set; }
         internal Dictionary<QuickSettingsRowId, OverlayToggleRow> ToggleRows { get; } = new();
         internal Dictionary<QuickSettingsRowId, OverlayNumericSliderRow> NumericSliderRows { get; } = new();
         internal Dictionary<QuickSettingsRowId, OverlayValueRow> ValueRows { get; } = new();
         internal Dictionary<QuickSettingsSectionId, RenderedQuickSettingsSection> RenderedSections { get; } = new();
         internal bool? RenderedAvailable { get; set; }
+        internal string LastRenderPath { get; set; } = "NotRendered";
         // Last applied projection for renderer delta classification only. The binding remains the
         // sole source of effective/authoritative values and mutation context.
         internal QuickSettingsPageSnapshot? RenderedPage { get; set; }
@@ -239,6 +242,8 @@ public sealed partial class OverlayWindow
     private QuickSettingsSurface? _shortcutQuickSettingsSource;
     private bool _devicePageReceivedThisShow;
     private bool _profilePageReceivedThisShow;
+    private bool _shortcutContentReadyLoggedThisShow;
+    private long _showStartedTimestamp;
 
     // SF-V2-07/09 section 10.2/44/12.1: App owns the NamedPipeOverlayClient; the narrow mutation
     // delegate is the only transport seam received by the Window/binders.
@@ -271,23 +276,23 @@ public sealed partial class OverlayWindow
     }
 
     // Called on the UI thread by App whenever the Runtime republishes a Device or Profile page.
-    internal void ApplyQuickSettingsPage(QuickSettingsPageSnapshot page)
+    internal string ApplyQuickSettingsPage(QuickSettingsPageSnapshot page)
     {
         if (page.PageId == QuickSettingsPageId.Profile)
-        {
-            ApplyActiveProfilePage(page);
-            return;
-        }
+            return ApplyActiveProfilePage(page);
         var preferredShortcutRowId = CaptureShortcutSelectionRowId();
         if (!_quickSettingsSurfaces.TryGetValue(page.PageId, out var surface))
         {
             OverlayLog.Warn("QuickSettings", "Ignoring a Quick Settings page for an unconfigured surface.", exception: null, ("PageId", page.PageId));
-            return;
+            return "Ignored";
         }
         _devicePageReceivedThisShow = true;
         surface.Binding?.ApplyAuthoritativePage(page);
         RenderQuickSettingsPage(surface);
+        var renderPath = surface.LastRenderPath;
+        ApplyQuickSettingsSurfacePresentation(surface, page.Available, page.Message);
         RefreshShortcutQuickSettingsView(preferredShortcutRowId);
+        return renderPath;
     }
 
     // The surface is populated or updated after ConfigureQuickSettings/ApplyQuickSettingsPage runs.
@@ -296,12 +301,28 @@ public sealed partial class OverlayWindow
         var content = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 0.0) };
         var homeHost = new Grid();
         homeHost.Children.Add(content);
+        TextBlock? loadingStatus = null;
+        if (pageId == QuickSettingsPageId.Device)
+        {
+            loadingStatus = new TextBlock
+            {
+                Text = "Loading global performance settings.",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                Visibility = Visibility.Collapsed,
+            };
+            OverlayQamResources.ApplyTextStyle(loadingStatus, "QamBodyStrongTextStyle");
+            homeHost.Children.Add(loadingStatus);
+        }
         _quickSettingsSurfaces[pageId] = new QuickSettingsSurface
         {
             PageId = pageId,
             TabId = tabId,
             HomeHost = homeHost,
             Content = content,
+            LoadingStatus = loadingStatus,
         };
         return homeHost;
     }
@@ -310,7 +331,11 @@ public sealed partial class OverlayWindow
     // updates retain each section card and every compatible row control.
     private void RenderQuickSettingsPage(QuickSettingsSurface surface, QuickSettingsRowId? forceRowId = null)
     {
-        if (surface.Binding is null) return;
+        if (surface.Binding is null)
+        {
+            surface.LastRenderPath = "NoBinding";
+            return;
+        }
         var page = surface.Binding.BuildEffectivePage();
 
         if (surface.RenderedPage is { } previousPage &&
@@ -320,20 +345,44 @@ public sealed partial class OverlayWindow
             if (rowIdsToApply.Count > 0)
                 ApplyQuickSettingsRowValues(surface, page, rowIdsToApply);
             surface.RenderedPage = page;
+            surface.LastRenderPath = "ValueOnly";
             return;
         }
 
         if (!page.Available)
         {
             if (surface.RenderedAvailable != false)
+            {
                 RebuildQuickSettingsContent(surface, page);
+                surface.RenderedPage = page;
+                surface.LastRenderPath = "FullRebuild";
+                return;
+            }
+            surface.RenderedPage = page;
+            surface.LastRenderPath = "UnchangedUnavailable";
+            return;
         }
         else if (surface.RenderedAvailable == true)
+        {
             ReconcileQuickSettingsSections(surface, page);
+            surface.RenderedPage = page;
+            surface.LastRenderPath = "SectionReconcile";
+            return;
+        }
         else
+        {
             RebuildQuickSettingsContent(surface, page);
+            surface.RenderedPage = page;
+            surface.LastRenderPath = "FullRebuild";
+        }
+    }
 
-        surface.RenderedPage = page;
+    private static void ApplyQuickSettingsSurfacePresentation(QuickSettingsSurface surface, bool available, string? message)
+    {
+        surface.Content.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+        if (surface.LoadingStatus is not { } status) return;
+        status.Text = available ? string.Empty : message ?? "Global performance settings are unavailable.";
+        status.Visibility = available ? Visibility.Collapsed : Visibility.Visible;
     }
 
     // Value-only updates change neither the section container nor any row control instance.
@@ -846,6 +895,20 @@ public sealed partial class OverlayWindow
         if (_shortcutQuickSettingsStatus.Visibility != statusVisibility)
             _shortcutQuickSettingsStatus.Visibility = statusVisibility;
 
+        if (!_shortcutContentReadyLoggedThisShow
+            && _showStartedTimestamp != 0
+            && profilePage is not null
+            && (!IsExactNoRunningGamePage(profilePage) || devicePage is not null))
+        {
+            _shortcutContentReadyLoggedThisShow = true;
+            OverlayLog.Debug("Performance", "OverlayShortcutContentReady",
+                ("ElapsedMs", Stopwatch.GetElapsedTime(_showStartedTimestamp).TotalMilliseconds),
+                ("Outcome", canShowSettings && string.IsNullOrWhiteSpace(statusText) ? "Ready" : "Unavailable"),
+                ("ProfileAvailable", profilePage.Available), ("DeviceAvailable", devicePage?.Available),
+                ("SourcePage", sourcePageId?.ToString() ?? "None"),
+                ("TargetKind", profilePage.ProfileTarget?.Kind.ToString() ?? "None"));
+        }
+
         if (!_shortcutSettingsSelected)
         {
             var hasSelectableSettings = _pageRows[AddonQuickSettingsTabId.Shortcut]
@@ -929,8 +992,18 @@ public sealed partial class OverlayWindow
     {
         _devicePageReceivedThisShow = false;
         _profilePageReceivedThisShow = false;
+        _shortcutContentReadyLoggedThisShow = false;
         _shortcutSettingsSelected = false;
         _shortcutUserNavigatedThisEntry = false;
+        if (_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Device, out var deviceSurface))
+        {
+            deviceSurface.Content.Visibility = Visibility.Collapsed;
+            if (deviceSurface.LoadingStatus is { } status)
+            {
+                status.Text = "Loading global performance settings.";
+                status.Visibility = Visibility.Visible;
+            }
+        }
         RestoreShortcutQuickSettingsHome();
         _pageRows[AddonQuickSettingsTabId.Shortcut] = [];
     }

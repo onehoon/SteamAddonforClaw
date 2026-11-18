@@ -2526,6 +2526,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     private async Task<QuickSettingsPageSnapshot> CaptureProfileQuickSettingsPageAsync(QuickSettingsProfileTarget profileTarget, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var currentTarget = _activeProfileTargetSource?.Invoke() ?? ActiveProfileTarget.ForSteam(_actualRunningAppIdSource());
         if (!MatchesQuickSettingsTarget(profileTarget, currentTarget))
             return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, profileTarget, "The requested game is not currently active.");
@@ -2533,7 +2534,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (profileTarget.Kind == QuickSettingsProfileTargetKind.Steam)
         {
             var appId = profileTarget.SteamAppId!.Value;
-            var snapshot = await CaptureActiveGameProfileAsync(cancellationToken).ConfigureAwait(false);
+            // The shared Overlay page needs the active profile values immediately; resolving an
+            // optional display name through the full game catalog must not delay TDP/CPU Boost.
+            var snapshot = CaptureGameProfile(appId);
             if (snapshot.AppId != appId || (!snapshot.Exists && !snapshot.PersistenceWritable))
                 return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, profileTarget, "The active game Profile is unavailable.");
             return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildProfile(snapshot));

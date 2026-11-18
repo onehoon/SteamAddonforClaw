@@ -228,6 +228,53 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Quick_settings_profile_capture_skips_catalog_name_scan_but_full_profile_capture_still_enriches()
+    {
+        const uint appId = 555;
+        var mutations = new GameProfileMutations(new ProfileStore(Path.Combine(_testDirectory, "profiles.json")), tdpLimits: TdpLimits());
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(appId, true, null));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetTdpEnabled(appId, true));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetTdp(appId,
+                new() { Pl1Watts = 20, Pl2Watts = 24 },
+                new() { Pl1Watts = 15, Pl2Watts = 19 }));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostEnabled(appId, true));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostAc(appId, CpuBoostMode.Aggressive));
+        await using var tdpRuntime = new TdpRuntime(
+            new ProfileStore(Path.Combine(_testDirectory, "tdp-settings.json")), new ProfileMutationGate(), TdpLimits(), new FakeTdpControl());
+
+        var scanCount = 0;
+        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations,
+            actualRunningAppIdSource: () => appId,
+            activeProfileTargetSource: () => ActiveProfileTarget.ForSteam(appId),
+            tdpRuntime: tdpRuntime,
+            featureSupport: new(true, false, false, false, false, false, false),
+            scanProfileGames: _ =>
+            {
+                scanCount++;
+                return Task.FromResult<IReadOnlyList<ProfileGameCatalogEntry>>(
+                    [new(appId, "Catalog Game", ProfileGameSource.Steam)]);
+            });
+
+        var page = await control.CaptureQuickSettingsPageAsync(
+            QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(appId));
+
+        Assert.True(page.Available);
+        Assert.Equal(0, scanCount);
+        Assert.Equal($"Game {appId}", page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+        var rows = page.Sections.SelectMany(section => section.Rows).ToDictionary(row => row.RowId);
+        Assert.True(rows[QuickSettingsRowId.ProfileTdpEnabled].Value!.BooleanValue);
+        Assert.Equal(20, rows[QuickSettingsRowId.ProfileTdpAcPl1].Value!.IntegerValue);
+        Assert.True(rows[QuickSettingsRowId.ProfileCpuBoostEnabled].Value!.BooleanValue);
+        Assert.Equal((int)CpuBoostMode.Aggressive, rows[QuickSettingsRowId.ProfileCpuBoostAc].Value!.IntegerValue);
+
+        var fullProfile = await control.CaptureGameProfileAsync(appId);
+
+        Assert.Equal(1, scanCount);
+        Assert.Equal("Catalog Game", fullProfile.DisplayName);
+    }
+
+    [Fact]
     public async Task Capture_profile_page_requesting_app_id_zero_is_unavailable_without_any_capture_attempt()
     {
         var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: null, actualRunningAppIdSource: () => throw new InvalidOperationException("Must not be consulted for AppId 0."));
@@ -238,24 +285,45 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Canceled_quick_settings_profile_capture_stops_before_reading_the_active_target()
+    {
+        var targetRead = 0;
+        var control = CreateControl(cpuBoostRuntime: null,
+            activeProfileTargetSource: () =>
+            {
+                targetRead++;
+                return ActiveProfileTarget.ForSteam(555);
+            });
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => control.CaptureQuickSettingsPageAsync(
+            QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(555), cancellation.Token));
+
+        Assert.Equal(0, targetRead);
+    }
+
+    [Fact]
     public async Task Active_target_change_between_initial_capture_and_dispatch_fails_closed()
     {
         var profilesPath = Path.Combine(_testDirectory, "profiles.json");
-        var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
-        mutations.SetEnabled(555u, false, "Active Game");
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath), tdpLimits: TdpLimits());
+        mutations.SetEnabled(555u, true, "Active Game");
+        mutations.SetCpuBoostEnabled(555u, true);
+        mutations.SetCpuBoostAc(555u, CpuBoostMode.Enabled);
         var targetRead = 0;
         var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations,
             activeProfileTargetSource: () => Interlocked.Increment(ref targetRead) == 1
                 ? ActiveProfileTarget.ForSteam(555)
                 : ActiveProfileTarget.ForSteam(666));
         var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(555),
-            QuickSettingsRowId.ProfileEnabled, [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+            QuickSettingsRowId.ProfileCpuBoostAc, [new(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer((int)CpuBoostMode.Aggressive))]);
 
         var result = await control.MutateQuickSettingAsync(intent);
 
         Assert.False(result.Succeeded);
         Assert.Equal(2, targetRead);
-        Assert.False(mutations.CaptureProfile(555)!.Profile.Enabled);
+        Assert.Equal(CpuBoostMode.Enabled, mutations.CaptureProfile(555)!.Profile.Performance.CpuBoost!.Ac);
     }
 
     [Fact]
@@ -428,7 +496,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         return runtime;
     }
 
-    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime? cpuBoostRuntime, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, AppSettings? appSettings = null, Func<AcDcPowerSource?>? powerSource = null, Func<ActiveProfileTarget>? activeProfileTargetSource = null)
+    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime? cpuBoostRuntime, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, AppSettings? appSettings = null, Func<AcDcPowerSource?>? powerSource = null, Func<ActiveProfileTarget>? activeProfileTargetSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, TdpRuntime? tdpRuntime = null, FrontendModelFeatureSupport? featureSupport = null)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -441,8 +509,11 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
             powerModeRuntime: null,
             gameProfileMutations: gameProfileMutations,
             actualRunningAppIdSource: actualRunningAppIdSource,
+            scanProfileGames: scanProfileGames,
             activeProfileTargetSource: activeProfileTargetSource,
-            quickSettingsPowerSource: powerSource);
+            quickSettingsPowerSource: powerSource,
+            tdpRuntime: tdpRuntime,
+            featureSupport: featureSupport);
     }
 
     public void Dispose()
@@ -463,5 +534,11 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     {
         public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException("Status capture is not part of these tests.");
+    }
+
+    private sealed class FakeTdpControl : IDeviceTdpControl
+    {
+        public void InvalidateCachedPowerLimits(string reason = "Unknown") { }
+        public TdpControlApplyResult Apply(TdpPowerPair target) => new(true);
     }
 }

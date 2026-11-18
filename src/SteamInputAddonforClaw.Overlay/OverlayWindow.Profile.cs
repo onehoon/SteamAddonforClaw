@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 using System.IO;
@@ -25,7 +26,13 @@ public sealed partial class OverlayWindow
     private bool _activeProfileInitialLoadPending;
     private bool _noGameRecheckRequestedForThisEntry;
     private uint? _profileArtworkRequestedAppId;
+    private int _profileArtworkRequestedDecodePixelWidth;
+    private double _profileArtworkRequestedRasterizationScale;
     private CancellationTokenSource? _profileArtworkRequestCancellation;
+    private uint? _profileArtworkCachedAppId;
+    private int _profileArtworkCachedDecodePixelWidth;
+    private double _profileArtworkCachedRasterizationScale;
+    private BitmapImage? _profileArtworkCachedBitmap;
 
     internal event Action? NoRunningGameProfileRecheckRequested;
 
@@ -86,7 +93,7 @@ public sealed partial class OverlayWindow
         {
             _noGameRecheckRequestedForThisEntry = false;
             if (_tabState.SelectedTab != AddonQuickSettingsTabId.Shortcut)
-                ClearProfileArtwork();
+                HideProfileArtworkPreservingCache();
             return;
         }
 
@@ -105,46 +112,89 @@ public sealed partial class OverlayWindow
         _noGameRecheckRequestedForThisEntry = false;
         _activeProfileInitialLoadPending = true;
         var page = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Loading the active game profile.");
-        surface.Binding?.ApplyAuthoritativePage(page);
-        RenderQuickSettingsPage(surface);
+        surface.Content.Visibility = Visibility.Collapsed;
         ApplyProfilePresentation(page);
-        UpdateProfileArtwork(page);
+        HideProfileArtworkPreservingCache();
     }
 
-    internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)
+    internal string ApplyActiveProfilePage(QuickSettingsPageSnapshot page)
     {
-        if (page.PageId != QuickSettingsPageId.Profile) return;
-        if (!_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)) return;
+        if (page.PageId != QuickSettingsPageId.Profile) return "Ignored";
+        if (!_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)) return "NoSurface";
 
         var preferredShortcutRowId = CaptureShortcutSelectionRowId();
         _profilePageReceivedThisShow = true;
         _activeProfileInitialLoadPending = false;
         surface.Binding?.ApplyAuthoritativePage(page);
+        surface.Content.Visibility = HasRenderableActiveProfile(page) ? Visibility.Visible : Visibility.Collapsed;
         RenderQuickSettingsPage(surface);
+        var renderPath = surface.LastRenderPath;
         ApplyProfilePresentation(page);
         UpdateProfileArtwork(page);
         TryRequestNoRunningGameRecheck(page);
         RefreshShortcutQuickSettingsView(preferredShortcutRowId);
+        return renderPath;
     }
 
     private void UpdateProfileArtwork(QuickSettingsPageSnapshot? page)
     {
-        var appId = IsProfileArtworkPresentationTab(_tabState.SelectedTab)
-            ? SteamGameArtworkResolver.EligibleSteamAppId(page)
-            : null;
+        if (!_isVisible || !_profilePageReceivedThisShow)
+        {
+            HideProfileArtworkPreservingCache();
+            return;
+        }
+
+        var appId = SteamGameArtworkResolver.EligibleSteamAppId(page);
         if (appId is null)
         {
             ClearProfileArtwork();
             return;
         }
 
-        if (_profileArtworkRequestedAppId == appId)
+        var (rasterizationScale, decodePixelWidth) = CurrentProfileArtworkDecodeKey();
+        var cachedBitmap = _profileArtworkCachedBitmap;
+        var cacheHit = cachedBitmap is not null
+            && IsProfileArtworkCacheCompatible(
+                _profileArtworkCachedAppId, _profileArtworkCachedDecodePixelWidth, _profileArtworkCachedRasterizationScale,
+                appId.Value, decodePixelWidth, rasterizationScale);
+
+        if (!IsProfileArtworkPresentationTab(_tabState.SelectedTab))
+        {
+            HideProfileArtworkPreservingCache();
+            return;
+        }
+
+        if (cacheHit)
+        {
+            CancelProfileArtworkRequest();
+            _profileArtworkRequestedAppId = appId;
+            _profileArtworkRequestedDecodePixelWidth = decodePixelWidth;
+            _profileArtworkRequestedRasterizationScale = rasterizationScale;
+            ApplyProfileArtwork(appId.Value, cachedBitmap!);
+            OverlayLog.Debug("Performance", "OverlayArtwork",
+                ("AppId", appId.Value), ("Cache", "Hit"), ("DecodePixelWidth", decodePixelWidth),
+                ("RasterizationScale", rasterizationScale), ("Stage", "Ready"), ("RetryUsed", false));
+            return;
+        }
+
+        if (_profileArtworkCachedBitmap is not null)
+            DiscardCachedProfileArtwork();
+
+        if (_profileArtworkRequestedAppId == appId
+            && _profileArtworkRequestCancellation is { IsCancellationRequested: false }
+            && _profileArtworkRequestedDecodePixelWidth == decodePixelWidth
+            && Math.Abs(_profileArtworkRequestedRasterizationScale - rasterizationScale) < 0.0001)
             return;
 
-        ClearProfileArtwork();
+        HideProfileArtworkPreservingCache();
         _profileArtworkRequestedAppId = appId;
+        _profileArtworkRequestedDecodePixelWidth = decodePixelWidth;
+        _profileArtworkRequestedRasterizationScale = rasterizationScale;
         var requestCancellation = new CancellationTokenSource();
         _profileArtworkRequestCancellation = requestCancellation;
+        OverlayLog.Debug("Performance", "OverlayArtwork",
+            ("AppId", appId.Value), ("Cache", "Miss"), ("DecodePixelWidth", decodePixelWidth),
+            ("RasterizationScale", rasterizationScale), ("Stage", "Lookup"), ("RetryUsed", false));
         _ = ResolveAndApplyProfileArtworkAsync(appId.Value, page!, requestCancellation);
     }
 
@@ -153,6 +203,9 @@ public sealed partial class OverlayWindow
         QuickSettingsPageSnapshot page,
         CancellationTokenSource requestCancellation)
     {
+        var elapsed = Stopwatch.StartNew();
+        var candidateLookupMs = 0.0;
+        var decodeMs = 0.0;
         var cancellationToken = requestCancellation.Token;
         var retryUsed = false;
         var candidateCount = 0;
@@ -171,7 +224,8 @@ public sealed partial class OverlayWindow
                     return;
                 }
 
-                IReadOnlyList<string> paths;
+                IReadOnlyList<string> paths = [];
+                var lookup = Stopwatch.StartNew();
                 try
                 {
                     paths = await Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(page));
@@ -183,6 +237,13 @@ public sealed partial class OverlayWindow
                         ("AppId", appId), ("CandidateCount", 0),
                         ("Stage", "NoCandidate"), ("RetryUsed", retryUsed),
                         ("ExceptionType", exception.GetType().Name));
+                }
+                finally
+                {
+                    candidateLookupMs += lookup.Elapsed.TotalMilliseconds;
+                    OverlayLog.Debug("Performance", "OverlayArtworkLookup",
+                        ("AppId", appId), ("ElapsedMs", lookup.Elapsed.TotalMilliseconds),
+                        ("CandidateCount", paths?.Count ?? 0), ("RetryUsed", retryUsed));
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -200,9 +261,18 @@ public sealed partial class OverlayWindow
                 OverlayLog.Debug("ProfileArtwork", "Resolved local artwork candidates.",
                     ("AppId", appId), ("CandidateCount", candidateCount), ("RetryUsed", retryUsed));
 
-                var bitmap = candidateCount == 0
-                    ? null
-                    : await TryLoadProfileArtworkAsync(paths, cancellationToken);
+                BitmapImage? bitmap;
+                var decode = Stopwatch.StartNew();
+                try
+                {
+                    bitmap = candidateCount == 0
+                        ? null
+                        : await TryLoadProfileArtworkAsync(paths, _profileArtworkRequestedDecodePixelWidth, cancellationToken);
+                }
+                finally
+                {
+                    decodeMs += decode.Elapsed.TotalMilliseconds;
+                }
 
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!IsCurrentProfileArtworkRequest(appId, requestCancellation))
@@ -217,9 +287,15 @@ public sealed partial class OverlayWindow
 
                 if (bitmap is not null)
                 {
-                    ProfileArtworkImage.Source = bitmap;
-                    ProfileArtworkHost.Visibility = Visibility.Visible;
-                    PageTitle.Visibility = Visibility.Collapsed;
+                    _profileArtworkCachedAppId = appId;
+                    _profileArtworkCachedDecodePixelWidth = _profileArtworkRequestedDecodePixelWidth;
+                    _profileArtworkCachedRasterizationScale = _profileArtworkRequestedRasterizationScale;
+                    _profileArtworkCachedBitmap = bitmap;
+                    ApplyProfileArtwork(appId, bitmap);
+                    OverlayLog.Debug("Performance", "OverlayArtwork",
+                        ("AppId", appId), ("Cache", "Miss"), ("CandidateLookupMs", candidateLookupMs),
+                        ("DecodeMs", decodeMs), ("ElapsedMs", elapsed.Elapsed.TotalMilliseconds),
+                        ("CandidateCount", candidateCount), ("Stage", "Success"), ("RetryUsed", retryUsed));
                     OverlayLog.Debug("ProfileArtwork", "Loaded local Profile artwork.",
                         ("AppId", appId), ("CandidateCount", candidateCount),
                         ("Stage", "Success"), ("RetryUsed", retryUsed));
@@ -240,6 +316,10 @@ public sealed partial class OverlayWindow
                 ProfileArtworkImage.Source = null;
                 ProfileArtworkHost.Visibility = Visibility.Collapsed;
                 PageTitle.Visibility = Visibility.Visible;
+                OverlayLog.Debug("Performance", "OverlayArtwork",
+                    ("AppId", appId), ("Cache", "Miss"), ("CandidateLookupMs", candidateLookupMs),
+                    ("DecodeMs", decodeMs), ("ElapsedMs", elapsed.Elapsed.TotalMilliseconds),
+                    ("CandidateCount", candidateCount), ("Stage", failureStage), ("RetryUsed", retryUsed));
                 OverlayLog.Warn("ProfileArtwork", "Local artwork unavailable after the bounded retry; keeping the Profile title visible.",
                     null, ("AppId", appId), ("CandidateCount", candidateCount),
                     ("Stage", failureStage), ("RetryUsed", retryUsed));
@@ -248,6 +328,10 @@ public sealed partial class OverlayWindow
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            OverlayLog.Debug("Performance", "OverlayArtwork",
+                ("AppId", appId), ("CandidateLookupMs", candidateLookupMs), ("DecodeMs", decodeMs),
+                ("ElapsedMs", elapsed.Elapsed.TotalMilliseconds), ("CandidateCount", candidateCount),
+                ("Stage", "StaleOrHidden"), ("RetryUsed", retryUsed));
             OverlayLog.Debug("ProfileArtwork", "Stopped stale local artwork lookup.",
                 ("AppId", appId), ("CandidateCount", candidateCount),
                 ("Stage", "StaleOrHidden"), ("RetryUsed", retryUsed));
@@ -264,14 +348,9 @@ public sealed partial class OverlayWindow
 
     private async Task<BitmapImage?> TryLoadProfileArtworkAsync(
         IReadOnlyList<string> paths,
+        int decodePixelWidth,
         CancellationToken cancellationToken)
     {
-        var scale = ProfileArtworkHost.XamlRoot?.RasterizationScale ?? 1.0;
-        var widthDip = ProfileArtworkHost.ActualWidth;
-        var decodePixelWidth = widthDip > 0
-            ? Math.Clamp((int)Math.Ceiling(widthDip * scale), 1, 1200)
-            : 960;
-
         foreach (var path in paths)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -308,7 +387,7 @@ public sealed partial class OverlayWindow
 
     private bool IsCurrentProfileArtworkTarget(uint appId)
     {
-        if (!_isVisible || !IsProfileArtworkPresentationTab(_tabState.SelectedTab)
+        if (!_isVisible || !_profilePageReceivedThisShow || !IsProfileArtworkPresentationTab(_tabState.SelectedTab)
             || _profileArtworkRequestedAppId != appId
             || !_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface))
             return false;
@@ -319,15 +398,65 @@ public sealed partial class OverlayWindow
     internal static bool IsProfileArtworkPresentationTab(AddonQuickSettingsTabId tab) =>
         tab is AddonQuickSettingsTabId.Profile or AddonQuickSettingsTabId.Shortcut;
 
-    private void ClearProfileArtwork()
+    internal static int ProfileArtworkDecodePixelWidth(double widthDip, double rasterizationScale) =>
+        widthDip > 0
+            ? Math.Clamp((int)Math.Ceiling(widthDip * rasterizationScale), 1, 1200)
+            : 960;
+
+    internal static bool IsProfileArtworkCacheCompatible(
+        uint? cachedAppId,
+        int cachedDecodePixelWidth,
+        double cachedRasterizationScale,
+        uint requestedAppId,
+        int requestedDecodePixelWidth,
+        double requestedRasterizationScale) =>
+        cachedAppId == requestedAppId
+        && cachedDecodePixelWidth == requestedDecodePixelWidth
+        && Math.Abs(cachedRasterizationScale - requestedRasterizationScale) < 0.0001;
+
+    private (double RasterizationScale, int DecodePixelWidth) CurrentProfileArtworkDecodeKey()
+    {
+        var scale = ProfileArtworkHost.XamlRoot?.RasterizationScale ?? 1.0;
+        if (!double.IsFinite(scale) || scale <= 0) scale = 1.0;
+        return (scale, ProfileArtworkDecodePixelWidth(ProfileArtworkHost.ActualWidth, scale));
+    }
+
+    private void ApplyProfileArtwork(uint appId, BitmapImage bitmap)
+    {
+        if (!IsCurrentProfileArtworkTarget(appId)) return;
+        ProfileArtworkImage.Source = bitmap;
+        ProfileArtworkHost.Visibility = Visibility.Visible;
+        PageTitle.Visibility = Visibility.Collapsed;
+    }
+
+    private void CancelProfileArtworkRequest()
     {
         _profileArtworkRequestCancellation?.Cancel();
         _profileArtworkRequestCancellation?.Dispose();
         _profileArtworkRequestCancellation = null;
+    }
+
+    private void HideProfileArtworkPreservingCache()
+    {
+        CancelProfileArtworkRequest();
         _profileArtworkRequestedAppId = null;
         ProfileArtworkImage.Source = null;
         ProfileArtworkHost.Visibility = Visibility.Collapsed;
         PageTitle.Visibility = Visibility.Visible;
+    }
+
+    private void DiscardCachedProfileArtwork()
+    {
+        _profileArtworkCachedAppId = null;
+        _profileArtworkCachedDecodePixelWidth = 0;
+        _profileArtworkCachedRasterizationScale = 0;
+        _profileArtworkCachedBitmap = null;
+    }
+
+    private void ClearProfileArtwork()
+    {
+        HideProfileArtworkPreservingCache();
+        DiscardCachedProfileArtwork();
     }
 
     private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)
@@ -337,7 +466,8 @@ public sealed partial class OverlayWindow
         if (_activeProfileInitialLoadPending)
         {
             _profileDetailRoot.Visibility = Visibility.Collapsed;
-            _profileStatusMessage.Visibility = Visibility.Collapsed;
+            _profileStatusMessage.Text = "Loading the active game profile.";
+            _profileStatusMessage.Visibility = Visibility.Visible;
             return;
         }
 
