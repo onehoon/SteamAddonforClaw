@@ -37,6 +37,17 @@ internal static class OverlayQuickSettingsSectionRendering
             .ToArray();
     }
 
+    internal static (double AdditionalTopPadding, double AdditionalBottomPadding) GetSectionCardPaddingAdjustment(
+        QuickSettingsSection section,
+        IReadOnlyList<QuickSettingsRenderedRowDescriptor> desiredRows)
+    {
+        var hasHeaderContent = desiredRows.Any(row => row.IsFeatureHeader) || !string.IsNullOrEmpty(section.Label);
+        var hasDetailContent = desiredRows.Any(row => !row.IsFeatureHeader);
+        return (
+            hasHeaderContent ? 2.0 : 7.0,
+            hasDetailContent || !hasHeaderContent ? 7.0 : 2.0);
+    }
+
     internal static QuickSettingsSectionRowPlan PlanRows(
         IReadOnlyDictionary<QuickSettingsRowId, QuickSettingsRenderedRowDescriptor> existingRows,
         QuickSettingsSection section)
@@ -564,10 +575,8 @@ public sealed partial class OverlayWindow
 
         rowStack.Children.Add(detailStack);
         sectionPanel.Children.Add(rowStack);
-        var hasHeaderContent = desiredRows.Any(row => row.IsFeatureHeader) || !string.IsNullOrEmpty(section.Label);
-        var hasDetailContent = desiredRows.Any(row => !row.IsFeatureHeader);
-        var additionalTopPadding = hasHeaderContent ? 2.0 : 7.0;
-        var additionalBottomPadding = hasDetailContent || !hasHeaderContent ? 7.0 : 2.0;
+        var (additionalTopPadding, additionalBottomPadding) =
+            OverlayQuickSettingsSectionRendering.GetSectionCardPaddingAdjustment(section, desiredRows);
         rendered.Card = CreateOverlaySectionCard(sectionPanel, additionalTopPadding, additionalBottomPadding);
 
         foreach (var descriptor in desiredRows)
@@ -601,6 +610,12 @@ public sealed partial class OverlayWindow
 
         if (rendered.Card is null || rendered.RowStack is null || rendered.DetailStack is null)
             return BuildQuickSettingsSection(surface, section);
+
+        var (additionalTopPadding, additionalBottomPadding) =
+            OverlayQuickSettingsSectionRendering.GetSectionCardPaddingAdjustment(section, plan.DesiredRows);
+        var expectedCardPadding = ResolveOverlaySectionCardPadding(additionalTopPadding, additionalBottomPadding);
+        if (rendered.Card.Padding != expectedCardPadding)
+            rendered.Card.Padding = expectedCardPadding;
 
         foreach (var rowId in plan.ChangedRowIds)
             if (rendered.RenderedRows.TryGetValue(rowId, out var oldRow))
@@ -1138,22 +1153,27 @@ public sealed partial class OverlayWindow
         double additionalTopPadding = 0.0,
         double additionalBottomPadding = 0.0)
     {
-        var sectionPadding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 0, 16, 0));
         return new Border
         {
             Child = child,
             Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
-            Padding = new Thickness(
-                sectionPadding.Left,
-                sectionPadding.Top + additionalTopPadding,
-                sectionPadding.Right,
-                sectionPadding.Bottom + additionalBottomPadding),
+            Padding = ResolveOverlaySectionCardPadding(additionalTopPadding, additionalBottomPadding),
             BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush"),
             BorderThickness = new Thickness(0),
             CornerRadius = OverlayQamResources.Get("QamSectionCornerRadius", new CornerRadius(0)),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Background = OverlayQamResources.Brush("QamSectionBrush"),
         };
+    }
+
+    private static Thickness ResolveOverlaySectionCardPadding(double additionalTopPadding, double additionalBottomPadding)
+    {
+        var sectionPadding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 0, 16, 0));
+        return new Thickness(
+            sectionPadding.Left,
+            sectionPadding.Top + additionalTopPadding,
+            sectionPadding.Right,
+            sectionPadding.Bottom + additionalBottomPadding);
     }
 
     // Malformed/unsupported rows are skipped entirely: they are never registered for selection and

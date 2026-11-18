@@ -383,18 +383,30 @@ public sealed class OverlayDeviceRendererWiringTests
             "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
         var buildSection = ExtractMethod(quickSettings, "private RenderedQuickSettingsSection BuildQuickSettingsSection(");
         var createCard = ExtractMethod(quickSettings, "private static Border CreateOverlaySectionCard(");
+        var resolveCardPadding = ExtractMethod(quickSettings,
+            "private static Thickness ResolveOverlaySectionCardPadding(");
         var buildController = ExtractMethod(controller, "private FrameworkElement BuildControllerPage(");
         var ledRows = ExtractMethod(controller, "private void BuildControllerLedRows(");
         var settingDetail = ExtractMethod(clawHud, "private FrameworkElement CreateSettingDetailPage(");
         var menuChrome = ExtractMethod(clawHud, "private static (Border Container, Button Button) CreateDetailMenuChrome(");
+        var paddingAdjustment = ExtractMethod(quickSettings,
+            "internal static (double AdditionalTopPadding, double AdditionalBottomPadding) GetSectionCardPaddingAdjustment(");
+        var reconcileSection = ExtractMethod(quickSettings, "private RenderedQuickSettingsSection ReconcileQuickSettingsSection(");
 
-        Assert.Contains("var hasHeaderContent = desiredRows.Any(row => row.IsFeatureHeader) || !string.IsNullOrEmpty(section.Label);", buildSection);
-        Assert.Contains("var hasDetailContent = desiredRows.Any(row => !row.IsFeatureHeader);", buildSection);
-        Assert.Contains("var additionalTopPadding = hasHeaderContent ? 2.0 : 7.0;", buildSection);
-        Assert.Contains("var additionalBottomPadding = hasDetailContent || !hasHeaderContent ? 7.0 : 2.0;", buildSection);
+        Assert.Contains("var hasHeaderContent = desiredRows.Any(row => row.IsFeatureHeader) || !string.IsNullOrEmpty(section.Label);", paddingAdjustment);
+        Assert.Contains("var hasDetailContent = desiredRows.Any(row => !row.IsFeatureHeader);", paddingAdjustment);
+        Assert.Contains("hasHeaderContent ? 2.0 : 7.0", paddingAdjustment);
+        Assert.Contains("hasDetailContent || !hasHeaderContent ? 7.0 : 2.0", paddingAdjustment);
+        Assert.Contains("GetSectionCardPaddingAdjustment(section, desiredRows)", buildSection);
+        Assert.Contains("GetSectionCardPaddingAdjustment(section, plan.DesiredRows)", reconcileSection);
+        Assert.Contains("if (rendered.Card.Padding != expectedCardPadding)", reconcileSection);
+        Assert.Contains("rendered.Card.Padding = expectedCardPadding;", reconcileSection);
+        Assert.DoesNotContain("CreateOverlaySectionCard(", reconcileSection);
+        Assert.DoesNotContain("rendered.Card =", reconcileSection);
         Assert.Contains("CreateOverlaySectionCard(sectionPanel, additionalTopPadding, additionalBottomPadding)", buildSection);
-        Assert.Contains("sectionPadding.Top + additionalTopPadding", createCard);
-        Assert.Contains("sectionPadding.Bottom + additionalBottomPadding", createCard);
+        Assert.Contains("ResolveOverlaySectionCardPadding(additionalTopPadding, additionalBottomPadding)", createCard);
+        Assert.Contains("sectionPadding.Top + additionalTopPadding", resolveCardPadding);
+        Assert.Contains("sectionPadding.Bottom + additionalBottomPadding", resolveCardPadding);
 
         static double[] ThicknessValues(XDocument document, string key) =>
             document.Descendants().Single(element => (string?)element.Attribute(XName.Get(
