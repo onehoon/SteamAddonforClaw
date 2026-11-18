@@ -88,7 +88,7 @@ public sealed class FrontButtonUiLayoutTests
         Assert.DoesNotContain("_path.TextChanged +=", codeBehind, StringComparison.Ordinal);
         Assert.Contains("_committedExecutablePath", codeBehind, StringComparison.Ordinal);
         Assert.Contains("_committedExecutablePath,", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("FrontButtonMappingInfoBar.IsOpen = true", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(FrontButtonMappingInfoBar, true)", codeBehind, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"FrontButtonMappingInfoBar\"", xaml, StringComparison.Ordinal);
     }
 }

@@ -82,6 +82,20 @@ public sealed partial class ControllerPage : UserControl
     internal event EventHandler<BackButtonMappingSettings>? BackButtonMappingEditRequested;
     internal event EventHandler<ControllerLedSettings>? ControllerLedEditRequested;
 
+    private static void SetInfoBarOpen(InfoBar infoBar, bool isOpen)
+    {
+        if (isOpen)
+        {
+            infoBar.Visibility = Visibility.Visible;
+            infoBar.IsOpen = true;
+        }
+        else
+        {
+            infoBar.IsOpen = false;
+            infoBar.Visibility = Visibility.Collapsed;
+        }
+    }
+
     internal void Initialize(
         FrontendBootstrapSnapshot bootstrap,
         IAddonFrontendControl frontend,
@@ -243,7 +257,7 @@ public sealed partial class ControllerPage : UserControl
         }
 
         RenderSteamVirtualController();
-        SteamVirtualControllerInfoBar.IsOpen = false;
+        SetInfoBarOpen(SteamVirtualControllerInfoBar, false);
         UpdateSteamVirtualControllerControls();
         try
         {
@@ -256,7 +270,7 @@ public sealed partial class ControllerPage : UserControl
                 SteamVirtualControllerInfoBar.Message = MainUiStrings.Get(
                     "Controller_SteamChoice_NotChanged",
                     "The saved controller choice was not changed.");
-                SteamVirtualControllerInfoBar.IsOpen = true;
+                SetInfoBarOpen(SteamVirtualControllerInfoBar, true);
                 _ = RefreshControllerForSteamAsync();
             }
         }
@@ -277,7 +291,7 @@ public sealed partial class ControllerPage : UserControl
             SteamVirtualControllerInfoBar.Message = MainUiStrings.Get(
                 "Controller_SteamChoice_Uncertain",
                 "The change could not be confirmed. The last confirmed choice is selected.");
-            SteamVirtualControllerInfoBar.IsOpen = true;
+            SetInfoBarOpen(SteamVirtualControllerInfoBar, true);
             _ = RefreshControllerForSteamAsync();
         }
         finally
@@ -295,7 +309,7 @@ public sealed partial class ControllerPage : UserControl
 
         var requested = GyroscopeEnabledToggle.IsOn;
         bool? confirmedValue = null;
-        SteamVirtualControllerInfoBar.IsOpen = false;
+        SetInfoBarOpen(SteamVirtualControllerInfoBar, false);
         UpdateGyroscopeControls();
         try
         {
@@ -333,7 +347,7 @@ public sealed partial class ControllerPage : UserControl
         SteamVirtualControllerInfoBar.Message = MainUiStrings.Get(
             "Controller_GyroscopeUpdateFailed",
             "The Gyroscope setting could not be saved. The last confirmed value is shown.");
-        SteamVirtualControllerInfoBar.IsOpen = true;
+        SetInfoBarOpen(SteamVirtualControllerInfoBar, true);
     }
 
     internal void Deactivate()
@@ -1053,10 +1067,10 @@ public sealed partial class ControllerPage : UserControl
     {
         VibrationStrengthInfoBar.Severity = severity;
         VibrationStrengthInfoBar.Message = message;
-        VibrationStrengthInfoBar.IsOpen = true;
+        SetInfoBarOpen(VibrationStrengthInfoBar, true);
     }
 
-    private void HideVibrationMessage() => VibrationStrengthInfoBar.IsOpen = false;
+    private void HideVibrationMessage() => SetInfoBarOpen(VibrationStrengthInfoBar, false);
 
     private static int ToPercent(double value) => Math.Clamp((int)Math.Round(value), 0, 100);
 
@@ -1066,12 +1080,12 @@ public sealed partial class ControllerPage : UserControl
 
         if (FrontButtonMappingValidation.ValidateExecutablePath(editor.ExecutablePathDraft) is not null)
         {
-            FrontButtonMappingInfoBar.IsOpen = true;
+            SetInfoBarOpen(FrontButtonMappingInfoBar, true);
             return;
         }
 
         editor.AcceptExecutablePathDraft();
-        FrontButtonMappingInfoBar.IsOpen = false;
+        SetInfoBarOpen(FrontButtonMappingInfoBar, false);
         RaiseEdit(editor);
     }
 

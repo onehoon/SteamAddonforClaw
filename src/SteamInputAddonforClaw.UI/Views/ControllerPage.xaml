@@ -32,7 +32,7 @@
                     </ctcontrols:SettingsCard>
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
-            <InfoBar x:Name="SteamVirtualControllerInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+            <InfoBar x:Name="SteamVirtualControllerInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
 
             <TextBlock x:Name="MappingUnavailableText" x:Uid="Controller_MappingUnavailable" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
 
@@ -80,6 +80,7 @@
                     x:Name="FrontButtonMappingInfoBar"
                     x:Uid="Controller_FrontButtonPathValidationInfoBar"
                     IsOpen="False"
+                    Visibility="Collapsed"
                     IsClosable="False"
                     Severity="Warning"
                     Message="Enter a fully qualified path to an .exe file." />
@@ -223,6 +224,7 @@
             <InfoBar
                 x:Name="VibrationStrengthInfoBar"
                 IsOpen="False"
+                Visibility="Collapsed"
                 IsClosable="False"
                 Severity="Informational"
                 Message="" />
