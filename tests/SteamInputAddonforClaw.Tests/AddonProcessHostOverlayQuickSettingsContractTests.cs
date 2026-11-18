@@ -179,6 +179,7 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
         var invalidation = ExtractMethod(source, "private void OnFrontendStateInvalidatedForOverlay");
+        var show = ExtractMethod(source, "private async Task CoordinateOverlayToggleAsync()");
 
         Assert.Contains("_ = _overlayController.RefreshShortcutAsync();", source, StringComparison.Ordinal);
         Assert.Contains("_ = _overlayController.RefreshShortcutAsync();", invalidation, StringComparison.Ordinal);
@@ -188,6 +189,32 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         var screenshot = ExtractMethod(source, "private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync");
         Assert.Contains("RetireOverlayCaptureUnderTransitionAsync(", screenshot, StringComparison.Ordinal);
         Assert.Contains("\"ShortcutScreenshot\"", screenshot, StringComparison.Ordinal);
+
+        var committed = show.IndexOf("AppLog.Info(\"OverlayCapture\", \"Capture committed.\"", StringComparison.Ordinal);
+        var stopMotion = show.IndexOf("StopMotionSourceAsync(\"OverlayCaptureCommitted\")", StringComparison.Ordinal);
+        var shortcut = show.IndexOf("RefreshShortcutAsync()", StringComparison.Ordinal);
+        var quickSettings = show.IndexOf("RefreshQuickSettingsAsync(preferActiveProfile)", StringComparison.Ordinal);
+        Assert.True(committed >= 0 && committed < stopMotion && stopMotion < shortcut && shortcut < quickSettings);
+    }
+
+    [Fact]
+    public void Shortcut_capture_and_send_logs_measure_their_own_runtime_stages()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Lifecycle", "OverlayProcessController.cs");
+        var refresh = ExtractMethod(source, "internal async Task RefreshShortcutAsync()");
+        var captureStart = refresh.IndexOf("var captureStopwatch = Stopwatch.StartNew();", StringComparison.Ordinal);
+        var captureLog = refresh.IndexOf("\"OverlayShortcutCapture\"", StringComparison.Ordinal);
+        var sendStart = refresh.IndexOf("var sendStopwatch = Stopwatch.StartNew();", StringComparison.Ordinal);
+        var sendCall = refresh.IndexOf("server.SendShortcutStateAsync(snapshot)", StringComparison.Ordinal);
+        var sendLog = refresh.IndexOf("\"OverlayShortcutSend\"", StringComparison.Ordinal);
+
+        Assert.True(captureStart >= 0 && captureStart < captureLog && captureLog < sendStart);
+        Assert.True(sendStart < sendCall && sendCall < sendLog);
+        Assert.Contains("captureStopwatch.Elapsed.TotalMilliseconds", refresh, StringComparison.Ordinal);
+        Assert.Contains("sendStopwatch.Elapsed.TotalMilliseconds", refresh, StringComparison.Ordinal);
+        Assert.Contains("snapshot.Tiles.Count", refresh, StringComparison.Ordinal);
+        Assert.Contains("snapshot.Available", refresh, StringComparison.Ordinal);
+        Assert.Contains("accepted ? \"Accepted\" : \"Declined\"", refresh, StringComparison.Ordinal);
     }
 
     // Section 10/18: no active target resolves to the exact no-game Unavailable page WITHOUT calling
@@ -279,12 +306,13 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         var showIndex = method.IndexOf("_overlayController.ShowAsync(preferActiveProfile)", StringComparison.Ordinal);
         var pauseIndex = method.IndexOf("PauseForOverlayAsync", StringComparison.Ordinal);
         var committedIndex = method.IndexOf("AppLog.Info(\"OverlayCapture\", \"Capture committed.\"", StringComparison.Ordinal);
+        var shortcutIndex = method.IndexOf("_overlayController.RefreshShortcutAsync()", StringComparison.Ordinal);
         var refreshIndex = method.IndexOf("_overlayController.RefreshQuickSettingsAsync(preferActiveProfile)", StringComparison.Ordinal);
 
         Assert.True(targetIndex >= 0 && targetIndex < showIndex);
         Assert.True(showIndex < pauseIndex);
         Assert.True(pauseIndex < committedIndex);
-        Assert.True(committedIndex < refreshIndex);
+        Assert.True(committedIndex < shortcutIndex && shortcutIndex < refreshIndex);
     }
 
     [Fact]
@@ -295,10 +323,11 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         var pauseIndex = opening.IndexOf("PauseForOverlayAsync", StringComparison.Ordinal);
         var committedIndex = opening.IndexOf("AppLog.Info(\"OverlayCapture\", \"Capture committed.\"", StringComparison.Ordinal);
         var stopIndex = opening.IndexOf("_ = StopMotionSourceAsync(\"OverlayCaptureCommitted\");", StringComparison.Ordinal);
+        var shortcutIndex = opening.IndexOf("_ = _overlayController.RefreshShortcutAsync();", StringComparison.Ordinal);
         var refreshIndex = opening.IndexOf("_overlayController.RefreshQuickSettingsAsync(preferActiveProfile)", StringComparison.Ordinal);
 
         Assert.True(pauseIndex >= 0 && pauseIndex < committedIndex);
-        Assert.True(committedIndex < stopIndex && stopIndex < refreshIndex);
+        Assert.True(committedIndex < stopIndex && stopIndex < shortcutIndex && shortcutIndex < refreshIndex);
         Assert.DoesNotContain("_ = ReconcileMotionReadersAsync(\"OverlayCaptureCommitted\");", opening);
         Assert.DoesNotContain("await StopMotionSourceAsync", opening);
         Assert.DoesNotContain("StopAsync(", opening);

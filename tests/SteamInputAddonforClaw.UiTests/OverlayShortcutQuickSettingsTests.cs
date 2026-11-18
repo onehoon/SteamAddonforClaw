@@ -14,7 +14,7 @@ public sealed class OverlayShortcutQuickSettingsTests
         var shortcuts = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
         var buildStart = shortcuts.IndexOf("private FrameworkElement BuildShortcutPage()", StringComparison.Ordinal);
-        var buildEnd = shortcuts.IndexOf("internal void ApplyShortcutState(", buildStart, StringComparison.Ordinal);
+        var buildEnd = shortcuts.IndexOf("internal bool ApplyShortcutState(", buildStart, StringComparison.Ordinal);
         var build = shortcuts[buildStart..buildEnd];
 
         Assert.Contains("_shortcutQuickSettingsHost", build, StringComparison.Ordinal);
@@ -232,6 +232,8 @@ public sealed class OverlayShortcutQuickSettingsTests
             ExtractMethod(quickSettings, "private string? ResolveShortcutQuickSettingsStatus("));
         Assert.Contains("ApplyQuickSettingsSurfacePresentation(surface, page.Available, page.Message);", applyDevice);
         Assert.Contains("surface.Content.Visibility = HasRenderableActiveProfile(page) ? Visibility.Visible : Visibility.Collapsed;", applyProfile);
+        Assert.Contains("if (_tabState.SelectedTab != AddonQuickSettingsTabId.Shortcut)", applyProfile);
+        Assert.Contains("UpdateProfileArtwork(profilePage);", refresh);
         Assert.Contains("ValueOnly", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
         Assert.Contains("SectionReconcile", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
         Assert.Contains("FullRebuild", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
@@ -241,6 +243,56 @@ public sealed class OverlayShortcutQuickSettingsTests
         Assert.Contains("Stopwatch.GetElapsedTime(_showStartedTimestamp)", refresh);
         Assert.Contains("HideProfileArtworkPreservingCache();", hide);
         Assert.DoesNotContain("ClearProfileArtwork();", hide);
+    }
+
+    [Fact]
+    public void Shortcut_tile_readiness_is_measured_after_grid_apply_once_per_show()
+    {
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var shortcuts = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var handler = ExtractMethod(app, "private Task HandleShortcutStateAsync(");
+        var apply = ExtractMethod(shortcuts, "internal bool ApplyShortcutState(");
+        var ready = ExtractMethod(shortcuts, "private void LogShortcutTileReadyIfNeeded(");
+        var reset = ExtractMethod(shell, "private void ResetUiForShow()");
+
+        Assert.True(handler.IndexOf("var receivedAt = Stopwatch.GetTimestamp();", StringComparison.Ordinal)
+            < handler.IndexOf("_dispatcherQueue.TryEnqueue", StringComparison.Ordinal));
+        Assert.True(handler.IndexOf("_window?.ApplyShortcutState(snapshot)", StringComparison.Ordinal)
+            < handler.IndexOf("OverlayShortcutUiApply", StringComparison.Ordinal));
+        Assert.Contains("Stopwatch.GetElapsedTime(receivedAt)", handler, StringComparison.Ordinal);
+        Assert.Contains("TileCount", handler, StringComparison.Ordinal);
+        Assert.Contains("\"Unavailable\"", handler, StringComparison.Ordinal);
+        Assert.Contains("\"Empty\"", handler, StringComparison.Ordinal);
+        Assert.True(apply.IndexOf("RefreshShortcutSelection(snapshot);", StringComparison.Ordinal)
+            < apply.IndexOf("LogShortcutTileReadyIfNeeded(snapshot);", StringComparison.Ordinal));
+        Assert.Contains("_shortcutTileReadyLoggedThisShow", ready, StringComparison.Ordinal);
+        Assert.Contains("!_isVisible", ready, StringComparison.Ordinal);
+        Assert.Contains("snapshot.Tiles.Count == 0", ready, StringComparison.Ordinal);
+        Assert.Contains("_shortcutGrid is null", ready, StringComparison.Ordinal);
+        Assert.Contains("_renderedShortcutTiles.Count", ready, StringComparison.Ordinal);
+        Assert.Contains("Stopwatch.GetElapsedTime(_showStartedTimestamp)", ready, StringComparison.Ordinal);
+        Assert.Contains("_shortcutTileReadyLoggedThisShow = false;", reset, StringComparison.Ordinal);
+        Assert.Contains("OverlayShortcutContentReady", quickSettings, StringComparison.Ordinal);
+        Assert.Contains("_shortcutContentReadyLoggedThisShow", quickSettings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shortcut_show_animation_is_shorter_without_detaching_acknowledgement_or_hide()
+    {
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var show = ExtractMethod(presentation, "internal async Task ShowForPocAsync()");
+        var hide = ExtractMethod(presentation, "internal Task HideForPocAsync()");
+
+        Assert.Contains("ShowDuration = TimeSpan.FromMilliseconds(80)", presentation, StringComparison.Ordinal);
+        Assert.Contains("await AnimateAsync(", show, StringComparison.Ordinal);
+        Assert.Contains("if (!initialStatePrepared || !AnimationsEnabled())", show, StringComparison.Ordinal);
+        Assert.Contains("catch (Exception exception)", show, StringComparison.Ordinal);
+        Assert.Contains("TrySetVisibleVisualState();", show, StringComparison.Ordinal);
+        Assert.Contains("ResetUiForShow();", show, StringComparison.Ordinal);
+        Assert.Contains("return Task.CompletedTask", hide, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShowForPocAsync();", presentation, StringComparison.Ordinal);
     }
 
     [Theory]

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -32,6 +33,7 @@ public sealed partial class OverlayWindow
     private StackPanel? _shortcutQuickSettingsHost;
     private TextBlock? _shortcutQuickSettingsStatus;
     private bool _shortcutExecutionInFlight;
+    private bool _shortcutTileReadyLoggedThisShow;
     private bool _isVisible;
 
     internal event Func<Guid, Task>? ShortcutExecutionRequested;
@@ -79,14 +81,28 @@ public sealed partial class OverlayWindow
         return root;
     }
 
-    internal void ApplyShortcutState(FrontendShortcutDashboardSnapshot snapshot)
+    internal bool ApplyShortcutState(FrontendShortcutDashboardSnapshot snapshot)
     {
         if (!IsShortcutSnapshotValid(snapshot))
         {
             OverlayLog.Warn("Shortcut", "Ignored a malformed Shortcut dashboard snapshot.");
-            return;
+            return false;
         }
         RefreshShortcutSelection(snapshot);
+        LogShortcutTileReadyIfNeeded(snapshot);
+        return true;
+    }
+
+    private void LogShortcutTileReadyIfNeeded(FrontendShortcutDashboardSnapshot snapshot)
+    {
+        if (_shortcutTileReadyLoggedThisShow || !_isVisible || _showStartedTimestamp == 0
+            || !snapshot.Available || snapshot.Tiles.Count == 0 || _shortcutGrid is null)
+            return;
+
+        _shortcutTileReadyLoggedThisShow = true;
+        OverlayLog.Debug("Performance", "OverlayShortcutTileReady",
+            ("ElapsedMs", Stopwatch.GetElapsedTime(_showStartedTimestamp).TotalMilliseconds),
+            ("TileCount", _renderedShortcutTiles.Count), ("Available", true));
     }
 
     internal void ApplyShortcutExecutionResult(OverlayShortcutExecuteResponse response)
