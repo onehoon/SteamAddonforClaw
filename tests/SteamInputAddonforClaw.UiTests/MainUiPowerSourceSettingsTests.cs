@@ -57,7 +57,7 @@ public sealed class MainUiPowerSourceSettingsTests
     [Theory]
     [InlineData("ProfilePage.xaml", "Steam_TdpCard", "TdpEnabledToggle")]
     [InlineData("XboxPage.xaml", "Xbox_TdpCard", "TdpEnabledToggle")]
-    public void Game_profile_tdp_uses_one_flat_card_with_hidden_toggle_and_flexible_slider_columns(
+    public void Game_profile_tdp_reuses_four_rail_controls_in_compact_card_and_expander(
         string file, string uid, string toggleName)
     {
         var path = Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", file);
@@ -65,29 +65,121 @@ public sealed class MainUiPowerSourceSettingsTests
         XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
         var tdpCard = Assert.Single(document.Descendants(), element =>
             element.Name.LocalName == "SettingsCard" && (string?)element.Attribute(xaml + "Uid") == uid);
-        Assert.Equal("Vertical", (string?)tdpCard.Attribute("ContentAlignment"));
-        Assert.Equal("Stretch", (string?)tdpCard.Attribute("HorizontalContentAlignment"));
-        var content = Assert.Single(tdpCard.Elements(), element => element.Name.LocalName == "StackPanel");
-        Assert.Equal("Stretch", (string?)content.Attribute("HorizontalAlignment"));
-        Assert.Null(document.Descendants().SingleOrDefault(element =>
-            element.Name.LocalName == "SettingsExpander" && (string?)element.Attribute(xaml + "Name") == "TdpExpander"));
-
-        var toggle = Assert.Single(tdpCard.Descendants(), element =>
+        Assert.Equal("Collapsed", (string?)tdpCard.Attribute("Visibility"));
+        var expander = Assert.Single(document.Descendants(), element =>
+            element.Name.LocalName == "SettingsExpander" && (string?)element.Attribute(xaml + "Name") == "TdpExpander");
+        Assert.Equal("Collapsed", (string?)expander.Attribute("Visibility"));
+        var toggle = Assert.Single(expander.Descendants(), element =>
             element.Name.LocalName == "ToggleSwitch" && (string?)element.Attribute(xaml + "Name") == toggleName);
         Assert.Equal("Collapsed", (string?)toggle.Attribute("Visibility"));
-        var acRail = Assert.Single(tdpCard.Descendants(), element =>
+        var acRail = Assert.Single(document.Descendants(), element =>
             (string?)element.Attribute(xaml + "Name") == "TdpAcCard");
-        var dcRail = Assert.Single(tdpCard.Descendants(), element =>
+        var dcRail = Assert.Single(document.Descendants(), element =>
             (string?)element.Attribute(xaml + "Name") == "TdpDcCard");
-        Assert.Equal("AC", (string?)acRail.Descendants().First(element => element.Name.LocalName == "TextBlock").Attribute("Text"));
-        Assert.Equal("DC", (string?)dcRail.Descendants().First(element => element.Name.LocalName == "TextBlock").Attribute("Text"));
-        var sliders = tdpCard.Descendants().Where(element => element.Name.LocalName == "Slider").ToArray();
+        Assert.Equal("Grid", acRail.Name.LocalName);
+        Assert.Equal("Grid", dcRail.Name.LocalName);
+        Assert.Equal("AC", (string?)acRail.Descendants().Single(element => (string?)element.Attribute(xaml + "Uid") == uid.Replace("TdpCard", "TdpAcRailLabel", StringComparison.Ordinal)).Attribute("Text"));
+        Assert.Equal("DC", (string?)dcRail.Descendants().Single(element => (string?)element.Attribute(xaml + "Uid") == uid.Replace("TdpCard", "TdpDcRailLabel", StringComparison.Ordinal)).Attribute("Text"));
+        Assert.Contains(acRail, expander.Descendants());
+        Assert.Contains(dcRail, expander.Descendants());
+        var sliders = document.Descendants().Where(element => element.Name.LocalName == "Slider"
+            && ((string?)element.Attribute(xaml + "Name")) is "AcPl1Slider" or "AcPl2Slider" or "DcPl1Slider" or "DcPl2Slider").ToArray();
         Assert.Equal(4, sliders.Length);
         foreach (var slider in sliders)
         {
             var grid = slider.Ancestors().First(element => element.Name.LocalName == "Grid");
             Assert.Equal("*", (string?)grid.Elements().First(element => element.Name.LocalName == "Grid.ColumnDefinitions")
                 .Elements().Last(element => element.Name.LocalName == "ColumnDefinition").Attribute("Width"));
+        }
+
+        var code = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", file + ".cs"));
+        Assert.Contains("SetTdpControlParent(tdpExpanded)", code, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(TdpAcExpandedCard.Content, TdpAcCard)", code, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(TdpDcExpandedCard.Content, TdpDcCard)", code, StringComparison.Ordinal);
+        Assert.Contains("_tdpCompactGrid.Children.Add(TdpAcCard)", code, StringComparison.Ordinal);
+        Assert.Contains("_tdpCompactGrid.Children.Add(TdpDcCard)", code, StringComparison.Ordinal);
+
+        foreach (var (rail, labelUid, pl1RowName, pl2RowName, pl1SliderName) in new[]
+        {
+            (acRail, uid.Replace("TdpCard", "TdpAcRailLabel", StringComparison.Ordinal), "TdpAcPl1Row", "AcPl2Row", "AcPl1Slider"),
+            (dcRail, uid.Replace("TdpCard", "TdpDcRailLabel", StringComparison.Ordinal), "TdpDcPl1Row", "DcPl2Row", "DcPl1Slider")
+        })
+        {
+            var columns = Assert.Single(rail.Elements(), element => element.Name.LocalName == "Grid.ColumnDefinitions")
+                .Elements().Select(element => (string?)element.Attribute("Width")).ToArray();
+            Assert.Equal(new[] { "Auto", "*" }, columns);
+            var label = Assert.Single(rail.Descendants(), element => (string?)element.Attribute(xaml + "Uid") == labelUid);
+            Assert.Equal("0", (string?)label.Attribute("Grid.Row"));
+            Assert.Equal("0", (string?)label.Attribute("Grid.Column"));
+            var pl1Row = Assert.Single(rail.Descendants(), element => (string?)element.Attribute(xaml + "Name") == pl1RowName);
+            Assert.Equal("0", (string?)pl1Row.Attribute("Grid.Row"));
+            Assert.Equal("1", (string?)pl1Row.Attribute("Grid.Column"));
+            Assert.Contains(pl1Row.Descendants(), element => (string?)element.Attribute(xaml + "Name") == pl1SliderName);
+            var pl2Row = Assert.Single(rail.Descendants(), element => (string?)element.Attribute(xaml + "Name") == pl2RowName);
+            Assert.Equal("1", (string?)pl2Row.Attribute("Grid.Row"));
+            Assert.Equal("1", (string?)pl2Row.Attribute("Grid.Column"));
+        }
+    }
+
+    [Theory]
+    [InlineData("ProfilePage.xaml", "Steam")]
+    [InlineData("XboxPage.xaml", "Xbox")]
+    public void Game_profile_cpu_and_power_modes_reuse_combo_boxes_across_compact_and_expanded_hosts(string file, string prefix)
+    {
+        var root = FindRepositoryRoot();
+        var document = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", file));
+        var code = Read(root, file + ".cs");
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        foreach (var feature in new[] { "CpuBoost", "PowerMode" })
+        {
+            var compact = Assert.Single(document.Descendants(), element => element.Name.LocalName == "SettingsCard"
+                && (string?)element.Attribute(xaml + "Name") == feature + "Card");
+            Assert.Equal("Collapsed", (string?)compact.Attribute("Visibility"));
+            Assert.Single(document.Descendants(), element => element.Name.LocalName == "SettingsExpander"
+                && (string?)element.Attribute(xaml + "Name") == feature + "Expander");
+            Assert.Contains("ApplyRailComboLayout(" + feature + "Card", code, StringComparison.Ordinal);
+            foreach (var rail in new[] { "Ac", "Dc" })
+            {
+                var comboName = feature + rail + "ComboBox";
+                Assert.Single(document.Descendants(), element => element.Name.LocalName == "ComboBox"
+                    && (string?)element.Attribute(xaml + "Name") == comboName);
+                Assert.Single(document.Descendants(), element => element.Name.LocalName == "SettingsCard"
+                    && (string?)element.Attribute(xaml + "Name") == feature + rail + "Card");
+            }
+        }
+
+        Assert.Contains("ApplyGameProfilePresentationLayout();", code, StringComparison.Ordinal);
+        Assert.Contains("var profileReady = _snapshot is not null", code, StringComparison.Ordinal);
+        Assert.Contains("MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.AC)", code, StringComparison.Ordinal);
+        Assert.Contains(prefix + "_CpuBoostCard.Header", ReadResources(root, "en-US"), StringComparison.Ordinal);
+        Assert.Contains(prefix + "_PowerModeCard.Header", ReadResources(root, "ko-KR"), StringComparison.Ordinal);
+
+        var layout = ExtractMethod(code, "private void ApplyGameProfilePresentationLayout()");
+        Assert.True(layout.IndexOf("if (!profileReady)", StringComparison.Ordinal)
+            < layout.IndexOf("SetTdpControlParent(tdpExpanded)", StringComparison.Ordinal));
+        Assert.Contains("previous?.TdpExpanded != tdpExpanded", layout, StringComparison.Ordinal);
+        Assert.Contains("previous is null || previous.Value.ActiveRail != activeRail", layout, StringComparison.Ordinal);
+        var beginLoad = ExtractMethod(code, "private void BeginProfileLoad(");
+        Assert.Contains("_snapshot = null; ApplyPowerSourceVisibility();", beginLoad, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Steam")]
+    [InlineData("Xbox")]
+    public void Game_profile_performance_descriptions_are_removed_only_for_the_three_updated_options(string prefix)
+    {
+        var root = FindRepositoryRoot();
+        foreach (var language in new[] { "en-US", "ko-KR" })
+        {
+            var resources = ReadResources(root, language);
+            foreach (var name in new[]
+            {
+                prefix + "_TdpCard.Description",
+                prefix + "_CpuBoostExpander.Description",
+                prefix + "_PowerModeExpander.Description"
+            })
+                Assert.DoesNotContain(name, resources, StringComparison.Ordinal);
         }
     }
 
@@ -256,6 +348,9 @@ public sealed class MainUiPowerSourceSettingsTests
 
     private static string Read(string root, string file) =>
         File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", file));
+
+    private static string ReadResources(string root, string language) =>
+        File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", language, "Resources.resw"));
 
     private static string ExtractMethod(string source, string signature)
     {

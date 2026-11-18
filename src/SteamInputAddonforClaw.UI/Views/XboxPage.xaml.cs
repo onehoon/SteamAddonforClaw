@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using CommunityToolkit.WinUI.Controls;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -27,6 +28,8 @@ public sealed partial class XboxPage : UserControl
     private bool? _pendingSimplifiedTdpControls;
     private bool _quickSettingsCurrentPowerSourceOnly;
     private FrontendTdpPowerSource? _currentPowerSource;
+    private Grid? _tdpCompactGrid;
+    private (FrontendTdpPowerSource? ActiveRail, bool TdpExpanded)? _lastGameProfileControlLayout;
     private CancellationTokenSource? _acFpsDebounce, _dcFpsDebounce; private long _acFpsGeneration, _dcFpsGeneration; private int? _acFpsDraft, _dcFpsDraft;
     private CancellationTokenSource? _acGpuDebounce, _dcGpuDebounce; private long _acGpuGeneration, _dcGpuGeneration, _gpuDraftGeneration; private int? _acGpuDraftIndex, _dcGpuDraftIndex; private bool _gpuDraftDirty;
     private static readonly CpuBoostModeItem[] Modes = [new(CpuBoostMode.Disabled, MainUiStrings.Get("Xbox_CpuBoost_Mode_Disabled", "Disabled")), new(CpuBoostMode.Enabled, MainUiStrings.Get("Xbox_CpuBoost_Mode_Enabled", "Enabled")), new(CpuBoostMode.Aggressive, MainUiStrings.Get("Xbox_CpuBoost_Mode_Aggressive", "Aggressive")), new(CpuBoostMode.EfficientEnabled, MainUiStrings.Get("Xbox_CpuBoost_Mode_EfficientEnabled", "Efficient Enabled")), new(CpuBoostMode.EfficientAggressive, MainUiStrings.Get("Xbox_CpuBoost_Mode_EfficientAggressive", "Efficient Aggressive")), new(CpuBoostMode.AggressiveAtGuaranteed, MainUiStrings.Get("Xbox_CpuBoost_Mode_AggressiveAtGuaranteed", "Aggressive At Guaranteed")), new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Xbox_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed"))];
@@ -50,7 +53,7 @@ public sealed partial class XboxPage : UserControl
         }
     }
 
-    internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
+    internal void Initialize(IAddonFrontendControl frontend) { _frontend = frontend; ApplyGameProfilePresentationLayout(); }
     internal void Activate()
     {
         if (_active) return;
@@ -159,12 +162,113 @@ public sealed partial class XboxPage : UserControl
         CpuBoostDcCard.Visibility = snapshot?.CpuBoost.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
         TdpAcCard.Visibility = snapshot?.Tdp.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
         TdpDcCard.Visibility = snapshot?.Tdp.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        TdpAcExpandedCard.Visibility = TdpAcCard.Visibility;
+        TdpDcExpandedCard.Visibility = TdpDcCard.Visibility;
         PowerModeAcCard.Visibility = snapshot?.PowerMode?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
         PowerModeDcCard.Visibility = snapshot?.PowerMode?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
         GpuMinimumClockAcCard.Visibility = snapshot?.GpuMinimumClock?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
         GpuMinimumClockDcCard.Visibility = snapshot?.GpuMinimumClock?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
         FpsAcCard.Visibility = snapshot?.FpsLimit?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
         FpsDcCard.Visibility = snapshot?.FpsLimit?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        ApplyGameProfilePresentationLayout();
+    }
+
+    private void ApplyGameProfilePresentationLayout()
+    {
+        var profileReady = _snapshot is not null;
+        if (!profileReady)
+        {
+            SetVisibilityIfChanged(TdpCard, Visibility.Collapsed);
+            SetVisibilityIfChanged(TdpExpander, Visibility.Collapsed);
+            SetVisibilityIfChanged(CpuBoostCard, Visibility.Collapsed);
+            SetVisibilityIfChanged(CpuBoostExpander, Visibility.Collapsed);
+            SetVisibilityIfChanged(PowerModeCard, Visibility.Collapsed);
+            SetVisibilityIfChanged(PowerModeExpander, Visibility.Collapsed);
+            return;
+        }
+
+        var activeRail = _quickSettingsCurrentPowerSourceOnly ? _currentPowerSource : null;
+        var tdpExpanded = DevicePage.TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, _snapshot?.Limits);
+        var previous = _lastGameProfileControlLayout;
+
+        if (previous?.TdpExpanded != tdpExpanded)
+            SetTdpControlParent(tdpExpanded);
+        if (previous is null || previous.Value.ActiveRail != activeRail)
+        {
+            ApplyRailComboLayout(CpuBoostCard, CpuBoostAcCard, CpuBoostDcCard,
+                CpuBoostAcComboBox, CpuBoostDcComboBox, activeRail);
+            ApplyRailComboLayout(PowerModeCard, PowerModeAcCard, PowerModeDcCard,
+                PowerModeAcComboBox, PowerModeDcComboBox, activeRail);
+            UpdateTdpCompactGridColumns(activeRail);
+        }
+
+        SetVisibilityIfChanged(TdpCard, !tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(TdpExpander, tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(CpuBoostCard, profileReady && activeRail is not null ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(CpuBoostExpander, profileReady && activeRail is null ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(PowerModeCard, profileReady && activeRail is not null ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(PowerModeExpander, profileReady && activeRail is null ? Visibility.Visible : Visibility.Collapsed);
+        _lastGameProfileControlLayout = (activeRail, tdpExpanded);
+    }
+
+    private void SetTdpControlParent(bool expanded)
+    {
+        _tdpCompactGrid ??= new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
+        if (_tdpCompactGrid.ColumnDefinitions.Count == 0)
+        {
+            _tdpCompactGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            _tdpCompactGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
+        if (expanded)
+        {
+            if (ReferenceEquals(TdpCard.Content, _tdpCompactGrid)) TdpCard.Content = null;
+            if (_tdpCompactGrid.Children.Contains(TdpAcCard)) _tdpCompactGrid.Children.Remove(TdpAcCard);
+            if (_tdpCompactGrid.Children.Contains(TdpDcCard)) _tdpCompactGrid.Children.Remove(TdpDcCard);
+            if (!ReferenceEquals(TdpAcExpandedCard.Content, TdpAcCard)) TdpAcExpandedCard.Content = TdpAcCard;
+            if (!ReferenceEquals(TdpDcExpandedCard.Content, TdpDcCard)) TdpDcExpandedCard.Content = TdpDcCard;
+        }
+        else
+        {
+            if (ReferenceEquals(TdpAcExpandedCard.Content, TdpAcCard)) TdpAcExpandedCard.Content = null;
+            if (ReferenceEquals(TdpDcExpandedCard.Content, TdpDcCard)) TdpDcExpandedCard.Content = null;
+            if (!_tdpCompactGrid.Children.Contains(TdpAcCard)) _tdpCompactGrid.Children.Add(TdpAcCard);
+            if (!_tdpCompactGrid.Children.Contains(TdpDcCard)) _tdpCompactGrid.Children.Add(TdpDcCard);
+            if (!ReferenceEquals(TdpCard.Content, _tdpCompactGrid)) TdpCard.Content = _tdpCompactGrid;
+        }
+    }
+
+    private void UpdateTdpCompactGridColumns(FrontendTdpPowerSource? activeRail)
+    {
+        Grid.SetColumn(TdpAcCard, activeRail == FrontendTdpPowerSource.DC ? 1 : 0);
+        Grid.SetColumn(TdpDcCard, activeRail == FrontendTdpPowerSource.DC ? 0 : 1);
+        Grid.SetColumnSpan(TdpAcCard, activeRail is null ? 1 : 2);
+        Grid.SetColumnSpan(TdpDcCard, activeRail is null ? 1 : 2);
+    }
+
+    private static void ApplyRailComboLayout(
+        SettingsCard compactCard,
+        SettingsCard acCard,
+        SettingsCard dcCard,
+        ComboBox acComboBox,
+        ComboBox dcComboBox,
+        FrontendTdpPowerSource? activeRail)
+    {
+        if (ReferenceEquals(compactCard.Content, acComboBox)) compactCard.Content = null;
+        if (ReferenceEquals(compactCard.Content, dcComboBox)) compactCard.Content = null;
+        if (acCard.Content is null) acCard.Content = acComboBox;
+        if (dcCard.Content is null) dcCard.Content = dcComboBox;
+        if (activeRail is null) return;
+
+        var selectedCard = activeRail == FrontendTdpPowerSource.AC ? acCard : dcCard;
+        var selectedComboBox = activeRail == FrontendTdpPowerSource.AC ? acComboBox : dcComboBox;
+        if (ReferenceEquals(selectedCard.Content, selectedComboBox)) selectedCard.Content = null;
+        compactCard.Content = selectedComboBox;
+    }
+
+    private static void SetVisibilityIfChanged(UIElement element, Visibility visibility)
+    {
+        if (element.Visibility != visibility) element.Visibility = visibility;
     }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
@@ -259,7 +363,7 @@ public sealed partial class XboxPage : UserControl
     }
 
     private async Task SelectGameAsync(FrontendXboxGameCatalogEntry game) { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.Key, preserveDirtyTdpDraft: false); }
-    private void BeginProfileLoad(FrontendXboxGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = true; _suppressGpuEvents = true; CancelFpsDebounce(); try { FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; GpuMinimumClockEnabledToggle.IsOn = false; GpuMinimumClockEnabledToggle.IsEnabled = false; PerGameBackButtonMappingEnabledToggle.IsOn = false; PerGameBackButtonMappingEnabledToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; DisplayScaling100Toggle.IsOn = false; DisplayScaling100Toggle.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = _suppressGpuEvents = false; } SetEditorsEnabled(false); }
+    private void BeginProfileLoad(FrontendXboxGameCatalogEntry game) { _snapshot = null; ApplyPowerSourceVisibility(); _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = true; _suppressGpuEvents = true; CancelFpsDebounce(); try { FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; GpuMinimumClockEnabledToggle.IsOn = false; GpuMinimumClockEnabledToggle.IsEnabled = false; PerGameBackButtonMappingEnabledToggle.IsOn = false; PerGameBackButtonMappingEnabledToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; DisplayScaling100Toggle.IsOn = false; DisplayScaling100Toggle.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = _suppressGpuEvents = false; } SetEditorsEnabled(false); }
     private async Task CaptureSelectedAsync(string key, bool preserveDirtyTdpDraft = true)
     {
         if (!_active || _frontend is null) return;
@@ -277,7 +381,7 @@ public sealed partial class XboxPage : UserControl
         catch (Exception exception) { if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, key)) ShowError(MainUiStrings.Get("Xbox_Profile_LoadFailed", "XBOX profile settings could not be loaded."), exception); }
         finally { if (ReferenceEquals(_captureCancellation, capture)) _captureCancellation = null; capture.Dispose(); }
     }
-    private void ClearSelection() { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressControllerEvents = true; _suppressGpuEvents = true; try { PerGameBackButtonMappingEnabledToggle.IsOn = false; PerGameBackButtonMappingEnabledToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; GpuMinimumClockEnabledToggle.IsOn = false; GpuMinimumClockEnabledToggle.IsEnabled = false; } finally { _suppressControllerEvents = _suppressGpuEvents = false; } ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; DisplayScaling100Toggle.IsOn = false; DisplayScaling100Toggle.IsEnabled = false; SetEditorsEnabled(false); }
+    private void ClearSelection() { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; ApplyPowerSourceVisibility(); _suppressControllerEvents = true; _suppressGpuEvents = true; try { PerGameBackButtonMappingEnabledToggle.IsOn = false; PerGameBackButtonMappingEnabledToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; GpuMinimumClockEnabledToggle.IsOn = false; GpuMinimumClockEnabledToggle.IsEnabled = false; } finally { _suppressControllerEvents = _suppressGpuEvents = false; } ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; DisplayScaling100Toggle.IsOn = false; DisplayScaling100Toggle.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendXboxGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false, bool preserveDirtyGpuDraft = false)
     {

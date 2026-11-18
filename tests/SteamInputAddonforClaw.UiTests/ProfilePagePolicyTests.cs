@@ -100,7 +100,7 @@ public sealed class ProfilePagePolicyTests
         var render = Method(code, "private void Render(FrontendGameProfileSnapshot snapshot", "private void SetEditorsEnabled(");
         var status = Method(code, "private void RenderProfileStatus(", "private void SetEditorsEnabled(");
 
-        Assert.Contains("TdpCard.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed", initialize);
+        Assert.Contains("ApplyGameProfilePresentationLayout();", initialize);
         Assert.Contains("IntelFpsExpander.Visibility = _featureSupport.IntelFpsLimit ? Visibility.Visible : Visibility.Collapsed", initialize);
         Assert.Contains("GpuMinimumClockExpander.Visibility = _featureSupport.IntelGpuMinimumClock ? Visibility.Visible : Visibility.Collapsed", initialize);
         Assert.Contains("TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && _featureSupport.Tdp && snapshot.Limits is not null", render);
