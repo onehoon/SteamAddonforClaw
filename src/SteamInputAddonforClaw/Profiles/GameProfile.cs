@@ -98,6 +98,7 @@ public sealed record GameTdpSettings
 public sealed record GameDisplayOverrides
 {
     public GameDisplayResolution? Resolution { get; init; }
+    public bool ScalingTo100Percent { get; init; }
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }

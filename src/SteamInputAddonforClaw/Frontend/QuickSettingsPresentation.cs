@@ -18,7 +18,6 @@ internal static class QuickSettingsPresentation
         FrontendGameTdpConfiguration Tdp,
         bool PersistenceWritable,
         FrontendTdpLimits? Limits,
-        FrontendGameResolution? Resolution,
         FrontendGamePowerModeConfiguration? PowerMode,
         FrontendGameFpsLimitConfiguration? FpsLimit,
         FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock,
@@ -120,15 +119,6 @@ internal static class QuickSettingsPresentation
         (WindowsPowerMode.BestPerformance, "Best performance"),
     ];
 
-    internal static readonly IReadOnlyList<QuickSettingsDiscreteOption> ProfileResolutionOptions =
-    [
-        new(0, "Do not change"),
-        new(1, "1920 × 1200"),
-        new(2, "1920 × 1080"),
-        new(3, "1680 × 1050"),
-        new(4, "1440 × 900"),
-    ];
-
     internal static readonly IReadOnlyList<QuickSettingsDiscreteOption> CpuBoostDiscreteOptions =
         [.. CpuBoostOptions.Select(o => new QuickSettingsDiscreteOption((int)o.Mode, o.Label))];
 
@@ -194,13 +184,13 @@ internal static class QuickSettingsPresentation
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
         string.IsNullOrWhiteSpace(snapshot.DisplayName) ? $"Game {snapshot.AppId}" : snapshot.DisplayName,
         snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
-        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock, snapshot.FeatureSupport,
+        snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock, snapshot.FeatureSupport,
         QuickSettingsProfileTarget.ForSteam(snapshot.AppId), BackButtonMapping: null));
 
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendXboxGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
         string.IsNullOrWhiteSpace(snapshot.DisplayName) ? "XBOX game" : snapshot.DisplayName,
         snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
-        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock, snapshot.FeatureSupport,
+        snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock, snapshot.FeatureSupport,
         QuickSettingsProfileTarget.ForXbox(snapshot.Key), snapshot.BackButtonMapping));
 
     private static QuickSettingsPageSnapshot BuildProfile(ProfileQuickSettingsProjection snapshot)
@@ -221,8 +211,6 @@ internal static class QuickSettingsPresentation
             {
                 FpsLimit = snapshot.FpsLimit ?? new(false, 60, 60, false, "Intel FPS Limit is unavailable."),
             }));
-        sections.Add(BuildProfileResolutionSection(snapshot));
-
         IReadOnlyList<QuickSettingsLinkedSliderConstraint> linkedConstraints = snapshot.FeatureSupport.Tdp && snapshot.Limits is { } limits
             ? BuildProfileTdpLinkedConstraints(limits)
             : [];
@@ -458,34 +446,6 @@ internal static class QuickSettingsPresentation
             Available: true, Writable: writable, Value: QuickSettingsValue.Integer(fps),
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 40, Maximum: 120, Step: 1, Suffix: " FPS"),
             CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
-
-    private static QuickSettingsSection BuildProfileResolutionSection(ProfileQuickSettingsProjection snapshot)
-    {
-        var current = snapshot.Resolution switch
-        {
-            null => 0,
-            { Width: 1920, Height: 1200 } => 1,
-            { Width: 1920, Height: 1080 } => 2,
-            { Width: 1680, Height: 1050 } => 3,
-            { Width: 1440, Height: 900 } => 4,
-            _ => -1,
-        };
-        if (current < 0)
-        {
-            return new QuickSettingsSection(QuickSettingsSectionId.ProfileResolution, "Resolution",
-                [new QuickSettingsRow(QuickSettingsRowId.ProfileResolution, "Resolution", QuickSettingsControlKind.Slider,
-                    Available: false, Writable: false, Value: null,
-                    SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: ProfileResolutionOptions),
-                    CommitPolicy: QuickSettingsCommitPolicy.Immediate)],
-                "The saved display resolution is not supported by this UI.");
-        }
-
-        return new QuickSettingsSection(QuickSettingsSectionId.ProfileResolution, "Resolution",
-            [new QuickSettingsRow(QuickSettingsRowId.ProfileResolution, "Resolution", QuickSettingsControlKind.Slider,
-                Available: true, Writable: snapshot.PersistenceWritable, Value: QuickSettingsValue.Integer(current),
-                SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: ProfileResolutionOptions),
-                CommitPolicy: QuickSettingsCommitPolicy.Immediate)]);
-    }
 
     private static QuickSettingsSection BuildTdpSection(FrontendTdpSnapshot tdp)
     {

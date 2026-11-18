@@ -287,23 +287,6 @@ internal static class QuickSettingsMutationAdapter
                     ? await control.SetXboxGameProfileGpuMinimumClockAcAsync(xboxKey!, index, cancellationToken).ConfigureAwait(false)
                     : await control.SetXboxGameProfileGpuMinimumClockDcAsync(xboxKey!, index, cancellationToken).ConfigureAwait(false));
             }
-            case QuickSettingsRowId.ProfileResolution:
-            {
-                if (!TryGetSingleIntegerInRange(intent, QuickSettingsRowId.ProfileResolution, 0, 4, out var option))
-                    return new QuickSettingsMutationResult(false, "Malformed Profile resolution value.", currentPage);
-                var resolution = option switch
-                {
-                    0 => null,
-                    1 => new FrontendGameResolution(1920, 1200),
-                    2 => new FrontendGameResolution(1920, 1080),
-                    3 => new FrontendGameResolution(1680, 1050),
-                    4 => new FrontendGameResolution(1440, 900),
-                    _ => null,
-                };
-                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
-                    ? FinishProfile(await control.SetGameProfileResolutionAsync(appId!.Value, resolution, displayName, cancellationToken).ConfigureAwait(false))
-                    : FinishProfile(await control.SetXboxGameProfileResolutionAsync(xboxKey!, resolution, displayName, cancellationToken).ConfigureAwait(false));
-            }
             default:
                 return new QuickSettingsMutationResult(false, "This row is not editable.", currentPage);
         }

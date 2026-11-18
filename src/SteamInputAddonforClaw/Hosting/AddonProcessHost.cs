@@ -4705,7 +4705,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ? () => _intelGpuMinimumClockRuntime.ReconcileAfterResume()
                 : null,
             () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"),
-            reconcileMaximumProcessorState: () => _maximumProcessorStateRuntime.Reconcile());
+            reconcileMaximumProcessorState: () => _maximumProcessorStateRuntime.Reconcile(),
+            reconcileDisplay: () =>
+            {
+                if (!_displayResolutionRuntime.Reconcile())
+                    AppLog.Warn("Profiles.Display", "Display profile resume reconcile did not complete.", null);
+            });
     }
 
     private async Task ReconcileXboxObserverAndTouchpadAfterResumeAsync(XboxGameSessionRuntime xboxGameSessionRuntime)
@@ -4725,7 +4730,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Action reconcilePowerMode,
         Action? reconcileGpuMinimumClock = null,
         Action? reconcileBattery = null,
-        Action? reconcileMaximumProcessorState = null)
+        Action? reconcileMaximumProcessorState = null,
+        Action? reconcileDisplay = null)
     {
         try
         {
@@ -4779,6 +4785,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("Profiles.Battery", "Battery charge-limit resume reconcile failed.", exception);
+        }
+
+        try
+        {
+            reconcileDisplay?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Display", "Display profile resume reconcile failed.", exception);
         }
     }
 

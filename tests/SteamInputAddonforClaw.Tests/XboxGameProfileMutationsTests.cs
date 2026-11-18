@@ -430,6 +430,34 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     }
 
     [Fact]
+    public void Scaling_to_100_percent_persists_independently_and_keeps_resolution()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new ProfileStore(PathName);
+        store.Save(new ProfileDocument
+        {
+            XboxGames = new()
+            {
+                [StoreKey] = new XboxGameProfile
+                {
+                    Enabled = false,
+                    Display = new GameDisplayOverrides
+                    {
+                        Resolution = new GameDisplayResolution { Width = 1600, Height = 900 },
+                    },
+                },
+            },
+        });
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), TdpLimits());
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetScalingTo100Percent(StoreKey, true, "Game"));
+
+        var saved = store.Load().Document.XboxGames[StoreKey];
+        Assert.True(saved.Display.ScalingTo100Percent);
+        Assert.Equal(new GameDisplayResolution { Width = 1600, Height = 900 }, saved.Display.Resolution);
+    }
+
+    [Fact]
     public void Unsafe_profile_document_is_never_replaced_by_an_Xbox_mutation()
     {
         Directory.CreateDirectory(_directory);

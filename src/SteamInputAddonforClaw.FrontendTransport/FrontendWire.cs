@@ -195,7 +195,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 90 adds Shortcut built-in actions and editor action-type lock metadata.
 // Version 91 adds the global SimplifiedTdpControls setting and its mutation RPC.
 // Version 92 adds the nullable Runtime current-power-source observation to FrontendBootstrapSnapshot.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 92; }
+// Version 93 adds per-game 100% display scaling mutations and snapshot state.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 93; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -249,7 +250,8 @@ internal enum FrontendRpcMethod
     SetSteamVirtualController, SetGameProfileSteamVirtualController, SetExperimentalVirtualTouchpadEnabled, SetGyroscopeEnabled,
     CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning,
     CaptureMaximumProcessorState, SetDeviceMaximumProcessorStateEnabled, SetDeviceMaximumProcessorStateAc, SetDeviceMaximumProcessorStateDc,
-    RepairStartupTask, RequestMsiLiveUpdateCatalog, SetQuickOverlayYButtonTarget, SetSimplifiedTdpControls
+    RepairStartupTask, RequestMsiLiveUpdateCatalog, SetQuickOverlayYButtonTarget, SetSimplifiedTdpControls,
+    SetGameProfileScalingTo100Percent, SetXboxGameProfileScalingTo100Percent
 }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
@@ -312,6 +314,7 @@ internal sealed record SetGameProfileFpsLimitDcRequest(uint AppId, int Fps);
 internal sealed record SetGameProfileTdpRequest(uint AppId, FrontendGameTdpConfiguration Configuration);
 internal sealed record SetGameProfileFavoriteRequest(uint AppId, bool Favorite, string? DisplayName);
 internal sealed record SetGameProfileResolutionRequest(uint AppId, FrontendGameResolution? Resolution, string? DisplayName);
+internal sealed record SetGameProfileScalingTo100PercentRequest(uint AppId, bool Enabled, string? DisplayName);
 internal sealed record CaptureXboxGameProfileRequest(string Key);
 internal sealed record SetXboxGameProfileFavoriteRequest(string Key, bool Favorite, string? DisplayName);
 internal sealed record SetXboxGameProfileEnabledRequest(string Key, bool Enabled, string? DisplayName);
@@ -327,6 +330,7 @@ internal sealed record SetXboxGameProfileFpsLimitEnabledRequest(string Key, bool
 internal sealed record SetXboxGameProfileFpsLimitAcRequest(string Key, int Fps);
 internal sealed record SetXboxGameProfileFpsLimitDcRequest(string Key, int Fps);
 internal sealed record SetXboxGameProfileResolutionRequest(string Key, FrontendGameResolution? Resolution, string? DisplayName);
+internal sealed record SetXboxGameProfileScalingTo100PercentRequest(string Key, bool Enabled, string? DisplayName);
 
 internal static class FrontendWireCodec
 {

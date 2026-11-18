@@ -184,6 +184,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.True((await control.SetXboxGameProfileFpsLimitDcAsync(Key, 60)).Succeeded);
         Assert.True((await control.SetXboxGameProfileFpsLimitEnabledAsync(Key, true)).Succeeded);
         Assert.True((await control.SetXboxGameProfileResolutionAsync(Key, new(1920, 1200), "Game")).Succeeded);
+        Assert.True((await control.SetXboxGameProfileScalingTo100PercentAsync(Key, true, "Game")).Succeeded);
 
         var capture = await control.CaptureXboxGameProfileAsync(Key);
         var saved = store.Load().Document.XboxGames[Key];
@@ -196,8 +197,9 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.True(capture.FpsLimit!.Enabled);
         Assert.Equal(90, capture.FpsLimit.AcFps);
         Assert.Equal(new FrontendGameResolution(1920, 1200), capture.Resolution);
+        Assert.True(capture.ScalingTo100Percent);
         Assert.True(saved.Favorite);
-        Assert.Equal(14, invalidations);
+        Assert.Equal(15, invalidations);
         Assert.Equal(0, transport.OperationCount);
         Assert.Equal(0, limiter.ApplyCount);
         await tdp.DisposeAsync();

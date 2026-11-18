@@ -54,14 +54,14 @@ public sealed record FrontendGameFpsLimitConfiguration(bool Enabled, int AcFps, 
 public sealed record FrontendGameGpuMinimumClockConfiguration(bool Available, bool Initialized, bool Enabled,
     IReadOnlyList<double> SelectableClocksMhz, double? AcMhz, double? DcMhz, double? RecommendedDefaultMhz, string? UnavailableReason = null);
 public sealed record FrontendGameProfileSnapshot(uint AppId, string? DisplayName, bool Exists, bool Enabled,
-    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null)
+    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null, bool ScalingTo100Percent = false)
 {
     public SteamVirtualControllerPreference? SteamVirtualController { get; init; }
     public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
 }
 public sealed record FrontendXboxGameProfileSnapshot(string Key, string? DisplayName, bool Exists, bool Enabled,
     FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits,
-    FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null)
+    FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null, bool ScalingTo100Percent = false)
 {
     public FrontendGameBackButtonMappingConfiguration? BackButtonMapping { get; init; }
     public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
@@ -839,6 +839,8 @@ public interface IAddonFrontendControl
         Task.FromResult(UnavailableXboxGameProfileMutation(key, "Minimum GPU Clock is unavailable."));
     Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default) =>
         Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileScalingTo100PercentAsync(string key, bool enabled, string? displayName, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
     Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileBackButtonMappingAsync(string key, BackButtonMappingSettings? mapping, CancellationToken cancellationToken = default) =>
         Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
@@ -861,6 +863,7 @@ public interface IAddonFrontendControl
     Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileFavoriteAsync(uint appId, bool favorite, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Favorites are unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileResolutionAsync(uint appId, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Display resolution is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileScalingTo100PercentAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
 
     // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
     /// <summary>Opens (or re-opens, if the previous session Completed/Failed) the diagnostic session:

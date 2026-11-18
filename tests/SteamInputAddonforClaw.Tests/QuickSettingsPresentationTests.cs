@@ -547,7 +547,6 @@ public sealed class QuickSettingsPresentationTests
             QuickSettingsSectionId.ProfileGeneral, QuickSettingsSectionId.ProfileTdp,
             QuickSettingsSectionId.ProfileCpuBoost, QuickSettingsSectionId.ProfilePowerMode,
             QuickSettingsSectionId.ProfileGpuMinimumClock, QuickSettingsSectionId.ProfileFpsLimit,
-            QuickSettingsSectionId.ProfileResolution,
         };
         Assert.Equal(expectedSections.Order(), page.Sections.Select(section => section.SectionId).Order());
         Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileController);
@@ -568,7 +567,6 @@ public sealed class QuickSettingsPresentationTests
                 QuickSettingsRowId.ProfileGpuMinimumClockAc, QuickSettingsRowId.ProfileGpuMinimumClockDc],
             [QuickSettingsSectionId.ProfileFpsLimit] = [QuickSettingsRowId.ProfileFpsLimitEnabled,
                 QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsRowId.ProfileFpsLimitDc],
-            [QuickSettingsSectionId.ProfileResolution] = [QuickSettingsRowId.ProfileResolution],
         };
         foreach (var (sectionId, rowIds) in expectedRows)
         {
@@ -610,14 +608,14 @@ public sealed class QuickSettingsPresentationTests
         Assert.Equal(QuickSettingsProfileTarget.ForXbox("xbox:canonical-key"), page.ProfileTarget);
         Assert.Equal("XBOX Game", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
         var sectionIds = page.Sections.Select(section => section.SectionId).ToHashSet();
-        Assert.Equal(8, sectionIds.Count);
+        Assert.Equal(7, sectionIds.Count);
         Assert.Equal(
             new[]
             {
                 QuickSettingsSectionId.ProfileGeneral, QuickSettingsSectionId.ProfileController,
                 QuickSettingsSectionId.ProfileTdp, QuickSettingsSectionId.ProfileCpuBoost,
                 QuickSettingsSectionId.ProfilePowerMode, QuickSettingsSectionId.ProfileGpuMinimumClock,
-                QuickSettingsSectionId.ProfileFpsLimit, QuickSettingsSectionId.ProfileResolution,
+                QuickSettingsSectionId.ProfileFpsLimit,
             }.ToHashSet(),
             sectionIds);
         Assert.Equal(8, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Minimum);
@@ -795,7 +793,7 @@ public sealed class QuickSettingsPresentationTests
         Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileGpuMinimumClock);
         Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileCpuBoost);
         Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfilePowerMode);
-        Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileResolution);
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileResolution);
         Assert.Empty(page.LinkedSliderConstraints);
     }
 
@@ -828,7 +826,7 @@ public sealed class QuickSettingsPresentationTests
         Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileGpuMinimumClock);
         Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileCpuBoost);
         Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfilePowerMode);
-        Assert.Contains(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileResolution);
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileResolution);
         Assert.True(page.Available);
     }
 
@@ -858,7 +856,7 @@ public sealed class QuickSettingsPresentationTests
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { PowerMode = null });
 
         Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode);
-        Assert.Contains(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfileResolution);
+        Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfileResolution);
     }
 
     [Fact]
@@ -970,19 +968,20 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
-    public void Profile_fps_and_resolution_rows_use_closed_product_options()
+    public void Profile_fps_rows_keep_closed_options_and_display_is_not_projected_to_quick_settings()
     {
-        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with
+        {
+            Resolution = new FrontendGameResolution(1920, 1080),
+            ScalingTo100Percent = true,
+        });
 
         var fps = FindRow(page, QuickSettingsRowId.ProfileFpsLimitAc);
         Assert.Equal((40, 120, 1), (fps.SliderSpec!.Minimum, fps.SliderSpec.Maximum, fps.SliderSpec.Step));
         Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, fps.CommitPolicy);
 
-        var resolution = FindRow(page, QuickSettingsRowId.ProfileResolution);
-        Assert.Equal([(0, "Do not change"), (1, "1920 × 1200"), (2, "1920 × 1080"), (3, "1680 × 1050"), (4, "1440 × 900")],
-            resolution.SliderSpec!.Options!.Select(option => (option.Value, option.Label)).ToArray());
-        Assert.Equal(0, resolution.Value!.IntegerValue);
-        Assert.Equal(QuickSettingsCommitPolicy.Immediate, resolution.CommitPolicy);
+        Assert.DoesNotContain(page.Sections, section => section.SectionId == QuickSettingsSectionId.ProfileResolution);
+        Assert.DoesNotContain(page.Sections.SelectMany(section => section.Rows), row => row.RowId == QuickSettingsRowId.ProfileResolution);
     }
 
     private static FrontendGameProfileSnapshot EnabledProfileSnapshot() => new(

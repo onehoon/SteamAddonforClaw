@@ -20,6 +20,8 @@ public sealed class AddonProcessHostResumeTests
         body = body[..body.IndexOf("internal static async Task ReconcilePerformanceAfterResumeAsync", StringComparison.Ordinal)];
 
         Assert.Contains("RequestControllerPresentationReconcile(\"PowerResume\")", body);
+        Assert.Contains("reconcileDisplay:", body);
+        Assert.Contains("_displayResolutionRuntime.Reconcile()", body);
         // The controller reconcile call precedes the delayed CPU Boost / Power Mode profile path.
         Assert.True(
             body.IndexOf("RequestControllerPresentationReconcile(\"PowerResume\")", StringComparison.Ordinal)
@@ -151,6 +153,24 @@ public sealed class AddonProcessHostResumeTests
             () => calls.Add("MaximumProcessorState"));
 
         Assert.Equal(new[] { "CPU", "Power", "MaximumProcessorState", "GPU", "Battery" }, calls);
+    }
+
+    [Fact]
+    public async Task Resume_reconcile_runs_display_recovery_after_existing_profile_runtimes()
+    {
+        var calls = new List<string>();
+
+        await AddonProcessHost.ReconcilePerformanceAfterResumeAsync(
+            CancellationToken.None,
+            static (_, _) => Task.CompletedTask,
+            () => calls.Add("CPU"),
+            () => calls.Add("Power"),
+            () => calls.Add("GPU"),
+            () => calls.Add("Battery"),
+            () => calls.Add("MaximumProcessorState"),
+            () => calls.Add("Display"));
+
+        Assert.Equal(new[] { "CPU", "Power", "MaximumProcessorState", "GPU", "Battery", "Display" }, calls);
     }
 
     [Fact]

@@ -50,8 +50,17 @@ public sealed class XboxCatalogPageUiTests
         Assert.Contains("Text=\"{Binding DisplayName}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FavoriteButton_Click", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ProfileEnabledToggle", xaml, StringComparison.Ordinal);
+        XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+        Assert.Single(document.Descendants(), element => element.Name.LocalName == "SettingsCard"
+            && (string?)element.Attribute(xamlNamespace + "Uid") == "Xbox_DisplayCard");
         foreach (var control in new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle", "FpsEnabledToggle", "ResolutionComboBox" })
             Assert.Contains($"x:Name=\"{control}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"DisplayScaling100Toggle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Right\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("OffContent=\"\" OnContent=\"\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("DisplayScaling100Toggle_Toggled", code, StringComparison.Ordinal);
+        Assert.Contains("SetXboxGameProfileScalingTo100PercentAsync", code, StringComparison.Ordinal);
+        Assert.Contains("Xbox_DisplayScaling_UpdateFailed", code, StringComparison.Ordinal);
         foreach (var internalField in new[] { "StoreId", "TitleId", "PackageFamilyName", "PackageFullName", "ConfigPath", "Executable", "AUMID", "ProcessPath" })
         {
             Assert.DoesNotContain(internalField, xaml, StringComparison.OrdinalIgnoreCase);
@@ -387,7 +396,7 @@ public sealed class XboxCatalogPageUiTests
             "SetXboxGameProfileCpuBoostAcAsync", "SetXboxGameProfileCpuBoostDcAsync", "SetXboxGameProfileTdpEnabledAsync",
             "SetXboxGameProfileTdpAsync", "SetXboxGameProfilePowerModeEnabledAsync", "SetXboxGameProfilePowerModeAcAsync",
             "SetXboxGameProfilePowerModeDcAsync", "SetXboxGameProfileFpsLimitEnabledAsync", "SetXboxGameProfileFpsLimitAcAsync",
-            "SetXboxGameProfileFpsLimitDcAsync", "SetXboxGameProfileResolutionAsync", "SetXboxGameProfileBackButtonMappingAsync"
+            "SetXboxGameProfileFpsLimitDcAsync", "SetXboxGameProfileResolutionAsync", "SetXboxGameProfileScalingTo100PercentAsync", "SetXboxGameProfileBackButtonMappingAsync"
         }) Assert.Contains(method, code, StringComparison.Ordinal);
         Assert.Contains("Task.Delay(300", code, StringComparison.Ordinal);
         Assert.Contains("Task.Delay(300", steamCode, StringComparison.Ordinal);
