@@ -9,6 +9,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using Windows.Storage;
+using CommunityToolkit.WinUI.Controls;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.UI;
@@ -49,6 +50,8 @@ public sealed partial class ProfilePage : UserControl
     private bool? _pendingSimplifiedTdpControls;
     private bool _quickSettingsCurrentPowerSourceOnly;
     private FrontendTdpPowerSource? _currentPowerSource;
+    private Grid? _tdpCompactGrid;
+    private (FrontendTdpPowerSource? ActiveRail, bool TdpExpanded)? _lastGameProfileControlLayout;
     private CancellationTokenSource? _acFpsDebounce, _dcFpsDebounce; private long _acFpsGeneration, _dcFpsGeneration; private int? _acFpsDraft, _dcFpsDraft;
     private CancellationTokenSource? _acGpuDebounce, _dcGpuDebounce; private long _acGpuGeneration, _dcGpuGeneration, _gpuDraftGeneration; private int? _acGpuDraftIndex, _dcGpuDraftIndex; private bool _gpuDraftDirty;
     private static readonly CpuBoostModeItem[] Modes = [new(CpuBoostMode.Disabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Disabled", "Disabled")), new(CpuBoostMode.Enabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Enabled", "Enabled")), new(CpuBoostMode.Aggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_Aggressive", "Aggressive")), new(CpuBoostMode.EfficientEnabled, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientEnabled", "Efficient Enabled")), new(CpuBoostMode.EfficientAggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressive", "Efficient Aggressive")), new(CpuBoostMode.AggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_AggressiveAtGuaranteed", "Aggressive At Guaranteed")), new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed"))];
@@ -69,7 +72,7 @@ public sealed partial class ProfilePage : UserControl
     {
         _frontend = frontend;
         _featureSupport = featureSupport ?? FrontendModelFeatureSupport.None;
-        TdpCard.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed;
+        ApplyGameProfilePresentationLayout();
         IntelFpsExpander.Visibility = _featureSupport.IntelFpsLimit ? Visibility.Visible : Visibility.Collapsed;
         GpuMinimumClockExpander.Visibility = _featureSupport.IntelGpuMinimumClock ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -674,7 +677,7 @@ public sealed partial class ProfilePage : UserControl
     }
 
     private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
-    private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = true; CancelFpsDebounce(); try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; DisplayScaling100Toggle.IsOn = false; DisplayScaling100Toggle.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = false; } SetEditorsEnabled(false); }
+    private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; ApplyPowerSourceVisibility(); _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = true; CancelFpsDebounce(); try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; DisplayScaling100Toggle.IsOn = false; DisplayScaling100Toggle.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = false; } SetEditorsEnabled(false); }
     private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var bootstrap = await _frontend.GetBootstrapAsync(); if (_active) { ApplySimplifiedTdpControlsPreference(bootstrap.Settings.SimplifiedTdpControls); _quickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly; _currentPowerSource = bootstrap.CurrentPowerSource; ApplyPowerSourceVisibility(); } var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty, _gpuDraftDirty, preservePendingFpsDraft: true); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) { _currentPowerSource = null; ApplyPowerSourceVisibility(); DisableEditorsAfterCaptureFailure(); ShowError(MainUiStrings.Get("Steam_Profile_LoadFailed", "Profile settings could not be loaded."), exception); } } }
 
     private void ApplySimplifiedTdpControlsPreference(bool enabled)
@@ -726,14 +729,116 @@ public sealed partial class ProfilePage : UserControl
         CpuBoostDcCard.Visibility = snapshot?.CpuBoost.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
         TdpAcCard.Visibility = snapshot?.Tdp.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
         TdpDcCard.Visibility = snapshot?.Tdp.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        TdpAcExpandedCard.Visibility = TdpAcCard.Visibility;
+        TdpDcExpandedCard.Visibility = TdpDcCard.Visibility;
         PowerModeAcCard.Visibility = snapshot?.PowerMode?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
         PowerModeDcCard.Visibility = snapshot?.PowerMode?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
         GpuMinimumClockAcCard.Visibility = snapshot?.GpuMinimumClock?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
         GpuMinimumClockDcCard.Visibility = snapshot?.GpuMinimumClock?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
         FpsAcCard.Visibility = snapshot?.FpsLimit?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
         FpsDcCard.Visibility = snapshot?.FpsLimit?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        ApplyGameProfilePresentationLayout();
     }
-    private void ClearSelection() { CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressEvents = true; try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; } finally { _suppressEvents = false; } ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; DisplayScaling100Toggle.IsOn = false; DisplayScaling100Toggle.IsEnabled = false; SetEditorsEnabled(false); }
+
+    private void ApplyGameProfilePresentationLayout()
+    {
+        var profileReady = _snapshot is not null;
+        if (!profileReady)
+        {
+            SetVisibilityIfChanged(TdpCard, Visibility.Collapsed);
+            SetVisibilityIfChanged(TdpExpander, Visibility.Collapsed);
+            SetVisibilityIfChanged(CpuBoostCard, Visibility.Collapsed);
+            SetVisibilityIfChanged(CpuBoostExpander, Visibility.Collapsed);
+            SetVisibilityIfChanged(PowerModeCard, Visibility.Collapsed);
+            SetVisibilityIfChanged(PowerModeExpander, Visibility.Collapsed);
+            return;
+        }
+
+        var activeRail = _quickSettingsCurrentPowerSourceOnly ? _currentPowerSource : null;
+        var tdpExpanded = DevicePage.TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, _snapshot?.Limits);
+        var previous = _lastGameProfileControlLayout;
+
+        if (previous?.TdpExpanded != tdpExpanded)
+            SetTdpControlParent(tdpExpanded);
+        if (previous is null || previous.Value.ActiveRail != activeRail)
+        {
+            ApplyRailComboLayout(CpuBoostCard, CpuBoostAcCard, CpuBoostDcCard,
+                CpuBoostAcComboBox, CpuBoostDcComboBox, activeRail);
+            ApplyRailComboLayout(PowerModeCard, PowerModeAcCard, PowerModeDcCard,
+                PowerModeAcComboBox, PowerModeDcComboBox, activeRail);
+            UpdateTdpCompactGridColumns(activeRail);
+        }
+
+        SetVisibilityIfChanged(TdpCard, _featureSupport.Tdp && profileReady && !tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(TdpExpander, _featureSupport.Tdp && profileReady && tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(CpuBoostCard, profileReady && activeRail is not null ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(CpuBoostExpander, profileReady && activeRail is null ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(PowerModeCard, profileReady && activeRail is not null ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(PowerModeExpander, profileReady && activeRail is null ? Visibility.Visible : Visibility.Collapsed);
+        _lastGameProfileControlLayout = (activeRail, tdpExpanded);
+    }
+
+    private void SetTdpControlParent(bool expanded)
+    {
+        _tdpCompactGrid ??= new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
+        if (_tdpCompactGrid.ColumnDefinitions.Count == 0)
+        {
+            _tdpCompactGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            _tdpCompactGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
+        if (expanded)
+        {
+            if (ReferenceEquals(TdpCard.Content, _tdpCompactGrid)) TdpCard.Content = null;
+            if (_tdpCompactGrid.Children.Contains(TdpAcCard)) _tdpCompactGrid.Children.Remove(TdpAcCard);
+            if (_tdpCompactGrid.Children.Contains(TdpDcCard)) _tdpCompactGrid.Children.Remove(TdpDcCard);
+            if (!ReferenceEquals(TdpAcExpandedCard.Content, TdpAcCard)) TdpAcExpandedCard.Content = TdpAcCard;
+            if (!ReferenceEquals(TdpDcExpandedCard.Content, TdpDcCard)) TdpDcExpandedCard.Content = TdpDcCard;
+        }
+        else
+        {
+            if (ReferenceEquals(TdpAcExpandedCard.Content, TdpAcCard)) TdpAcExpandedCard.Content = null;
+            if (ReferenceEquals(TdpDcExpandedCard.Content, TdpDcCard)) TdpDcExpandedCard.Content = null;
+            if (!_tdpCompactGrid.Children.Contains(TdpAcCard)) _tdpCompactGrid.Children.Add(TdpAcCard);
+            if (!_tdpCompactGrid.Children.Contains(TdpDcCard)) _tdpCompactGrid.Children.Add(TdpDcCard);
+            if (!ReferenceEquals(TdpCard.Content, _tdpCompactGrid)) TdpCard.Content = _tdpCompactGrid;
+        }
+    }
+
+    private void UpdateTdpCompactGridColumns(FrontendTdpPowerSource? activeRail)
+    {
+        Grid.SetColumn(TdpAcCard, activeRail == FrontendTdpPowerSource.DC ? 1 : 0);
+        Grid.SetColumn(TdpDcCard, activeRail == FrontendTdpPowerSource.DC ? 0 : 1);
+        Grid.SetColumnSpan(TdpAcCard, activeRail is null ? 1 : 2);
+        Grid.SetColumnSpan(TdpDcCard, activeRail is null ? 1 : 2);
+    }
+
+    private static void ApplyRailComboLayout(
+        SettingsCard compactCard,
+        SettingsCard acCard,
+        SettingsCard dcCard,
+        ComboBox acComboBox,
+        ComboBox dcComboBox,
+        FrontendTdpPowerSource? activeRail)
+    {
+        if (ReferenceEquals(compactCard.Content, acComboBox)) compactCard.Content = null;
+        if (ReferenceEquals(compactCard.Content, dcComboBox)) compactCard.Content = null;
+        if (acCard.Content is null) acCard.Content = acComboBox;
+        if (dcCard.Content is null) dcCard.Content = dcComboBox;
+        if (activeRail is null) return;
+
+        var selectedCard = activeRail == FrontendTdpPowerSource.AC ? acCard : dcCard;
+        var selectedComboBox = activeRail == FrontendTdpPowerSource.AC ? acComboBox : dcComboBox;
+        if (ReferenceEquals(selectedCard.Content, selectedComboBox)) selectedCard.Content = null;
+        compactCard.Content = selectedComboBox;
+    }
+
+    private static void SetVisibilityIfChanged(UIElement element, Visibility visibility)
+    {
+        if (element.Visibility != visibility) element.Visibility = visibility;
+    }
+
+    private void ClearSelection() { CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; ApplyPowerSourceVisibility(); _suppressEvents = true; try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; } finally { _suppressEvents = false; } ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; DisplayScaling100Toggle.IsOn = false; DisplayScaling100Toggle.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false, bool preserveDirtyGpuDraft = false, bool preservePendingFpsDraft = false)
     {

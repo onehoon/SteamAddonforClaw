@@ -242,7 +242,7 @@
   <data name="Steam_CpuBoost_UpdateFailed" xml:space="preserve"><value>CPU Boost could not be updated.</value></data>
   <data name="Steam_CpuBoostAcCard.Header" xml:space="preserve"><value>AC</value></data>
   <data name="Steam_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
-  <data name="Steam_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
+  <data name="Steam_CpuBoostCard.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Steam_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Steam_Favorite_SaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
   <data name="Steam_Favorite_AddAutomationName" xml:space="preserve"><value>Add {0} to favorites</value></data>
@@ -267,7 +267,7 @@
   <data name="Steam_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
   <data name="Steam_PowerModeAcCard.Header" xml:space="preserve"><value>AC</value></data>
   <data name="Steam_PowerModeDcCard.Header" xml:space="preserve"><value>DC</value></data>
-  <data name="Steam_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
+  <data name="Steam_PowerModeCard.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
   <data name="Steam_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
   <data name="Steam_Profile_LoadFailed" xml:space="preserve"><value>Profile settings could not be loaded.</value></data>
   <data name="Steam_Profile_SettingsUnwritable" xml:space="preserve"><value>Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
@@ -284,8 +284,8 @@
   <data name="Steam_TdpAcRailLabel.Text" xml:space="preserve"><value>AC</value></data>
   <data name="Steam_TdpControl_ToggleUpdateFailed" xml:space="preserve"><value>TDP Control could not be updated.</value></data>
   <data name="Steam_TdpDcRailLabel.Text" xml:space="preserve"><value>DC</value></data>
-  <data name="Steam_TdpCard.Description" xml:space="preserve"><value>Configure processor power limits for AC and DC operation.</value></data>
   <data name="Steam_TdpCard.Header" xml:space="preserve"><value>TDP Control</value></data>
+  <data name="Steam_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
   <data name="Steam_VirtualController_DefaultOption.Content" xml:space="preserve"><value>Use default</value></data>
   <data name="Steam_VirtualController_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
   <data name="Steam_VirtualController_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
@@ -324,7 +324,7 @@
   <data name="Xbox_ControllerMappingExpander.Header" xml:space="preserve"><value>M1 / M2 Button Mapping</value></data>
   <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve"><value>AC</value></data>
   <data name="Xbox_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
-  <data name="Xbox_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
+  <data name="Xbox_CpuBoostCard.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Xbox_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Xbox_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
   <data name="Xbox_CpuBoost_Mode_AggressiveAtGuaranteed" xml:space="preserve"><value>Aggressive At Guaranteed</value></data>
@@ -351,7 +351,7 @@
   <data name="Xbox_M2Card.Header" xml:space="preserve"><value>M2</value></data>
   <data name="Xbox_PowerModeAcCard.Header" xml:space="preserve"><value>AC</value></data>
   <data name="Xbox_PowerModeDcCard.Header" xml:space="preserve"><value>DC</value></data>
-  <data name="Xbox_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
+  <data name="Xbox_PowerModeCard.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
   <data name="Xbox_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
   <data name="Xbox_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>
   <data name="Xbox_PowerMode_Mode_BestPerformance" xml:space="preserve"><value>Best performance</value></data>
@@ -373,8 +373,8 @@
   <data name="Xbox_TdpAcRailLabel.Text" xml:space="preserve"><value>AC</value></data>
   <data name="Xbox_TdpControl_ToggleUpdateFailed" xml:space="preserve"><value>TDP Control could not be updated.</value></data>
   <data name="Xbox_TdpDcRailLabel.Text" xml:space="preserve"><value>DC</value></data>
-  <data name="Xbox_TdpCard.Description" xml:space="preserve"><value>Configure processor power limits for AC and DC operation.</value></data>
   <data name="Xbox_TdpCard.Header" xml:space="preserve"><value>TDP Control</value></data>
+  <data name="Xbox_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
   <data name="MainNav_ClawHud.Content" xml:space="preserve"><value>ClawHUD</value></data>
   <data name="ClawHud_PageTitle.Text" xml:space="preserve"><value>ClawHUD</value></data>
   <data name="ClawHud_PageSubtitle.Text" xml:space="preserve"><value>Configure the performance overlay and display behavior.</value></data>

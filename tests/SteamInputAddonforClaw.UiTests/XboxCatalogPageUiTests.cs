@@ -83,10 +83,10 @@ public sealed class XboxCatalogPageUiTests
                 new[] { "TdpCard", "TdpAcPl1Slider", "TdpDcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
             ("ProfilePage.xaml",
                 new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle" },
-                new[] { "TdpCard", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
+                new[] { "TdpCard", "TdpExpander", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostCard", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeCard", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
             ("XboxPage.xaml",
                 new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle" },
-                new[] { "TdpCard", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
+                new[] { "TdpCard", "TdpExpander", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostCard", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeCard", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
         };
         XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
 
