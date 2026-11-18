@@ -723,9 +723,9 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendMaximumProcessorStateSnapshot.Unavailable);
     Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendMaximumProcessorStateMutationResult(FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed, "Maximum Processor State is unavailable.", FrontendMaximumProcessorStateSnapshot.Unavailable));
-    Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateAcAsync(int percent, CancellationToken cancellationToken = default) =>
+    Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateAcAsync(int? percent, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendMaximumProcessorStateMutationResult(FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed, "Maximum Processor State is unavailable.", FrontendMaximumProcessorStateSnapshot.Unavailable));
-    Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateDcAsync(int percent, CancellationToken cancellationToken = default) =>
+    Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateDcAsync(int? percent, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendMaximumProcessorStateMutationResult(FrontendMaximumProcessorStateMutationOutcome.PersistenceFailed, "Maximum Processor State is unavailable.", FrontendMaximumProcessorStateSnapshot.Unavailable));
     Task<FrontendPowerModeSnapshot> CapturePowerModeAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendPowerModeSnapshot.Unavailable);
     Task<FrontendPowerModeMutationResult> SetDevicePowerModeAcAsync(WindowsPowerMode mode, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendPowerModeMutationResult(FrontendPowerModeMutationOutcome.PersistenceFailed, "Power Mode is unavailable.", FrontendPowerModeSnapshot.Unavailable));

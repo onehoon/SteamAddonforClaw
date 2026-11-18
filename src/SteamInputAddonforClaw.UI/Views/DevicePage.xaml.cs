@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Shapes;
+using CommunityToolkit.WinUI.Controls;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.UI;
@@ -30,6 +31,7 @@ public sealed partial class DevicePage : UserControl
     private FrontendMaximumProcessorStateSnapshot _maximumProcessorStateSnapshot = FrontendMaximumProcessorStateSnapshot.Unavailable;
     private bool _suppressTdpEvents;
     private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
+    private bool _hasTdpSnapshot;
     private bool _simplifiedTdpControls;
     private bool? _pendingSimplifiedTdpControls;
     private bool _quickSettingsCurrentPowerSourceOnly;
@@ -49,6 +51,8 @@ public sealed partial class DevicePage : UserControl
     private bool _batteryChargeLimitDraftDirty;
     private bool _batteryChargeLimitMutationBusy;
     private int _batteryChargeLimitDraftPercent = 60;
+    private DeviceControlLayoutKey? _lastDeviceControlLayout;
+    private Grid? _tdpCompactGrid;
     private static readonly CpuBoostModeItem[] Modes =
     [
         new(CpuBoostMode.Disabled, MainUiStrings.Get("Device_CpuBoost_Mode_Disabled", "Disabled")),
@@ -60,10 +64,11 @@ public sealed partial class DevicePage : UserControl
         new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Device_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed")),
     ];
 
-    private static readonly MaximumProcessorStatePercentItem[] MaximumProcessorStatePercentages =
+    private static readonly MaximumProcessorStateOptionItem[] MaximumProcessorStateOptions =
     [
-        new(100, "100%"),
-        new(99, "99%")
+        new(null, MainUiStrings.Get("Device_MaximumProcessorState_DoNotChange", "Do not change")),
+        new(99, "99%"),
+        new(100, "100%")
     ];
 
     public DevicePage()
@@ -72,8 +77,8 @@ public sealed partial class DevicePage : UserControl
         RenderStartupTaskStatus();
         CpuBoostAcComboBox.ItemsSource = Modes;
         CpuBoostDcComboBox.ItemsSource = Modes;
-        MaximumProcessorStateAcComboBox.ItemsSource = MaximumProcessorStatePercentages;
-        MaximumProcessorStateDcComboBox.ItemsSource = MaximumProcessorStatePercentages;
+        MaximumProcessorStateAcComboBox.ItemsSource = MaximumProcessorStateOptions;
+        MaximumProcessorStateDcComboBox.ItemsSource = MaximumProcessorStateOptions;
         PowerModeAcComboBox.ItemsSource = PowerModes;
         PowerModeDcComboBox.ItemsSource = PowerModes;
         UpdateMaximumProcessorStateEditability();
@@ -83,7 +88,8 @@ public sealed partial class DevicePage : UserControl
     {
         _frontend = frontend;
         _featureSupport = featureSupport ?? FrontendModelFeatureSupport.None;
-        TdpCard.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed;
+        _lastDeviceControlLayout = null;
+        ApplyPowerSourceVisibility();
         BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit ? Visibility.Visible : Visibility.Collapsed;
         if (!_featureSupport.Tdp) SetInfoBarOpen(TdpInfoBar, false);
         if (!_featureSupport.BatteryChargeLimit) SetInfoBarOpen(BatteryChargeLimitInfoBar, false);
@@ -192,8 +198,17 @@ public sealed partial class DevicePage : UserControl
             ? Visibility.Visible : Visibility.Collapsed;
         var dc = MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.DC)
             ? Visibility.Visible : Visibility.Collapsed;
-        TdpAcCard.Visibility = CpuBoostAcCard.Visibility = PowerModeAcCard.Visibility = MaximumProcessorStateAcCard.Visibility = ac;
-        TdpDcCard.Visibility = CpuBoostDcCard.Visibility = PowerModeDcCard.Visibility = MaximumProcessorStateDcCard.Visibility = dc;
+        SetVisibilityIfChanged(TdpAcCard, ac);
+        SetVisibilityIfChanged(CpuBoostAcCard, ac);
+        SetVisibilityIfChanged(PowerModeAcCard, ac);
+        SetVisibilityIfChanged(MaximumProcessorStateAcCard, ac);
+        SetVisibilityIfChanged(TdpDcCard, dc);
+        SetVisibilityIfChanged(CpuBoostDcCard, dc);
+        SetVisibilityIfChanged(PowerModeDcCard, dc);
+        SetVisibilityIfChanged(MaximumProcessorStateDcCard, dc);
+        SetVisibilityIfChanged(TdpAcExpandedCard, ac);
+        SetVisibilityIfChanged(TdpDcExpandedCard, dc);
+        ApplyDevicePresentationLayout();
     }
 
     private void ApplySimplifiedTdpControlsPreference(bool enabled)
@@ -207,7 +222,99 @@ public sealed partial class DevicePage : UserControl
         _pendingSimplifiedTdpControls = null;
         if (_simplifiedTdpControls == enabled) return;
         _simplifiedTdpControls = enabled;
-        RenderTdp(_tdpSnapshot);
+        if (_hasTdpSnapshot) RenderTdp(_tdpSnapshot);
+        else ApplyDevicePresentationLayout();
+    }
+
+    private void ApplyDevicePresentationLayout()
+    {
+        var activeRail = _quickSettingsCurrentPowerSourceOnly ? _currentPowerSource : null;
+        var tdpExpanded = TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, _tdpSnapshot.Limits);
+        var layout = new DeviceControlLayoutKey(activeRail, tdpExpanded);
+        var previous = _lastDeviceControlLayout;
+
+        if (previous?.TdpExpanded != layout.TdpExpanded)
+            SetTdpControlParent(layout.TdpExpanded);
+        if (previous is null || previous.Value.ActiveRail != layout.ActiveRail)
+        {
+            ApplyRailComboLayout(CpuBoostCard, CpuBoostAcCard, CpuBoostDcCard,
+                CpuBoostAcComboBox, CpuBoostDcComboBox, activeRail);
+            ApplyRailComboLayout(MaximumProcessorStateCard, MaximumProcessorStateAcCard, MaximumProcessorStateDcCard,
+                MaximumProcessorStateAcComboBox, MaximumProcessorStateDcComboBox, activeRail);
+            ApplyRailComboLayout(PowerModeCard, PowerModeAcCard, PowerModeDcCard,
+                PowerModeAcComboBox, PowerModeDcComboBox, activeRail);
+            UpdateTdpCompactGridColumns(activeRail);
+        }
+
+        SetVisibilityIfChanged(TdpCard, _featureSupport.Tdp && !tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(TdpExpander, _featureSupport.Tdp && tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(CpuBoostCard, activeRail is null ? Visibility.Collapsed : Visibility.Visible);
+        SetVisibilityIfChanged(CpuBoostExpander, activeRail is null ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(MaximumProcessorStateCard, activeRail is null ? Visibility.Collapsed : Visibility.Visible);
+        SetVisibilityIfChanged(MaximumProcessorStateExpander, activeRail is null ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(PowerModeCard, activeRail is null ? Visibility.Collapsed : Visibility.Visible);
+        SetVisibilityIfChanged(PowerModeExpander, activeRail is null ? Visibility.Visible : Visibility.Collapsed);
+        _lastDeviceControlLayout = layout;
+    }
+
+    private void SetTdpControlParent(bool expanded)
+    {
+        _tdpCompactGrid ??= new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
+        if (_tdpCompactGrid.ColumnDefinitions.Count == 0)
+        {
+            _tdpCompactGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            _tdpCompactGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
+        if (expanded)
+        {
+            if (ReferenceEquals(TdpCard.Content, _tdpCompactGrid)) TdpCard.Content = null;
+            if (_tdpCompactGrid.Children.Contains(TdpAcCard)) _tdpCompactGrid.Children.Remove(TdpAcCard);
+            if (_tdpCompactGrid.Children.Contains(TdpDcCard)) _tdpCompactGrid.Children.Remove(TdpDcCard);
+            if (!ReferenceEquals(TdpAcExpandedCard.Content, TdpAcCard)) TdpAcExpandedCard.Content = TdpAcCard;
+            if (!ReferenceEquals(TdpDcExpandedCard.Content, TdpDcCard)) TdpDcExpandedCard.Content = TdpDcCard;
+        }
+        else
+        {
+            if (ReferenceEquals(TdpAcExpandedCard.Content, TdpAcCard)) TdpAcExpandedCard.Content = null;
+            if (ReferenceEquals(TdpDcExpandedCard.Content, TdpDcCard)) TdpDcExpandedCard.Content = null;
+            if (!_tdpCompactGrid.Children.Contains(TdpAcCard)) _tdpCompactGrid.Children.Add(TdpAcCard);
+            if (!_tdpCompactGrid.Children.Contains(TdpDcCard)) _tdpCompactGrid.Children.Add(TdpDcCard);
+            if (!ReferenceEquals(TdpCard.Content, _tdpCompactGrid)) TdpCard.Content = _tdpCompactGrid;
+        }
+    }
+
+    private void UpdateTdpCompactGridColumns(FrontendTdpPowerSource? activeRail)
+    {
+        Grid.SetColumn(TdpAcCard, activeRail == FrontendTdpPowerSource.DC ? 1 : 0);
+        Grid.SetColumn(TdpDcCard, activeRail == FrontendTdpPowerSource.DC ? 0 : 1);
+        Grid.SetColumnSpan(TdpAcCard, activeRail is null ? 1 : 2);
+        Grid.SetColumnSpan(TdpDcCard, activeRail is null ? 1 : 2);
+    }
+
+    private static void ApplyRailComboLayout(
+        SettingsCard compactCard,
+        SettingsCard acCard,
+        SettingsCard dcCard,
+        ComboBox acComboBox,
+        ComboBox dcComboBox,
+        FrontendTdpPowerSource? activeRail)
+    {
+        if (ReferenceEquals(compactCard.Content, acComboBox)) compactCard.Content = null;
+        if (ReferenceEquals(compactCard.Content, dcComboBox)) compactCard.Content = null;
+        if (acCard.Content is null) acCard.Content = acComboBox;
+        if (dcCard.Content is null) dcCard.Content = dcComboBox;
+        if (activeRail is null) return;
+
+        var selectedCard = activeRail == FrontendTdpPowerSource.AC ? acCard : dcCard;
+        var selectedComboBox = activeRail == FrontendTdpPowerSource.AC ? acComboBox : dcComboBox;
+        if (ReferenceEquals(selectedCard.Content, selectedComboBox)) selectedCard.Content = null;
+        compactCard.Content = selectedComboBox;
+    }
+
+    private static void SetVisibilityIfChanged(UIElement element, Visibility visibility)
+    {
+        if (element.Visibility != visibility) element.Visibility = visibility;
     }
 
     private void ApplyPendingSimplifiedTdpControlsPreference()
@@ -245,17 +352,6 @@ public sealed partial class DevicePage : UserControl
         var editable = snapshot.Available && snapshot.PersistenceWritable && !_batteryChargeLimitMutationBusy;
         BatteryChargeLimitEnabledToggleSwitch.IsEnabled = editable && snapshot.Initialized;
         BatteryChargeLimitSlider.IsEnabled = editable;
-        var current = snapshot.CurrentLimitPercent is { } currentPercent
-            ? MainUiStrings.Format("Device_Battery_CurrentKnown", "Current hardware: {0}%", currentPercent)
-            : MainUiStrings.Get("Device_Battery_CurrentUnavailable", "Current hardware: unavailable");
-        var desired = snapshot.Initialized
-            ? MainUiStrings.Format("Device_Battery_DesiredKnown", "Desired: {0}% ({1})",
-                snapshot.DesiredLimitPercent,
-                MainUiStrings.Get(snapshot.DesiredEnabled == true ? "Device_Battery_EnabledWord" : "Device_Battery_DisabledWord",
-                    snapshot.DesiredEnabled == true ? "enabled" : "disabled"))
-            : MainUiStrings.Get("Device_Battery_DesiredNotInitialized", "Desired: not initialized; choose a supported 60–100% value to take ownership.");
-        BatteryChargeLimitStatusText.Text = $"{current} · {desired}";
-
         BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Warning;
         if (!snapshot.Available)
         {
@@ -421,13 +517,8 @@ public sealed partial class DevicePage : UserControl
         _suppressMaximumProcessorStateEvents = true;
         try
         {
-            MaximumProcessorStateEnabledToggleSwitch.IsOn = snapshot.Enabled;
-            MaximumProcessorStateAcComboBox.SelectedItem = snapshot.Ac.DesiredPercent is { } ac
-                ? MaximumProcessorStatePercentages.FirstOrDefault(item => item.Percent == ac)
-                : null;
-            MaximumProcessorStateDcComboBox.SelectedItem = snapshot.Dc.DesiredPercent is { } dc
-                ? MaximumProcessorStatePercentages.FirstOrDefault(item => item.Percent == dc)
-                : null;
+            MaximumProcessorStateAcComboBox.SelectedItem = MaximumProcessorStateOptions.Single(item => item.Percent == snapshot.Ac.DesiredPercent);
+            MaximumProcessorStateDcComboBox.SelectedItem = MaximumProcessorStateOptions.Single(item => item.Percent == snapshot.Dc.DesiredPercent);
         }
         finally { _suppressMaximumProcessorStateEvents = false; }
 
@@ -479,29 +570,21 @@ public sealed partial class DevicePage : UserControl
         var editable = _maximumProcessorStateSnapshot.PersistenceWritable
             && _maximumProcessorStateSnapshot.ConfigurationValid
             && !_maximumProcessorStateMutationBusy;
-        MaximumProcessorStateEnabledToggleSwitch.IsEnabled = editable;
-        MaximumProcessorStateAcComboBox.IsEnabled = editable && _maximumProcessorStateSnapshot.Enabled;
-        MaximumProcessorStateDcComboBox.IsEnabled = editable && _maximumProcessorStateSnapshot.Enabled;
-    }
-
-    private async void MaximumProcessorStateEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressMaximumProcessorStateEvents || _frontend is null || _maximumProcessorStateMutationBusy) return;
-        var enabled = MaximumProcessorStateEnabledToggleSwitch.IsOn;
-        await RunMaximumProcessorStateMutationAsync(() => _frontend.SetDeviceMaximumProcessorStateEnabledAsync(enabled));
+        MaximumProcessorStateAcComboBox.IsEnabled = editable;
+        MaximumProcessorStateDcComboBox.IsEnabled = editable;
     }
 
     private async void MaximumProcessorStateAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressMaximumProcessorStateEvents || _frontend is null || _maximumProcessorStateMutationBusy
-            || MaximumProcessorStateAcComboBox.SelectedItem is not MaximumProcessorStatePercentItem item) return;
+            || MaximumProcessorStateAcComboBox.SelectedItem is not MaximumProcessorStateOptionItem item) return;
         await RunMaximumProcessorStateMutationAsync(() => _frontend.SetDeviceMaximumProcessorStateAcAsync(item.Percent));
     }
 
     private async void MaximumProcessorStateDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressMaximumProcessorStateEvents || _frontend is null || _maximumProcessorStateMutationBusy
-            || MaximumProcessorStateDcComboBox.SelectedItem is not MaximumProcessorStatePercentItem item) return;
+            || MaximumProcessorStateDcComboBox.SelectedItem is not MaximumProcessorStateOptionItem item) return;
         await RunMaximumProcessorStateMutationAsync(() => _frontend.SetDeviceMaximumProcessorStateDcAsync(item.Percent));
     }
 
@@ -653,6 +736,7 @@ public sealed partial class DevicePage : UserControl
 
         var keepDraft = preserveDirtyDraft && _tdpDraftDirty;
         _tdpSnapshot = snapshot;
+        _hasTdpSnapshot = true;
         if (!keepDraft)
         {
             if (snapshot.Configuration is { } configuration)
@@ -698,6 +782,7 @@ public sealed partial class DevicePage : UserControl
         foreach (var slider in new[] { TdpAcPl1Slider, TdpAcPl2Slider, TdpDcPl1Slider, TdpDcPl2Slider }) slider.IsEnabled = editable;
         SetTdpValueText(TdpAcPl1ValueText, _acPl1Draft); SetTdpValueText(TdpAcPl2ValueText, _acPl2Draft);
         SetTdpValueText(TdpDcPl1ValueText, _dcPl1Draft); SetTdpValueText(TdpDcPl2ValueText, _dcPl2Draft);
+        ApplyDevicePresentationLayout();
         if (!snapshot.Available) { TdpInfoBar.Message = MainUiStrings.Get("Device_Tdp_Unavailable", "TDP Control is unavailable on this device."); SetInfoBarOpen(TdpInfoBar, true); }
         else if (!snapshot.PersistenceWritable) { TdpInfoBar.Message = MainUiStrings.Get("Device_Tdp_SettingsUnwritable", "TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."); TdpInfoBar.Severity = InfoBarSeverity.Error; SetInfoBarOpen(TdpInfoBar, true); }
         else if (snapshot.Available) SetInfoBarOpen(TdpInfoBar, false);
@@ -1136,7 +1221,8 @@ public sealed partial class DevicePage : UserControl
         }
     }
 
-    private sealed record MaximumProcessorStatePercentItem(int Percent, string Label);
+    private readonly record struct DeviceControlLayoutKey(FrontendTdpPowerSource? ActiveRail, bool TdpExpanded);
+    private sealed record MaximumProcessorStateOptionItem(int? Percent, string Label);
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
     private sealed record PowerModeItem(WindowsPowerMode Mode, string Label);
 }

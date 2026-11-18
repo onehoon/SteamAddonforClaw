@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
-        <StackPanel Spacing="16">
+        <StackPanel Spacing="8">
             <TextBlock x:Uid="Settings_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Settings" />
 
             <ctcontrols:SettingsCard x:Name="UpdateCard" x:Uid="Settings_UpdateCard" Header="Application updates">

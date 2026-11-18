@@ -416,7 +416,8 @@ public sealed class UiArchitectureTests
         var tdp = ExtractMethod(page, "private void RenderTdp(");
         var battery = ExtractMethod(page, "private void RenderBatteryChargeLimit(");
 
-        Assert.Contains("TdpCard.Visibility = _featureSupport.Tdp", page, StringComparison.Ordinal);
+        Assert.Contains("SetVisibilityIfChanged(TdpCard, _featureSupport.Tdp && !tdpExpanded", page, StringComparison.Ordinal);
+        Assert.Contains("SetVisibilityIfChanged(TdpExpander, _featureSupport.Tdp && tdpExpanded", page, StringComparison.Ordinal);
         Assert.Contains("BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit", page, StringComparison.Ordinal);
         AssertUnsupportedFeatureClosesInfoBar(tdp, "if (!_featureSupport.Tdp)", "TdpInfoBar", "_tdpSnapshot = snapshot;");
         Assert.Contains("if (!snapshot.Available)", tdp, StringComparison.Ordinal);
@@ -429,6 +430,24 @@ public sealed class UiArchitectureTests
             "_batteryChargeLimitSnapshot = snapshot;");
         Assert.Contains("if (!snapshot.Available)", battery, StringComparison.Ordinal);
         Assert.Contains("SetInfoBarOpen(BatteryChargeLimitInfoBar, true)", battery, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Device_preference_hydration_does_not_render_placeholder_tdp_failure_before_capture()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var preference = ExtractMethod(page, "private void ApplySimplifiedTdpControlsPreference(");
+        var refresh = ExtractMethod(page, "internal async Task RefreshAsync()");
+        var tdp = ExtractMethod(page, "private void RenderTdp(");
+
+        Assert.Contains("if (_hasTdpSnapshot) RenderTdp(_tdpSnapshot)", preference, StringComparison.Ordinal);
+        Assert.Contains("else ApplyDevicePresentationLayout()", preference, StringComparison.Ordinal);
+        Assert.True(refresh.IndexOf("CaptureDeviceQuickSettingsAsync()", StringComparison.Ordinal)
+            < refresh.IndexOf("RenderTdp(snapshot.Tdp)", StringComparison.Ordinal));
+        Assert.Contains("_hasTdpSnapshot = true", tdp, StringComparison.Ordinal);
+        Assert.Contains("if (!snapshot.Available)", tdp, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(TdpInfoBar, true)", tdp, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -519,7 +538,8 @@ public sealed class UiArchitectureTests
         Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Slider x:Name=\"BatteryChargeLimitSlider\"", xaml, StringComparison.Ordinal);
         Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitValueText\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitStatusText\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("BatteryChargeLimitStatusText", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("MinWidth=\"520\"", xaml, StringComparison.Ordinal);
         Assert.Contains("RenderBatteryChargeLimit(snapshot.BatteryChargeLimit)", code, StringComparison.Ordinal);
         Assert.Contains("CaptureBatteryChargeLimitAsync", frontendContracts, StringComparison.Ordinal);
         Assert.Contains("SetDeviceBatteryChargeLimitPercentAsync", code, StringComparison.Ordinal);
@@ -584,7 +604,7 @@ public sealed class UiArchitectureTests
         Assert.Contains("Click=\"CenterMStartupDisableButton_Click\"", xaml, StringComparison.Ordinal);
 
         var requestStart = code.IndexOf("private async Task RequestCenterMTransitionAsync", StringComparison.Ordinal);
-        var requestEnd = code.IndexOf("private sealed record MaximumProcessorStatePercentItem", requestStart, StringComparison.Ordinal);
+        var requestEnd = code.IndexOf("private sealed record MaximumProcessorStateOptionItem", requestStart, StringComparison.Ordinal);
         Assert.True(requestStart >= 0 && requestEnd > requestStart);
         var request = code[requestStart..requestEnd];
         var confirmation = request.IndexOf("dialog.ShowAsync() != ContentDialogResult.Primary", StringComparison.Ordinal);

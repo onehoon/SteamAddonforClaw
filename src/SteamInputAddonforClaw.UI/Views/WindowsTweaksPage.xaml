@@ -4,12 +4,12 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
-        <StackPanel Spacing="16">
+        <StackPanel Spacing="8">
             <TextBlock x:Uid="Tweaks_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Tweaks" />
             <TextBlock x:Name="EntryPromptText" x:Uid="Tweaks_EntryPrompt" Text="Review the safety notice to open these controls." TextWrapping="Wrap" Visibility="Collapsed" />
             <TextBlock x:Name="OperationMessageText" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
-            <StackPanel x:Name="TweaksPanel" Spacing="12" Visibility="Collapsed">
-                <TextBlock x:Uid="Tweaks_GamingPerformanceHeader" Text="Gaming Performance" FontWeight="SemiBold" Margin="0,8,0,0" />
+            <StackPanel x:Name="TweaksPanel" Spacing="8" Visibility="Collapsed">
+                <TextBlock x:Uid="Tweaks_GamingPerformanceHeader" Text="Gaming Performance" FontWeight="SemiBold" Margin="0,4,0,0" />
                 <ctcontrols:SettingsCard x:Name="MemoryIntegrityCard" x:Uid="Tweaks_MemoryIntegrityCard" Header="Memory Integrity">
                     <ctcontrols:SettingsCard.Description>
                         <TextBlock x:Uid="Tweaks_MemoryIntegrityDescription" Text="Configure Windows kernel memory protection." MaxLines="1" TextTrimming="CharacterEllipsis" />
@@ -28,7 +28,7 @@
                         <ToggleSwitch x:Name="VirtualMachinePlatformSwitch" VerticalAlignment="Center" IsEnabled="False" OffContent="" OnContent="" Toggled="TweakSwitch_Toggled" />
                     </StackPanel>
                 </ctcontrols:SettingsCard>
-                <TextBlock x:Uid="Tweaks_RegistryTweaksHeader" Text="Registry Tweaks" FontWeight="SemiBold" Margin="0,12,0,0" />
+                <TextBlock x:Uid="Tweaks_RegistryTweaksHeader" Text="Registry Tweaks" FontWeight="SemiBold" Margin="0,4,0,0" />
                 <ctcontrols:SettingsCard x:Name="InstantContextMenusCard" x:Uid="Tweaks_InstantContextMenusCard" Header="Faster Menus">
                     <ctcontrols:SettingsCard.Description>
                         <TextBlock x:Uid="Tweaks_InstantContextMenusDescription" Text="Disable menu animation and reduce submenu delay to 10 ms." MaxLines="1" TextTrimming="CharacterEllipsis" />

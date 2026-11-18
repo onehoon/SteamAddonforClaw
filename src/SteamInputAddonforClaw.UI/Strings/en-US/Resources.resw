@@ -29,12 +29,6 @@
   <data name="Settings_AppTheme_Description" xml:space="preserve">
     <value>Choose the main app appearance.</value>
   </data>
-  <data name="Device_Battery_CurrentKnown" xml:space="preserve"><value>Current hardware: {0}%</value></data>
-  <data name="Device_Battery_CurrentUnavailable" xml:space="preserve"><value>Current hardware: unavailable</value></data>
-  <data name="Device_Battery_DesiredKnown" xml:space="preserve"><value>Desired: {0}% ({1})</value></data>
-  <data name="Device_Battery_DesiredNotInitialized" xml:space="preserve"><value>Desired: not initialized; choose a supported 60–100% value to take ownership.</value></data>
-  <data name="Device_Battery_EnabledWord" xml:space="preserve"><value>enabled</value></data>
-  <data name="Device_Battery_DisabledWord" xml:space="preserve"><value>disabled</value></data>
   <data name="Device_Battery_Unavailable" xml:space="preserve"><value>Battery charge-limit control is unavailable on this device.</value></data>
   <data name="Device_Battery_SettingsUnwritable" xml:space="preserve"><value>Battery settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
   <data name="Device_Battery_MismatchToDesired" xml:space="preserve"><value>Current hardware does not match the saved desired battery charge limit; it will be reconciled on the next lifecycle event.</value></data>
@@ -44,7 +38,6 @@
   <data name="Device_CenterM_Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Device_CenterM_ChangeCancelled" xml:space="preserve"><value>The controller authority change was cancelled.</value></data>
   <data name="Device_CenterM_ChangeFailed" xml:space="preserve"><value>The controller authority change could not be completed.</value></data>
-  <data name="Device_CenterMStartupCard.Description" xml:space="preserve"><value>Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.</value></data>
   <data name="Device_CenterM_EnableAndRestart" xml:space="preserve"><value>Enable and Restart</value></data>
   <data name="Device_CenterM_EnableConfirmation" xml:space="preserve"><value>Restore MSI Center M controller authority.&#xA;&#xA;Windows must restart to apply this change.</value></data>
   <data name="Device_CenterM_EnableTitle" xml:space="preserve"><value>Enable MSI Center M</value></data>
@@ -75,17 +68,18 @@
   <data name="Device_CpuBoost_RuntimeInterrupted" xml:space="preserve"><value>CPU Boost could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Device_CpuBoost_SettingsUnwritable" xml:space="preserve"><value>CPU Boost settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
   <data name="Device_CpuBoostAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_CpuBoostCard.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Device_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
-  <data name="Device_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
   <data name="Device_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Device_MaximumProcessorState_InvalidSettings" xml:space="preserve"><value>The saved Maximum Processor State settings are invalid. No Windows changes were made.</value></data>
   <data name="Device_MaximumProcessorState_RuntimeInterrupted" xml:space="preserve"><value>Maximum Processor State could not be updated because the Runtime connection was interrupted.</value></data>
   <data name="Device_MaximumProcessorState_SettingsUnavailable" xml:space="preserve"><value>The current Windows maximum processor state could not be read.</value></data>
   <data name="Device_MaximumProcessorState_SettingsUnwritable" xml:space="preserve"><value>Maximum Processor State settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
   <data name="Device_MaximumProcessorState_UpdateFailed" xml:space="preserve"><value>Maximum Processor State could not be updated.</value></data>
+  <data name="Device_MaximumProcessorState_DoNotChange" xml:space="preserve"><value>Do not change</value></data>
   <data name="Device_MaximumProcessorStateAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_MaximumProcessorStateCard.Header" xml:space="preserve"><value>Maximum Processor State</value></data>
   <data name="Device_MaximumProcessorStateDcCard.Header" xml:space="preserve"><value>DC</value></data>
-  <data name="Device_MaximumProcessorStateExpander.Description" xml:space="preserve"><value>Set the Windows maximum processor performance state to 99% or 100%. This is not a CPU utilization limit. Turning this off stops applying the setting but does not restore the previous value.</value></data>
   <data name="Device_MaximumProcessorStateExpander.Header" xml:space="preserve"><value>Maximum Processor State</value></data>
   <data name="MsiUpdates_CatalogOnly.Text" xml:space="preserve"><value>Read-only version check · update availability is shown; downloads and installation are not supported yet.</value></data>
   <data name="MsiUpdates_CheckButton.Content" xml:space="preserve"><value>Check for updates</value></data>
@@ -132,8 +126,8 @@
   <data name="Device_PowerMode_SettingsUnavailable" xml:space="preserve"><value>Power Mode settings are unavailable.</value></data>
   <data name="Device_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
   <data name="Device_PowerModeAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_PowerModeCard.Header" xml:space="preserve"><value>Power Mode</value></data>
   <data name="Device_PowerModeDcCard.Header" xml:space="preserve"><value>DC</value></data>
-  <data name="Device_PowerModeExpander.Description" xml:space="preserve"><value>Configured Windows 11 power mode for each power rail.</value></data>
   <data name="Device_PowerModeExpander.Header" xml:space="preserve"><value>Power Mode</value></data>
   <data name="Device_Tdp_ChangeFailed" xml:space="preserve"><value>The TDP change failed.</value></data>
   <data name="Device_Tdp_ResultFail" xml:space="preserve"><value>Fail</value></data>
@@ -144,8 +138,8 @@
   <data name="Device_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
   <data name="Device_TdpAcRailLabel.Text" xml:space="preserve"><value>AC</value></data>
   <data name="Device_TdpDcRailLabel.Text" xml:space="preserve"><value>DC</value></data>
-  <data name="Device_TdpCard.Description" xml:space="preserve"><value>Configure processor power limits for AC and DC operation.</value></data>
   <data name="Device_TdpCard.Header" xml:space="preserve"><value>TDP Control</value></data>
+  <data name="Device_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>Controller</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>

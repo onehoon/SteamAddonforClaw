@@ -29,11 +29,11 @@ internal sealed record MaximumProcessorStateRuntimeSnapshot(
     public static readonly MaximumProcessorStateRuntimeSnapshot Empty = new(
         MaximumProcessorStateSideReading.Unavailable,
         MaximumProcessorStateSideReading.Unavailable,
-        100, 100, false, false, false, null);
+        null, null, false, false, false, null);
 }
 
-/// <summary>Device-only owner for the PROCTHROTTLEMAX desired pair. Missing configuration is
-/// disabled with prospective 100/100 selections; reading it never persists or writes Windows.</summary>
+/// <summary>Device-only owner for independently managed PROCTHROTTLEMAX AC/DC values. Missing or
+/// disabled configuration means neither rail is managed; reading it never persists or writes Windows.</summary>
 internal sealed class MaximumProcessorStateRuntime
 {
     private const int DefaultPercent = 100;
@@ -106,14 +106,14 @@ internal sealed class MaximumProcessorStateRuntime
         }
     }
 
-    internal MaximumProcessorStateMutationResult SetAc(int percent) => SetSide(percent, isAc: true);
-    internal MaximumProcessorStateMutationResult SetDc(int percent) => SetSide(percent, isAc: false);
+    internal MaximumProcessorStateMutationResult SetAc(int? percent) => SetSide(percent, isAc: true);
+    internal MaximumProcessorStateMutationResult SetDc(int? percent) => SetSide(percent, isAc: false);
 
-    private MaximumProcessorStateMutationResult SetSide(int percent, bool isAc)
+    private MaximumProcessorStateMutationResult SetSide(int? percent, bool isAc)
     {
         lock (_mutationGate.Sync)
         {
-            if (!WindowsMaximumProcessorStatePowerPolicy.IsAllowed(percent))
+            if (percent is { } selectedPercent && !WindowsMaximumProcessorStatePowerPolicy.IsAllowed(selectedPercent))
             {
                 RefreshSnapshot(_profileStore.Load(), $"Only 99% and 100% are supported for {(isAc ? "AC" : "DC")}.");
                 return new(MaximumProcessorStateMutationOutcome.InvalidTarget, "Only 99% and 100% are supported.");
@@ -127,19 +127,43 @@ internal sealed class MaximumProcessorStateRuntime
             }
 
             var previous = loaded.Document.Device.Performance.MaximumProcessorState;
-            if (previous is null || !IsValid(previous) || previous.Enabled != true)
+            if (previous is not null && !IsValid(previous))
             {
-                RefreshSnapshot(loaded, "Maximum Processor State must be enabled before changing an AC or DC value.");
-                return new(MaximumProcessorStateMutationOutcome.InvalidTarget, "Maximum Processor State must be enabled before changing an AC or DC value.");
+                RefreshSnapshot(loaded, "The saved Maximum Processor State configuration is invalid.");
+                return new(MaximumProcessorStateMutationOutcome.InvalidTarget, "The saved Maximum Processor State configuration is invalid.");
             }
 
-            var updatedSettings = isAc ? previous with { Ac = percent } : previous with { Dc = percent };
+            // Enabled=false is the legacy global-off state. Treat its stored pair as unmanaged so
+            // selecting one concrete rail never silently reactivates the other legacy value.
+            var currentAc = previous?.Enabled == true ? previous.Ac : null;
+            var currentDc = previous?.Enabled == true ? previous.Dc : null;
+            var updatedAc = isAc ? percent : currentAc;
+            var updatedDc = isAc ? currentDc : percent;
+            if (updatedAc == currentAc && updatedDc == currentDc)
+            {
+                RefreshSnapshot(loaded);
+                return new(MaximumProcessorStateMutationOutcome.Succeeded, null);
+            }
+
+            var updatedSettings = new DeviceMaximumProcessorStateSettings
+            {
+                Enabled = true,
+                Ac = updatedAc,
+                Dc = updatedDc
+            };
             var updatedDocument = WithSettings(loaded.Document, updatedSettings);
             if (!TrySave(updatedDocument, previous, isAc ? "AC" : "DC", out var persistenceFailure))
                 return new(MaximumProcessorStateMutationOutcome.PersistenceFailed, persistenceFailure);
 
-            var applied = _powerPolicy.Apply(isAc ? percent : null, isAc ? null : percent);
-            return CompleteApply(updatedSettings, applied, isAc ? "AC" : "DC");
+            if (percent is { } value)
+            {
+                var applied = _powerPolicy.Apply(isAc ? value : null, isAc ? null : value);
+                return CompleteApply(updatedSettings, applied, isAc ? "AC" : "DC");
+            }
+
+            var current = _powerPolicy.Read();
+            SetSnapshot(CreateSnapshot(current, updatedSettings, persistenceWritable: true, current.FailureMessage));
+            return new(MaximumProcessorStateMutationOutcome.Succeeded, null);
         }
     }
 
@@ -250,8 +274,8 @@ internal sealed class MaximumProcessorStateRuntime
 
     private static bool IsValid(DeviceMaximumProcessorStateSettings settings)
         => settings.Enabled is not null
-            && settings.Ac is { } ac && WindowsMaximumProcessorStatePowerPolicy.IsAllowed(ac)
-            && settings.Dc is { } dc && WindowsMaximumProcessorStatePowerPolicy.IsAllowed(dc);
+            && (settings.Ac is null || WindowsMaximumProcessorStatePowerPolicy.IsAllowed(settings.Ac.Value))
+            && (settings.Dc is null || WindowsMaximumProcessorStatePowerPolicy.IsAllowed(settings.Dc.Value));
 
     private static MaximumProcessorStateRuntimeSnapshot CreateSnapshot(
         MaximumProcessorStateSystemState current,
@@ -260,12 +284,13 @@ internal sealed class MaximumProcessorStateRuntime
         string? failure)
     {
         var valid = settings is null || IsValid(settings);
+        var managing = settings?.Enabled == true;
         return new MaximumProcessorStateRuntimeSnapshot(
             current.Ac,
             current.Dc,
-            settings is null ? DefaultPercent : valid ? settings.Ac : null,
-            settings is null ? DefaultPercent : valid ? settings.Dc : null,
-            settings?.Enabled == true,
+            managing && valid ? settings!.Ac : null,
+            managing && valid ? settings!.Dc : null,
+            managing,
             valid,
             persistenceWritable,
             failure ?? current.FailureMessage);

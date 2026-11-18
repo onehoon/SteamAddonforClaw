@@ -32,8 +32,12 @@ public sealed class MainUiPowerSourceSettingsTests
         var steam = Read(root, "ProfilePage.xaml.cs");
         var xbox = Read(root, "XboxPage.xaml.cs");
 
-        Assert.Contains("TdpAcCard.Visibility = CpuBoostAcCard.Visibility = PowerModeAcCard.Visibility = MaximumProcessorStateAcCard.Visibility = ac", device);
-        Assert.Contains("TdpDcCard.Visibility = CpuBoostDcCard.Visibility = PowerModeDcCard.Visibility = MaximumProcessorStateDcCard.Visibility = dc", device);
+        Assert.Contains("SetVisibilityIfChanged(TdpAcCard, ac)", device);
+        Assert.Contains("SetVisibilityIfChanged(CpuBoostAcCard, ac)", device);
+        Assert.Contains("SetVisibilityIfChanged(MaximumProcessorStateAcCard, ac)", device);
+        Assert.Contains("SetVisibilityIfChanged(TdpDcCard, dc)", device);
+        Assert.Contains("SetVisibilityIfChanged(CpuBoostDcCard, dc)", device);
+        Assert.Contains("SetVisibilityIfChanged(MaximumProcessorStateDcCard, dc)", device);
         foreach (var (source, fields) in new[]
         {
             (steam, new[] { "CpuBoost", "Tdp", "PowerMode", "GpuMinimumClock", "FpsLimit" }),
@@ -51,10 +55,9 @@ public sealed class MainUiPowerSourceSettingsTests
     }
 
     [Theory]
-    [InlineData("DevicePage.xaml", "Device_TdpCard", "TdpEnabledToggleSwitch")]
     [InlineData("ProfilePage.xaml", "Steam_TdpCard", "TdpEnabledToggle")]
     [InlineData("XboxPage.xaml", "Xbox_TdpCard", "TdpEnabledToggle")]
-    public void Tdp_uses_one_flat_card_with_hidden_toggle_and_flexible_slider_columns(
+    public void Game_profile_tdp_uses_one_flat_card_with_hidden_toggle_and_flexible_slider_columns(
         string file, string uid, string toggleName)
     {
         var path = Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", file);
@@ -86,6 +89,25 @@ public sealed class MainUiPowerSourceSettingsTests
             Assert.Equal("*", (string?)grid.Elements().First(element => element.Name.LocalName == "Grid.ColumnDefinitions")
                 .Elements().Last(element => element.Name.LocalName == "ColumnDefinition").Attribute("Width"));
         }
+    }
+
+    [Fact]
+    public void Device_tdp_reuses_the_same_rail_controls_in_compact_and_expanded_hosts()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = Read(root, "DevicePage.xaml");
+        var code = Read(root, "DevicePage.xaml.cs");
+        XNamespace xamlNs = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var document = XDocument.Parse(xaml);
+
+        Assert.Contains("x:Name=\"TdpCard\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TdpExpander\"", xaml, StringComparison.Ordinal);
+        Assert.Equal(1, document.Descendants().Count(element => (string?)element.Attribute(xamlNs + "Name") == "TdpAcCard"));
+        Assert.Equal(1, document.Descendants().Count(element => (string?)element.Attribute(xamlNs + "Name") == "TdpDcCard"));
+        Assert.Contains("ReferenceEquals(TdpAcExpandedCard.Content, TdpAcCard)", code, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(TdpDcExpandedCard.Content, TdpDcCard)", code, StringComparison.Ordinal);
+        Assert.Contains("_tdpCompactGrid.Children.Add(TdpAcCard)", code, StringComparison.Ordinal);
+        Assert.Contains("_tdpCompactGrid.Children.Add(TdpDcCard)", code, StringComparison.Ordinal);
     }
 
     [Fact]

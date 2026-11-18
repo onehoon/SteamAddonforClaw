@@ -9,7 +9,7 @@
         <DataTemplate x:Key="ShortcutCardTemplate" x:DataType="frontend:FrontendShortcutEditorTile">
             <Border
                 Tag="{x:Bind TileId}"
-                Margin="0,0,12,12"
+                Margin="0,0,8,8"
                 Padding="16"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"

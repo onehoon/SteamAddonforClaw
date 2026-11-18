@@ -3,7 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
-        <StackPanel Spacing="16">
+        <StackPanel Spacing="8">
             <StackPanel Spacing="4">
                 <TextBlock x:Uid="Controller_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Controller" />
                 <TextBlock x:Uid="Controller_PageDescription" Opacity="0.7" Text="Configure controller buttons and controller-specific settings." TextWrapping="Wrap" />
@@ -36,10 +36,10 @@
 
             <TextBlock x:Name="MappingUnavailableText" x:Uid="Controller_MappingUnavailable" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
 
-            <StackPanel x:Name="MappingContent" Spacing="12">
+            <StackPanel x:Name="MappingContent" Spacing="8">
                 <TextBlock x:Uid="Controller_ButtonMappingHeader" Text="Button Mapping" FontSize="18" FontWeight="SemiBold" />
 
-                <StackPanel x:Name="FrontButtonMappingContent" Spacing="12">
+                <StackPanel x:Name="FrontButtonMappingContent" Spacing="8">
                 <ctcontrols:SettingsExpander x:Uid="Controller_GamebarExpander" Header="XBOX Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="False">
                     <ctcontrols:SettingsExpander.HeaderIcon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE990;" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
