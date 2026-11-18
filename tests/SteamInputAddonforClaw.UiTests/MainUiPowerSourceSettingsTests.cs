@@ -62,6 +62,10 @@ public sealed class MainUiPowerSourceSettingsTests
         XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
         var tdpCard = Assert.Single(document.Descendants(), element =>
             element.Name.LocalName == "SettingsCard" && (string?)element.Attribute(xaml + "Uid") == uid);
+        Assert.Equal("Vertical", (string?)tdpCard.Attribute("ContentAlignment"));
+        Assert.Equal("Stretch", (string?)tdpCard.Attribute("HorizontalContentAlignment"));
+        var content = Assert.Single(tdpCard.Elements(), element => element.Name.LocalName == "StackPanel");
+        Assert.Equal("Stretch", (string?)content.Attribute("HorizontalAlignment"));
         Assert.Null(document.Descendants().SingleOrDefault(element =>
             element.Name.LocalName == "SettingsExpander" && (string?)element.Attribute(xaml + "Name") == "TdpExpander"));
 

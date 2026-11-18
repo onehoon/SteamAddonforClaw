@@ -64,9 +64,10 @@
 
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
             <ctcontrols:SettingsCard x:Name="TdpCard" x:Uid="Device_TdpCard" Header="TDP Control"
-                Description="Configure processor power limits for AC and DC operation.">
+                Description="Configure processor power limits for AC and DC operation."
+                ContentAlignment="Vertical" HorizontalContentAlignment="Stretch">
                 <ctcontrols:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsCard.HeaderIcon>
-                <StackPanel Spacing="8">
+                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
                     <ToggleSwitch x:Name="TdpEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
                     <StackPanel x:Name="TdpAcCard" Spacing="6">
                         <TextBlock x:Uid="Device_TdpAcRailLabel" Text="AC" FontWeight="SemiBold" />
