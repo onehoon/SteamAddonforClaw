@@ -66,11 +66,12 @@ public sealed partial class OverlayWindow
         };
         for (var column = 0; column < ShortcutVisualColumnCount; column++)
             _shortcutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var rowMargin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0));
         var separator = new Border
         {
             Height = OverlayQamResources.Get("QamSectionSeparatorThickness", new Thickness(0, 1, 0, 0)).Top,
             Background = OverlayQamResources.Brush("QamSeparatorBrush"),
-            Margin = new Thickness(0, 4, 0, 4),
+            Margin = new Thickness(rowMargin.Left, 0, rowMargin.Right, 12),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             IsHitTestVisible = false,
         };

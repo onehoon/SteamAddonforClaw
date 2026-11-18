@@ -45,6 +45,7 @@ public sealed partial class OverlayWindow
         rootView.Visibility = Visibility.Collapsed;
         detailView.Visibility = Visibility.Visible;
         DetailBackButton.Visibility = Visibility.Visible;
+        PageTitle.Opacity = 1.0;
         PageTitle.Text = title;
         PageTitle.Visibility = Visibility.Visible;
         _pageRows[tab] = detailRows;
@@ -69,6 +70,7 @@ public sealed partial class OverlayWindow
         detail.DetailView.Visibility = Visibility.Collapsed;
         detail.RootView.Visibility = Visibility.Visible;
         DetailBackButton.Visibility = Visibility.Collapsed;
+        PageTitle.Opacity = 1.0;
         PageTitle.Text = LabelFor(detail.Tab);
         PageTitle.Visibility = Visibility.Visible;
         _pageRows[detail.Tab] = detail.RootRows;
@@ -98,6 +100,7 @@ public sealed partial class OverlayWindow
         detail.DetailView.Visibility = Visibility.Collapsed;
         detail.RootView.Visibility = Visibility.Visible;
         DetailBackButton.Visibility = Visibility.Collapsed;
+        PageTitle.Opacity = 1.0;
         PageTitle.Text = LabelFor(_tabState.SelectedTab);
         PageTitle.Visibility = Visibility.Visible;
         _pageRows[detail.Tab] = detail.RootRows;

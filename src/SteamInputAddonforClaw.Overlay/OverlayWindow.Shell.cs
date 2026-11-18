@@ -148,6 +148,7 @@ public sealed partial class OverlayWindow
         ResetShortcutQuickSettingsForShow();
         PrepareActiveProfileFirstShow();
         ResetDetailForTabChangeOrShow();
+        PageTitle.Opacity = 1.0;
         _tabState.ResetForShow();
         ApplySelectedTabVisualState();
     }
@@ -278,6 +279,8 @@ public sealed partial class OverlayWindow
 
         _numericSliderRepeatTarget.Clear();
         var selected = _tabState.SelectedTab;
+        if (selected != AddonQuickSettingsTabId.Shortcut && PageTitle.Opacity != 1.0)
+            PageTitle.Opacity = 1.0;
         if (_activeDetailPage is null)
         {
             DetailBackButton.Visibility = Visibility.Collapsed;

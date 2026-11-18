@@ -116,14 +116,17 @@ public sealed partial class OverlayWindow
         _controllerLedDetailRows.Clear();
         BuildControllerLedRows(rows, _controllerLedDetailRows);
         BuildControllerVibrationRows(vibrationSection, rows);
-        var steamCard = CreateOverlaySectionCard(steamSection);
+        var steamCard = CreateOverlaySectionCard(steamSection, additionalTopPadding: 2.0, additionalBottomPadding: 7.0);
         SetOverlaySectionSeparator(steamCard, visible: false);
         root.Children.Add(steamCard);
-        var mappingCard = CreateOverlaySectionCard(mappingSection);
+        var mappingCard = CreateOverlaySectionCard(mappingSection, additionalTopPadding: 2.0, additionalBottomPadding: 7.0);
         SetOverlaySectionSeparator(mappingCard, visible: true);
         root.Children.Add(mappingCard);
         root.Children.Add(_controllerLedSectionCard!);
-        _controllerVibrationSectionCard = CreateOverlaySectionCard(vibrationSection);
+        _controllerVibrationSectionCard = CreateOverlaySectionCard(
+            vibrationSection,
+            additionalTopPadding: 2.0,
+            additionalBottomPadding: 7.0);
         SetOverlaySectionSeparator(_controllerVibrationSectionCard, visible: true);
         root.Children.Add(_controllerVibrationSectionCard);
 
@@ -250,7 +253,7 @@ public sealed partial class OverlayWindow
         AddControllerRow(options, detailRows, _controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities,
             () => _controllerLedMutationInFlight && _controllerLedAvailable && _controllerLed.Enabled);
         details.Children.Add(options);
-        _controllerLedDetailView = CreateOverlaySectionCard(details);
+        _controllerLedDetailView = CreateOverlaySectionCard(details, additionalTopPadding: 7.0, additionalBottomPadding: 7.0);
         SetOverlaySectionSeparator(_controllerLedDetailView, visible: false);
         _controllerLedDetailView.Visibility = Visibility.Collapsed;
 

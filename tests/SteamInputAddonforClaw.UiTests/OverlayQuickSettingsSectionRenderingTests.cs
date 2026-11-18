@@ -143,6 +143,60 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
     }
 
     [Fact]
+    public void Profile_fps_section_padding_tracks_detail_visibility_and_retains_header_control()
+    {
+        var header = ToggleRow(QuickSettingsRowId.ProfileFpsLimitEnabled);
+        var ac = NumericRow(QuickSettingsRowId.ProfileFpsLimitAc, 60);
+        var dc = NumericRow(QuickSettingsRowId.ProfileFpsLimitDc, 45);
+        var enabled = new QuickSettingsSection(QuickSettingsSectionId.ProfileFpsLimit, "Intel FPS Limit", [header, ac, dc]);
+        var enabledRows = OverlayQuickSettingsSectionRendering.DescribeRows(enabled);
+        var enabledAdjustment = OverlayQuickSettingsSectionRendering.GetSectionCardPaddingAdjustment(enabled, enabledRows);
+
+        Assert.Equal(12, 10 + enabledAdjustment.AdditionalTopPadding);
+        Assert.Equal(12, 5 + enabledAdjustment.AdditionalBottomPadding);
+
+        var headerControl = new object();
+        var existingControls = enabledRows.ToDictionary(
+            row => row.Row.RowId,
+            row => row.Row.RowId == header.RowId ? headerControl : new object());
+        var disabled = enabled with
+        {
+            Rows = [
+                header with { Value = QuickSettingsValue.Boolean(false) },
+                ac with { Visible = false },
+                dc with { Visible = false },
+            ],
+        };
+        var disabledPlan = OverlayQuickSettingsSectionRendering.PlanRows(
+            enabledRows.ToDictionary(row => row.Row.RowId), disabled);
+        var disabledAdjustment = OverlayQuickSettingsSectionRendering.GetSectionCardPaddingAdjustment(
+            disabled, disabledPlan.DesiredRows);
+        var disabledControls = ApplyRowPlan(
+            enabledRows.ToDictionary(row => row.Row.RowId), existingControls, disabledPlan);
+
+        Assert.Equal(12, 10 + disabledAdjustment.AdditionalTopPadding);
+        Assert.Equal(12, 10 + disabledAdjustment.AdditionalBottomPadding);
+        Assert.DoesNotContain(header.RowId, disabledPlan.ChangedRowIds);
+        Assert.Same(headerControl, disabledControls[header.RowId]);
+        Assert.DoesNotContain(ac.RowId, disabledControls.Keys);
+        Assert.DoesNotContain(dc.RowId, disabledControls.Keys);
+
+        var restoredPlan = OverlayQuickSettingsSectionRendering.PlanRows(
+            disabledPlan.DesiredRows.ToDictionary(row => row.Row.RowId), enabled);
+        var restoredAdjustment = OverlayQuickSettingsSectionRendering.GetSectionCardPaddingAdjustment(
+            enabled, restoredPlan.DesiredRows);
+        var restoredControls = ApplyRowPlan(
+            disabledPlan.DesiredRows.ToDictionary(row => row.Row.RowId), disabledControls, restoredPlan);
+
+        Assert.Equal(12, 10 + restoredAdjustment.AdditionalTopPadding);
+        Assert.Equal(12, 5 + restoredAdjustment.AdditionalBottomPadding);
+        Assert.DoesNotContain(header.RowId, restoredPlan.ChangedRowIds);
+        Assert.Same(headerControl, restoredControls[header.RowId]);
+        Assert.Contains(ac.RowId, restoredControls.Keys);
+        Assert.Contains(dc.RowId, restoredControls.Keys);
+    }
+
+    [Fact]
     public void Row_plan_replaces_only_rows_with_incompatible_rendering_metadata()
     {
         var header = ToggleRow(QuickSettingsRowId.DeviceTdpEnabled);
