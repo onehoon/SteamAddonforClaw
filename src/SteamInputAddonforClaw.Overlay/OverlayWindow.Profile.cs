@@ -40,8 +40,7 @@ public sealed partial class OverlayWindow
     private void ProfileContentColumn_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         var (width, height) = CalculateProfileArtworkSize(e.NewSize.Width);
-        if (Math.Abs(ProfileArtworkHost.Width - width) >= 0.0001
-            || Math.Abs(ProfileArtworkHost.Height - height) >= 0.0001)
+        if (ShouldUpdateProfileArtworkSize(ProfileArtworkHost.Width, ProfileArtworkHost.Height, width, height))
         {
             ProfileArtworkHost.Width = width;
             ProfileArtworkHost.Height = height;
@@ -93,6 +92,16 @@ public sealed partial class OverlayWindow
             : 0;
         return (width, width * 430.0 / 920.0);
     }
+
+    internal static bool ShouldUpdateProfileArtworkSize(
+        double currentWidth,
+        double currentHeight,
+        double width,
+        double height) =>
+        !double.IsFinite(currentWidth)
+        || !double.IsFinite(currentHeight)
+        || Math.Abs(currentWidth - width) >= 0.0001
+        || Math.Abs(currentHeight - height) >= 0.0001;
 
     private FrameworkElement BuildProfilePage()
     {
