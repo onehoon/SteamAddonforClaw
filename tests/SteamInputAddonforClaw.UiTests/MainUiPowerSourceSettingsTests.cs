@@ -111,6 +111,70 @@ public sealed class MainUiPowerSourceSettingsTests
     }
 
     [Fact]
+    public void Device_tdp_rail_label_and_pl1_share_a_row_with_pl2_below()
+    {
+        var root = FindRepositoryRoot();
+        var document = XDocument.Parse(Read(root, "DevicePage.xaml"));
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        foreach (var (railName, labelUid, pl1Name, pl2Name, pl1SliderName) in new[]
+        {
+            ("TdpAcCard", "Device_TdpAcRailLabel", "TdpAcPl1Row", "TdpAcPl2Row", "TdpAcPl1Slider"),
+            ("TdpDcCard", "Device_TdpDcRailLabel", "TdpDcPl1Row", "TdpDcPl2Row", "TdpDcPl1Slider")
+        })
+        {
+            var rail = Assert.Single(document.Descendants(), element => (string?)element.Attribute(xaml + "Name") == railName);
+            Assert.Equal("Grid", rail.Name.LocalName);
+            var railColumns = Assert.Single(rail.Elements(), element => element.Name.LocalName == "Grid.ColumnDefinitions")
+                .Elements().Select(element => (string?)element.Attribute("Width")).ToArray();
+            Assert.Equal(new[] { "Auto", "*" }, railColumns);
+
+            var label = Assert.Single(rail.Descendants(), element => (string?)element.Attribute(xaml + "Uid") == labelUid);
+            Assert.Equal("0", (string?)label.Attribute("Grid.Row"));
+            Assert.Equal("0", (string?)label.Attribute("Grid.Column"));
+
+            var pl1Row = Assert.Single(rail.Descendants(), element => (string?)element.Attribute(xaml + "Name") == pl1Name);
+            Assert.Equal("0", (string?)pl1Row.Attribute("Grid.Row"));
+            Assert.Equal("1", (string?)pl1Row.Attribute("Grid.Column"));
+            var pl1Slider = Assert.Single(pl1Row.Descendants(), element => (string?)element.Attribute(xaml + "Name") == pl1SliderName);
+            var pl1Columns = Assert.Single(pl1Row.Elements(), element => element.Name.LocalName == "Grid.ColumnDefinitions")
+                .Elements().Select(element => (string?)element.Attribute("Width")).ToArray();
+            Assert.Equal("*", pl1Columns[^1]);
+            Assert.Equal("4", (string?)pl1Slider.Attribute("Grid.Column"));
+
+            var pl2Row = Assert.Single(rail.Descendants(), element => (string?)element.Attribute(xaml + "Name") == pl2Name);
+            Assert.Equal("1", (string?)pl2Row.Attribute("Grid.Row"));
+            Assert.Equal("1", (string?)pl2Row.Attribute("Grid.Column"));
+        }
+    }
+
+    [Fact]
+    public void Device_tdp_containers_stay_hidden_until_the_first_authoritative_snapshot()
+    {
+        var root = FindRepositoryRoot();
+        var document = XDocument.Parse(Read(root, "DevicePage.xaml"));
+        var code = Read(root, "DevicePage.xaml.cs");
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        foreach (var name in new[] { "TdpCard", "TdpExpander" })
+        {
+            var container = Assert.Single(document.Descendants(), element => (string?)element.Attribute(xaml + "Name") == name);
+            Assert.Equal("Collapsed", (string?)container.Attribute("Visibility"));
+        }
+
+        var layout = ExtractMethod(code, "private void ApplyDevicePresentationLayout()");
+        Assert.Contains("var tdpReady = _hasTdpSnapshot;", layout, StringComparison.Ordinal);
+        Assert.Contains("_featureSupport.Tdp && tdpReady && !tdpExpanded", layout, StringComparison.Ordinal);
+        Assert.Contains("_featureSupport.Tdp && tdpReady && tdpExpanded", layout, StringComparison.Ordinal);
+
+        var render = ExtractMethod(code, "private void RenderTdp(");
+        Assert.True(render.IndexOf("_hasTdpSnapshot = true;", StringComparison.Ordinal)
+            < render.IndexOf("ApplyDevicePresentationLayout();", StringComparison.Ordinal));
+        Assert.Contains("if (!snapshot.Available)", render, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(TdpInfoBar, true)", render, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Main_settings_owns_shared_preferences_and_quick_overlay_keeps_only_its_own_controls()
     {
         var root = FindRepositoryRoot();

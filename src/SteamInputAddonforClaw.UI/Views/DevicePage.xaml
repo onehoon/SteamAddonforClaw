@@ -62,27 +62,31 @@
             </ctcontrols:SettingsCard>
 
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
-            <ctcontrols:SettingsCard x:Name="TdpCard" x:Uid="Device_TdpCard" Header="TDP Control">
+            <ctcontrols:SettingsCard x:Name="TdpCard" x:Uid="Device_TdpCard" Header="TDP Control" Visibility="Collapsed">
                 <ctcontrols:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsCard.HeaderIcon>
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsExpander x:Name="TdpExpander" x:Uid="Device_TdpExpander" Header="TDP Control" IsExpanded="False">
+            <ctcontrols:SettingsExpander x:Name="TdpExpander" x:Uid="Device_TdpExpander" Header="TDP Control" IsExpanded="False" Visibility="Collapsed">
                 <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="TdpEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard x:Name="TdpAcExpandedCard">
-                        <StackPanel x:Name="TdpAcCard" Spacing="6">
-                            <TextBlock x:Uid="Device_TdpAcRailLabel" Text="AC" FontWeight="SemiBold" />
-                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                            <Grid x:Name="TdpAcPl2Row" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                        </StackPanel>
+                        <Grid x:Name="TdpAcCard" ColumnSpacing="8" RowSpacing="6">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBlock x:Uid="Device_TdpAcRailLabel" Grid.Row="0" Grid.Column="0" Text="AC" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Grid x:Name="TdpAcPl1Row" Grid.Row="0" Grid.Column="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                            <Grid x:Name="TdpAcPl2Row" Grid.Row="1" Grid.Column="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                        </Grid>
                     </ctcontrols:SettingsCard>
                     <ctcontrols:SettingsCard x:Name="TdpDcExpandedCard">
-                        <StackPanel x:Name="TdpDcCard" Spacing="6">
-                            <TextBlock x:Uid="Device_TdpDcRailLabel" Text="DC" FontWeight="SemiBold" />
-                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                            <Grid x:Name="TdpDcPl2Row" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                        </StackPanel>
+                        <Grid x:Name="TdpDcCard" ColumnSpacing="8" RowSpacing="6">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBlock x:Uid="Device_TdpDcRailLabel" Grid.Row="0" Grid.Column="0" Text="DC" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Grid x:Name="TdpDcPl1Row" Grid.Row="0" Grid.Column="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                            <Grid x:Name="TdpDcPl2Row" Grid.Row="1" Grid.Column="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                        </Grid>
                     </ctcontrols:SettingsCard>
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>

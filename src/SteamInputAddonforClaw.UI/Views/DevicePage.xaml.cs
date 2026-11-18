@@ -230,6 +230,7 @@ public sealed partial class DevicePage : UserControl
     {
         var activeRail = _quickSettingsCurrentPowerSourceOnly ? _currentPowerSource : null;
         var tdpExpanded = TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, _tdpSnapshot.Limits);
+        var tdpReady = _hasTdpSnapshot;
         var layout = new DeviceControlLayoutKey(activeRail, tdpExpanded);
         var previous = _lastDeviceControlLayout;
 
@@ -246,8 +247,8 @@ public sealed partial class DevicePage : UserControl
             UpdateTdpCompactGridColumns(activeRail);
         }
 
-        SetVisibilityIfChanged(TdpCard, _featureSupport.Tdp && !tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
-        SetVisibilityIfChanged(TdpExpander, _featureSupport.Tdp && tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(TdpCard, _featureSupport.Tdp && tdpReady && !tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
+        SetVisibilityIfChanged(TdpExpander, _featureSupport.Tdp && tdpReady && tdpExpanded ? Visibility.Visible : Visibility.Collapsed);
         SetVisibilityIfChanged(CpuBoostCard, activeRail is null ? Visibility.Collapsed : Visibility.Visible);
         SetVisibilityIfChanged(CpuBoostExpander, activeRail is null ? Visibility.Visible : Visibility.Collapsed);
         SetVisibilityIfChanged(MaximumProcessorStateCard, activeRail is null ? Visibility.Collapsed : Visibility.Visible);
