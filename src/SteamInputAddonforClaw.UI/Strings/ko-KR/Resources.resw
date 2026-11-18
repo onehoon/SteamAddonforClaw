@@ -142,10 +142,10 @@
   <data name="Device_Tdp_SettingsUnwritable" xml:space="preserve"><value>TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.</value></data>
   <data name="Device_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
   <data name="Device_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
-  <data name="Device_TdpAcCard.Header" xml:space="preserve"><value>AC</value></data>
-  <data name="Device_TdpDcCard.Header" xml:space="preserve"><value>DC</value></data>
-  <data name="Device_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
-  <data name="Device_TdpExpander.Header" xml:space="preserve"><value>TDP 조절</value></data>
+  <data name="Device_TdpAcRailLabel.Text" xml:space="preserve"><value>AC</value></data>
+  <data name="Device_TdpDcRailLabel.Text" xml:space="preserve"><value>DC</value></data>
+  <data name="Device_TdpCard.Description" xml:space="preserve"><value>Configure processor power limits for AC and DC operation.</value></data>
+  <data name="Device_TdpCard.Header" xml:space="preserve"><value>TDP 조절</value></data>
   <data name="MainNav_Controller.Content" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="Controller_PageTitle.Text" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="Controller_PageDescription.Text" xml:space="preserve"><value>Configure controller buttons and controller-specific settings.</value></data>
@@ -246,20 +246,20 @@
   <data name="Steam_CpuBoost_Mode_EfficientEnabled" xml:space="preserve"><value>Efficient Enabled</value></data>
   <data name="Steam_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
   <data name="Steam_CpuBoost_UpdateFailed" xml:space="preserve"><value>CPU Boost could not be updated.</value></data>
-  <data name="Steam_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_CpuBoostAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Steam_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Steam_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
   <data name="Steam_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Steam_Favorite_SaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
   <data name="Steam_Favorite_AddAutomationName" xml:space="preserve"><value>{0} 즐겨찾기에 추가</value></data>
   <data name="Steam_Favorite_RemoveAutomationName" xml:space="preserve"><value>{0} 즐겨찾기에서 제거</value></data>
   <data name="Steam_Favorite_UnknownAutomationName" xml:space="preserve"><value>{0} 즐겨찾기 상태를 알 수 없음</value></data>
-  <data name="Steam_FpsAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_FpsDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_FpsAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Steam_FpsDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Steam_GameSearchBox.PlaceholderText" xml:space="preserve"><value>Search games...</value></data>
   <data name="Steam_GpuMinimumClock_UpdateFailed" xml:space="preserve"><value>Minimum GPU Clock could not be updated.</value></data>
-  <data name="Steam_GpuMinimumClockAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_GpuMinimumClockDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_GpuMinimumClockAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Steam_GpuMinimumClockDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Steam_GpuMinimumClockExpander.Description" xml:space="preserve"><value>Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.</value></data>
   <data name="Steam_GpuMinimumClockExpander.Header" xml:space="preserve"><value>Minimum GPU Clock</value></data>
   <data name="Steam_IntelFps_Unavailable" xml:space="preserve"><value>Intel FPS Limit is unavailable.</value></data>
@@ -271,8 +271,8 @@
   <data name="Steam_PowerMode_Mode_BestPowerEfficiency" xml:space="preserve"><value>Best power efficiency</value></data>
   <data name="Steam_PowerMode_ToggleUpdateFailed" xml:space="preserve"><value>Windows Power Mode could not be updated.</value></data>
   <data name="Steam_PowerMode_UpdateFailed" xml:space="preserve"><value>Power Mode could not be updated.</value></data>
-  <data name="Steam_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Steam_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Steam_PowerModeAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Steam_PowerModeDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Steam_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
   <data name="Steam_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
   <data name="Steam_Profile_LoadFailed" xml:space="preserve"><value>Profile settings could not be loaded.</value></data>
@@ -284,11 +284,11 @@
   <data name="Steam_ResolutionCard.Header" xml:space="preserve"><value>Resolution</value></data>
   <data name="Steam_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
   <data name="Steam_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
-  <data name="Steam_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Steam_TdpAcRailLabel.Text" xml:space="preserve"><value>AC</value></data>
   <data name="Steam_TdpControl_ToggleUpdateFailed" xml:space="preserve"><value>TDP Control could not be updated.</value></data>
-  <data name="Steam_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Steam_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
-  <data name="Steam_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
+  <data name="Steam_TdpDcRailLabel.Text" xml:space="preserve"><value>DC</value></data>
+  <data name="Steam_TdpCard.Description" xml:space="preserve"><value>Configure processor power limits for AC and DC operation.</value></data>
+  <data name="Steam_TdpCard.Header" xml:space="preserve"><value>TDP Control</value></data>
   <data name="Steam_VirtualController_DefaultOption.Content" xml:space="preserve"><value>Use default</value></data>
   <data name="Steam_VirtualController_DualSenseEdgeOption.Content" xml:space="preserve"><value>DualSense Edge</value></data>
   <data name="Steam_VirtualController_SteamDeckOption.Content" xml:space="preserve"><value>Steam Deck</value></data>
@@ -325,8 +325,8 @@
   <data name="Xbox_FavoriteStateUnavailableInfoBar.Message" xml:space="preserve"><value>프로필 설정을 읽을 수 없어 즐겨찾기 상태를 확인할 수 없습니다.</value></data>
   <data name="Xbox_ControllerMappingExpander.Description" xml:space="preserve"><value>Enable a per-game M1 / M2 override for Xbox 360 output. Off uses the global mapping.</value></data>
   <data name="Xbox_ControllerMappingExpander.Header" xml:space="preserve"><value>M1 / M2 Button Mapping</value></data>
-  <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_CpuBoostDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_CpuBoostAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Xbox_CpuBoostDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Xbox_CpuBoostExpander.Description" xml:space="preserve"><value>Processor performance boost mode.</value></data>
   <data name="Xbox_CpuBoostExpander.Header" xml:space="preserve"><value>CPU Boost</value></data>
   <data name="Xbox_CpuBoost_Mode_Aggressive" xml:space="preserve"><value>Aggressive</value></data>
@@ -338,11 +338,11 @@
   <data name="Xbox_CpuBoost_Mode_Enabled" xml:space="preserve"><value>Enabled</value></data>
   <data name="Xbox_CpuBoost_UpdateFailed" xml:space="preserve"><value>CPU Boost could not be updated.</value></data>
   <data name="Xbox_Favorite_SaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
-  <data name="Xbox_FpsAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_FpsDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_FpsAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Xbox_FpsDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Xbox_GameSearchBox.PlaceholderText" xml:space="preserve"><value>Search games...</value></data>
-  <data name="Xbox_GpuMinimumClockAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_GpuMinimumClockDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_GpuMinimumClockAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Xbox_GpuMinimumClockDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Xbox_GpuMinimumClockExpander.Description" xml:space="preserve"><value>Overrides the Device minimum GPU clock for this game. Actual clock may still fall lower when required by power or thermal limits.</value></data>
   <data name="Xbox_GpuMinimumClockExpander.Header" xml:space="preserve"><value>Minimum GPU Clock</value></data>
   <data name="Xbox_GpuMinimumClock_UpdateFailed" xml:space="preserve"><value>Minimum GPU Clock could not be updated.</value></data>
@@ -352,8 +352,8 @@
   <data name="Xbox_IntelFps_UpdateFailed" xml:space="preserve"><value>Intel FPS Limit could not be updated.</value></data>
   <data name="Xbox_M1Card.Header" xml:space="preserve"><value>M1</value></data>
   <data name="Xbox_M2Card.Header" xml:space="preserve"><value>M2</value></data>
-  <data name="Xbox_PowerModeAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
-  <data name="Xbox_PowerModeDcCard.Header" xml:space="preserve"><value>On battery</value></data>
+  <data name="Xbox_PowerModeAcCard.Header" xml:space="preserve"><value>AC</value></data>
+  <data name="Xbox_PowerModeDcCard.Header" xml:space="preserve"><value>DC</value></data>
   <data name="Xbox_PowerModeExpander.Description" xml:space="preserve"><value>Configured AC/DC Windows power mode.</value></data>
   <data name="Xbox_PowerModeExpander.Header" xml:space="preserve"><value>Windows Power Mode</value></data>
   <data name="Xbox_PowerMode_Mode_Balanced" xml:space="preserve"><value>Balanced</value></data>
@@ -370,11 +370,11 @@
   <data name="Xbox_ResolutionCard.Header" xml:space="preserve"><value>Resolution</value></data>
   <data name="Xbox_Tdp_Unavailable" xml:space="preserve"><value>TDP Control is unavailable on this device.</value></data>
   <data name="Xbox_Tdp_UpdateFailed" xml:space="preserve"><value>TDP could not be updated.</value></data>
-  <data name="Xbox_TdpAcCard.Header" xml:space="preserve"><value>Plugged in</value></data>
+  <data name="Xbox_TdpAcRailLabel.Text" xml:space="preserve"><value>AC</value></data>
   <data name="Xbox_TdpControl_ToggleUpdateFailed" xml:space="preserve"><value>TDP Control could not be updated.</value></data>
-  <data name="Xbox_TdpDcCard.Header" xml:space="preserve"><value>On battery</value></data>
-  <data name="Xbox_TdpExpander.Description" xml:space="preserve"><value>Configure processor power limits for plugged-in and battery operation.</value></data>
-  <data name="Xbox_TdpExpander.Header" xml:space="preserve"><value>TDP Control</value></data>
+  <data name="Xbox_TdpDcRailLabel.Text" xml:space="preserve"><value>DC</value></data>
+  <data name="Xbox_TdpCard.Description" xml:space="preserve"><value>Configure processor power limits for AC and DC operation.</value></data>
+  <data name="Xbox_TdpCard.Header" xml:space="preserve"><value>TDP Control</value></data>
   <data name="MainNav_ClawHud.Content" xml:space="preserve"><value>ClawHUD</value></data>
   <data name="ClawHud_PageTitle.Text" xml:space="preserve"><value>ClawHUD</value></data>
   <data name="ClawHud_PageSubtitle.Text" xml:space="preserve"><value>ClawHUD 오버레이 설정을 변경할 수 있습니다.</value></data>
@@ -426,10 +426,6 @@
   <data name="QuickOverlay_YButtonQuickJump_Controller.Content" xml:space="preserve"><value>컨트롤러</value></data>
   <data name="QuickOverlay_YButtonQuickJump_Setting.Content" xml:space="preserve"><value>설정</value></data>
   <data name="QuickOverlay_YButtonQuickJump_Off.Content" xml:space="preserve"><value>사용 안 함</value></data>
-  <data name="QuickOverlay_PowerSourceCard.Header" xml:space="preserve"><value>현재 전원 방식 옵션만 보기</value></data>
-  <data name="QuickOverlay_PowerSourceCard.Description" xml:space="preserve"><value>퀵 셋팅 오버레이에 현재 연결된 전원 방식 옵션만 표시합니다.</value></data>
-  <data name="QuickOverlay_SimplifiedTdpControlsCard.Header" xml:space="preserve"><value>간편 TDP 설정</value></data>
-  <data name="QuickOverlay_SimplifiedTdpControlsCard.Description" xml:space="preserve"><value>PL1만 표시하고 기기별 간격에 따라 PL2를 자동으로 조정합니다.</value></data>
   <data name="QuickOverlay_TabOrderExpander.Header" xml:space="preserve"><value>퀵 오버레이 탭 순서</value></data>
   <data name="QuickOverlay_TabOrderExpander.Description" xml:space="preserve"><value>퀵 오버레이 탭 순서와 처음 열리는 탭을 설정합니다.</value></data>
   <data name="QuickOverlay_TabOrderStatusText.Text" xml:space="preserve"><value>탭 순서를 불러오는 중…</value></data>
@@ -678,6 +674,10 @@
   <data name="Settings_Update_OperationFailed" xml:space="preserve">
     <value>The update operation failed. Try again.</value>
   </data>
+  <data name="Settings_QuickSettingsPowerSourceOnlyCard.Header" xml:space="preserve"><value>현재 전원 방식 옵션만 보기</value></data>
+  <data name="Settings_QuickSettingsPowerSourceOnlyCard.Description" xml:space="preserve"><value>메인 페이지와 빠른 설정 오버레이에 현재 AC 또는 DC 전원 옵션만 표시합니다.</value></data>
+  <data name="Settings_SimplifiedTdpControlsCard.Header" xml:space="preserve"><value>간편 TDP 설정</value></data>
+  <data name="Settings_SimplifiedTdpControlsCard.Description" xml:space="preserve"><value>기기에 알려진 TDP 간격이 있을 때만 PL1을 표시합니다. 그렇지 않으면 PL1과 PL2를 모두 표시합니다.</value></data>
   <data name="Settings_AppThemeCard.Header" xml:space="preserve">
     <value>테마</value>
   </data>

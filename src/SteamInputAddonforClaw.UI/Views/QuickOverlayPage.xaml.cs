@@ -16,17 +16,9 @@ public sealed partial class QuickOverlayPage : UserControl
     private static readonly AddonQuickSettingsTabId[] TabOrderTabIds = Enum.GetValues<AddonQuickSettingsTabId>();
 
     private IAddonFrontendControl? _frontend;
-    private bool _applyingPowerSourcePreference;
-    private bool _powerSourceMutationInProgress;
-    private bool _powerSourceRefreshInProgress;
-    private bool _discardInFlightPowerSourceRefresh;
-    private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
-    private bool _applyingSimplifiedTdpControlsPreference;
-    private bool _simplifiedTdpControlsMutationInProgress;
-    private bool _discardInFlightSimplifiedTdpControlsRefresh;
-    private bool _lastKnownSimplifiedTdpControls;
     private bool _applyingYButtonQuickJumpTarget;
     private bool _yButtonQuickJumpMutationInProgress;
+    private bool _yButtonQuickJumpRefreshInProgress;
     private bool _discardInFlightYButtonQuickJumpRefresh;
     private QuickOverlayYButtonTarget _lastKnownYButtonQuickJumpTarget = QuickOverlayYButtonTarget.Profile;
     private readonly Dictionary<AddonQuickSettingsTabId, TabOrderRowControls> _tabOrderRows = new();
@@ -50,12 +42,8 @@ public sealed partial class QuickOverlayPage : UserControl
     internal void Initialize(FrontendBootstrapSnapshot bootstrap, IAddonFrontendControl frontend)
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
-        _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
-        _lastKnownSimplifiedTdpControls = bootstrap.Settings.SimplifiedTdpControls;
         _lastKnownYButtonQuickJumpTarget = NormalizeYButtonQuickJumpTarget(
             bootstrap.Settings.YButtonQuickJumpTarget, QuickOverlayYButtonTarget.Profile);
-        SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
-        SetSimplifiedTdpControlsToggle(_lastKnownSimplifiedTdpControls);
         SetYButtonQuickJumpTarget(_lastKnownYButtonQuickJumpTarget);
     }
 
@@ -63,7 +51,7 @@ public sealed partial class QuickOverlayPage : UserControl
 
     internal void RequestRefresh()
     {
-        _ = RefreshQuickSettingsPowerSourcePreferenceAsync();
+        _ = RefreshYButtonQuickJumpTargetAsync();
         _ = RefreshTabOrderAsync();
     }
 
@@ -253,25 +241,14 @@ public sealed partial class QuickOverlayPage : UserControl
         }
     }
 
-    private async Task RefreshQuickSettingsPowerSourcePreferenceAsync()
+    private async Task RefreshYButtonQuickJumpTargetAsync()
     {
-        if (_frontend is null || _powerSourceRefreshInProgress ||
-            (_powerSourceMutationInProgress && _yButtonQuickJumpMutationInProgress && _simplifiedTdpControlsMutationInProgress)) return;
+        if (_frontend is null || _yButtonQuickJumpRefreshInProgress || _yButtonQuickJumpMutationInProgress) return;
 
-        _powerSourceRefreshInProgress = true;
+        _yButtonQuickJumpRefreshInProgress = true;
         try
         {
             var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
-            if (!_powerSourceMutationInProgress && !_discardInFlightPowerSourceRefresh)
-            {
-                _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
-                SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
-            }
-            if (!_simplifiedTdpControlsMutationInProgress && !_discardInFlightSimplifiedTdpControlsRefresh)
-            {
-                _lastKnownSimplifiedTdpControls = bootstrap.Settings.SimplifiedTdpControls;
-                SetSimplifiedTdpControlsToggle(_lastKnownSimplifiedTdpControls);
-            }
             if (!_yButtonQuickJumpMutationInProgress && !_discardInFlightYButtonQuickJumpRefresh)
             {
                 _lastKnownYButtonQuickJumpTarget = NormalizeYButtonQuickJumpTarget(
@@ -281,13 +258,11 @@ public sealed partial class QuickOverlayPage : UserControl
         }
         catch (Exception exception)
         {
-            AppLog.Warn("QuickSettings", "Current power-source preference refresh failed.", exception);
+            AppLog.Warn("QuickSettings", "Y Button Quick Jump preference refresh failed.", exception);
         }
         finally
         {
-            _powerSourceRefreshInProgress = false;
-            _discardInFlightPowerSourceRefresh = false;
-            _discardInFlightSimplifiedTdpControlsRefresh = false;
+            _yButtonQuickJumpRefreshInProgress = false;
             _discardInFlightYButtonQuickJumpRefresh = false;
         }
     }
@@ -304,7 +279,7 @@ public sealed partial class QuickOverlayPage : UserControl
             return;
 
         // A bootstrap read that started before this choice must not overwrite its mutation result.
-        _discardInFlightYButtonQuickJumpRefresh = _powerSourceRefreshInProgress;
+        _discardInFlightYButtonQuickJumpRefresh = _yButtonQuickJumpRefreshInProgress;
         _yButtonQuickJumpMutationInProgress = true;
         YButtonQuickJumpComboBox.IsEnabled = false;
         try
@@ -353,104 +328,4 @@ public sealed partial class QuickOverlayPage : UserControl
         QuickOverlayYButtonTarget target, QuickOverlayYButtonTarget fallback) =>
         Enum.IsDefined(target) ? target : fallback;
 
-    private void SetQuickSettingsPowerSourceToggle(bool enabled)
-    {
-        _applyingPowerSourcePreference = true;
-        try { QuickSettingsPowerSourceToggleSwitch.IsOn = enabled; }
-        finally { _applyingPowerSourcePreference = false; }
-    }
-
-    private void SetSimplifiedTdpControlsToggle(bool enabled)
-    {
-        _applyingSimplifiedTdpControlsPreference = true;
-        try { SimplifiedTdpControlsToggleSwitch.IsOn = enabled; }
-        finally { _applyingSimplifiedTdpControlsPreference = false; }
-    }
-
-    private async void SimplifiedTdpControlsToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_applyingSimplifiedTdpControlsPreference || _frontend is null || _simplifiedTdpControlsMutationInProgress) return;
-
-        _discardInFlightSimplifiedTdpControlsRefresh = _powerSourceRefreshInProgress;
-        _simplifiedTdpControlsMutationInProgress = true;
-        SimplifiedTdpControlsToggleSwitch.IsEnabled = false;
-        try
-        {
-            var settings = await _frontend.SetSimplifiedTdpControlsAsync(
-                SimplifiedTdpControlsToggleSwitch.IsOn).ConfigureAwait(true);
-            _lastKnownSimplifiedTdpControls = settings.SimplifiedTdpControls;
-            SetSimplifiedTdpControlsToggle(_lastKnownSimplifiedTdpControls);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("QuickSettings", "Simplified TDP Controls preference update failed.", exception);
-            bool? refreshedValue = null;
-            try
-            {
-                var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
-                refreshedValue = bootstrap.Settings.SimplifiedTdpControls;
-            }
-            catch (Exception refreshException)
-            {
-                AppLog.Warn("QuickSettings", "Simplified TDP Controls preference rollback failed.", refreshException);
-            }
-
-            _lastKnownSimplifiedTdpControls = ResolveSimplifiedTdpControlsPreference(
-                _lastKnownSimplifiedTdpControls,
-                refreshedValue);
-            SetSimplifiedTdpControlsToggle(_lastKnownSimplifiedTdpControls);
-        }
-        finally
-        {
-            _simplifiedTdpControlsMutationInProgress = false;
-            SimplifiedTdpControlsToggleSwitch.IsEnabled = true;
-        }
-    }
-
-    private async void QuickSettingsPowerSourceToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_applyingPowerSourcePreference || _frontend is null || _powerSourceMutationInProgress) return;
-
-        // A snapshot started before this edit must not overwrite its authoritative mutation result.
-        _discardInFlightPowerSourceRefresh = _powerSourceRefreshInProgress;
-        _powerSourceMutationInProgress = true;
-        QuickSettingsPowerSourceToggleSwitch.IsEnabled = false;
-        try
-        {
-            var settings = await _frontend.SetQuickSettingsCurrentPowerSourceOnlyAsync(
-                QuickSettingsPowerSourceToggleSwitch.IsOn).ConfigureAwait(true);
-            _lastKnownQuickSettingsCurrentPowerSourceOnly = settings.QuickSettingsCurrentPowerSourceOnly;
-            SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("QuickSettings", "Current power-source preference update failed.", exception);
-            bool? refreshedValue = null;
-            try
-            {
-                var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
-                refreshedValue = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
-            }
-            catch (Exception refreshException)
-            {
-                AppLog.Warn("QuickSettings", "Current power-source preference rollback failed.", refreshException);
-            }
-
-            _lastKnownQuickSettingsCurrentPowerSourceOnly = ResolveQuickSettingsPowerSourcePreference(
-                _lastKnownQuickSettingsCurrentPowerSourceOnly,
-                refreshedValue);
-            SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
-        }
-        finally
-        {
-            _powerSourceMutationInProgress = false;
-            QuickSettingsPowerSourceToggleSwitch.IsEnabled = true;
-        }
-    }
-
-    internal static bool ResolveQuickSettingsPowerSourcePreference(bool lastKnownValue, bool? refreshedValue) =>
-        refreshedValue ?? lastKnownValue;
-
-    internal static bool ResolveSimplifiedTdpControlsPreference(bool lastKnownValue, bool? refreshedValue) =>
-        refreshedValue ?? lastKnownValue;
 }

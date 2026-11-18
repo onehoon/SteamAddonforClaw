@@ -47,6 +47,8 @@ public sealed partial class ProfilePage : UserControl
     private bool _tdpDraftDirty;
     private bool _simplifiedTdpControls;
     private bool? _pendingSimplifiedTdpControls;
+    private bool _quickSettingsCurrentPowerSourceOnly;
+    private FrontendTdpPowerSource? _currentPowerSource;
     private CancellationTokenSource? _acFpsDebounce, _dcFpsDebounce; private long _acFpsGeneration, _dcFpsGeneration; private int? _acFpsDraft, _dcFpsDraft;
     private CancellationTokenSource? _acGpuDebounce, _dcGpuDebounce; private long _acGpuGeneration, _dcGpuGeneration, _gpuDraftGeneration; private int? _acGpuDraftIndex, _dcGpuDraftIndex; private bool _gpuDraftDirty;
     private static readonly CpuBoostModeItem[] Modes = [new(CpuBoostMode.Disabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Disabled", "Disabled")), new(CpuBoostMode.Enabled, MainUiStrings.Get("Steam_CpuBoost_Mode_Enabled", "Enabled")), new(CpuBoostMode.Aggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_Aggressive", "Aggressive")), new(CpuBoostMode.EfficientEnabled, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientEnabled", "Efficient Enabled")), new(CpuBoostMode.EfficientAggressive, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressive", "Efficient Aggressive")), new(CpuBoostMode.AggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_AggressiveAtGuaranteed", "Aggressive At Guaranteed")), new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Steam_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed"))];
@@ -67,7 +69,7 @@ public sealed partial class ProfilePage : UserControl
     {
         _frontend = frontend;
         _featureSupport = featureSupport ?? FrontendModelFeatureSupport.None;
-        TdpExpander.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed;
+        TdpCard.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed;
         IntelFpsExpander.Visibility = _featureSupport.IntelFpsLimit ? Visibility.Visible : Visibility.Collapsed;
         GpuMinimumClockExpander.Visibility = _featureSupport.IntelGpuMinimumClock ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -673,7 +675,7 @@ public sealed partial class ProfilePage : UserControl
 
     private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
     private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = true; CancelFpsDebounce(); try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = false; } SetEditorsEnabled(false); }
-    private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var bootstrap = await _frontend.GetBootstrapAsync(); if (_active) ApplySimplifiedTdpControlsPreference(bootstrap.Settings.SimplifiedTdpControls); var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty, _gpuDraftDirty, preservePendingFpsDraft: true); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) { DisableEditorsAfterCaptureFailure(); ShowError(MainUiStrings.Get("Steam_Profile_LoadFailed", "Profile settings could not be loaded."), exception); } } }
+    private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var bootstrap = await _frontend.GetBootstrapAsync(); if (_active) { ApplySimplifiedTdpControlsPreference(bootstrap.Settings.SimplifiedTdpControls); _quickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly; _currentPowerSource = bootstrap.CurrentPowerSource; ApplyPowerSourceVisibility(); } var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty, _gpuDraftDirty, preservePendingFpsDraft: true); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) { _currentPowerSource = null; ApplyPowerSourceVisibility(); DisableEditorsAfterCaptureFailure(); ShowError(MainUiStrings.Get("Steam_Profile_LoadFailed", "Profile settings could not be loaded."), exception); } } }
 
     private void ApplySimplifiedTdpControlsPreference(bool enabled)
     {
@@ -698,8 +700,7 @@ public sealed partial class ProfilePage : UserControl
     private void RenderTdpPresentationOnly()
     {
         var exactGapMode = _snapshot?.Limits is { } limits
-            && _simplifiedTdpControls
-            && DevicePage.TdpDraftPolicy.GetKnownTdpGap(limits) > 0;
+            && !DevicePage.TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, limits);
         if (_snapshot?.Limits is { } currentLimits)
         {
             _suppressTdpEvents = true;
@@ -711,7 +712,26 @@ public sealed partial class ProfilePage : UserControl
             }
             finally { _suppressTdpEvents = false; }
         }
-        AcPl2Row.Visibility = DcPl2Row.Visibility = exactGapMode ? Visibility.Collapsed : Visibility.Visible;
+        var showPl2 = DevicePage.TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, _snapshot?.Limits);
+        AcPl2Row.Visibility = DcPl2Row.Visibility = showPl2 ? Visibility.Visible : Visibility.Collapsed;
+        ApplyPowerSourceVisibility();
+    }
+
+    private void ApplyPowerSourceVisibility()
+    {
+        var snapshot = _snapshot;
+        var ac = MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.AC);
+        var dc = MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.DC);
+        CpuBoostAcCard.Visibility = snapshot?.CpuBoost.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        CpuBoostDcCard.Visibility = snapshot?.CpuBoost.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        TdpAcCard.Visibility = snapshot?.Tdp.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        TdpDcCard.Visibility = snapshot?.Tdp.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        PowerModeAcCard.Visibility = snapshot?.PowerMode?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        PowerModeDcCard.Visibility = snapshot?.PowerMode?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        GpuMinimumClockAcCard.Visibility = snapshot?.GpuMinimumClock?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        GpuMinimumClockDcCard.Visibility = snapshot?.GpuMinimumClock?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        FpsAcCard.Visibility = snapshot?.FpsLimit?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        FpsDcCard.Visibility = snapshot?.FpsLimit?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
     }
     private void ClearSelection() { CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce(); _gpuDraftDirty = false; _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressEvents = true; try { SteamVirtualControllerComboBox.SelectedItem = null; SteamVirtualControllerComboBox.IsEnabled = false; } finally { _suppressEvents = false; } ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
 
@@ -738,7 +758,6 @@ public sealed partial class ProfilePage : UserControl
             }
         }
         finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressFeatureEvents = false; }
-        CpuBoostAcCard.Visibility = CpuBoostDcCard.Visibility = snapshot.CpuBoost.Enabled ? Visibility.Visible : Visibility.Collapsed; TdpAcCard.Visibility = TdpDcCard.Visibility = snapshot.Tdp.Enabled ? Visibility.Visible : Visibility.Collapsed; PowerModeAcCard.Visibility = PowerModeDcCard.Visibility = snapshot.PowerMode?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; GpuMinimumClockAcCard.Visibility = GpuMinimumClockDcCard.Visibility = snapshot.GpuMinimumClock?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; FpsAcCard.Visibility = FpsDcCard.Visibility = snapshot.FpsLimit?.Enabled == true ? Visibility.Visible : Visibility.Collapsed;
         RenderTdpPresentationOnly();
         SetEditorsEnabled(snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable); ResolutionComboBox.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; RenderProfileStatus(snapshot);
     }

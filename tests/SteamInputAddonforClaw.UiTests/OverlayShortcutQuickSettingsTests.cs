@@ -97,8 +97,8 @@ public sealed class OverlayShortcutQuickSettingsTests
         [
             new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle,
                 false, false, null, null, QuickSettingsCommitPolicy.Immediate) { Visible = false },
-            NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "Plugged in · PL1", 20),
-            NumericRow(QuickSettingsRowId.ProfileTdpAcPl2, "Plugged in · PL2", 25)
+            NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "AC · PL1", 20),
+            NumericRow(QuickSettingsRowId.ProfileTdpAcPl2, "AC · PL2", 25)
         ]);
         var profilePage = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile,
             QuickSettingsProfileTarget.ForSteam(570), true, null, [section], []);
@@ -299,8 +299,8 @@ public sealed class OverlayShortcutQuickSettingsTests
     {
         var hiddenEnabled = new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP", QuickSettingsControlKind.Toggle,
             Available: false, Writable: false, Value: null, SliderSpec: null, QuickSettingsCommitPolicy.Immediate) { Visible = false };
-        var pl1 = NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "Plugged in · PL1", 20);
-        var hiddenPl2 = NumericRow(QuickSettingsRowId.ProfileTdpAcPl2, "Plugged in · PL2", 25) with { Visible = false };
+        var pl1 = NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "AC · PL1", 20);
+        var hiddenPl2 = NumericRow(QuickSettingsRowId.ProfileTdpAcPl2, "AC · PL2", 25) with { Visible = false };
         var tdp = new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control", [hiddenEnabled, pl1, hiddenPl2]);
         var cpuBoost = new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, "CPU Boost", []);
         var powerMode = new QuickSettingsSection(QuickSettingsSectionId.ProfilePowerMode, "Windows Power Mode", []);
@@ -332,8 +332,8 @@ public sealed class OverlayShortcutQuickSettingsTests
         [
             new QuickSettingsRow(QuickSettingsRowId.ProfileTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle,
                 true, false, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate) { Visible = false },
-            NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "Plugged in · PL1", 20, acVisible),
-            NumericRow(QuickSettingsRowId.ProfileTdpDcPl1, "On battery · PL1", 15, !acVisible),
+            NumericRow(QuickSettingsRowId.ProfileTdpAcPl1, "AC · PL1", 20, acVisible),
+            NumericRow(QuickSettingsRowId.ProfileTdpDcPl1, "DC · PL1", 15, !acVisible),
         ]);
         var cpuBoost = new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, "CPU Boost", []);
         var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(570), true,

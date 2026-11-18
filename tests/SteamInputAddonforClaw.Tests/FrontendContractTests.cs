@@ -85,7 +85,7 @@ public sealed class FrontendContractTests
     {
         const string retiredSurfaceFragment = "Gpu" + "Frequency" + "Probe";
 
-        Assert.Equal(91, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(92, FrontendTransportProtocol.CurrentVersion);
         Assert.DoesNotContain(typeof(IAddonFrontendControl).GetMethods(),
             method => method.Name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
         Assert.DoesNotContain(Enum.GetNames<FrontendRpcMethod>(),
@@ -234,9 +234,13 @@ public sealed class FrontendContractTests
         var value = new FrontendBootstrapSnapshot(
             new(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default),
             @"C:\Logs",
-            FrontButtonMappingAvailable: true);
+            FrontButtonMappingAvailable: true)
+        {
+            CurrentPowerSource = FrontendTdpPowerSource.AC,
+        };
         var restored = JsonSerializer.Deserialize<FrontendBootstrapSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
+        Assert.Equal(FrontendTdpPowerSource.AC, restored!.CurrentPowerSource);
     }
 
     [Fact]

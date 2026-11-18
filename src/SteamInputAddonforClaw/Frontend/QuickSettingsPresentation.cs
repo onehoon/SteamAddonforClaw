@@ -291,10 +291,10 @@ internal static class QuickSettingsPresentation
 
         if (snapshot.Tdp.Enabled)
         {
-            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpAcPl1, "Plugged in · PL1", snapshot.Tdp.Ac.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, writable));
-            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpAcPl2, "Plugged in · PL2", snapshot.Tdp.Ac.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, writable));
-            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpDcPl1, "On battery · PL1", snapshot.Tdp.Dc.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, writable));
-            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpDcPl2, "On battery · PL2", snapshot.Tdp.Dc.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, writable));
+            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpAcPl1, "AC · PL1", snapshot.Tdp.Ac.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, writable));
+            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpAcPl2, "AC · PL2", snapshot.Tdp.Ac.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, writable));
+            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpDcPl1, "DC · PL1", snapshot.Tdp.Dc.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, writable));
+            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpDcPl2, "DC · PL2", snapshot.Tdp.Dc.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, writable));
         }
 
         return new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control", rows);
@@ -326,8 +326,8 @@ internal static class QuickSettingsPresentation
 
         if (snapshot.CpuBoost.Enabled)
         {
-            rows.Add(BuildProfileCpuBoostSlider(QuickSettingsRowId.ProfileCpuBoostAc, "Plugged in", snapshot.CpuBoost.Ac, writable));
-            rows.Add(BuildProfileCpuBoostSlider(QuickSettingsRowId.ProfileCpuBoostDc, "On battery", snapshot.CpuBoost.Dc, writable));
+            rows.Add(BuildProfileCpuBoostSlider(QuickSettingsRowId.ProfileCpuBoostAc, "AC", snapshot.CpuBoost.Ac, writable));
+            rows.Add(BuildProfileCpuBoostSlider(QuickSettingsRowId.ProfileCpuBoostDc, "DC", snapshot.CpuBoost.Dc, writable));
         }
 
         return new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, "CPU Boost", rows);
@@ -357,8 +357,8 @@ internal static class QuickSettingsPresentation
 
         if (powerMode.Enabled)
         {
-            rows.Add(BuildProfilePowerModeSlider(QuickSettingsRowId.ProfilePowerModeAc, "Plugged in", powerMode.Ac, writable));
-            rows.Add(BuildProfilePowerModeSlider(QuickSettingsRowId.ProfilePowerModeDc, "On battery", powerMode.Dc, writable));
+            rows.Add(BuildProfilePowerModeSlider(QuickSettingsRowId.ProfilePowerModeAc, "AC", powerMode.Ac, writable));
+            rows.Add(BuildProfilePowerModeSlider(QuickSettingsRowId.ProfilePowerModeDc, "DC", powerMode.Dc, writable));
         }
 
         return new QuickSettingsSection(QuickSettingsSectionId.ProfilePowerMode, "Windows Power Mode", rows);
@@ -395,8 +395,8 @@ internal static class QuickSettingsPresentation
 
         if (fps.Enabled)
         {
-            rows.Add(BuildProfileFpsLimitSlider(QuickSettingsRowId.ProfileFpsLimitAc, "Plugged in", fps.AcFps, writable));
-            rows.Add(BuildProfileFpsLimitSlider(QuickSettingsRowId.ProfileFpsLimitDc, "On battery", fps.DcFps, writable));
+            rows.Add(BuildProfileFpsLimitSlider(QuickSettingsRowId.ProfileFpsLimitAc, "AC", fps.AcFps, writable));
+            rows.Add(BuildProfileFpsLimitSlider(QuickSettingsRowId.ProfileFpsLimitDc, "DC", fps.DcFps, writable));
         }
 
         return new QuickSettingsSection(QuickSettingsSectionId.ProfileFpsLimit, "Intel FPS Limit", rows);
@@ -420,8 +420,8 @@ internal static class QuickSettingsPresentation
             var fallbackIndex = FindGpuClockIndex(gpu.SelectableClocksMhz, gpu.RecommendedDefaultMhz) ?? 0;
             var acIndex = FindGpuClockIndex(gpu.SelectableClocksMhz, gpu.AcMhz) ?? fallbackIndex;
             var dcIndex = FindGpuClockIndex(gpu.SelectableClocksMhz, gpu.DcMhz) ?? fallbackIndex;
-            rows.Add(BuildProfileGpuMinimumClockSlider(QuickSettingsRowId.ProfileGpuMinimumClockAc, "Plugged in", acIndex, options, writable));
-            rows.Add(BuildProfileGpuMinimumClockSlider(QuickSettingsRowId.ProfileGpuMinimumClockDc, "On battery", dcIndex, options, writable));
+            rows.Add(BuildProfileGpuMinimumClockSlider(QuickSettingsRowId.ProfileGpuMinimumClockAc, "AC", acIndex, options, writable));
+            rows.Add(BuildProfileGpuMinimumClockSlider(QuickSettingsRowId.ProfileGpuMinimumClockDc, "DC", dcIndex, options, writable));
         }
 
         var warning = gpu.UnavailableReason;
@@ -503,10 +503,10 @@ internal static class QuickSettingsPresentation
         // configuration/limits snapshot is missing or invalid -- simply omit the numeric rows.
         if (tdp.Available && tdp.Configuration is { Enabled: true } configuration && tdp.Limits is { } limits)
         {
-            rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpAcPl1, "Plugged in · PL1", configuration.Ac.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, tdp.PersistenceWritable));
-            rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpAcPl2, "Plugged in · PL2", configuration.Ac.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, tdp.PersistenceWritable));
-            rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpDcPl1, "On battery · PL1", configuration.Dc.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, tdp.PersistenceWritable));
-            rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpDcPl2, "On battery · PL2", configuration.Dc.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, tdp.PersistenceWritable));
+            rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpAcPl1, "AC · PL1", configuration.Ac.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, tdp.PersistenceWritable));
+            rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpAcPl2, "AC · PL2", configuration.Ac.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, tdp.PersistenceWritable));
+            rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpDcPl1, "DC · PL1", configuration.Dc.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, tdp.PersistenceWritable));
+            rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpDcPl2, "DC · PL2", configuration.Dc.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, tdp.PersistenceWritable));
         }
 
         return new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP Control", rows);
@@ -572,8 +572,8 @@ internal static class QuickSettingsPresentation
 
         if (available && cpuBoost.Enabled)
         {
-            rows.Add(BuildCpuBoostSlider(QuickSettingsRowId.DeviceCpuBoostAc, "Plugged in", cpuBoost.Ac, cpuBoost.PersistenceWritable));
-            rows.Add(BuildCpuBoostSlider(QuickSettingsRowId.DeviceCpuBoostDc, "On battery", cpuBoost.Dc, cpuBoost.PersistenceWritable));
+            rows.Add(BuildCpuBoostSlider(QuickSettingsRowId.DeviceCpuBoostAc, "AC", cpuBoost.Ac, cpuBoost.PersistenceWritable));
+            rows.Add(BuildCpuBoostSlider(QuickSettingsRowId.DeviceCpuBoostDc, "DC", cpuBoost.Dc, cpuBoost.PersistenceWritable));
         }
 
         return new QuickSettingsSection(QuickSettingsSectionId.DeviceCpuBoost, "CPU Boost", rows);
@@ -616,8 +616,8 @@ internal static class QuickSettingsPresentation
 
         if (available && powerMode.Enabled)
         {
-            rows.Add(BuildPowerModeSlider(QuickSettingsRowId.DevicePowerModeAc, "Plugged in", powerMode.Ac, writable));
-            rows.Add(BuildPowerModeSlider(QuickSettingsRowId.DevicePowerModeDc, "On battery", powerMode.Dc, writable));
+            rows.Add(BuildPowerModeSlider(QuickSettingsRowId.DevicePowerModeAc, "AC", powerMode.Ac, writable));
+            rows.Add(BuildPowerModeSlider(QuickSettingsRowId.DevicePowerModeDc, "DC", powerMode.Dc, writable));
         }
 
         return new QuickSettingsSection(QuickSettingsSectionId.DevicePowerMode, "Windows Power Mode", rows);

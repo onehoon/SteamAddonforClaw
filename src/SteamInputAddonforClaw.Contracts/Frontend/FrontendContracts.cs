@@ -413,6 +413,10 @@ public sealed record FrontendCenterMStartupMutationResult(
 /// setter returns.</param>
 public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string LogDirectoryPath, bool FrontButtonMappingAvailable)
 {
+    /// <summary>The Runtime's current AC/DC observation. Null means unknown or unavailable, so
+    /// consumers that filter power-source-specific controls must keep both rails visible.</summary>
+    public FrontendTdpPowerSource? CurrentPowerSource { get; init; }
+
     /// <summary>Whether the supported Full1902 M1/M2 physical input contract exists on this machine.
     /// This is the same stable startup hardware fact as FrontButtonMappingAvailable.</summary>
     public bool BackButtonMappingAvailable { get; init; }

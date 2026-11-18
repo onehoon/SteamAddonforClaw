@@ -416,7 +416,7 @@ public sealed class UiArchitectureTests
         var tdp = ExtractMethod(page, "private void RenderTdp(");
         var battery = ExtractMethod(page, "private void RenderBatteryChargeLimit(");
 
-        Assert.Contains("TdpExpander.Visibility = _featureSupport.Tdp", page, StringComparison.Ordinal);
+        Assert.Contains("TdpCard.Visibility = _featureSupport.Tdp", page, StringComparison.Ordinal);
         Assert.Contains("BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit", page, StringComparison.Ordinal);
         AssertUnsupportedFeatureClosesInfoBar(tdp, "if (!_featureSupport.Tdp)", "TdpInfoBar", "_tdpSnapshot = snapshot;");
         Assert.Contains("if (!snapshot.Available)", tdp, StringComparison.Ordinal);

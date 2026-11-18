@@ -1,0 +1,195 @@
+using System.Xml.Linq;
+using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Views;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+public sealed class MainUiPowerSourceSettingsTests
+{
+    [Fact]
+    public void Current_source_filter_matches_all_preference_and_source_combinations()
+    {
+        FrontendTdpPowerSource?[] sources = [FrontendTdpPowerSource.AC, FrontendTdpPowerSource.DC, null];
+        foreach (var simplified in new[] { false, true })
+        foreach (var currentOnly in new[] { false, true })
+        foreach (var source in sources)
+        foreach (var rail in new[] { FrontendTdpPowerSource.AC, FrontendTdpPowerSource.DC })
+        {
+            var expected = !currentOnly || source is null || source == rail;
+            Assert.Equal(expected, MainUiPowerSourceVisibility.IsVisible(currentOnly, source, rail));
+            Assert.Equal(!simplified, DevicePage.TdpDraftPolicy.ShouldShowPl2(simplified, new(8, 30, 8, 37)));
+            Assert.True(DevicePage.TdpDraftPolicy.ShouldShowPl2(simplified, new(8, 32, 8, 40)));
+            Assert.True(DevicePage.TdpDraftPolicy.ShouldShowPl2(simplified, null));
+        }
+    }
+
+    [Fact]
+    public void All_three_main_editors_use_the_shared_source_filter_without_changing_feature_state()
+    {
+        var root = FindRepositoryRoot();
+        var device = Read(root, "DevicePage.xaml.cs");
+        var steam = Read(root, "ProfilePage.xaml.cs");
+        var xbox = Read(root, "XboxPage.xaml.cs");
+
+        Assert.Contains("TdpAcCard.Visibility = CpuBoostAcCard.Visibility = PowerModeAcCard.Visibility = MaximumProcessorStateAcCard.Visibility = ac", device);
+        Assert.Contains("TdpDcCard.Visibility = CpuBoostDcCard.Visibility = PowerModeDcCard.Visibility = MaximumProcessorStateDcCard.Visibility = dc", device);
+        foreach (var (source, fields) in new[]
+        {
+            (steam, new[] { "CpuBoost", "Tdp", "PowerMode", "GpuMinimumClock", "FpsLimit" }),
+            (xbox, new[] { "CpuBoost", "Tdp", "PowerMode", "GpuMinimumClock", "FpsLimit" }),
+        })
+        {
+            Assert.Contains("MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.AC)", source);
+            Assert.Contains("MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.DC)", source);
+            foreach (var field in fields)
+                Assert.Contains($"snapshot?.{field}", source);
+        }
+        Assert.Contains("bootstrap.CurrentPowerSource", device);
+        Assert.Contains("bootstrap.CurrentPowerSource", steam);
+        Assert.Contains("bootstrap.CurrentPowerSource", xbox);
+    }
+
+    [Theory]
+    [InlineData("DevicePage.xaml", "Device_TdpCard", "TdpEnabledToggleSwitch")]
+    [InlineData("ProfilePage.xaml", "Steam_TdpCard", "TdpEnabledToggle")]
+    [InlineData("XboxPage.xaml", "Xbox_TdpCard", "TdpEnabledToggle")]
+    public void Tdp_uses_one_flat_card_with_hidden_toggle_and_flexible_slider_columns(
+        string file, string uid, string toggleName)
+    {
+        var path = Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", file);
+        var document = XDocument.Load(path);
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var tdpCard = Assert.Single(document.Descendants(), element =>
+            element.Name.LocalName == "SettingsCard" && (string?)element.Attribute(xaml + "Uid") == uid);
+        Assert.Equal("Vertical", (string?)tdpCard.Attribute("ContentAlignment"));
+        Assert.Equal("Stretch", (string?)tdpCard.Attribute("HorizontalContentAlignment"));
+        var content = Assert.Single(tdpCard.Elements(), element => element.Name.LocalName == "StackPanel");
+        Assert.Equal("Stretch", (string?)content.Attribute("HorizontalAlignment"));
+        Assert.Null(document.Descendants().SingleOrDefault(element =>
+            element.Name.LocalName == "SettingsExpander" && (string?)element.Attribute(xaml + "Name") == "TdpExpander"));
+
+        var toggle = Assert.Single(tdpCard.Descendants(), element =>
+            element.Name.LocalName == "ToggleSwitch" && (string?)element.Attribute(xaml + "Name") == toggleName);
+        Assert.Equal("Collapsed", (string?)toggle.Attribute("Visibility"));
+        var acRail = Assert.Single(tdpCard.Descendants(), element =>
+            (string?)element.Attribute(xaml + "Name") == "TdpAcCard");
+        var dcRail = Assert.Single(tdpCard.Descendants(), element =>
+            (string?)element.Attribute(xaml + "Name") == "TdpDcCard");
+        Assert.Equal("AC", (string?)acRail.Descendants().First(element => element.Name.LocalName == "TextBlock").Attribute("Text"));
+        Assert.Equal("DC", (string?)dcRail.Descendants().First(element => element.Name.LocalName == "TextBlock").Attribute("Text"));
+        var sliders = tdpCard.Descendants().Where(element => element.Name.LocalName == "Slider").ToArray();
+        Assert.Equal(4, sliders.Length);
+        foreach (var slider in sliders)
+        {
+            var grid = slider.Ancestors().First(element => element.Name.LocalName == "Grid");
+            Assert.Equal("*", (string?)grid.Elements().First(element => element.Name.LocalName == "Grid.ColumnDefinitions")
+                .Elements().Last(element => element.Name.LocalName == "ColumnDefinition").Attribute("Width"));
+        }
+    }
+
+    [Fact]
+    public void Main_settings_owns_shared_preferences_and_quick_overlay_keeps_only_its_own_controls()
+    {
+        var root = FindRepositoryRoot();
+        var settingsXaml = Read(root, "SettingsPage.xaml");
+        var settingsCode = Read(root, "SettingsPage.xaml.cs");
+        var quickOverlayXaml = Read(root, "QuickOverlayPage.xaml");
+        var quickOverlayCode = Read(root, "QuickOverlayPage.xaml.cs");
+
+        Assert.Contains("Settings_QuickSettingsPowerSourceOnlyCard", settingsXaml);
+        Assert.Contains("Settings_SimplifiedTdpControlsCard", settingsXaml);
+        Assert.Contains("SetQuickSettingsCurrentPowerSourceOnlyAsync", settingsCode);
+        Assert.Contains("SetSimplifiedTdpControlsAsync", settingsCode);
+        Assert.Contains("bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly", settingsCode);
+        Assert.Contains("bootstrap.Settings.SimplifiedTdpControls", settingsCode);
+        Assert.DoesNotContain("QuickSettingsPowerSourceOnlyToggleSwitch", quickOverlayXaml);
+        Assert.DoesNotContain("SimplifiedTdpControlsToggleSwitch", quickOverlayXaml);
+        Assert.DoesNotContain("SetQuickSettingsCurrentPowerSourceOnlyAsync", quickOverlayCode);
+        Assert.DoesNotContain("SetSimplifiedTdpControlsAsync", quickOverlayCode);
+        Assert.Contains("RequestQuickSettingsPreferencesRefresh", settingsCode);
+        Assert.Contains("RequestQuickSettingsPreferencesRefresh", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs")));
+        Assert.Contains("SimplifiedTdpControlsRequested", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs")));
+    }
+
+    [Fact]
+    public void Main_settings_uses_authoritative_mutation_readback_and_retries_invalidations_after_in_flight_work()
+    {
+        Assert.True(SettingsPage.ResolvePreference(lastKnownValue: true, refreshedValue: null));
+        Assert.False(SettingsPage.ResolvePreference(lastKnownValue: false, refreshedValue: null));
+        Assert.True(SettingsPage.ResolvePreference(lastKnownValue: false, refreshedValue: true));
+        Assert.False(SettingsPage.ResolvePreference(lastKnownValue: true, refreshedValue: false));
+
+        var root = FindRepositoryRoot();
+        var settings = Read(root, "SettingsPage.xaml.cs");
+        var requestRefresh = ExtractMethod(settings, "internal void RequestQuickSettingsPreferencesRefresh()");
+        var refresh = ExtractMethod(settings, "private async Task RefreshQuickSettingsPreferencesAsync()");
+        var drain = ExtractMethod(settings, "private void DrainPendingQuickSettingsPreferencesRefresh()");
+        var powerSourceMutation = ExtractMethod(settings, "private async void QuickSettingsPowerSourceOnlyToggleSwitch_Toggled(");
+        var simplifiedMutation = ExtractMethod(settings, "private async void SimplifiedTdpControlsToggleSwitch_Toggled(");
+
+        Assert.Contains("_quickSettingsPreferencesRefreshPending = true", requestRefresh, StringComparison.Ordinal);
+        Assert.Contains("_powerSourceMutationInProgress || _simplifiedTdpMutationInProgress", requestRefresh, StringComparison.Ordinal);
+        Assert.Contains("DrainPendingQuickSettingsPreferencesRefresh()", refresh, StringComparison.Ordinal);
+        Assert.Contains("RequestQuickSettingsPreferencesRefresh()", drain, StringComparison.Ordinal);
+        Assert.Contains("DrainPendingQuickSettingsPreferencesRefresh()", powerSourceMutation, StringComparison.Ordinal);
+        Assert.Contains("DrainPendingQuickSettingsPreferencesRefresh()", simplifiedMutation, StringComparison.Ordinal);
+        Assert.Contains("_lastKnownQuickSettingsPowerSourceOnly = settings.QuickSettingsCurrentPowerSourceOnly", settings, StringComparison.Ordinal);
+        Assert.Contains("_lastKnownSimplifiedTdpControls = settings.SimplifiedTdpControls", settings, StringComparison.Ordinal);
+        Assert.Contains("_applyingQuickSettingsPowerSourceOnly", settings, StringComparison.Ordinal);
+        Assert.Contains("_applyingSimplifiedTdpControls", settings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Main_page_AC_DC_labels_and_localized_settings_resources_are_present()
+    {
+        var root = FindRepositoryRoot();
+        foreach (var language in new[] { "en-US", "ko-KR" })
+        {
+            var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", language, "Resources.resw"));
+            var values = resources.Descendants("data").ToDictionary(
+                element => (string)element.Attribute("name")!,
+                element => element.Element("value")?.Value ?? string.Empty,
+                StringComparer.Ordinal);
+            Assert.Equal("AC", values["Steam_TdpAcRailLabel.Text"]);
+            Assert.Equal("DC", values["Steam_TdpDcRailLabel.Text"]);
+            Assert.Equal("AC", values["Xbox_FpsAcCard.Header"]);
+            Assert.Equal("DC", values["Xbox_FpsDcCard.Header"]);
+            Assert.Contains("Settings_QuickSettingsPowerSourceOnlyCard.Header", values.Keys);
+            Assert.Contains("Settings_SimplifiedTdpControlsCard.Header", values.Keys);
+            Assert.DoesNotContain(values, item => item.Key.StartsWith("QuickOverlay_PowerSourceCard.", StringComparison.Ordinal));
+            Assert.DoesNotContain(values, item => item.Key.StartsWith("QuickOverlay_SimplifiedTdpControlsCard.", StringComparison.Ordinal));
+        }
+
+        var presentation = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw", "Frontend", "QuickSettingsPresentation.cs"));
+        Assert.DoesNotContain("Plugged in", presentation, StringComparison.Ordinal);
+        Assert.DoesNotContain("On battery", presentation, StringComparison.Ordinal);
+        Assert.Contains("AC · PL1", presentation, StringComparison.Ordinal);
+        Assert.Contains("DC · PL1", presentation, StringComparison.Ordinal);
+    }
+
+    private static string Read(string root, string file) =>
+        File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", file));
+
+    private static string ExtractMethod(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Method not found: {signature}");
+        var open = source.IndexOf('{', start);
+        Assert.True(open >= 0);
+        var depth = 0;
+        for (var index = open; index < source.Length; index++)
+        {
+            if (source[index] == '{') depth++;
+            else if (source[index] == '}' && --depth == 0) return source[open..(index + 1)];
+        }
+        throw new InvalidOperationException($"Method is not closed: {signature}");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+            if (File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx"))) return directory.FullName;
+        throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+}

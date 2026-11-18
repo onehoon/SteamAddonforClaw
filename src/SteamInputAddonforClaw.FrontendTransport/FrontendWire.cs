@@ -194,7 +194,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 88 extends the read-only MSI Update snapshot with installed-version, Intel DSA source and provenance fields.
 // Version 90 adds Shortcut built-in actions and editor action-type lock metadata.
 // Version 91 adds the global SimplifiedTdpControls setting and its mutation RPC.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 91; }
+// Version 92 adds the nullable Runtime current-power-source observation to FrontendBootstrapSnapshot.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 92; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
