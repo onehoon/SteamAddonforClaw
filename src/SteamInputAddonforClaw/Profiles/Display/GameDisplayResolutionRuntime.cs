@@ -84,6 +84,15 @@ internal sealed class GameDisplayResolutionRuntime
         if (target is null && !scalingEnabled)
             return _recovery is null || RestoreAndRetireRecovery();
 
+        if (target is null && scalingEnabled
+            && _recovery is { OwnsResolution: true } previous
+            && (!previous.OwnsScaling
+                || (previous.ScaleCaptureMode is { } scaleMode
+                    && previous.Original is { } originalMode
+                    && !SameMode(scaleMode, originalMode)))
+            && !RestoreAndRetireRecovery())
+            return false;
+
         if (!TryAcquireNewComponents(target, scalingEnabled, active?.TargetLabel, out var recovery))
             return false;
         _recovery = recovery;

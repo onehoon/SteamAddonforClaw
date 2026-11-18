@@ -187,6 +187,85 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void Removing_owned_resolution_while_scaling_stays_enabled_rebases_scaling_and_allows_next_game()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        SaveSteamProfile(store, 123, new() { Width = 1440, Height = 900 });
+        var display = new FakeDisplay { Current = OriginalMode };
+        var scaling = new FakeScaling { Current = OriginalScale };
+        var runtime = CreateRuntime(store, display, scaling);
+        uint active = 123;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => active));
+
+        Assert.True(runtime.Reconcile());
+        Assert.Equal((1440, 900), (display.Current.Width, display.Current.Height));
+
+        SaveSteamProfile(store, 123, new() { Width = 1440, Height = 900 }, scaling: true);
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
+
+        SaveSteamProfile(store, 123, resolution: null, scaling: true);
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(OriginalMode, display.Current);
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
+
+        active = 0;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(OriginalMode, display.Current);
+        Assert.Equal(OriginalScale, scaling.Current);
+        Assert.False(File.Exists(Recovery));
+
+        SaveSteamProfile(store, 456, new() { Width = 1600, Height = 900 });
+        active = 456;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal((1600, 900), (display.Current.Width, display.Current.Height));
+
+        active = 0;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(OriginalMode, display.Current);
+    }
+
+    [Fact]
+    public void Direct_resolution_only_to_scaling_only_profile_handoff_restores_cleanly()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        SaveSteamProfile(store, 123, new() { Width = 1440, Height = 900 });
+        var document = store.Load().Document;
+        store.Save(document with
+        {
+            Games = new Dictionary<string, GameProfile>(document.Games)
+            {
+                ["456"] = document.Games["123"] with
+                {
+                    DisplayName = "Game B",
+                    Display = new GameDisplayOverrides { ScalingTo100Percent = true },
+                },
+            },
+        });
+        var display = new FakeDisplay { Current = OriginalMode };
+        var scaling = new FakeScaling { Current = OriginalScale };
+        var runtime = CreateRuntime(store, display, scaling);
+        uint active = 123;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => active));
+
+        Assert.True(runtime.Reconcile());
+        Assert.Equal((1440, 900), (display.Current.Width, display.Current.Height));
+
+        active = 456;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(OriginalMode, display.Current);
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
+
+        active = 0;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(OriginalMode, display.Current);
+        Assert.Equal(OriginalScale, scaling.Current);
+        Assert.False(File.Exists(Recovery));
+    }
+
+    [Fact]
     public void Switching_from_scaling_on_to_off_restores_scale_before_the_new_resolution()
     {
         Directory.CreateDirectory(_root);
