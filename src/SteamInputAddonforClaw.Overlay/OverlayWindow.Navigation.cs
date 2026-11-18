@@ -300,10 +300,14 @@ public sealed partial class OverlayWindow
         RenderShortcutSnapshot();
     }
 
-    private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(AddonQuickSettingsTabId tab) =>
-        _pageRows.TryGetValue(tab, out var rows)
+    private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(AddonQuickSettingsTabId tab)
+    {
+        var capabilities = _pageRows.TryGetValue(tab, out var rows)
             ? rows.Select(row => row.Capabilities).ToArray()
             : [];
+        return OverlayShortcutQuickSettingsProjection.FilterInputCapabilitiesForCurrentShow(
+            tab, capabilities, _devicePageReceivedThisShow, _profilePageReceivedThisShow);
+    }
 
     private Border? SelectedRowContainer(AddonQuickSettingsTabId tab)
     {

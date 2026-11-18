@@ -160,6 +160,19 @@ internal sealed record QuickSettingsSectionRowPlan(
 
 internal static class OverlayShortcutQuickSettingsProjection
 {
+    internal static IReadOnlyList<OverlayRowCapabilities> FilterInputCapabilitiesForCurrentShow(
+        AddonQuickSettingsTabId tab,
+        IReadOnlyList<OverlayRowCapabilities> capabilities,
+        bool devicePageReceivedThisShow,
+        bool profilePageReceivedThisShow)
+    {
+        if ((tab == AddonQuickSettingsTabId.Device && !devicePageReceivedThisShow) ||
+            (tab == AddonQuickSettingsTabId.Profile && !profilePageReceivedThisShow))
+            return [];
+
+        return capabilities;
+    }
+
     internal static QuickSettingsPageId? ResolveSourcePage(
         QuickSettingsPageSnapshot? profilePage,
         bool devicePageReceived)
