@@ -1001,7 +1001,30 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         BackButtonMappingAvailable = _frontButtonMappingAvailable,
         ControllerLedAvailable = _controllerLedAvailable,
         FeatureSupport = _featureSupport,
+        CurrentPowerSource = CaptureQuickSettingsPowerSource(),
     });
+
+    private FrontendTdpPowerSource? CaptureQuickSettingsPowerSource()
+    {
+        if (!_settings.QuickSettingsCurrentPowerSourceOnly)
+            return null;
+
+        try
+        {
+            return _quickSettingsPowerSource() switch
+            {
+                AcDcPowerSource.AC => FrontendTdpPowerSource.AC,
+                AcDcPowerSource.DC => FrontendTdpPowerSource.DC,
+                _ => null,
+            };
+        }
+        catch (Exception exception)
+        {
+            AppLog.Debug("QuickSettings", "Current AC/DC power source is unknown; retaining both rails in the Main UI.",
+                ("Reason", exception.GetType().Name));
+            return null;
+        }
+    }
 
     public Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default)
     {

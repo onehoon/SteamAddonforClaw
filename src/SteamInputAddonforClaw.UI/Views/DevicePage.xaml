@@ -63,25 +63,23 @@
             </ctcontrols:SettingsCard>
 
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
-            <ctcontrols:SettingsExpander x:Name="TdpExpander" x:Uid="Device_TdpExpander" Header="TDP Control" IsExpanded="False"
-                Description="Configure processor power limits for plugged-in and battery operation.">
-                <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
-                <ToggleSwitch x:Name="TdpEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
-                <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard x:Uid="Device_TdpAcCard" Header="Plugged in">
-                        <StackPanel Spacing="6">
-                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                            <Grid x:Name="TdpAcPl2Row" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                        </StackPanel>
-                    </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard x:Uid="Device_TdpDcCard" Header="On battery">
-                        <StackPanel Spacing="6">
-                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                            <Grid x:Name="TdpDcPl2Row" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                        </StackPanel>
-                    </ctcontrols:SettingsCard>
-                </ctcontrols:SettingsExpander.Items>
-            </ctcontrols:SettingsExpander>
+            <ctcontrols:SettingsCard x:Name="TdpCard" x:Uid="Device_TdpCard" Header="TDP Control"
+                Description="Configure processor power limits for AC and DC operation.">
+                <ctcontrols:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsCard.HeaderIcon>
+                <StackPanel Spacing="8">
+                    <ToggleSwitch x:Name="TdpEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
+                    <StackPanel x:Name="TdpAcCard" Spacing="6">
+                        <TextBlock x:Uid="Device_TdpAcRailLabel" Text="AC" FontWeight="SemiBold" />
+                        <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                        <Grid x:Name="TdpAcPl2Row" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                    </StackPanel>
+                    <StackPanel x:Name="TdpDcCard" Spacing="6">
+                        <TextBlock x:Uid="Device_TdpDcRailLabel" Text="DC" FontWeight="SemiBold" />
+                        <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                        <Grid x:Name="TdpDcPl2Row" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                    </StackPanel>
+                </StackPanel>
+            </ctcontrols:SettingsCard>
 
             <InfoBar x:Name="CpuBoostInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
 
@@ -100,14 +98,14 @@
                     OffContent=""
                     OnContent="" />
                 <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard x:Uid="Device_CpuBoostAcCard" Header="Plugged in">
+                    <ctcontrols:SettingsCard x:Name="CpuBoostAcCard" x:Uid="Device_CpuBoostAcCard" Header="AC">
                         <ComboBox
                             x:Name="CpuBoostAcComboBox"
                             MinWidth="220"
                             DisplayMemberPath="Label"
                             SelectionChanged="CpuBoostAcComboBox_SelectionChanged" />
                     </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard x:Uid="Device_CpuBoostDcCard" Header="On battery">
+                    <ctcontrols:SettingsCard x:Name="CpuBoostDcCard" x:Uid="Device_CpuBoostDcCard" Header="DC">
                         <ComboBox
                             x:Name="CpuBoostDcComboBox"
                             MinWidth="220"
@@ -133,14 +131,14 @@
                     OnContent=""
                     Toggled="MaximumProcessorStateEnabledToggleSwitch_Toggled" />
                 <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard x:Uid="Device_MaximumProcessorStateAcCard" Header="AC">
+                    <ctcontrols:SettingsCard x:Name="MaximumProcessorStateAcCard" x:Uid="Device_MaximumProcessorStateAcCard" Header="AC">
                         <ComboBox
                             x:Name="MaximumProcessorStateAcComboBox"
                             MinWidth="220"
                             DisplayMemberPath="Label"
                             SelectionChanged="MaximumProcessorStateAcComboBox_SelectionChanged" />
                     </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard x:Uid="Device_MaximumProcessorStateDcCard" Header="DC">
+                    <ctcontrols:SettingsCard x:Name="MaximumProcessorStateDcCard" x:Uid="Device_MaximumProcessorStateDcCard" Header="DC">
                         <ComboBox
                             x:Name="MaximumProcessorStateDcComboBox"
                             MinWidth="220"
@@ -157,8 +155,8 @@
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="PowerModeEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
                 <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard x:Uid="Device_PowerModeAcCard" Header="Plugged in"><ComboBox x:Name="PowerModeAcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeAcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard x:Uid="Device_PowerModeDcCard" Header="On battery"><ComboBox x:Name="PowerModeDcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeDcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard x:Name="PowerModeAcCard" x:Uid="Device_PowerModeAcCard" Header="AC"><ComboBox x:Name="PowerModeAcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeAcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard x:Name="PowerModeDcCard" x:Uid="Device_PowerModeDcCard" Header="DC"><ComboBox x:Name="PowerModeDcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeDcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 

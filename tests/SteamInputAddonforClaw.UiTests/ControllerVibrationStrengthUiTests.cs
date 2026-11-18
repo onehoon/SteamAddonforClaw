@@ -23,7 +23,7 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("if (!_featureSupport.Motion", controller);
         Assert.Contains("x:Name=\"GyroscopeCard\"", xaml);
         Assert.Contains("DeviceContent.Initialize(_frontend, _bootstrap.FeatureSupport)", mainWindow);
-        Assert.Contains("TdpExpander.Visibility = _featureSupport.Tdp", device);
+        Assert.Contains("TdpCard.Visibility = _featureSupport.Tdp", device);
         Assert.Contains("BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit", device);
     }
 

@@ -42,6 +42,46 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         Assert.Equal(contentsBefore, File.ReadAllText(profilesPath));
     }
 
+    [Theory]
+    [InlineData(true, FrontendTdpPowerSource.AC)]
+    [InlineData(false, FrontendTdpPowerSource.DC)]
+    public async Task Bootstrap_exposes_the_existing_runtime_power_source_when_filtering_is_enabled(
+        bool useAc, FrontendTdpPowerSource expected)
+    {
+        var control = CreateControl(cpuBoostRuntime: null,
+            appSettings: new AppSettings { QuickSettingsCurrentPowerSourceOnly = true },
+            powerSource: () => useAc ? AcDcPowerSource.AC : AcDcPowerSource.DC);
+
+        var bootstrap = await control.GetBootstrapAsync();
+
+        Assert.Equal(expected, bootstrap.CurrentPowerSource);
+    }
+
+    [Fact]
+    public async Task Bootstrap_reports_unknown_power_source_as_null_when_the_runtime_reader_fails()
+    {
+        var control = CreateControl(cpuBoostRuntime: null,
+            appSettings: new AppSettings { QuickSettingsCurrentPowerSourceOnly = true },
+            powerSource: () => throw new InvalidOperationException("test failure"));
+
+        var bootstrap = await control.GetBootstrapAsync();
+
+        Assert.Null(bootstrap.CurrentPowerSource);
+    }
+
+    [Fact]
+    public async Task Bootstrap_does_not_read_power_source_when_filtering_is_disabled()
+    {
+        var reads = 0;
+        var control = CreateControl(cpuBoostRuntime: null,
+            powerSource: () => { reads++; return AcDcPowerSource.AC; });
+
+        var bootstrap = await control.GetBootstrapAsync();
+
+        Assert.Null(bootstrap.CurrentPowerSource);
+        Assert.Equal(0, reads);
+    }
+
     [Fact]
     public async Task Capture_device_page_projects_current_power_source_without_removing_companion_rows()
     {

@@ -12,6 +12,17 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class SettingsPage : UserControl
 {
     private IAddonFrontendControl? _frontend;
+    private bool _active;
+    private bool _applyingQuickSettingsPowerSourceOnly;
+    private bool _applyingSimplifiedTdpControls;
+    private bool _quickSettingsPreferencesRefreshInProgress;
+    private bool _quickSettingsPreferencesRefreshPending;
+    private bool _discardInFlightPowerSourceRefresh;
+    private bool _discardInFlightSimplifiedTdpRefresh;
+    private bool _powerSourceMutationInProgress;
+    private bool _simplifiedTdpMutationInProgress;
+    private bool _lastKnownQuickSettingsPowerSourceOnly;
+    private bool _lastKnownSimplifiedTdpControls;
     private FrontendUpdateSnapshot _updateSnapshot = FrontendUpdateSnapshot.Unavailable;
     private int _updateOperationInProgress;
     private FrontendGamingHomeSnapshot _gamingHomeSnapshot = FrontendGamingHomeSnapshot.Unavailable(
@@ -39,6 +50,11 @@ public sealed partial class SettingsPage : UserControl
     internal void Initialize(FrontendBootstrapSnapshot bootstrap, IAddonFrontendControl frontend, MainUiTheme appTheme)
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
+        _lastKnownQuickSettingsPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
+        _lastKnownSimplifiedTdpControls = bootstrap.Settings.SimplifiedTdpControls;
+        SetQuickSettingsPowerSourceOnly(_lastKnownQuickSettingsPowerSourceOnly);
+        SetSimplifiedTdpControls(_lastKnownSimplifiedTdpControls);
+        UpdateQuickSettingsPreferenceControlStates();
         DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
         _lastKnownLogLevel = bootstrap.Settings.LogLevel;
         _logDirectoryPath = bootstrap.LogDirectoryPath;
@@ -50,6 +66,162 @@ public sealed partial class SettingsPage : UserControl
 
     internal void RequestAppUpdateRefresh() => _ = RefreshAppUpdateAsync();
     internal void RequestGamingHomeRefresh() => _ = RefreshGamingHomeAsync();
+    internal void Activate()
+    {
+        _active = true;
+        RequestQuickSettingsPreferencesRefresh();
+    }
+
+    internal void Deactivate()
+    {
+        _active = false;
+        _quickSettingsPreferencesRefreshPending = false;
+    }
+
+    internal void RequestQuickSettingsPreferencesRefresh()
+    {
+        if (!_active) return;
+        if (_quickSettingsPreferencesRefreshInProgress || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress)
+        {
+            _quickSettingsPreferencesRefreshPending = true;
+            if (_quickSettingsPreferencesRefreshInProgress)
+            {
+                _discardInFlightPowerSourceRefresh = true;
+                _discardInFlightSimplifiedTdpRefresh = true;
+            }
+            return;
+        }
+
+        _ = RefreshQuickSettingsPreferencesAsync();
+    }
+
+    private async Task RefreshQuickSettingsPreferencesAsync()
+    {
+        if (!_active || _frontend is null) return;
+        if (_quickSettingsPreferencesRefreshInProgress || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress)
+        {
+            _quickSettingsPreferencesRefreshPending = true;
+            return;
+        }
+        _quickSettingsPreferencesRefreshInProgress = true;
+        try
+        {
+            var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
+            if (!_powerSourceMutationInProgress && !_discardInFlightPowerSourceRefresh)
+            {
+                _lastKnownQuickSettingsPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
+                SetQuickSettingsPowerSourceOnly(_lastKnownQuickSettingsPowerSourceOnly);
+            }
+            if (!_simplifiedTdpMutationInProgress && !_discardInFlightSimplifiedTdpRefresh)
+            {
+                _lastKnownSimplifiedTdpControls = bootstrap.Settings.SimplifiedTdpControls;
+                SetSimplifiedTdpControls(_lastKnownSimplifiedTdpControls);
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Settings", "Quick Settings preferences refresh failed.", exception);
+        }
+        finally
+        {
+            _quickSettingsPreferencesRefreshInProgress = false;
+            _discardInFlightPowerSourceRefresh = false;
+            _discardInFlightSimplifiedTdpRefresh = false;
+            DrainPendingQuickSettingsPreferencesRefresh();
+        }
+    }
+
+    private async void QuickSettingsPowerSourceOnlyToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_applyingQuickSettingsPowerSourceOnly || _frontend is null || _powerSourceMutationInProgress) return;
+        _discardInFlightPowerSourceRefresh = _quickSettingsPreferencesRefreshInProgress;
+        _powerSourceMutationInProgress = true;
+        UpdateQuickSettingsPreferenceControlStates();
+        try
+        {
+            var settings = await _frontend.SetQuickSettingsCurrentPowerSourceOnlyAsync(
+                QuickSettingsPowerSourceOnlyToggleSwitch.IsOn).ConfigureAwait(true);
+            _lastKnownQuickSettingsPowerSourceOnly = settings.QuickSettingsCurrentPowerSourceOnly;
+            SetQuickSettingsPowerSourceOnly(_lastKnownQuickSettingsPowerSourceOnly);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Settings", "Current power-source preference update failed.", exception);
+            bool? refreshedValue = null;
+            try { refreshedValue = (await _frontend.GetBootstrapAsync().ConfigureAwait(true)).Settings.QuickSettingsCurrentPowerSourceOnly; }
+            catch (Exception readbackException) { AppLog.Warn("Settings", "Current power-source preference readback failed; keeping the last confirmed value.", readbackException); }
+            _lastKnownQuickSettingsPowerSourceOnly = ResolvePreference(_lastKnownQuickSettingsPowerSourceOnly, refreshedValue);
+            SetQuickSettingsPowerSourceOnly(_lastKnownQuickSettingsPowerSourceOnly);
+        }
+        finally
+        {
+            _powerSourceMutationInProgress = false;
+            UpdateQuickSettingsPreferenceControlStates();
+            DrainPendingQuickSettingsPreferencesRefresh();
+        }
+    }
+
+    private async void SimplifiedTdpControlsToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_applyingSimplifiedTdpControls || _frontend is null || _simplifiedTdpMutationInProgress) return;
+        _discardInFlightSimplifiedTdpRefresh = _quickSettingsPreferencesRefreshInProgress;
+        _simplifiedTdpMutationInProgress = true;
+        UpdateQuickSettingsPreferenceControlStates();
+        try
+        {
+            var settings = await _frontend.SetSimplifiedTdpControlsAsync(
+                SimplifiedTdpControlsToggleSwitch.IsOn).ConfigureAwait(true);
+            _lastKnownSimplifiedTdpControls = settings.SimplifiedTdpControls;
+            SetSimplifiedTdpControls(_lastKnownSimplifiedTdpControls);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Settings", "Simplified TDP preference update failed.", exception);
+            bool? refreshedValue = null;
+            try { refreshedValue = (await _frontend.GetBootstrapAsync().ConfigureAwait(true)).Settings.SimplifiedTdpControls; }
+            catch (Exception readbackException) { AppLog.Warn("Settings", "Simplified TDP preference readback failed; keeping the last confirmed value.", readbackException); }
+            _lastKnownSimplifiedTdpControls = ResolvePreference(_lastKnownSimplifiedTdpControls, refreshedValue);
+            SetSimplifiedTdpControls(_lastKnownSimplifiedTdpControls);
+        }
+        finally
+        {
+            _simplifiedTdpMutationInProgress = false;
+            UpdateQuickSettingsPreferenceControlStates();
+            DrainPendingQuickSettingsPreferencesRefresh();
+        }
+    }
+
+    private void DrainPendingQuickSettingsPreferencesRefresh()
+    {
+        if (!_quickSettingsPreferencesRefreshPending || _quickSettingsPreferencesRefreshInProgress
+            || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress || !_active)
+            return;
+
+        _quickSettingsPreferencesRefreshPending = false;
+        RequestQuickSettingsPreferencesRefresh();
+    }
+
+    private void SetQuickSettingsPowerSourceOnly(bool enabled)
+    {
+        _applyingQuickSettingsPowerSourceOnly = true;
+        try { QuickSettingsPowerSourceOnlyToggleSwitch.IsOn = enabled; }
+        finally { _applyingQuickSettingsPowerSourceOnly = false; }
+    }
+
+    private void SetSimplifiedTdpControls(bool enabled)
+    {
+        _applyingSimplifiedTdpControls = true;
+        try { SimplifiedTdpControlsToggleSwitch.IsOn = enabled; }
+        finally { _applyingSimplifiedTdpControls = false; }
+    }
+
+    private void UpdateQuickSettingsPreferenceControlStates()
+    {
+        QuickSettingsPowerSourceOnlyToggleSwitch.IsEnabled = !_powerSourceMutationInProgress;
+        SimplifiedTdpControlsToggleSwitch.IsEnabled = !_simplifiedTdpMutationInProgress;
+    }
+
+    internal static bool ResolvePreference(bool lastKnownValue, bool? refreshedValue) => refreshedValue ?? lastKnownValue;
 
     internal void SetAppThemeSelection(MainUiTheme theme, string? failureDescription = null)
     {

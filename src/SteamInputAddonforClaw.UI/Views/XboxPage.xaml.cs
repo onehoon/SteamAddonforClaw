@@ -25,6 +25,8 @@ public sealed partial class XboxPage : UserControl
     private bool _tdpDraftDirty;
     private bool _simplifiedTdpControls;
     private bool? _pendingSimplifiedTdpControls;
+    private bool _quickSettingsCurrentPowerSourceOnly;
+    private FrontendTdpPowerSource? _currentPowerSource;
     private CancellationTokenSource? _acFpsDebounce, _dcFpsDebounce; private long _acFpsGeneration, _dcFpsGeneration; private int? _acFpsDraft, _dcFpsDraft;
     private CancellationTokenSource? _acGpuDebounce, _dcGpuDebounce; private long _acGpuGeneration, _dcGpuGeneration, _gpuDraftGeneration; private int? _acGpuDraftIndex, _dcGpuDraftIndex; private bool _gpuDraftDirty;
     private static readonly CpuBoostModeItem[] Modes = [new(CpuBoostMode.Disabled, MainUiStrings.Get("Xbox_CpuBoost_Mode_Disabled", "Disabled")), new(CpuBoostMode.Enabled, MainUiStrings.Get("Xbox_CpuBoost_Mode_Enabled", "Enabled")), new(CpuBoostMode.Aggressive, MainUiStrings.Get("Xbox_CpuBoost_Mode_Aggressive", "Aggressive")), new(CpuBoostMode.EfficientEnabled, MainUiStrings.Get("Xbox_CpuBoost_Mode_EfficientEnabled", "Efficient Enabled")), new(CpuBoostMode.EfficientAggressive, MainUiStrings.Get("Xbox_CpuBoost_Mode_EfficientAggressive", "Efficient Aggressive")), new(CpuBoostMode.AggressiveAtGuaranteed, MainUiStrings.Get("Xbox_CpuBoost_Mode_AggressiveAtGuaranteed", "Aggressive At Guaranteed")), new(CpuBoostMode.EfficientAggressiveAtGuaranteed, MainUiStrings.Get("Xbox_CpuBoost_Mode_EfficientAggressiveAtGuaranteed", "Efficient Aggressive At Guaranteed"))];
@@ -56,7 +58,7 @@ public sealed partial class XboxPage : UserControl
         if (_frontend is not null)
         {
             _frontend.StateInvalidated += OnStateInvalidated;
-            _ = RefreshSimplifiedTdpControlsPreferenceAsync();
+            _ = RefreshQuickSettingsPreferencesAsync();
         }
 
         if (_catalogLoaded)
@@ -80,21 +82,31 @@ public sealed partial class XboxPage : UserControl
     private void OnStateInvalidated(object? sender, EventArgs e)
     {
         if (_active)
-            DispatcherQueue.TryEnqueue(() => _ = RefreshSimplifiedTdpControlsPreferenceAsync());
+            DispatcherQueue.TryEnqueue(() => _ = RefreshQuickSettingsPreferencesAsync());
     }
 
-    private async Task RefreshSimplifiedTdpControlsPreferenceAsync()
+    private async Task RefreshQuickSettingsPreferencesAsync()
     {
         if (!_active || _frontend is null) return;
         try
         {
             var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
             if (_active)
+            {
                 ApplySimplifiedTdpControlsPreference(bootstrap.Settings.SimplifiedTdpControls);
+                _quickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
+                _currentPowerSource = bootstrap.CurrentPowerSource;
+                ApplyPowerSourceVisibility();
+            }
         }
         catch (Exception exception)
         {
-            AppLog.Warn("Xbox", "Simplified TDP preference refresh failed.", exception);
+            AppLog.Warn("Xbox", "Quick Settings preferences refresh failed.", exception);
+            if (_active)
+            {
+                _currentPowerSource = null;
+                ApplyPowerSourceVisibility();
+            }
         }
     }
 
@@ -121,8 +133,7 @@ public sealed partial class XboxPage : UserControl
     private void RenderTdpPresentationOnly()
     {
         var exactGapMode = _snapshot?.Limits is { } limits
-            && _simplifiedTdpControls
-            && DevicePage.TdpDraftPolicy.GetKnownTdpGap(limits) > 0;
+            && !DevicePage.TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, limits);
         if (_snapshot?.Limits is { } currentLimits)
         {
             _suppressTdpEvents = true;
@@ -134,7 +145,26 @@ public sealed partial class XboxPage : UserControl
             }
             finally { _suppressTdpEvents = false; }
         }
-        AcPl2Row.Visibility = DcPl2Row.Visibility = exactGapMode ? Visibility.Collapsed : Visibility.Visible;
+        var showPl2 = DevicePage.TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, _snapshot?.Limits);
+        AcPl2Row.Visibility = DcPl2Row.Visibility = showPl2 ? Visibility.Visible : Visibility.Collapsed;
+        ApplyPowerSourceVisibility();
+    }
+
+    private void ApplyPowerSourceVisibility()
+    {
+        var snapshot = _snapshot;
+        var ac = MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.AC);
+        var dc = MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.DC);
+        CpuBoostAcCard.Visibility = snapshot?.CpuBoost.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        CpuBoostDcCard.Visibility = snapshot?.CpuBoost.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        TdpAcCard.Visibility = snapshot?.Tdp.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        TdpDcCard.Visibility = snapshot?.Tdp.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        PowerModeAcCard.Visibility = snapshot?.PowerMode?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        PowerModeDcCard.Visibility = snapshot?.PowerMode?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        GpuMinimumClockAcCard.Visibility = snapshot?.GpuMinimumClock?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        GpuMinimumClockDcCard.Visibility = snapshot?.GpuMinimumClock?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
+        FpsAcCard.Visibility = snapshot?.FpsLimit?.Enabled == true && ac ? Visibility.Visible : Visibility.Collapsed;
+        FpsDcCard.Visibility = snapshot?.FpsLimit?.Enabled == true && dc ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
@@ -268,7 +298,6 @@ public sealed partial class XboxPage : UserControl
             }
         }
         finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressFeatureEvents = false; }
-        CpuBoostAcCard.Visibility = CpuBoostDcCard.Visibility = snapshot.CpuBoost.Enabled ? Visibility.Visible : Visibility.Collapsed; TdpAcCard.Visibility = TdpDcCard.Visibility = snapshot.Tdp.Enabled ? Visibility.Visible : Visibility.Collapsed; PowerModeAcCard.Visibility = PowerModeDcCard.Visibility = snapshot.PowerMode?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; GpuMinimumClockAcCard.Visibility = GpuMinimumClockDcCard.Visibility = snapshot.GpuMinimumClock?.Enabled == true ? Visibility.Visible : Visibility.Collapsed; FpsAcCard.Visibility = FpsDcCard.Visibility = snapshot.FpsLimit?.Enabled == true ? Visibility.Visible : Visibility.Collapsed;
         RenderTdpPresentationOnly();
         SetEditorsEnabled(snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable); ResolutionComboBox.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; RenderProfileStatus(snapshot);
     }

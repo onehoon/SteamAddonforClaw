@@ -32,6 +32,8 @@ public sealed partial class DevicePage : UserControl
     private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
     private bool _simplifiedTdpControls;
     private bool? _pendingSimplifiedTdpControls;
+    private bool _quickSettingsCurrentPowerSourceOnly;
+    private FrontendTdpPowerSource? _currentPowerSource;
     private FrontendPowerModeSnapshot _powerModeSnapshot = FrontendPowerModeSnapshot.Unavailable;
     private int? _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft;
     private CancellationTokenSource? _tdpEditDebounce;
@@ -81,7 +83,7 @@ public sealed partial class DevicePage : UserControl
     {
         _frontend = frontend;
         _featureSupport = featureSupport ?? FrontendModelFeatureSupport.None;
-        TdpExpander.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed;
+        TdpCard.Visibility = _featureSupport.Tdp ? Visibility.Visible : Visibility.Collapsed;
         BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit ? Visibility.Visible : Visibility.Collapsed;
         if (!_featureSupport.Tdp) SetInfoBarOpen(TdpInfoBar, false);
         if (!_featureSupport.BatteryChargeLimit) SetInfoBarOpen(BatteryChargeLimitInfoBar, false);
@@ -132,7 +134,7 @@ public sealed partial class DevicePage : UserControl
     internal async Task RefreshAsync()
     {
         if (_frontend is null) return;
-        await RefreshSimplifiedTdpControlsPreferenceAsync();
+        await RefreshQuickSettingsPreferencesAsync();
         // Shared Frontend V2 (SF-V2-01): one aggregate read replaces separate Device
         // captures. A failed child capture is isolated server-side into that child's Unavailable
         // snapshot (all child render methods handle Unavailable), so only
@@ -148,6 +150,7 @@ public sealed partial class DevicePage : UserControl
             RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: true);
             RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);
             RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot.Unavailable, preserveDirtyDraft: true);
+            ApplyPowerSourceVisibility();
             return;
         }
         Render(snapshot.CpuBoost);
@@ -155,21 +158,42 @@ public sealed partial class DevicePage : UserControl
         RenderTdp(snapshot.Tdp);
         RenderPowerMode(snapshot.PowerMode);
         RenderBatteryChargeLimit(snapshot.BatteryChargeLimit);
+        ApplyPowerSourceVisibility();
     }
 
-    private async Task RefreshSimplifiedTdpControlsPreferenceAsync()
+    private async Task RefreshQuickSettingsPreferencesAsync()
     {
         if (_frontend is null) return;
         try
         {
             var bootstrap = await _frontend.GetBootstrapAsync();
             if (_active)
+            {
                 ApplySimplifiedTdpControlsPreference(bootstrap.Settings.SimplifiedTdpControls);
+                _quickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
+                _currentPowerSource = bootstrap.CurrentPowerSource;
+                ApplyPowerSourceVisibility();
+            }
         }
         catch (Exception exception)
         {
-            AppLog.Warn("Device", "Simplified TDP preference refresh failed.", exception);
+            AppLog.Warn("Device", "Quick Settings preferences refresh failed.", exception);
+            if (_active)
+            {
+                _currentPowerSource = null;
+                ApplyPowerSourceVisibility();
+            }
         }
+    }
+
+    private void ApplyPowerSourceVisibility()
+    {
+        var ac = MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.AC)
+            ? Visibility.Visible : Visibility.Collapsed;
+        var dc = MainUiPowerSourceVisibility.IsVisible(_quickSettingsCurrentPowerSourceOnly, _currentPowerSource, FrontendTdpPowerSource.DC)
+            ? Visibility.Visible : Visibility.Collapsed;
+        TdpAcCard.Visibility = CpuBoostAcCard.Visibility = PowerModeAcCard.Visibility = MaximumProcessorStateAcCard.Visibility = ac;
+        TdpDcCard.Visibility = CpuBoostDcCard.Visibility = PowerModeDcCard.Visibility = MaximumProcessorStateDcCard.Visibility = dc;
     }
 
     private void ApplySimplifiedTdpControlsPreference(bool enabled)
@@ -647,7 +671,7 @@ public sealed partial class DevicePage : UserControl
         {
             if (snapshot.Limits is { } limits)
             {
-                var exactGapMode = _simplifiedTdpControls && TdpDraftPolicy.GetKnownTdpGap(limits) > 0;
+                var exactGapMode = !TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, limits);
                 foreach (var slider in new[] { TdpAcPl1Slider, TdpDcPl1Slider })
                 {
                     slider.Minimum = limits.Pl1MinimumWatts;
@@ -665,9 +689,7 @@ public sealed partial class DevicePage : UserControl
             TdpEnabledToggleSwitch.IsOn = snapshot.Configuration?.Enabled == true;
             SetSlider(TdpAcPl1Slider, _acPl1Draft); SetSlider(TdpAcPl2Slider, _acPl2Draft);
             SetSlider(TdpDcPl1Slider, _dcPl1Draft); SetSlider(TdpDcPl2Slider, _dcPl2Draft);
-            var showPl2 = !(snapshot.Limits is { } knownLimits
-                && _simplifiedTdpControls
-                && TdpDraftPolicy.GetKnownTdpGap(knownLimits) > 0);
+            var showPl2 = TdpDraftPolicy.ShouldShowPl2(_simplifiedTdpControls, snapshot.Limits);
             TdpAcPl2Row.Visibility = TdpDcPl2Row.Visibility = showPl2 ? Visibility.Visible : Visibility.Collapsed;
         }
         finally { _suppressTdpEvents = false; }
@@ -801,6 +823,9 @@ public sealed partial class DevicePage : UserControl
             { Pl1MinimumWatts: 8, Pl1MaximumWatts: 35, Pl2MinimumWatts: 8, Pl2MaximumWatts: 45 } => 2,
             _ => 0
         };
+
+        internal static bool ShouldShowPl2(bool simplifiedTdpControls, FrontendTdpLimits? limits) =>
+            !simplifiedTdpControls || limits is null || GetKnownTdpGap(limits) == 0;
 
         internal static AdjustedPair AdjustAfterEdit(bool pl1WasEdited, int? pl1, int? pl2, FrontendTdpLimits limits, bool exactGap = false)
         {

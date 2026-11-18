@@ -15,6 +15,34 @@
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsCard
+                x:Uid="Settings_QuickSettingsPowerSourceOnlyCard"
+                Description="Show controls for the current AC or DC power source in the main pages and Quick Settings Overlay."
+                Header="Show only current power source">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE85E;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="QuickSettingsPowerSourceOnlyToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="QuickSettingsPowerSourceOnlyToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsCard
+                x:Uid="Settings_SimplifiedTdpControlsCard"
+                Description="Show PL1 only when the device has a known TDP gap; otherwise keep PL1 and PL2."
+                Header="Simplified TDP Controls">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71B;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="SimplifiedTdpControlsToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="SimplifiedTdpControlsToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsCard
                 x:Name="AppThemeCard"
                 x:Uid="Settings_AppThemeCard"
                 Header="App theme"

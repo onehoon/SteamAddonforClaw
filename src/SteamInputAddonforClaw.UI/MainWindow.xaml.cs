@@ -181,6 +181,8 @@ public sealed partial class MainWindow : Window
         _ = RefreshSystemStatusAsync();
         _settingsContent?.RequestAppUpdateRefresh();
         _settingsContent?.RequestGamingHomeRefresh();
+        if (_navigationState.CurrentPage == MainNavigationPage.Settings)
+            _settingsContent?.RequestQuickSettingsPreferencesRefresh();
         _overlayContent?.RequestClawHudRefresh();
         _shortcutContent?.RequestRefresh();
         if (_navigationState.CurrentPage == MainNavigationPage.QuickOverlay)
@@ -198,6 +200,7 @@ public sealed partial class MainWindow : Window
                 ("RemainingPages", Math.Max(0, DeferredWarmupPages.Length - _nextWarmupPageIndex)));
         if (_settingsContent is not null)
         {
+            _settingsContent.Deactivate();
             _settingsContent.AppThemeSelectionRequested -= OnAppThemeSelectionRequested;
             _settingsContent.AppUpdateSnapshotRendered -= OnAppUpdateSnapshotRendered;
             _settingsContent.DeveloperMenuRequested -= OnDeveloperMenuRequested;
@@ -700,6 +703,7 @@ public sealed partial class MainWindow : Window
 
         var wasController = ControllerPageHost.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
+        var wasSettings = SettingsPageHost.Visibility == Visibility.Visible;
         var wasMsiUpdates = MsiUpdatesPageHost.Visibility == Visibility.Visible;
         var wasProfile = ProfilePageHost.Visibility == Visibility.Visible;
         var wasXbox = XboxPageHost.Visibility == Visibility.Visible;
@@ -729,6 +733,8 @@ public sealed partial class MainWindow : Window
         TweaksPageHost.Visibility = page == MainNavigationPage.Tweaks ? Visibility.Visible : Visibility.Collapsed;
         HowToUsePageHost.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsPageHost.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
+        if (page == MainNavigationPage.Settings && !wasSettings) _settingsContent!.Activate();
+        else if (wasSettings && page != MainNavigationPage.Settings) _settingsContent?.Deactivate();
         if (page == MainNavigationPage.HowToUse) _howToUseContent!.Activate();
         if (page == MainNavigationPage.Controller)
         {

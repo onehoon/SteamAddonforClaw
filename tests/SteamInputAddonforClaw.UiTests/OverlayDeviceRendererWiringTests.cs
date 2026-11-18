@@ -726,7 +726,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var source = ReadOverlayWindowSource();
 
         Assert.DoesNotContain("Intel FPS Limit", source);
-        Assert.DoesNotContain("Plugged in · PL1", source);
+        Assert.DoesNotContain("AC · PL1", source);
         Assert.DoesNotContain("Efficient Aggressive", source);
         Assert.DoesNotContain("Best performance", source);
         Assert.DoesNotContain("2000", source);

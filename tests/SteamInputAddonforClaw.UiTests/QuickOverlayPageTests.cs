@@ -12,27 +12,9 @@ public sealed class QuickOverlayPageTests
     [InlineData(false, null, false)]
     [InlineData(false, true, true)]
     [InlineData(true, false, false)]
-    public void Failed_mutation_prefers_readback_and_falls_back_to_last_confirmed_value(
-        bool lastKnownValue,
-        bool? refreshedValue,
-        bool expectedValue)
-    {
-        Assert.Equal(expectedValue,
-            QuickOverlayPage.ResolveQuickSettingsPowerSourcePreference(lastKnownValue, refreshedValue));
-    }
-
-    [Theory]
-    [InlineData(false, null, false)]
-    [InlineData(false, true, true)]
-    [InlineData(true, false, false)]
-    public void Failed_simplified_tdp_mutation_prefers_readback_and_falls_back_to_last_confirmed_value(
-        bool lastKnownValue,
-        bool? refreshedValue,
-        bool expectedValue)
-    {
-        Assert.Equal(expectedValue,
-            QuickOverlayPage.ResolveSimplifiedTdpControlsPreference(lastKnownValue, refreshedValue));
-    }
+    public void Failed_settings_mutation_prefers_readback_and_falls_back_to_last_confirmed_value(
+        bool lastKnownValue, bool? refreshedValue, bool expectedValue) =>
+        Assert.Equal(expectedValue, SettingsPage.ResolvePreference(lastKnownValue, refreshedValue));
 
     [Fact]
     public void Initialization_uses_startup_snapshot_and_activation_refreshes_authoritative_state()
@@ -40,22 +22,16 @@ public sealed class QuickOverlayPageTests
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
         var initialize = ExtractMethod(page, "internal void Initialize(");
-        var refresh = ExtractMethod(page, "private async Task RefreshQuickSettingsPowerSourcePreferenceAsync()");
+        var refresh = ExtractMethod(page, "private async Task RefreshYButtonQuickJumpTargetAsync()");
 
-        Assert.Contains("bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly", initialize, StringComparison.Ordinal);
-        Assert.Contains("bootstrap.Settings.SimplifiedTdpControls", initialize, StringComparison.Ordinal);
-        Assert.Contains("SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly)", initialize, StringComparison.Ordinal);
+        Assert.Contains("bootstrap.Settings.YButtonQuickJumpTarget", initialize, StringComparison.Ordinal);
         Assert.DoesNotContain("GetBootstrapAsync", initialize, StringComparison.Ordinal);
         Assert.Contains("internal void Activate() => RequestRefresh()", page, StringComparison.Ordinal);
         var requestRefresh = ExtractMethod(page, "internal void RequestRefresh()");
-        Assert.Contains("_ = RefreshQuickSettingsPowerSourcePreferenceAsync()", requestRefresh, StringComparison.Ordinal);
+        Assert.Contains("_ = RefreshYButtonQuickJumpTargetAsync()", requestRefresh, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshTabOrderAsync()", requestRefresh, StringComparison.Ordinal);
         Assert.Contains("await _frontend.GetBootstrapAsync()", refresh, StringComparison.Ordinal);
-        Assert.Contains("_powerSourceMutationInProgress && _yButtonQuickJumpMutationInProgress && _simplifiedTdpControlsMutationInProgress", refresh, StringComparison.Ordinal);
-        Assert.Contains("_discardInFlightPowerSourceRefresh = false", refresh, StringComparison.Ordinal);
-        Assert.Contains("_lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly", refresh, StringComparison.Ordinal);
         Assert.Contains("bootstrap.Settings.YButtonQuickJumpTarget", refresh, StringComparison.Ordinal);
-        Assert.Contains("bootstrap.Settings.SimplifiedTdpControls", refresh, StringComparison.Ordinal);
         Assert.Contains("catch (Exception exception)", refresh, StringComparison.Ordinal);
         Assert.Contains("finally", refresh, StringComparison.Ordinal);
     }
@@ -68,7 +44,7 @@ public sealed class QuickOverlayPageTests
         var xamlNamespace = XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml");
         var cardNames = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard")
             .Select(element => (string?)element.Attribute(xamlNamespace)).ToHashSet();
-        Assert.True(cardNames.SetEquals(new[] { "YButtonQuickJumpCard", "QuickSettingsPowerSourceCard", "SimplifiedTdpControlsCard" }));
+        Assert.True(cardNames.SetEquals(new[] { "YButtonQuickJumpCard" }));
 
         var combo = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "ComboBox");
         Assert.True(combo.Elements().Select(element => (string?)element.Attribute("Tag")).ToHashSet()
@@ -87,7 +63,7 @@ public sealed class QuickOverlayPageTests
         Assert.Contains("await _frontend.SetQuickOverlayYButtonTargetAsync(target)", mutation, StringComparison.Ordinal);
         Assert.Contains("settings.YButtonQuickJumpTarget", mutation, StringComparison.Ordinal);
         Assert.Contains("SetYButtonQuickJumpTarget(_lastKnownYButtonQuickJumpTarget)", mutation, StringComparison.Ordinal);
-        Assert.Contains("_discardInFlightYButtonQuickJumpRefresh = _powerSourceRefreshInProgress", mutation, StringComparison.Ordinal);
+        Assert.Contains("_discardInFlightYButtonQuickJumpRefresh = _yButtonQuickJumpRefreshInProgress", mutation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -144,56 +120,46 @@ public sealed class QuickOverlayPageTests
     }
 
     [Fact]
-    public void Toggle_uses_the_existing_typed_mutation_and_rolls_back_from_readback_or_last_known_value()
+    public void Shared_preferences_live_in_Main_Settings_while_Overlay_setting_controls_remain()
     {
-        var page = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
-            "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
-        var handler = ExtractMethod(page, "private async void QuickSettingsPowerSourceToggleSwitch_Toggled(");
-        var xaml = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
-            "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml"));
+        var root = FindRepositoryRoot();
+        var settingsXaml = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml"));
+        var settingsCode = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml.cs"));
+        var quickOverlayXaml = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml"));
+        var quickOverlayCode = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
 
-        Assert.Contains("_applyingPowerSourcePreference || _frontend is null || _powerSourceMutationInProgress", handler, StringComparison.Ordinal);
-        Assert.Contains("_powerSourceMutationInProgress = true", handler, StringComparison.Ordinal);
-        Assert.Contains("_discardInFlightPowerSourceRefresh = _powerSourceRefreshInProgress", handler, StringComparison.Ordinal);
-        Assert.Contains("QuickSettingsPowerSourceToggleSwitch.IsEnabled = false", handler, StringComparison.Ordinal);
-        Assert.Contains("await _frontend.SetQuickSettingsCurrentPowerSourceOnlyAsync(", handler, StringComparison.Ordinal);
-        Assert.Contains("settings.QuickSettingsCurrentPowerSourceOnly", handler, StringComparison.Ordinal);
-        Assert.Contains("await _frontend.GetBootstrapAsync()", handler, StringComparison.Ordinal);
-        Assert.Contains("ResolveQuickSettingsPowerSourcePreference(", handler, StringComparison.Ordinal);
-        Assert.Contains("finally", handler, StringComparison.Ordinal);
-        Assert.Contains("_powerSourceMutationInProgress = false", handler, StringComparison.Ordinal);
-        Assert.Contains("QuickSettingsPowerSourceToggleSwitch.IsEnabled = true", handler, StringComparison.Ordinal);
-        Assert.Contains("Toggled=\"QuickSettingsPowerSourceToggleSwitch_Toggled\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Uid=\"Settings_QuickSettingsPowerSourceOnlyCard\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Uid=\"Settings_SimplifiedTdpControlsCard\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("Toggled=\"QuickSettingsPowerSourceOnlyToggleSwitch_Toggled\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("Toggled=\"SimplifiedTdpControlsToggleSwitch_Toggled\"", settingsXaml, StringComparison.Ordinal);
+        foreach (var methodName in new[] { "QuickSettingsPowerSourceOnlyToggleSwitch_Toggled", "SimplifiedTdpControlsToggleSwitch_Toggled" })
+        {
+            var handler = ExtractMethod(settingsCode, "private async void " + methodName + "(");
+            Assert.Contains("_frontend.Set", handler, StringComparison.Ordinal);
+            Assert.Contains("settings.", handler, StringComparison.Ordinal);
+            Assert.Contains("_frontend.GetBootstrapAsync()", handler, StringComparison.Ordinal);
+            Assert.Contains("ResolvePreference(", handler, StringComparison.Ordinal);
+            Assert.Contains("finally", handler, StringComparison.Ordinal);
+            Assert.Contains("UpdateQuickSettingsPreferenceControlStates()", handler, StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain("QuickSettingsPowerSourceToggleSwitch", quickOverlayXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SimplifiedTdpControlsToggleSwitch", quickOverlayXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetQuickSettingsCurrentPowerSourceOnlyAsync", quickOverlayCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetSimplifiedTdpControlsAsync", quickOverlayCode, StringComparison.Ordinal);
+        Assert.Contains("RequestQuickSettingsPreferencesRefresh", settingsCode, StringComparison.Ordinal);
+        Assert.Contains("_navigationState.CurrentPage == MainNavigationPage.Settings", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs")), StringComparison.Ordinal);
 
-        var overlayPage = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
+        var overlayPage = File.ReadAllText(Path.Combine(root,
             "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs"));
-        var overlayApp = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
+        var overlayApp = File.ReadAllText(Path.Combine(root,
             "src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs"));
         Assert.Contains("QuickSettingsCurrentPowerSourceOnlyRequested", overlayPage, StringComparison.Ordinal);
         Assert.Contains("ApplyQuickSettingsCurrentPowerSourceOnly", overlayPage, StringComparison.Ordinal);
         Assert.Contains("_client!.SendCurrentPowerSourceMutationAsync(enabled)", overlayApp, StringComparison.Ordinal);
-    }
 
-    [Fact]
-    public void Simplified_tdp_toggle_uses_authoritative_runtime_state_and_the_typed_overlay_request()
-    {
-        var root = FindRepositoryRoot();
-        var page = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml.cs"));
-        var handler = ExtractMethod(page, "private async void SimplifiedTdpControlsToggleSwitch_Toggled(");
-        var xaml = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Views", "QuickOverlayPage.xaml"));
-        Assert.Contains("await _frontend.SetSimplifiedTdpControlsAsync(", handler, StringComparison.Ordinal);
-        Assert.Contains("settings.SimplifiedTdpControls", handler, StringComparison.Ordinal);
-        Assert.Contains("ResolveSimplifiedTdpControlsPreference(", handler, StringComparison.Ordinal);
-        Assert.Contains("Toggled=\"SimplifiedTdpControlsToggleSwitch_Toggled\"", xaml, StringComparison.Ordinal);
-
-        var overlay = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs"));
-        var app = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs"));
-        var wire = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.FrontendTransport", "OverlayWire.cs"));
-        Assert.Contains("SimplifiedTdpControlsRequested", overlay, StringComparison.Ordinal);
-        Assert.Contains("ApplySimplifiedTdpControls(settings.SimplifiedTdpControls", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs")), StringComparison.Ordinal);
-        Assert.Contains("SendSimplifiedTdpControlsMutationAsync(enabled)", app, StringComparison.Ordinal);
-        Assert.Contains("SimplifiedTdpControlsMutationRequest", wire, StringComparison.Ordinal);
-        Assert.Contains("CurrentVersion = 23", wire, StringComparison.Ordinal);
+        var overlayCode = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs"));
+        Assert.Contains("ApplySimplifiedTdpControls(settings.SimplifiedTdpControls", overlayCode, StringComparison.Ordinal);
+        Assert.Contains("RenderQuickSettingsCurrentPowerSourceRow", overlayPage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -213,10 +179,14 @@ public sealed class QuickOverlayPageTests
         Assert.DoesNotContain("QuickOverlay", warmup, StringComparison.Ordinal);
         Assert.Contains("case MainNavigationPage.QuickOverlay: _ = GetOrCreateQuickOverlayPage(); break;", materialize, StringComparison.Ordinal);
         Assert.Contains("QuickOverlayPageHost.Visibility = page == MainNavigationPage.QuickOverlay", showPage, StringComparison.Ordinal);
+        Assert.Contains("if (page == MainNavigationPage.Settings && !wasSettings) _settingsContent!.Activate()", showPage, StringComparison.Ordinal);
+        Assert.Contains("else if (wasSettings && page != MainNavigationPage.Settings) _settingsContent?.Deactivate()", showPage, StringComparison.Ordinal);
         Assert.Contains("if (page == MainNavigationPage.QuickOverlay) _quickOverlayContent!.Activate();", showPage, StringComparison.Ordinal);
         Assert.Contains("MainNavigationPage.QuickOverlay => \"QuickOverlay\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("if (_navigationState.CurrentPage == MainNavigationPage.QuickOverlay)", invalidation, StringComparison.Ordinal);
         Assert.Contains("_quickOverlayContent?.RequestRefresh()", invalidation, StringComparison.Ordinal);
+        Assert.Contains("if (_navigationState.CurrentPage == MainNavigationPage.Settings)", invalidation, StringComparison.Ordinal);
+        Assert.Contains("_settingsContent?.RequestQuickSettingsPreferencesRefresh()", invalidation, StringComparison.Ordinal);
 
         var shell = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
         Assert.Contains("x:Name=\"OverlayPageHost\"", shell, StringComparison.Ordinal);

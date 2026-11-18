@@ -71,13 +71,13 @@ public sealed class XboxCatalogPageUiTests
         {
             ("DevicePage.xaml",
                 new[] { "TdpEnabledToggleSwitch", "CpuBoostEnabledToggleSwitch", "PowerModeEnabledToggleSwitch" },
-                new[] { "TdpExpander", "TdpAcPl1Slider", "TdpDcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
+                new[] { "TdpCard", "TdpAcPl1Slider", "TdpDcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
             ("ProfilePage.xaml",
                 new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle" },
-                new[] { "TdpExpander", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
+                new[] { "TdpCard", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
             ("XboxPage.xaml",
                 new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle" },
-                new[] { "TdpExpander", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
+                new[] { "TdpCard", "TdpAcCard", "TdpDcCard", "AcPl1Slider", "DcPl1Slider", "CpuBoostExpander", "CpuBoostAcComboBox", "CpuBoostDcComboBox", "PowerModeExpander", "PowerModeAcComboBox", "PowerModeDcComboBox" }),
         };
         XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
 
@@ -274,8 +274,8 @@ public sealed class XboxCatalogPageUiTests
         Assert.Contains("else if (wasXbox) _xboxContent?.Deactivate()", showPage, StringComparison.Ordinal);
         Assert.Contains("GetOrCreateXboxPage()", materialize, StringComparison.Ordinal);
         Assert.DoesNotContain(".Activate()", materialize, StringComparison.Ordinal);
-        var stateInvalidation = Method(pageCode, "private void OnStateInvalidated", "private async Task RefreshSimplifiedTdpControlsPreferenceAsync");
-        Assert.Contains("RefreshSimplifiedTdpControlsPreferenceAsync", stateInvalidation, StringComparison.Ordinal);
+        var stateInvalidation = Method(pageCode, "private void OnStateInvalidated", "private async Task RefreshQuickSettingsPreferencesAsync");
+        Assert.Contains("RefreshQuickSettingsPreferencesAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("RefreshGamesAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureSelectedAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("PackageCatalog", pageCode, StringComparison.Ordinal);
@@ -424,8 +424,8 @@ public sealed class XboxCatalogPageUiTests
 
         Assert.False(XboxPage.ShouldPreserveDirtyTdpDraft(true, 5, 5));
         Assert.True(XboxPage.ShouldPreserveDirtyTdpDraft(true, 5, 6));
-        var stateInvalidation = Method(code, "private void OnStateInvalidated", "private async Task RefreshSimplifiedTdpControlsPreferenceAsync");
-        Assert.Contains("RefreshSimplifiedTdpControlsPreferenceAsync", stateInvalidation, StringComparison.Ordinal);
+        var stateInvalidation = Method(code, "private void OnStateInvalidated", "private async Task RefreshQuickSettingsPreferencesAsync");
+        Assert.Contains("RefreshQuickSettingsPreferencesAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("RefreshGamesAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureSelectedAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("ActualRunningAppId", code, StringComparison.Ordinal);

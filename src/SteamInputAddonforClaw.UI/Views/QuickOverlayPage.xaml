@@ -28,36 +28,6 @@
                 </ComboBox>
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard
-                x:Name="QuickSettingsPowerSourceCard"
-                x:Uid="QuickOverlay_PowerSourceCard"
-                Description="Show only the controls for the currently connected power source in Quick Settings Overlay."
-                Header="Show only current power source">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE85E;" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch
-                    x:Name="QuickSettingsPowerSourceToggleSwitch"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
-            </ctcontrols:SettingsCard>
-
-            <ctcontrols:SettingsCard
-                x:Name="SimplifiedTdpControlsCard"
-                x:Uid="QuickOverlay_SimplifiedTdpControlsCard"
-                Description="Show PL1 only; PL2 automatically follows PL1 using the device-specific gap."
-                Header="Simplified TDP Controls">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE71B;" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch
-                    x:Name="SimplifiedTdpControlsToggleSwitch"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="SimplifiedTdpControlsToggleSwitch_Toggled" />
-            </ctcontrols:SettingsCard>
-
             <ctcontrols:SettingsExpander
                 x:Name="QuickOverlayTabOrderExpander"
                 x:Uid="QuickOverlay_TabOrderExpander"
