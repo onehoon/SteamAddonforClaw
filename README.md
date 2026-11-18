@@ -119,11 +119,11 @@ The page also provides device-wide performance and battery controls:
 
 - **TDP Control** — manages processor power limits using separate **Plugged in** and **On battery** values. **PL1** is the sustained power limit and **PL2** is the higher short-duration limit. Available ranges depend on the detected Claw model. When available, first setup uses valid MSI Center M Manual TDP values.
 - **CPU Boost** — manages the Windows processor boost mode separately for plugged-in and battery use. Choices are **Disabled**, **Enabled**, **Aggressive**, **Efficient Enabled**, **Efficient Aggressive**, **Aggressive At Guaranteed**, and **Efficient Aggressive At Guaranteed**. **Disabled** is a CPU mode choice, not an Addon management toggle.
-- **Maximum Processor State** — optionally sets the Windows maximum processor performance state to **99%** or **100%** separately for AC and DC. It is off for new users, is not a CPU-utilization limit, and is independent of CPU Boost. Turning it off stops the Addon from applying the setting; it does not restore the previous Windows value.
+- **Maximum Processor State** — independently manages the Windows maximum processor performance state for AC and DC. Each rail can be set to **Do not change**, **99%**, or **100%**. New users leave both rails unmanaged. **Do not change** stops future Addon writes for that rail and does not restore the existing Windows value. This is not a CPU-utilization limit and is independent of CPU Boost.
 - **Windows Power Mode** — manages the Windows power mode separately for each power source: **Best power efficiency**, **Balanced**, or **Best performance**.
 - **Battery charge limit** — enables a charging limit from 60% to 100% in 5% steps, when the device supports it.
 
-TDP Control, CPU Boost, and Windows Power Mode are managed whenever their valid settings are configured; they do not have individual on/off switches. The Addon does not necessarily restore the exact Windows or MSI value that existed before management began. **Maximum Processor State** remains an optional setting that can be turned off; turning it off does not restore the previous Windows value.
+TDP Control, CPU Boost, and Windows Power Mode are managed whenever their valid settings are configured; they do not have individual on/off switches. The Addon does not necessarily restore the exact Windows or MSI value that existed before management began. **Maximum Processor State** is managed independently per AC/DC rail; choosing **Do not change** leaves that rail unmanaged without restoring its previous Windows value.
 
 **Battery charge limit** is different: its switch directly enables or disables the MSI charge-limit function. The selected percentage remains saved for later use.
 

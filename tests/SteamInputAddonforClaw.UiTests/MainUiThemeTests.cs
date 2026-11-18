@@ -152,7 +152,7 @@ public sealed class MainUiThemeTests
 
         var developerWarning = Method(mainWindow, "private async void OnDeveloperMenuRequested", "private void MainNavigationView_SelectionChanged");
         var prerequisiteResult = Method(mainWindow, "private async Task HandlePrerequisiteSetupResultAsync", "private async Task TryShowCenterMDisableConfirmationAsync");
-        var centerMConfirmation = Method(devicePage, "private async Task RequestCenterMTransitionAsync", "private sealed record MaximumProcessorStatePercentItem");
+        var centerMConfirmation = Method(devicePage, "private async Task RequestCenterMTransitionAsync", "private sealed record MaximumProcessorStateOptionItem");
 
         AssertDialogOwner(developerWarning, "RequestedTheme = MainAppRoot.ActualTheme", "XamlRoot = Content.XamlRoot");
         AssertDialogOwner(prerequisiteResult, "RequestedTheme = MainAppRoot.ActualTheme", "XamlRoot = Content.XamlRoot");

@@ -79,7 +79,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetWindowsTweakAsync(FrontendWindowsTweakId.DisableEdgeBackground, true);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.True(result.Succeeded);
         Assert.Equal(FrontendWindowsTweakId.DisableEdgeBackground, result.UpdatedTweak.Id);
         Assert.Equal(FrontendWindowsTweakState.Enabled, result.UpdatedTweak.State);
@@ -96,7 +96,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetSteamVirtualControllerAsync(SteamVirtualControllerPreference.DualSenseEdge);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, fake.LastSteamVirtualControllerPreference);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, result.SteamVirtualController);
     }
@@ -111,7 +111,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetGyroscopeEnabledAsync(false);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.False(fake.LastGyroscopeEnabled);
         Assert.False(result.GyroscopeEnabled);
     }
@@ -126,7 +126,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetQuickOverlayYButtonTargetAsync(QuickOverlayYButtonTarget.Off);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(QuickOverlayYButtonTarget.Off, fake.LastYButtonQuickJumpTarget);
         Assert.Equal(QuickOverlayYButtonTarget.Off, result.YButtonQuickJumpTarget);
         await Assert.ThrowsAsync<JsonException>(() =>
@@ -143,7 +143,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var settings = await client.SetSimplifiedTdpControlsAsync(true);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("SetSimplifiedTdpControls", Enum.GetNames<FrontendRpcMethod>());
         Assert.True(fake.LastSimplifiedTdpControls);
         Assert.True(settings.SimplifiedTdpControls);
@@ -159,7 +159,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetExperimentalVirtualTouchpadEnabledAsync(true);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal((int)FrontendRpcMethod.SetGameProfileSteamVirtualController + 1,
             (int)FrontendRpcMethod.SetExperimentalVirtualTouchpadEnabled);
         Assert.True(fake.LastExperimentalVirtualTouchpadEnabled);
@@ -181,7 +181,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
@@ -309,7 +309,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -373,7 +373,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -463,7 +463,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.RunDeveloperRumbleRearmAsync();
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.DeveloperRumbleRearmResult, result);
         Assert.Equal(1, fake.DeveloperRumbleRearmCount);
         Assert.False(result.PhysicalMotorEffectVerified);
@@ -599,7 +599,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.RequestMsiLiveUpdateCatalogAsync();
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal("E1T52IMS.113", received.Categories[0].Entries[0].InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable,
@@ -642,6 +642,8 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(99, fake.LastMaximumProcessorStateAc);
         Assert.Equal(fake.MaximumProcessorStateMutationResult, await client.SetDeviceMaximumProcessorStateDcAsync(100));
         Assert.Equal(100, fake.LastMaximumProcessorStateDc);
+        Assert.Equal(fake.MaximumProcessorStateMutationResult, await client.SetDeviceMaximumProcessorStateAcAsync(null));
+        Assert.Null(fake.LastMaximumProcessorStateAc);
     }
 
     [Fact]
@@ -899,7 +901,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
-        Assert.Equal(93, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
         await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
     }
 
@@ -1878,14 +1880,12 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(0, fake.TotalCalls);
     }
 
-    // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 92 in sync with it
-    // by hand. A stale value here would make the frame rejected at the version check instead of
-    // reaching the method-shape validation this test actually targets.
+    // Attribute arguments must be compile-time constants, so use the current protocol version
+    // literal here to reach method-shape validation rather than failing the version check.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":93,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":93,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":93,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":94,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":94,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":94,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -2439,9 +2439,9 @@ public sealed class FrontendNamedPipeTransportTests
         { TotalCalls++; return Task.FromResult(MaximumProcessorStateSnapshot); }
         public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateEnabledAsync(bool enabled, CancellationToken t = default)
         { TotalCalls++; LastMaximumProcessorStateEnabled = enabled; return Task.FromResult(MaximumProcessorStateMutationResult); }
-        public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateAcAsync(int percent, CancellationToken t = default)
+        public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateAcAsync(int? percent, CancellationToken t = default)
         { TotalCalls++; LastMaximumProcessorStateAc = percent; return Task.FromResult(MaximumProcessorStateMutationResult); }
-        public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateDcAsync(int percent, CancellationToken t = default)
+        public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateDcAsync(int? percent, CancellationToken t = default)
         { TotalCalls++; LastMaximumProcessorStateDc = percent; return Task.FromResult(MaximumProcessorStateMutationResult); }
         public AddonQuickSettingsShellSnapshot ShellSnapshot { get; } = AddonQuickSettingsShellContract.Create([AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting]);
         public int CaptureShellCount { get; private set; }

@@ -28,8 +28,8 @@ public sealed class MaximumProcessorStateRuntimeTests : IDisposable
         Assert.Equal(85u, snapshot.AcCurrent.Percent);
         Assert.Equal(90u, snapshot.DcCurrent.Percent);
         Assert.False(snapshot.Enabled);
-        Assert.Equal(100, snapshot.AcDesired);
-        Assert.Equal(100, snapshot.DcDesired);
+        Assert.Null(snapshot.AcDesired);
+        Assert.Null(snapshot.DcDesired);
         Assert.Empty(policy.Applied);
         Assert.Equal(legacy, File.ReadAllText(path));
     }
@@ -49,8 +49,8 @@ public sealed class MaximumProcessorStateRuntimeTests : IDisposable
         Assert.True(runtime.SetEnabled(false).Succeeded);
         Assert.Empty(policy.Applied);
         Assert.False(runtime.Snapshot.Enabled);
-        Assert.Equal(99, runtime.Snapshot.AcDesired);
-        Assert.Equal(99, runtime.Snapshot.DcDesired);
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Null(runtime.Snapshot.DcDesired);
         Assert.Equal(99u, policy.Ac);
         Assert.Equal(99u, policy.Dc);
 
@@ -183,6 +183,81 @@ public sealed class MaximumProcessorStateRuntimeTests : IDisposable
         Assert.Empty(policy.Applied);
         Assert.Equal(85u, policy.Ac);
         Assert.Equal(90u, policy.Dc);
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Null(runtime.Snapshot.DcDesired);
+
+        Assert.True(runtime.SetAc(99).Succeeded);
+        Assert.Equal((99, null), Assert.Single(policy.Applied));
+        var saved = store.Load().Document.Device.Performance.MaximumProcessorState;
+        Assert.True(saved!.Enabled);
+        Assert.Equal(99, saved.Ac);
+        Assert.Null(saved.Dc);
+    }
+
+    [Fact]
+    public void Selecting_do_not_change_does_not_create_or_apply_a_missing_configuration()
+    {
+        var policy = new FakePowerPolicy { Ac = 85, Dc = 90 };
+        var runtime = CreateRuntime(policy);
+
+        var result = runtime.SetAc(null);
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(policy.Applied);
+        Assert.Null(new ProfileStore(ProfilePath).Load().Document.Device.Performance.MaximumProcessorState);
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Null(runtime.Snapshot.DcDesired);
+    }
+
+    [Fact]
+    public void Selecting_do_not_change_unmanages_only_that_rail_without_writing_windows()
+    {
+        var store = new ProfileStore(ProfilePath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    MaximumProcessorState = new DeviceMaximumProcessorStateSettings { Enabled = true, Ac = 99, Dc = 100 }
+                }
+            }
+        });
+        var policy = new FakePowerPolicy { Ac = 99, Dc = 100 };
+        var runtime = CreateRuntime(policy);
+        policy.Applied.Clear();
+
+        Assert.True(runtime.SetAc(null).Succeeded);
+
+        Assert.Empty(policy.Applied);
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Equal(100, runtime.Snapshot.DcDesired);
+        runtime.Reconcile();
+        Assert.Equal((null, 100), Assert.Single(policy.Applied));
+    }
+
+    [Fact]
+    public void Enabled_partial_configuration_reconciles_only_managed_rails()
+    {
+        var store = new ProfileStore(ProfilePath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    MaximumProcessorState = new DeviceMaximumProcessorStateSettings { Enabled = true, Ac = null, Dc = 99 }
+                }
+            }
+        });
+        var policy = new FakePowerPolicy { Ac = 85, Dc = 90 };
+        var runtime = CreateRuntime(policy);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal((null, 99), Assert.Single(policy.Applied));
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Equal(99, runtime.Snapshot.DcDesired);
     }
 
     [Fact]

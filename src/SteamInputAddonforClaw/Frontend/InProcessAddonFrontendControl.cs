@@ -1947,10 +1947,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
         => MutateMaximumProcessorState(() => _maximumProcessorStateRuntime!.SetEnabled(enabled));
 
-    public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateAcAsync(int percent, CancellationToken cancellationToken = default)
+    public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateAcAsync(int? percent, CancellationToken cancellationToken = default)
         => MutateMaximumProcessorState(() => _maximumProcessorStateRuntime!.SetAc(percent));
 
-    public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateDcAsync(int percent, CancellationToken cancellationToken = default)
+    public Task<FrontendMaximumProcessorStateMutationResult> SetDeviceMaximumProcessorStateDcAsync(int? percent, CancellationToken cancellationToken = default)
         => MutateMaximumProcessorState(() => _maximumProcessorStateRuntime!.SetDc(percent));
 
     private Task<FrontendMaximumProcessorStateMutationResult> MutateMaximumProcessorState(Func<MaximumProcessorStateMutationResult> mutation)

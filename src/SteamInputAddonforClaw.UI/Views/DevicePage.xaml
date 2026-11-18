@@ -18,7 +18,7 @@
         </Style>
     </UserControl.Resources>
     <ScrollViewer Padding="32">
-        <StackPanel Spacing="16">
+        <StackPanel Spacing="8">
             <TextBlock x:Uid="Device_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Device" />
 
             <Border x:Name="DeviceSummaryCard" Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
@@ -50,8 +50,7 @@
             </Border>
 
             <InfoBar x:Name="CenterMStartupInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Informational" />
-            <ctcontrols:SettingsCard x:Name="CenterMStartupCard" x:Uid="Device_CenterMStartupCard" Header="MSI Center M"
-                Description="Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.">
+            <ctcontrols:SettingsCard x:Name="CenterMStartupCard" x:Uid="Device_CenterMStartupCard" Header="MSI Center M">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE71D;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
@@ -63,24 +62,34 @@
             </ctcontrols:SettingsCard>
 
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
-            <ctcontrols:SettingsCard x:Name="TdpCard" x:Uid="Device_TdpCard" Header="TDP Control"
-                Description="Configure processor power limits for AC and DC operation."
-                ContentAlignment="Vertical" HorizontalContentAlignment="Stretch">
+            <ctcontrols:SettingsCard x:Name="TdpCard" x:Uid="Device_TdpCard" Header="TDP Control" Visibility="Collapsed">
                 <ctcontrols:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsCard.HeaderIcon>
-                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
-                    <ToggleSwitch x:Name="TdpEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
-                    <StackPanel x:Name="TdpAcCard" Spacing="6">
-                        <TextBlock x:Uid="Device_TdpAcRailLabel" Text="AC" FontWeight="SemiBold" />
-                        <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                        <Grid x:Name="TdpAcPl2Row" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                    </StackPanel>
-                    <StackPanel x:Name="TdpDcCard" Spacing="6">
-                        <TextBlock x:Uid="Device_TdpDcRailLabel" Text="DC" FontWeight="SemiBold" />
-                        <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                        <Grid x:Name="TdpDcPl2Row" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                    </StackPanel>
-                </StackPanel>
             </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsExpander x:Name="TdpExpander" x:Uid="Device_TdpExpander" Header="TDP Control" IsExpanded="False" Visibility="Collapsed">
+                <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
+                <ToggleSwitch x:Name="TdpEnabledToggleSwitch" Visibility="Collapsed" OffContent="" OnContent="" />
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard x:Name="TdpAcExpandedCard">
+                        <Grid x:Name="TdpAcCard" ColumnSpacing="8" RowSpacing="6">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBlock x:Uid="Device_TdpAcRailLabel" Grid.Row="0" Grid.Column="0" Text="AC" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Grid x:Name="TdpAcPl1Row" Grid.Row="0" Grid.Column="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                            <Grid x:Name="TdpAcPl2Row" Grid.Row="1" Grid.Column="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                        </Grid>
+                    </ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard x:Name="TdpDcExpandedCard">
+                        <Grid x:Name="TdpDcCard" ColumnSpacing="8" RowSpacing="6">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBlock x:Uid="Device_TdpDcRailLabel" Grid.Row="0" Grid.Column="0" Text="DC" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Grid x:Name="TdpDcPl1Row" Grid.Row="0" Grid.Column="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                            <Grid x:Name="TdpDcPl2Row" Grid.Row="1" Grid.Column="1" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                        </Grid>
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
 
             <InfoBar x:Name="CpuBoostInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
 
@@ -88,7 +97,6 @@
                 x:Name="CpuBoostExpander"
                 x:Uid="Device_CpuBoostExpander"
                 Header="CPU Boost"
-                Description="Processor performance boost mode."
                 IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xEEA1;" />
@@ -116,21 +124,19 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
+            <ctcontrols:SettingsCard x:Name="CpuBoostCard" x:Uid="Device_CpuBoostCard" Header="CPU Boost">
+                <ctcontrols:SettingsCard.HeaderIcon><FontIcon Glyph="&#xEEA1;" /></ctcontrols:SettingsCard.HeaderIcon>
+            </ctcontrols:SettingsCard>
+
             <InfoBar x:Name="MaximumProcessorStateInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
             <ctcontrols:SettingsExpander
                 x:Name="MaximumProcessorStateExpander"
                 x:Uid="Device_MaximumProcessorStateExpander"
                 Header="Maximum Processor State"
-                Description="Set the Windows maximum processor performance state to 99% or 100%. This is not a CPU utilization limit. Turning this off stops applying the setting but does not restore the previous value."
                 IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xF42F;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
-                <ToggleSwitch
-                    x:Name="MaximumProcessorStateEnabledToggleSwitch"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="MaximumProcessorStateEnabledToggleSwitch_Toggled" />
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard x:Name="MaximumProcessorStateAcCard" x:Uid="Device_MaximumProcessorStateAcCard" Header="AC">
                         <ComboBox
@@ -149,8 +155,12 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
+            <ctcontrols:SettingsCard x:Name="MaximumProcessorStateCard" x:Uid="Device_MaximumProcessorStateCard" Header="Maximum Processor State">
+                <ctcontrols:SettingsCard.HeaderIcon><FontIcon Glyph="&#xF42F;" /></ctcontrols:SettingsCard.HeaderIcon>
+            </ctcontrols:SettingsCard>
+
             <InfoBar x:Name="PowerModeInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
-            <ctcontrols:SettingsExpander x:Name="PowerModeExpander" x:Uid="Device_PowerModeExpander" Header="Windows Power Mode" Description="Configured Windows 11 power mode for each power rail." IsExpanded="False">
+            <ctcontrols:SettingsExpander x:Name="PowerModeExpander" x:Uid="Device_PowerModeExpander" Header="Windows Power Mode" IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE7E8;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
@@ -161,22 +171,21 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
+            <ctcontrols:SettingsCard x:Name="PowerModeCard" x:Uid="Device_PowerModeCard" Header="Windows Power Mode">
+                <ctcontrols:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE7E8;" /></ctcontrols:SettingsCard.HeaderIcon>
+            </ctcontrols:SettingsCard>
+
             <InfoBar x:Name="BatteryChargeLimitInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
             <ctcontrols:SettingsCard x:Name="BatteryChargeLimitCard" x:Uid="Device_BatteryChargeLimitCard" Header="Battery charge limit">
-                <ctcontrols:SettingsCard.Description>
-                    <TextBlock x:Name="BatteryChargeLimitStatusText" Opacity="0.7" TextWrapping="Wrap" />
-                </ctcontrols:SettingsCard.Description>
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE86B;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
-                <StackPanel Spacing="8" MinWidth="520">
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <TextBlock x:Name="BatteryChargeLimitValueText" MinWidth="64" Text="—%" VerticalAlignment="Center" />
-                        <Slider x:Name="BatteryChargeLimitSlider" Grid.Column="1" VerticalAlignment="Center" Minimum="60" Maximum="100" StepFrequency="5" ValueChanged="BatteryChargeLimitSlider_ValueChanged" PointerCaptureLost="BatteryChargeLimitSlider_PointerCaptureLost" KeyUp="BatteryChargeLimitSlider_KeyUp" />
-                        <ToggleSwitch x:Name="BatteryChargeLimitEnabledToggleSwitch" Grid.Column="2" VerticalAlignment="Center" OffContent="" OnContent="" Toggled="BatteryChargeLimitEnabledToggleSwitch_Toggled" />
-                    </Grid>
-                </StackPanel>
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock x:Name="BatteryChargeLimitValueText" MinWidth="64" Text="—%" VerticalAlignment="Center" />
+                    <Slider x:Name="BatteryChargeLimitSlider" Grid.Column="1" VerticalAlignment="Center" Minimum="60" Maximum="100" StepFrequency="5" ValueChanged="BatteryChargeLimitSlider_ValueChanged" PointerCaptureLost="BatteryChargeLimitSlider_PointerCaptureLost" KeyUp="BatteryChargeLimitSlider_KeyUp" />
+                    <ToggleSwitch x:Name="BatteryChargeLimitEnabledToggleSwitch" Grid.Column="2" VerticalAlignment="Center" OffContent="" OnContent="" Toggled="BatteryChargeLimitEnabledToggleSwitch_Toggled" />
+                </Grid>
             </ctcontrols:SettingsCard>
 
         </StackPanel>

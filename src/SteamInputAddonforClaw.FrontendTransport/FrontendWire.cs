@@ -196,7 +196,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 91 adds the global SimplifiedTdpControls setting and its mutation RPC.
 // Version 92 adds the nullable Runtime current-power-source observation to FrontendBootstrapSnapshot.
 // Version 93 adds per-game 100% display scaling mutations and snapshot state.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 93; }
+// v94 makes Device Maximum Processor State AC/DC selection nullable so each rail can be unmanaged.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 94; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -267,8 +268,8 @@ internal sealed record SetGyroscopeEnabledRequest(bool Enabled);
 internal sealed record SetWindowsTweakRequest(FrontendWindowsTweakId Id, bool Enabled);
 internal sealed record AcknowledgeWindowsTweaksWarningRequest(DateOnly LocalDate);
 internal sealed record SetDeviceMaximumProcessorStateEnabledRequest(bool Enabled);
-internal sealed record SetDeviceMaximumProcessorStateAcRequest(int Percent);
-internal sealed record SetDeviceMaximumProcessorStateDcRequest(int Percent);
+internal sealed record SetDeviceMaximumProcessorStateAcRequest(int? Percent);
+internal sealed record SetDeviceMaximumProcessorStateDcRequest(int? Percent);
 internal sealed record SetGamingHomeSelectionRequest(FrontendGamingHomeSelection Selection);
 internal sealed record SetGamingHomeStartupRequest(bool Enabled);
 internal sealed record SetClawHudEnabledRequest(bool Enabled);

@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
-        <StackPanel Spacing="16">
+        <StackPanel Spacing="8">
             <StackPanel Spacing="4">
                 <TextBlock x:Uid="ClawHud_PageTitle" FontSize="24" FontWeight="SemiBold" Text="ClawHUD" />
                 <TextBlock x:Uid="ClawHud_PageSubtitle" Opacity="0.7" Text="Configure the performance overlay and display behavior." TextWrapping="Wrap" />

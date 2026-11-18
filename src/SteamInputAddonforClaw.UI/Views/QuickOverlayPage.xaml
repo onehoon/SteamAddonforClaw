@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
-        <StackPanel Spacing="16">
+        <StackPanel Spacing="8">
             <TextBlock x:Uid="QuickOverlay_PageTitle" FontSize="24" FontWeight="SemiBold" Text="Quick Overlay" />
 
             <ctcontrols:SettingsCard

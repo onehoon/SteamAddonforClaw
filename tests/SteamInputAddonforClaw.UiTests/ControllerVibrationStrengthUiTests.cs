@@ -23,8 +23,43 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("if (!_featureSupport.Motion", controller);
         Assert.Contains("x:Name=\"GyroscopeCard\"", xaml);
         Assert.Contains("DeviceContent.Initialize(_frontend, _bootstrap.FeatureSupport)", mainWindow);
-        Assert.Contains("TdpCard.Visibility = _featureSupport.Tdp", device);
+        Assert.Contains("SetVisibilityIfChanged(TdpCard, _featureSupport.Tdp && tdpReady && !tdpExpanded", device);
         Assert.Contains("BatteryChargeLimitCard.Visibility = _featureSupport.BatteryChargeLimit", device);
+    }
+
+    [Fact]
+    public void Controller_info_bars_collapse_when_closed_and_share_the_visibility_helper()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
+        var document = XDocument.Parse(xaml);
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        foreach (var name in new[]
+        {
+            "SteamVirtualControllerInfoBar",
+            "FrontButtonMappingInfoBar",
+            "VibrationStrengthInfoBar"
+        })
+        {
+            var infoBar = Assert.Single(document.Descendants(), element =>
+                element.Name.LocalName == "InfoBar" && (string?)element.Attribute(x + "Name") == name);
+            Assert.Equal("False", (string?)infoBar.Attribute("IsOpen"));
+            Assert.Equal("Collapsed", (string?)infoBar.Attribute("Visibility"));
+            Assert.DoesNotMatch($@"{name}\.IsOpen\s*=", code);
+        }
+
+        Assert.Contains("private static void SetInfoBarOpen(InfoBar infoBar, bool isOpen)", code, StringComparison.Ordinal);
+        Assert.Contains("infoBar.Visibility = Visibility.Visible;", code, StringComparison.Ordinal);
+        Assert.Contains("infoBar.Visibility = Visibility.Collapsed;", code, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(SteamVirtualControllerInfoBar, false);", code, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(SteamVirtualControllerInfoBar, true);", code, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(FrontButtonMappingInfoBar, false);", code, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(FrontButtonMappingInfoBar, true);", code, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(VibrationStrengthInfoBar, false);", code, StringComparison.Ordinal);
+        Assert.Contains("SetInfoBarOpen(VibrationStrengthInfoBar, true);", code, StringComparison.Ordinal);
+        Assert.Contains("var preserveFailure = VibrationStrengthInfoBar.IsOpen", code, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -240,7 +240,7 @@ public sealed class MainUiLocalizationResourceTests
         var source = File.ReadAllText(Path.Combine(
             FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", "DevicePage.xaml.cs"));
         var methodStart = source.IndexOf("private async Task RequestCenterMTransitionAsync", StringComparison.Ordinal);
-        var methodEnd = source.IndexOf("private sealed record MaximumProcessorStatePercentItem", methodStart, StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("private sealed record MaximumProcessorStateOptionItem", methodStart, StringComparison.Ordinal);
         Assert.True(methodStart >= 0 && methodEnd > methodStart);
         var method = source[methodStart..methodEnd];
 
