@@ -77,13 +77,14 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Grid Grid.Row="0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Button
                                     x:Name="DetailBackButton"
-                                    Grid.Column="0"
+                                    Grid.Row="0"
+                                    HorizontalAlignment="Left"
                                     Visibility="Collapsed"
                                     Style="{StaticResource QamFlatButtonStyle}"
                                     Padding="8,0"
@@ -104,7 +105,7 @@
                                 </Button>
                                 <TextBlock
                                     x:Name="PageTitle"
-                                    Grid.Column="1"
+                                    Grid.Row="1"
                                     Visibility="Visible"
                                     Style="{StaticResource QamPageTitleTextStyle}"
                                     Margin="{StaticResource QamPageTitleMargin}" />

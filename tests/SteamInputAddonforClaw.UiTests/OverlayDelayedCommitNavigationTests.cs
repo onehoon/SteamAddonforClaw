@@ -137,6 +137,32 @@ public sealed class OverlayDelayedCommitNavigationTests
     }
 
     [Fact]
+    public void Detail_back_button_occupies_its_own_row_above_the_page_title()
+    {
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
+        var profileColumn = xaml.IndexOf("x:Name=\"ProfileContentColumn\"", StringComparison.Ordinal);
+        var headerStart = xaml.IndexOf("<Grid Grid.Row=\"0\">", profileColumn, StringComparison.Ordinal);
+        var headerEnd = xaml.IndexOf("</Grid>", headerStart, StringComparison.Ordinal);
+        Assert.True(profileColumn >= 0 && headerStart > profileColumn && headerEnd > headerStart);
+        var header = xaml[headerStart..(headerEnd + "</Grid>".Length)];
+
+        Assert.Contains("<Grid.RowDefinitions>", header, StringComparison.Ordinal);
+        Assert.Equal(2, header.Split("<RowDefinition Height=\"Auto\" />", StringSplitOptions.None).Length - 1);
+        Assert.Contains("x:Name=\"DetailBackButton\"", header, StringComparison.Ordinal);
+        Assert.Contains("Grid.Row=\"0\"", header, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Left\"", header, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"Collapsed\"", header, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnDetailBackButtonClick\"", header, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"PageTitle\"", header, StringComparison.Ordinal);
+        Assert.Contains("Grid.Row=\"1\"", header, StringComparison.Ordinal);
+        Assert.DoesNotContain("Grid.Column", header, StringComparison.Ordinal);
+
+        var detail = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.DetailNavigation.cs");
+        Assert.Contains("DetailBackButton.Visibility = Visibility.Visible;\n        PageTitle.Opacity = 1.0;", detail, StringComparison.Ordinal);
+        Assert.Contains("DetailBackButton.Visibility = Visibility.Collapsed;\n        PageTitle.Opacity = 1.0;", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Forced_hide_cancels_local_drafts_and_vibration_flush_is_not_duplicated()
     {
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");

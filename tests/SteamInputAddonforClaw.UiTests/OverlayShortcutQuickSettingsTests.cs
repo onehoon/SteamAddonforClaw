@@ -120,7 +120,7 @@ public sealed class OverlayShortcutQuickSettingsTests
 
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
         var refreshStart = quickSettings.IndexOf("private void RefreshShortcutQuickSettingsView(QuickSettingsRowId? preferredShortcutRowId)", StringComparison.Ordinal);
-        var refreshEnd = quickSettings.IndexOf("private string? ResolveShortcutQuickSettingsStatus(", refreshStart, StringComparison.Ordinal);
+        var refreshEnd = quickSettings.IndexOf("internal static string? ResolveShortcutQuickSettingsStatus(", refreshStart, StringComparison.Ordinal);
         var refresh = quickSettings[refreshStart..refreshEnd];
         Assert.Contains("ShouldAutoSelectShortcutSettings(", refresh, StringComparison.Ordinal);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Shortcut))", refresh, StringComparison.Ordinal);
@@ -228,8 +228,8 @@ public sealed class OverlayShortcutQuickSettingsTests
         var profileGate = refresh.IndexOf("var profilePage = _profilePageReceivedThisShow", StringComparison.Ordinal);
         var deviceGate = refresh.IndexOf("var devicePage = _devicePageReceivedThisShow", StringComparison.Ordinal);
         Assert.True(profileGate >= 0 && deviceGate > profileGate);
-        Assert.Contains("if (!_profilePageReceivedThisShow || profilePage is null)",
-            ExtractMethod(quickSettings, "private string? ResolveShortcutQuickSettingsStatus("));
+        Assert.Contains("if (!profilePageReceivedThisShow || profilePage is null)",
+            ExtractMethod(quickSettings, "internal static string? ResolveShortcutQuickSettingsStatus("));
         Assert.Contains("ApplyQuickSettingsSurfacePresentation(surface, page.Available, page.Message);", applyDevice);
         Assert.Contains("surface.Content.Visibility = HasRenderableActiveProfile(page) ? Visibility.Visible : Visibility.Collapsed;", applyProfile);
         Assert.Contains("if (_tabState.SelectedTab != AddonQuickSettingsTabId.Shortcut)", applyProfile);
@@ -243,6 +243,81 @@ public sealed class OverlayShortcutQuickSettingsTests
         Assert.Contains("Stopwatch.GetElapsedTime(_showStartedTimestamp)", refresh);
         Assert.Contains("HideProfileArtworkPreservingCache();", hide);
         Assert.DoesNotContain("ClearProfileArtwork();", hide);
+    }
+
+    [Fact]
+    public void Shortcut_first_show_hides_provisional_title_and_interim_status_until_fresh_pages_arrive()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var detail = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.DetailNavigation.cs");
+        var refresh = ExtractMethod(quickSettings, "private void RefreshShortcutQuickSettingsView(QuickSettingsRowId? preferredShortcutRowId)");
+        var status = ExtractMethod(quickSettings, "internal static string? ResolveShortcutQuickSettingsStatus(");
+
+        Assert.Contains("var profileReadyForThisShow = _profilePageReceivedThisShow && profilePage is not null;", refresh);
+        Assert.Contains("PageTitle.Opacity = titleOpacity;", refresh);
+        Assert.Contains("if (profileReadyForThisShow)", refresh);
+        Assert.Contains("ResolveTitle(profilePage)", refresh);
+        Assert.True(refresh.IndexOf("if (profileReadyForThisShow)", StringComparison.Ordinal)
+            < refresh.IndexOf("ResolveTitle(profilePage)", StringComparison.Ordinal));
+        Assert.Contains("if (!profilePageReceivedThisShow || profilePage is null)", status);
+        Assert.Contains("if (!devicePageReceivedThisShow || devicePage is null)", status);
+        Assert.Contains("return null;", status);
+
+        var reset = ExtractMethod(shell, "private void ResetUiForShow()");
+        var selected = ExtractMethod(shell, "private void ApplySelectedTabVisualState()");
+        Assert.Contains("PageTitle.Opacity = 1.0;", reset);
+        Assert.Contains("selected != AddonQuickSettingsTabId.Shortcut", selected);
+        Assert.Contains("PageTitle.Opacity = 1.0;", selected);
+        Assert.Contains("PageTitle.Opacity = 1.0;", ExtractMethod(detail, "private bool EnterDetailPage("));
+        Assert.Contains("PageTitle.Opacity = 1.0;", ExtractMethod(detail, "private bool TryReturnFromDetailPage()"));
+
+        var noGamePage = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile, null, ReadNoGameProfileMessage());
+        var oldProfilePage = ProfilePage(QuickSettingsProfileTarget.ForSteam(570), gameName: "Old Game");
+        Assert.Null(OverlayWindow.ResolveShortcutQuickSettingsStatus(null, null,
+            profilePageReceivedThisShow: false, devicePageReceivedThisShow: false));
+        Assert.Null(OverlayWindow.ResolveShortcutQuickSettingsStatus(oldProfilePage, null,
+            profilePageReceivedThisShow: false, devicePageReceivedThisShow: false));
+        Assert.Null(OverlayWindow.ResolveShortcutQuickSettingsStatus(noGamePage, null,
+            profilePageReceivedThisShow: true, devicePageReceivedThisShow: false));
+        Assert.Null(OverlayWindow.ResolveShortcutQuickSettingsStatus(noGamePage, null,
+            profilePageReceivedThisShow: true, devicePageReceivedThisShow: true));
+
+        var deviceFailure = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Device, null, "Global device settings failed.");
+        Assert.Equal("Global device settings failed.", OverlayWindow.ResolveShortcutQuickSettingsStatus(
+            noGamePage, deviceFailure, profilePageReceivedThisShow: true, devicePageReceivedThisShow: true));
+
+        var profileFailure = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile, null, "Active profile capture failed.");
+        Assert.Equal("Active profile capture failed.", OverlayWindow.ResolveShortcutQuickSettingsStatus(
+            profileFailure, null, profilePageReceivedThisShow: true, devicePageReceivedThisShow: false));
+        Assert.Null(OverlayWindow.ResolveShortcutQuickSettingsStatus(
+            ProfilePage(QuickSettingsProfileTarget.ForSteam(570)), null,
+            profilePageReceivedThisShow: true, devicePageReceivedThisShow: false));
+    }
+
+    [Fact]
+    public void Shortcut_tile_separator_matches_section_edges_and_keeps_tile_grid_geometry()
+    {
+        var shortcuts = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
+        var buildStart = shortcuts.IndexOf("private FrameworkElement BuildShortcutPage()", StringComparison.Ordinal);
+        var buildEnd = shortcuts.IndexOf("internal bool ApplyShortcutState(", buildStart, StringComparison.Ordinal);
+        Assert.True(buildStart >= 0 && buildEnd > buildStart);
+        var build = shortcuts[buildStart..buildEnd];
+
+        Assert.Contains("var rowMargin = OverlayQamResources.Get(\"QamRowMargin\", new Thickness(-16, 0, -16, 0));", build);
+        Assert.Contains("Margin = new Thickness(rowMargin.Left, 0, rowMargin.Right, 12)", build);
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", build);
+        Assert.Contains("QamSectionSeparatorThickness", build);
+        Assert.Contains("QamSeparatorBrush", build);
+        Assert.Contains("ColumnSpacing = OverlayQamResources.Get(\"QamTileSpacing\", 8.0)", build);
+        Assert.Contains("RowSpacing = OverlayQamResources.Get(\"QamTileSpacing\", 8.0)", build);
+        Assert.Contains("private const int ShortcutVisualColumnCount = 3;", shortcuts);
+        Assert.Contains("for (var column = 0; column < ShortcutVisualColumnCount; column++)", build);
+        Assert.True(build.IndexOf("root.Children.Add(separator)", StringComparison.Ordinal)
+            < build.IndexOf("root.Children.Add(_shortcutGrid)", StringComparison.Ordinal));
     }
 
     [Fact]

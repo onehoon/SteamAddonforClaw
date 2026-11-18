@@ -83,7 +83,7 @@ public sealed partial class OverlayWindow
 
     private FrameworkElement CreateSettingDetailPage(FrameworkElement content)
     {
-        var detailPage = CreateOverlaySectionCard(content);
+        var detailPage = CreateOverlaySectionCard(content, additionalTopPadding: 7.0, additionalBottomPadding: 7.0);
         SetOverlaySectionSeparator((Border)detailPage, visible: false);
         detailPage.Visibility = Visibility.Collapsed;
         return detailPage;
@@ -147,7 +147,7 @@ public sealed partial class OverlayWindow
         var header = OverlayRowChrome.Create(button);
         header.Padding = new Thickness(0);
         header.Background = new SolidColorBrush(Colors.Transparent);
-        return (CreateOverlaySectionCard(header), button);
+        return (CreateOverlaySectionCard(header, additionalTopPadding: 2.0, additionalBottomPadding: 2.0), button);
     }
 
     private void OpenSettingDetail(

@@ -564,7 +564,11 @@ public sealed partial class OverlayWindow
 
         rowStack.Children.Add(detailStack);
         sectionPanel.Children.Add(rowStack);
-        rendered.Card = CreateOverlaySectionCard(sectionPanel);
+        var hasHeaderContent = desiredRows.Any(row => row.IsFeatureHeader) || !string.IsNullOrEmpty(section.Label);
+        var hasDetailContent = desiredRows.Any(row => !row.IsFeatureHeader);
+        var additionalTopPadding = hasHeaderContent ? 2.0 : 7.0;
+        var additionalBottomPadding = hasDetailContent || !hasHeaderContent ? 7.0 : 2.0;
+        rendered.Card = CreateOverlaySectionCard(sectionPanel, additionalTopPadding, additionalBottomPadding);
 
         foreach (var descriptor in desiredRows)
         {
@@ -720,7 +724,14 @@ public sealed partial class OverlayWindow
                 descriptor.StrongLabel))
             throw new InvalidOperationException("A malformed Quick Settings row reached the Overlay renderer.");
         if (!descriptor.IsFeatureHeader)
+        {
             OverlayRowChrome.ApplyDetailPadding(row.Container);
+            var indent = OverlayQamResources.Get("QamDetailIndent", new Thickness(16, 0, 0, 0)).Left;
+            var margin = row.Container.Margin;
+            var padding = row.Container.Padding;
+            row.Container.Margin = new Thickness(margin.Left - indent, margin.Top, margin.Right, margin.Bottom);
+            row.Container.Padding = new Thickness(padding.Left + indent, padding.Top, padding.Right, padding.Bottom);
+        }
         RegisterRowPointerSelection(row.Container);
         return new RenderedQuickSettingsRow { Descriptor = descriptor, Row = row };
     }
@@ -896,11 +907,22 @@ public sealed partial class OverlayWindow
         else
             _pageRows[AddonQuickSettingsTabId.Shortcut] = [];
 
-        var title = OverlayShortcutQuickSettingsProjection.ResolveTitle(profilePage);
-        if (PageTitle.Text != title)
-            PageTitle.Text = title;
+        var profileReadyForThisShow = _profilePageReceivedThisShow && profilePage is not null;
+        var titleOpacity = profileReadyForThisShow ? 1.0 : 0.0;
+        if (PageTitle.Opacity != titleOpacity)
+            PageTitle.Opacity = titleOpacity;
+        if (profileReadyForThisShow)
+        {
+            var title = OverlayShortcutQuickSettingsProjection.ResolveTitle(profilePage);
+            if (PageTitle.Text != title)
+                PageTitle.Text = title;
+        }
         UpdateProfileArtwork(profilePage);
-        var status = ResolveShortcutQuickSettingsStatus(profilePage, devicePage);
+        var status = ResolveShortcutQuickSettingsStatus(
+            profilePage,
+            devicePage,
+            _profilePageReceivedThisShow,
+            _devicePageReceivedThisShow);
         var statusText = status ?? string.Empty;
         if (_shortcutQuickSettingsStatus!.Text != statusText)
             _shortcutQuickSettingsStatus.Text = statusText;
@@ -960,17 +982,19 @@ public sealed partial class OverlayWindow
         ApplyShortcutSelectionVisual();
     }
 
-    private string? ResolveShortcutQuickSettingsStatus(
+    internal static string? ResolveShortcutQuickSettingsStatus(
         QuickSettingsPageSnapshot? profilePage,
-        QuickSettingsPageSnapshot? devicePage)
+        QuickSettingsPageSnapshot? devicePage,
+        bool profilePageReceivedThisShow,
+        bool devicePageReceivedThisShow)
     {
-        if (!_profilePageReceivedThisShow || profilePage is null)
-            return "Loading the active game profile.";
+        if (!profilePageReceivedThisShow || profilePage is null)
+            return null;
 
         if (IsExactNoRunningGamePage(profilePage))
         {
-            if (!_devicePageReceivedThisShow || devicePage is null)
-                return "Loading global performance settings.";
+            if (!devicePageReceivedThisShow || devicePage is null)
+                return null;
             return devicePage.Available ? null : devicePage.Message ?? "Global performance settings are unavailable.";
         }
 
@@ -1109,13 +1133,21 @@ public sealed partial class OverlayWindow
         QuickSettingsSectionId.DeviceTdp or QuickSettingsSectionId.DeviceCpuBoost or
         QuickSettingsSectionId.ProfileTdp or QuickSettingsSectionId.ProfileCpuBoost;
 
-    private static Border CreateOverlaySectionCard(UIElement child)
+    private static Border CreateOverlaySectionCard(
+        UIElement child,
+        double additionalTopPadding = 0.0,
+        double additionalBottomPadding = 0.0)
     {
+        var sectionPadding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 0, 16, 0));
         return new Border
         {
             Child = child,
             Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
-            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 0, 16, 0)),
+            Padding = new Thickness(
+                sectionPadding.Left,
+                sectionPadding.Top + additionalTopPadding,
+                sectionPadding.Right,
+                sectionPadding.Bottom + additionalBottomPadding),
             BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush"),
             BorderThickness = new Thickness(0),
             CornerRadius = OverlayQamResources.Get("QamSectionCornerRadius", new CornerRadius(0)),

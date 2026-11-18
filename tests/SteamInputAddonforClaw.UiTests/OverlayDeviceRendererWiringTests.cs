@@ -345,6 +345,89 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Detail_row_selection_surface_aligns_to_the_section_edge_without_moving_content()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var createRow = ExtractMethod(source, "private RenderedQuickSettingsRow CreateRenderedQuickSettingsRow(");
+        var resources = XDocument.Parse(ReadSource(
+            "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+
+        Assert.Contains("if (!descriptor.IsFeatureHeader)", createRow, StringComparison.Ordinal);
+        Assert.Contains("OverlayRowChrome.ApplyDetailPadding(row.Container);", createRow, StringComparison.Ordinal);
+        Assert.Contains("row.Container.Margin = new Thickness(margin.Left - indent, margin.Top, margin.Right, margin.Bottom);", createRow, StringComparison.Ordinal);
+        Assert.Contains("row.Container.Padding = new Thickness(padding.Left + indent, padding.Top, padding.Right, padding.Bottom);", createRow, StringComparison.Ordinal);
+
+        static double[] ThicknessValues(XDocument document, string key) =>
+            document.Descendants().Single(element => (string?)element.Attribute(XName.Get(
+                    "Key", "http://schemas.microsoft.com/winfx/2006/xaml")) == key)
+                .Value.Split(',').Select(value => double.Parse(value, CultureInfo.InvariantCulture)).ToArray();
+
+        var detailIndent = ThicknessValues(resources, "QamDetailIndent")[0];
+        var rowMargin = ThicknessValues(resources, "QamRowMargin");
+        var detailPadding = ThicknessValues(resources, "QamDetailRowPadding");
+        Assert.Equal(-32, rowMargin[0] - detailIndent);
+        Assert.Equal(-16, rowMargin[2]);
+        Assert.Equal(32, detailPadding[0] + detailIndent);
+        Assert.Equal(5, detailPadding[1]);
+        Assert.Equal(5, detailPadding[3]);
+        Assert.Equal(0, (rowMargin[0] - detailIndent) + (detailPadding[0] + detailIndent));
+    }
+
+    [Fact]
+    public void Section_spacing_uses_content_shape_and_is_reused_by_all_overlay_tabs()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var resources = XDocument.Parse(ReadSource(
+            "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var buildSection = ExtractMethod(quickSettings, "private RenderedQuickSettingsSection BuildQuickSettingsSection(");
+        var createCard = ExtractMethod(quickSettings, "private static Border CreateOverlaySectionCard(");
+        var buildController = ExtractMethod(controller, "private FrameworkElement BuildControllerPage(");
+        var ledRows = ExtractMethod(controller, "private void BuildControllerLedRows(");
+        var settingDetail = ExtractMethod(clawHud, "private FrameworkElement CreateSettingDetailPage(");
+        var menuChrome = ExtractMethod(clawHud, "private static (Border Container, Button Button) CreateDetailMenuChrome(");
+
+        Assert.Contains("var hasHeaderContent = desiredRows.Any(row => row.IsFeatureHeader) || !string.IsNullOrEmpty(section.Label);", buildSection);
+        Assert.Contains("var hasDetailContent = desiredRows.Any(row => !row.IsFeatureHeader);", buildSection);
+        Assert.Contains("var additionalTopPadding = hasHeaderContent ? 2.0 : 7.0;", buildSection);
+        Assert.Contains("var additionalBottomPadding = hasDetailContent || !hasHeaderContent ? 7.0 : 2.0;", buildSection);
+        Assert.Contains("CreateOverlaySectionCard(sectionPanel, additionalTopPadding, additionalBottomPadding)", buildSection);
+        Assert.Contains("sectionPadding.Top + additionalTopPadding", createCard);
+        Assert.Contains("sectionPadding.Bottom + additionalBottomPadding", createCard);
+
+        static double[] ThicknessValues(XDocument document, string key) =>
+            document.Descendants().Single(element => (string?)element.Attribute(XName.Get(
+                    "Key", "http://schemas.microsoft.com/winfx/2006/xaml")) == key)
+                .Value.Split(',').Select(value => double.Parse(value, CultureInfo.InvariantCulture)).ToArray();
+
+        var rowPadding = ThicknessValues(resources, "QamRowPadding");
+        var detailPadding = ThicknessValues(resources, "QamDetailRowPadding");
+        Assert.Equal(10, rowPadding[1]);
+        Assert.Equal(10, rowPadding[3]);
+        Assert.Equal(5, detailPadding[1]);
+        Assert.Equal(5, detailPadding[3]);
+        Assert.Equal(12, rowPadding[1] + 2.0);
+        Assert.Equal(12, rowPadding[3] + 2.0);
+        Assert.Equal(12, detailPadding[1] + 7.0);
+        Assert.Equal(12, detailPadding[3] + 7.0);
+
+        Assert.Contains("CreateOverlaySectionCard(steamSection, additionalTopPadding: 2.0, additionalBottomPadding: 7.0)", buildController);
+        Assert.Contains("CreateOverlaySectionCard(mappingSection, additionalTopPadding: 2.0, additionalBottomPadding: 7.0)", buildController);
+        Assert.Contains("additionalTopPadding: 2.0", buildController);
+        Assert.Contains("additionalBottomPadding: 7.0", buildController);
+        Assert.Contains("CreateOverlaySectionCard(details, additionalTopPadding: 7.0, additionalBottomPadding: 7.0)", ledRows);
+        Assert.Contains("CreateOverlaySectionCard(content, additionalTopPadding: 7.0, additionalBottomPadding: 7.0)", settingDetail);
+        Assert.Contains("CreateOverlaySectionCard(header, additionalTopPadding: 2.0, additionalBottomPadding: 2.0)", menuChrome);
+        Assert.Contains("_gyroscopeRow.Container.Visibility = _controllerMotionSupported ? Visibility.Visible : Visibility.Collapsed;", controller);
+
+        var shortcutRefresh = ExtractMethod(quickSettings, "private void RefreshShortcutQuickSettingsView(QuickSettingsRowId? preferredShortcutRowId)");
+        Assert.Contains("desiredSource.HomeHost.Children.Remove(desiredSource.Content);", shortcutRefresh);
+        Assert.Contains("_shortcutQuickSettingsHost.Children.Add(desiredSource.Content);", shortcutRefresh);
+        Assert.DoesNotContain("BuildQuickSettingsSection", shortcutRefresh);
+    }
+
+    [Fact]
     public void Value_only_quick_settings_updates_skip_page_reconciliation_selection_and_scroll_work()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
@@ -820,7 +903,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
 
-        Assert.Contains("CreateOverlaySectionCard(sectionPanel)", quickSettings);
+        Assert.Contains("CreateOverlaySectionCard(sectionPanel, additionalTopPadding, additionalBottomPadding)", quickSettings);
         var settingPageStart = clawHud.IndexOf("private FrameworkElement BuildSettingPage", StringComparison.Ordinal);
         var settingPageEnd = clawHud.IndexOf("private FrameworkElement CreateSettingDetailPage", settingPageStart, StringComparison.Ordinal);
         var settingPage = clawHud[settingPageStart..settingPageEnd];
