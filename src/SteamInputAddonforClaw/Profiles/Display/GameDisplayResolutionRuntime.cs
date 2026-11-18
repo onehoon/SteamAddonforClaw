@@ -227,7 +227,7 @@ internal sealed class GameDisplayResolutionRuntime
         {
             if (!_scaling.TryCapture(out var currentScale)
                 || !SameDisplay(currentScale, originalScale)
-                || currentScale.OriginalScaleFactor != originalScale.OriginalScaleFactor)
+                || currentScale.OriginalRelativeScale != originalScale.OriginalRelativeScale)
                 return false;
             updated = recovery with { ScalingOwned = false };
             return true;

@@ -6,8 +6,7 @@ namespace SteamInputAddonforClaw.Profiles.Display;
 internal readonly record struct DisplayScaleSnapshot(
     string PrimaryGdiDeviceName,
     string MonitorDevicePath,
-    int OriginalRelativeScale,
-    int OriginalScaleFactor);
+    int OriginalRelativeScale);
 
 internal interface IDisplayScalingService
 {
@@ -18,8 +17,8 @@ internal interface IDisplayScalingService
 
 /// <summary>
 /// Uses the undocumented DisplayConfig -3/-4 packets for the desktop scale value. The packets are
-/// deliberately isolated here and every mutation is checked through both packet readback and the
-/// documented GetScaleFactorForMonitor query. Unsupported systems fail closed.
+/// deliberately isolated here, and every mutation is checked through -3 packet readback.
+/// Unsupported systems fail closed.
 /// </summary>
 internal sealed class DisplayScalingService : IDisplayScalingService
 {
@@ -140,8 +139,8 @@ internal sealed class DisplayScalingService : IDisplayScalingService
         internal uint Id;
     }
 
-    private readonly record struct PrimaryPath(IntPtr Monitor, string GdiDeviceName, string MonitorDevicePath, Luid AdapterId, uint SourceId);
-    private readonly record struct ScaleReadback(PrimaryPath Path, DpiScaleGetInfo Info, int ScaleFactor);
+    private readonly record struct PrimaryPath(string GdiDeviceName, string MonitorDevicePath, Luid AdapterId, uint SourceId);
+    private readonly record struct ScaleReadback(PrimaryPath Path, DpiScaleGetInfo Info);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -170,9 +169,6 @@ internal sealed class DisplayScalingService : IDisplayScalingService
     [DllImport("user32.dll", EntryPoint = "DisplayConfigSetDeviceInfo", SetLastError = true)]
     private static extern int DisplayConfigSetDeviceInfo(ref DpiScaleSetInfo request);
 
-    [DllImport("shcore.dll", SetLastError = true)]
-    private static extern int GetScaleFactorForMonitor(IntPtr monitor, out int scaleFactor);
-
     internal static int DpiScaleGetInfoSize => Marshal.SizeOf<DpiScaleGetInfo>();
     internal static int DpiScaleSetInfoSize => Marshal.SizeOf<DpiScaleSetInfo>();
     internal static int SourceDeviceNameSize => Marshal.SizeOf<SourceDeviceName>();
@@ -182,7 +178,7 @@ internal sealed class DisplayScalingService : IDisplayScalingService
         snapshot = default;
         if (!OperatingSystem.IsWindows() || !TryReadPrimaryScale(out var readback)) return false;
         snapshot = new(readback.Path.GdiDeviceName, readback.Path.MonitorDevicePath,
-            readback.Info.CurrentRelativeScale, readback.ScaleFactor);
+            readback.Info.CurrentRelativeScale);
         return true;
     }
 
@@ -191,12 +187,11 @@ internal sealed class DisplayScalingService : IDisplayScalingService
         if (!TryReadMatchingScale(original, out var current)) return false;
         var minimum = current.Info.MinimumRelativeScale;
         if (current.Info.CurrentRelativeScale == minimum)
-            return current.ScaleFactor == 100;
+            return true;
 
         if (!TrySetRelativeScale(current.Path, minimum)) return false;
         if (!TryReadMatchingScale(original, out var verified)
-            || verified.Info.CurrentRelativeScale != verified.Info.MinimumRelativeScale
-            || verified.ScaleFactor != 100)
+            || verified.Info.CurrentRelativeScale != verified.Info.MinimumRelativeScale)
         {
             AppLog.Warn("Profiles.Display", "Display scaling to 100% failed readback verification.", null,
                 ("GdiDevice", original.PrimaryGdiDeviceName));
@@ -217,12 +212,11 @@ internal sealed class DisplayScalingService : IDisplayScalingService
             return false;
         }
         if (current.Info.CurrentRelativeScale == original.OriginalRelativeScale)
-            return current.ScaleFactor == original.OriginalScaleFactor;
+            return true;
 
         if (!TrySetRelativeScale(current.Path, original.OriginalRelativeScale)) return false;
         if (!TryReadMatchingScale(original, out var verified)
-            || verified.Info.CurrentRelativeScale != original.OriginalRelativeScale
-            || verified.ScaleFactor != original.OriginalScaleFactor)
+            || verified.Info.CurrentRelativeScale != original.OriginalRelativeScale)
         {
             AppLog.Warn("Profiles.Display", "Captured display scaling failed readback verification; recovery remains pending.", null,
                 ("GdiDevice", original.PrimaryGdiDeviceName));
@@ -287,15 +281,7 @@ internal sealed class DisplayScalingService : IDisplayScalingService
                 ("GdiDevice", path.GdiDeviceName), ("Status", result));
             return false;
         }
-        var scaleResult = GetScaleFactorForMonitor(path.Monitor, out var scaleFactor);
-        if (scaleResult != 0 || scaleFactor <= 0)
-        {
-            AppLog.Warn("Profiles.Display", "The current monitor scale factor could not be read.", null,
-                ("GdiDevice", path.GdiDeviceName), ("Status", scaleResult));
-            return false;
-        }
-
-        readback = new(path, info, scaleFactor);
+        readback = new(path, info);
         return true;
     }
 
@@ -366,7 +352,7 @@ internal sealed class DisplayScalingService : IDisplayScalingService
                 if (DisplayConfigGetDeviceInfo(ref target) != 0
                     || string.IsNullOrWhiteSpace(target.MonitorDevicePath))
                     return false;
-                match = new PrimaryPath(primaryMonitor, primaryDeviceName, target.MonitorDevicePath,
+                match = new PrimaryPath(primaryDeviceName, target.MonitorDevicePath,
                     path.Source.AdapterId, path.Source.Id);
             }
             if (match is not { } found) return false;

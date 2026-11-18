@@ -11,7 +11,7 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
     private string Profiles => Path.Combine(_root, "profiles.json");
     private string Recovery => Path.Combine(_root, "display-resolution-recovery.json");
     private static readonly DisplayModeSnapshot OriginalMode = new(1920, 1200, 120, 32);
-    private static readonly DisplayScaleSnapshot OriginalScale = new("\\.\\DISPLAY1", "monitor-path-1", 2, 150);
+    private static readonly DisplayScaleSnapshot OriginalScale = new("\\.\\DISPLAY1", "monitor-path-1", 2);
 
     [Fact]
     public void Pending_legacy_recovery_blocks_reconcile_when_resolution_restore_fails()
@@ -72,7 +72,7 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         Assert.Equal(OriginalMode, display.Current);
         Assert.Equal(0, display.ApplyCalls);
         Assert.Equal(0, display.RestoreCalls);
-        Assert.Equal(100, scaling.Current.OriginalScaleFactor);
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
         Assert.Equal(1, scaling.SetCalls);
 
         active = 0;
@@ -90,6 +90,21 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         Assert.Equal(0x20, DisplayScalingService.DpiScaleGetInfoSize);
         Assert.Equal(0x18, DisplayScalingService.DpiScaleSetInfoSize);
         Assert.Equal(84, DisplayScalingService.SourceDeviceNameSize);
+    }
+
+    [Fact]
+    public void Startup_recovery_accepts_legacy_scale_snapshot_with_obsolete_scale_factor_field()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(Recovery,
+            "{\"OriginalScale\":{\"PrimaryGdiDeviceName\":\"\\\\.\\\\DISPLAY1\",\"MonitorDevicePath\":\"monitor-path-1\",\"OriginalRelativeScale\":2,\"OriginalScaleFactor\":150},\"ScalingOwned\":true}");
+        var scaling = new FakeScaling();
+        var runtime = CreateRuntime(new ProfileStore(Profiles), new FakeDisplay { Current = OriginalMode }, scaling);
+
+        runtime.StartupRecover();
+
+        Assert.Equal(1, scaling.RestoreCalls);
+        Assert.False(File.Exists(Recovery));
     }
 
     [Fact]
@@ -141,12 +156,34 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         var store = new ProfileStore(Profiles);
         SaveSteamProfile(store, 123, resolution: null, scaling: true);
         var display = new FakeDisplay { Current = OriginalMode };
-        var scaling = new FakeScaling { Current = OriginalScale with { OriginalRelativeScale = 0, OriginalScaleFactor = 100 } };
+        var scaling = new FakeScaling { Current = OriginalScale with { OriginalRelativeScale = 0 } };
         var runtime = CreateRuntime(store, display, scaling);
         runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 123));
 
         Assert.True(runtime.Reconcile());
         Assert.Equal(0, scaling.SetCalls);
+    }
+
+    [Fact]
+    public void External_mode_change_keeps_scale_recovery_pending_when_relative_scale_is_not_restored()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        SaveSteamProfile(store, 123, resolution: null, scaling: true);
+        var display = new FakeDisplay { Current = OriginalMode };
+        var scaling = new FakeScaling { Current = OriginalScale };
+        var runtime = CreateRuntime(store, display, scaling);
+        uint active = 123;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => active));
+
+        Assert.True(runtime.Reconcile());
+        display.Current = new(1600, 900, 60, 32);
+        active = 0;
+
+        Assert.False(runtime.Reconcile());
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
+        Assert.Equal(0, scaling.RestoreCalls);
+        Assert.True(File.Exists(Recovery));
     }
 
     [Fact]
@@ -260,7 +297,7 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         Assert.True(runtime.Reconcile());
         Assert.Equal(1, scaling.CaptureCalls);
         Assert.Equal((1440, 900), (display.Current.Width, display.Current.Height));
-        Assert.Equal(100, scaling.Current.OriginalScaleFactor);
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
 
         document = store.Load().Document;
         profile = document.Games["123"];
@@ -307,7 +344,7 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
 
         Assert.True(runtime.Reconcile());
         Assert.Equal(OriginalMode, display.Current);
-        Assert.Equal(100, scaling.Current.OriginalScaleFactor);
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
 
         activeKey = null;
         Assert.True(runtime.Reconcile());
@@ -369,7 +406,7 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         scaling.RestoreSucceeds = false;
         Assert.False(runtime.Reconcile());
         Assert.True(File.Exists(Recovery));
-        Assert.Equal(100, scaling.Current.OriginalScaleFactor);
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
 
         scaling.RestoreSucceeds = true;
         Assert.True(runtime.Reconcile());
@@ -394,7 +431,7 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         active = 0;
 
         Assert.False(runtime.Reconcile());
-        Assert.Equal(100, scaling.Current.OriginalScaleFactor);
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
         Assert.True(File.Exists(Recovery));
         Assert.Equal(0, display.ApplyCalls);
         Assert.Equal(0, display.RestoreCalls);
@@ -494,10 +531,10 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         public bool TrySetTo100(DisplayScaleSnapshot original)
         {
             Operations?.Add("scale.set100");
-            if (Current.OriginalRelativeScale == MinimumRelativeScale && Current.OriginalScaleFactor == 100) return true;
+            if (Current.OriginalRelativeScale == MinimumRelativeScale) return true;
             if (!SetSucceeds || !SameDisplay(Current, original)) return false;
             SetCalls++;
-            Current = Current with { OriginalRelativeScale = MinimumRelativeScale, OriginalScaleFactor = 100 };
+            Current = Current with { OriginalRelativeScale = MinimumRelativeScale };
             return true;
         }
 
