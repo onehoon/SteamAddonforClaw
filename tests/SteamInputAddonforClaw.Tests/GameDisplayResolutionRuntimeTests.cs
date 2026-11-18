@@ -89,6 +89,7 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
     {
         Assert.Equal(0x20, DisplayScalingService.DpiScaleGetInfoSize);
         Assert.Equal(0x18, DisplayScalingService.DpiScaleSetInfoSize);
+        Assert.Equal(84, DisplayScalingService.SourceDeviceNameSize);
     }
 
     [Fact]

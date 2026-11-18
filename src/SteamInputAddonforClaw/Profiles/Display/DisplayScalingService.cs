@@ -25,7 +25,6 @@ internal sealed class DisplayScalingService : IDisplayScalingService
 {
     private const uint QdcOnlyActivePaths = 0x00000002;
     private const uint MonitorInfoPrimary = 0x00000001;
-    private const uint TargetDeviceNameInUse = 0x00000001;
     private const int GetDpiScaleType = -3;
     private const int SetDpiScaleType = -4;
     private const int DisplayConfigModeInfoSize = 64;
@@ -99,7 +98,6 @@ internal sealed class DisplayScalingService : IDisplayScalingService
     private struct SourceDeviceName
     {
         internal DeviceInfoHeader Header;
-        internal uint Flags;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] internal string ViewGdiDeviceName;
     }
 
@@ -177,6 +175,7 @@ internal sealed class DisplayScalingService : IDisplayScalingService
 
     internal static int DpiScaleGetInfoSize => Marshal.SizeOf<DpiScaleGetInfo>();
     internal static int DpiScaleSetInfoSize => Marshal.SizeOf<DpiScaleSetInfo>();
+    internal static int SourceDeviceNameSize => Marshal.SizeOf<SourceDeviceName>();
 
     public bool TryCapture(out DisplayScaleSnapshot snapshot)
     {
@@ -365,7 +364,6 @@ internal sealed class DisplayScalingService : IDisplayScalingService
                     MonitorDevicePath = string.Empty,
                 };
                 if (DisplayConfigGetDeviceInfo(ref target) != 0
-                    || (target.Flags & TargetDeviceNameInUse) == 0
                     || string.IsNullOrWhiteSpace(target.MonitorDevicePath))
                     return false;
                 match = new PrimaryPath(primaryMonitor, primaryDeviceName, target.MonitorDevicePath,
