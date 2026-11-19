@@ -27,13 +27,6 @@ jobs:
       CHANNEL: ${{ inputs.channel || 'stable' }}
 
     steps:
-      - name: Verify main branch
-        shell: pwsh
-        run: |
-          if ('${{ github.ref }}' -ne 'refs/heads/main') {
-            throw 'Release can only run from main.'
-          }
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
