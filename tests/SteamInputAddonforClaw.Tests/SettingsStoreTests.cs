@@ -56,6 +56,47 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"SteamBigPictureScalingTo100Percent\":\"true\"}")]
+    [InlineData("{\"SteamBigPictureScalingTo100Percent\":1}")]
+    [InlineData("{\"SteamBigPictureScalingTo100Percent\":null}")]
+    public void Big_Picture_scaling_preference_defaults_off_for_missing_or_malformed_values(string json)
+    {
+        var path = Path.Combine(_testDirectory, "big-picture-scaling-settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, json);
+
+        Assert.False(new SettingsStore(path).Load().SteamBigPictureScalingTo100Percent);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Big_Picture_scaling_preference_round_trips(bool enabled)
+    {
+        var path = Path.Combine(_testDirectory, "big-picture-scaling-round-trip.json");
+        var store = new SettingsStore(path);
+
+        store.Save(new AppSettings { SteamBigPictureScalingTo100Percent = enabled });
+
+        Assert.Equal(enabled, store.Load().SteamBigPictureScalingTo100Percent);
+        Assert.Contains($"\"SteamBigPictureScalingTo100Percent\": {enabled.ToString().ToLowerInvariant()}", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void Failed_big_picture_scaling_save_does_not_publish_the_new_preference()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var blockingFile = Path.Combine(_testDirectory, "settings-parent-file");
+        File.WriteAllText(blockingFile, "not a directory");
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(),
+            new SettingsStore(Path.Combine(blockingFile, "settings.json")), new FakeStartupManager());
+
+        Assert.ThrowsAny<IOException>(() => coordinator.ChangeSteamBigPictureScalingTo100Percent(true));
+        Assert.False(coordinator.SteamBigPictureScalingTo100Percent);
+    }
+
+    [Theory]
     [InlineData("{}", SteamVirtualControllerPreference.SteamDeck)]
     [InlineData("{\"SteamVirtualController\":\"SteamDeck\"}", SteamVirtualControllerPreference.SteamDeck)]
     [InlineData("{\"SteamVirtualController\":\"DualSenseEdge\"}", SteamVirtualControllerPreference.DualSenseEdge)]

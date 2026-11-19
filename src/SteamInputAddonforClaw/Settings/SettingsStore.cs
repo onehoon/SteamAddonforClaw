@@ -73,6 +73,8 @@ public sealed class SettingsStore
                 && currentPowerProperty.ValueKind == JsonValueKind.True && currentPowerProperty.GetBoolean();
             var simplifiedTdpControls = root.TryGetProperty("SimplifiedTdpControls", out var simplifiedTdpProperty)
                 && simplifiedTdpProperty.ValueKind == JsonValueKind.True && simplifiedTdpProperty.GetBoolean();
+            var steamBigPictureScalingTo100Percent = root.TryGetProperty("SteamBigPictureScalingTo100Percent", out var bigPictureScalingProperty)
+                && bigPictureScalingProperty.ValueKind == JsonValueKind.True && bigPictureScalingProperty.GetBoolean();
             var clawHudEnabled = root.TryGetProperty("ClawHudEnabled", out var clawHudProperty)
                 && clawHudProperty.ValueKind == JsonValueKind.True && clawHudProperty.GetBoolean();
             var settings = new AppSettings(
@@ -84,6 +86,7 @@ public sealed class SettingsStore
                 ExperimentalVirtualTouchpadEnabled = experimentalVirtualTouchpadEnabled,
                 QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
                 SimplifiedTdpControls = simplifiedTdpControls,
+                SteamBigPictureScalingTo100Percent = steamBigPictureScalingTo100Percent,
                 YButtonQuickJumpTarget = ReadYButtonQuickJumpTarget(root),
                 SteamVirtualController = ReadSteamVirtualController(root),
                 GyroscopeEnabled = ReadGyroscopeEnabled(root),
@@ -364,7 +367,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SimplifiedTdpControls, settings.YButtonQuickJumpTarget, settings.SteamVirtualController, settings.GyroscopeEnabled, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, WindowsTweaksWarningAcknowledgedLocalDate = settings.WindowsTweaksWarningAcknowledgedLocalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.ExperimentalVirtualTouchpadEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.SimplifiedTdpControls, settings.SteamBigPictureScalingTo100Percent, settings.YButtonQuickJumpTarget, settings.SteamVirtualController, settings.GyroscopeEnabled, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, WindowsTweaksWarningAcknowledgedLocalDate = settings.WindowsTweaksWarningAcknowledgedLocalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

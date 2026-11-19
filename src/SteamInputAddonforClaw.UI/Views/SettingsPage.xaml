@@ -43,6 +43,20 @@
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsCard
+                x:Uid="Settings_SteamBigPictureScalingCard"
+                Description="Automatically set Windows display scaling to 100% while Steam Big Picture is open. Restore the previous scale when it closes."
+                Header="Steam Big Picture Display Scaling">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="SteamBigPictureScalingToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="SteamBigPictureScalingToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsCard
                 x:Name="AppThemeCard"
                 x:Uid="Settings_AppThemeCard"
                 Header="App theme"

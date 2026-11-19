@@ -319,6 +319,57 @@ public sealed class MainUiPowerSourceSettingsTests
     }
 
     [Fact]
+    public void Big_Picture_scaling_settings_card_is_localized_and_uses_authoritative_toggle_readback()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = Read(root, "SettingsPage.xaml");
+        var document = XDocument.Parse(xaml);
+        XNamespace xamlNs = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var card = Assert.Single(document.Descendants(), element => element.Name.LocalName == "SettingsCard"
+            && (string?)element.Attribute(xamlNs + "Uid") == "Settings_SteamBigPictureScalingCard");
+        var icon = Assert.Single(card.Descendants(), element => element.Name.LocalName == "FontIcon");
+        Assert.Equal("\uE7F4", (string?)icon.Attribute("Glyph"));
+        var toggle = Assert.Single(card.Descendants(), element => element.Name.LocalName == "ToggleSwitch"
+            && (string?)element.Attribute(xamlNs + "Name") == "SteamBigPictureScalingToggleSwitch");
+        Assert.Equal("", (string?)toggle.Attribute("OffContent"));
+        Assert.Equal("", (string?)toggle.Attribute("OnContent"));
+        Assert.Equal("SteamBigPictureScalingToggleSwitch_Toggled", (string?)toggle.Attribute("Toggled"));
+
+        var code = Read(root, "SettingsPage.xaml.cs");
+        var refresh = ExtractMethod(code, "private async Task RefreshQuickSettingsPreferencesAsync()");
+        var mutation = ExtractMethod(code, "private async void SteamBigPictureScalingToggleSwitch_Toggled(");
+        var activate = ExtractMethod(code, "internal void Activate()");
+        var controlStates = ExtractMethod(code, "private void UpdateQuickSettingsPreferenceControlStates()");
+        Assert.Contains("bootstrap.Settings.SteamBigPictureScalingTo100Percent", code, StringComparison.Ordinal);
+        Assert.Contains("SetSteamBigPictureScalingTo100PercentAsync", mutation, StringComparison.Ordinal);
+        Assert.Contains("GetBootstrapAsync()", mutation, StringComparison.Ordinal);
+        Assert.Contains("ResolvePreference(_lastKnownSteamBigPictureScalingTo100Percent, refreshedValue)", mutation, StringComparison.Ordinal);
+        Assert.Contains("_applyingSteamBigPictureScaling", mutation, StringComparison.Ordinal);
+        Assert.Contains("_steamBigPictureScalingMutationInProgress = true", mutation, StringComparison.Ordinal);
+        Assert.Contains("_steamBigPictureScalingMutationInProgress = false", mutation, StringComparison.Ordinal);
+        Assert.Contains("SteamBigPictureScalingTo100Percent", refresh, StringComparison.Ordinal);
+        Assert.Contains("SetSteamBigPictureScaling(_lastKnownSteamBigPictureScalingTo100Percent)", refresh, StringComparison.Ordinal);
+        Assert.Contains("RequestQuickSettingsPreferencesRefresh()", activate, StringComparison.Ordinal);
+        Assert.Contains("SteamBigPictureScalingToggleSwitch.IsEnabled = !_steamBigPictureScalingMutationInProgress", controlStates, StringComparison.Ordinal);
+
+        var expected = new Dictionary<string, (string Header, string Description)>(StringComparer.Ordinal)
+        {
+            ["en-US"] = ("Steam Big Picture Display Scaling", "Automatically set Windows display scaling to 100% while Steam Big Picture is open. Restore the previous scale when it closes."),
+            ["ko-KR"] = ("Steam Big Picture 디스플레이 배율", "Steam Big Picture 실행 중 Windows 배율을 100%로 변경하고 종료하면 이전 배율로 복원합니다.")
+        };
+        foreach (var (language, localized) in expected)
+        {
+            var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.UI", "Strings", language, "Resources.resw"));
+            var entries = resources.Descendants("data").ToDictionary(
+                element => (string)element.Attribute("name")!,
+                element => element.Element("value")?.Value ?? string.Empty,
+                StringComparer.Ordinal);
+            Assert.Equal(localized.Description, entries["Settings_SteamBigPictureScalingCard.Description"]);
+            Assert.Equal(localized.Header, entries["Settings_SteamBigPictureScalingCard.Header"]);
+        }
+    }
+
+    [Fact]
     public void Main_page_AC_DC_labels_and_localized_settings_resources_are_present()
     {
         var root = FindRepositoryRoot();

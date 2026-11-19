@@ -211,6 +211,31 @@ public sealed class XboxGameSessionRuntimeHostTests
     }
 
     [Fact]
+    public void Big_Picture_transitions_and_startup_reconcile_use_the_existing_display_owner()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs").Replace("\r\n", "\n", StringComparison.Ordinal);
+        var composition = ReadSource("src/SteamInputAddonforClaw/Runtime/AddonRuntimeComposition.cs");
+        var handler = Method(host, "private void OnBigPictureStateChanged(bool active)", "private void OnXboxObservationReadinessChanged(");
+        var startup = Method(host, "internal void ReconcileDeviceProfileStartup()", "internal void ReconcileIntelGpuMinimumClockForStartup()");
+        var resume = Method(host, "private void OnPowerResumeObserved()", "private async Task ReconcileXboxObserverAndTouchpadAfterResumeAsync(");
+        var runtimeConstructionStart = host.IndexOf("_displayResolutionRuntime = new(", StringComparison.Ordinal);
+        var runtimeConstructionEnd = host.IndexOf("var fpsMarker", runtimeConstructionStart, StringComparison.Ordinal);
+        var displayRequest = host[runtimeConstructionStart..runtimeConstructionEnd];
+
+        Assert.Contains("ReconcileDisplayForBigPictureStateChanged()", handler, StringComparison.Ordinal);
+        Assert.Contains("_runtimeHost is null || _runtimeStartupSettings is null", handler, StringComparison.Ordinal);
+        Assert.Contains("_displayResolutionRuntime.Reconcile()", handler, StringComparison.Ordinal);
+        Assert.Contains("steamRuntime.IsBigPictureActive", composition, StringComparison.Ordinal);
+        Assert.Contains("_displayResolutionRuntime.Reconcile()", startup, StringComparison.Ordinal);
+        Assert.Contains("reconcileDisplay:", resume, StringComparison.Ordinal);
+        Assert.Contains("_displayResolutionRuntime.Reconcile()", resume, StringComparison.Ordinal);
+        Assert.Contains("CapturePresentationSnapshot().BigPictureActive", displayRequest, StringComparison.Ordinal);
+        Assert.Contains("SteamBigPictureScalingTo100Percent", displayRequest, StringComparison.Ordinal);
+        Assert.DoesNotContain("RunningAppId", displayRequest, StringComparison.Ordinal);
+        Assert.DoesNotContain("steam://open/bigpicture", host, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Frontend_contract_removes_diagnostic_rpc_and_advances_only_frontend_protocol()
     {
         var wire = ReadSource("src/SteamInputAddonforClaw.FrontendTransport/FrontendWire.cs");
@@ -219,7 +244,7 @@ public sealed class XboxGameSessionRuntimeHostTests
         var client = ReadSource("src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs");
         var control = ReadSource("src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs");
 
-        Assert.Contains("CurrentVersion = 94", wire, StringComparison.Ordinal);
+        Assert.Contains("CurrentVersion = 95", wire, StringComparison.Ordinal);
         Assert.Contains("Version 58:", wire, StringComparison.Ordinal);
         Assert.Contains("Version 59:", wire, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureXboxSessionDiagnostic", wire + contracts + server + client + control, StringComparison.Ordinal);

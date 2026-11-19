@@ -350,6 +350,7 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
     public bool ExperimentalVirtualTouchpadEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
     public bool SimplifiedTdpControls { get; init; }
+    public bool SteamBigPictureScalingTo100Percent { get; init; }
     public FrontendModelFeatureSupport FeatureSupport { get; init; } = FrontendModelFeatureSupport.None;
     public QuickOverlayYButtonTarget YButtonQuickJumpTarget { get; init; } = QuickOverlayYButtonTarget.Profile;
     public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
@@ -635,6 +636,8 @@ public interface IAddonFrontendControl
     async Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken cancellationToken = default) =>
         (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
     async Task<FrontendSettingsSnapshot> SetSimplifiedTdpControlsAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
+    async Task<FrontendSettingsSnapshot> SetSteamBigPictureScalingTo100PercentAsync(bool enabled, CancellationToken cancellationToken = default) =>
         (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
     Task<FrontendSettingsSnapshot> SetQuickOverlayYButtonTargetAsync(
         QuickOverlayYButtonTarget target, CancellationToken cancellationToken = default) =>

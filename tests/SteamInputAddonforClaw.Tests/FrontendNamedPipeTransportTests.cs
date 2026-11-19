@@ -79,7 +79,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetWindowsTweakAsync(FrontendWindowsTweakId.DisableEdgeBackground, true);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.True(result.Succeeded);
         Assert.Equal(FrontendWindowsTweakId.DisableEdgeBackground, result.UpdatedTweak.Id);
         Assert.Equal(FrontendWindowsTweakState.Enabled, result.UpdatedTweak.State);
@@ -96,7 +96,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetSteamVirtualControllerAsync(SteamVirtualControllerPreference.DualSenseEdge);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, fake.LastSteamVirtualControllerPreference);
         Assert.Equal(SteamVirtualControllerPreference.DualSenseEdge, result.SteamVirtualController);
     }
@@ -111,7 +111,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetGyroscopeEnabledAsync(false);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.False(fake.LastGyroscopeEnabled);
         Assert.False(result.GyroscopeEnabled);
     }
@@ -126,7 +126,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetQuickOverlayYButtonTargetAsync(QuickOverlayYButtonTarget.Off);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(QuickOverlayYButtonTarget.Off, fake.LastYButtonQuickJumpTarget);
         Assert.Equal(QuickOverlayYButtonTarget.Off, result.YButtonQuickJumpTarget);
         await Assert.ThrowsAsync<JsonException>(() =>
@@ -143,10 +143,26 @@ public sealed class FrontendNamedPipeTransportTests
 
         var settings = await client.SetSimplifiedTdpControlsAsync(true);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("SetSimplifiedTdpControls", Enum.GetNames<FrontendRpcMethod>());
         Assert.True(fake.LastSimplifiedTdpControls);
         Assert.True(settings.SimplifiedTdpControls);
+    }
+
+    [Fact]
+    public async Task Big_Picture_display_scaling_preference_round_trips_over_protocol_95()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var settings = await client.SetSteamBigPictureScalingTo100PercentAsync(true);
+
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
+        Assert.Contains("SetSteamBigPictureScalingTo100Percent", Enum.GetNames<FrontendRpcMethod>());
+        Assert.True(fake.LastSteamBigPictureScalingTo100Percent);
+        Assert.True(settings.SteamBigPictureScalingTo100Percent);
     }
 
     [Fact]
@@ -159,7 +175,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetExperimentalVirtualTouchpadEnabledAsync(true);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal((int)FrontendRpcMethod.SetGameProfileSteamVirtualController + 1,
             (int)FrontendRpcMethod.SetExperimentalVirtualTouchpadEnabled);
         Assert.True(fake.LastExperimentalVirtualTouchpadEnabled);
@@ -181,7 +197,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
@@ -309,7 +325,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -373,7 +389,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -463,7 +479,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.RunDeveloperRumbleRearmAsync();
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.DeveloperRumbleRearmResult, result);
         Assert.Equal(1, fake.DeveloperRumbleRearmCount);
         Assert.False(result.PhysicalMotorEffectVerified);
@@ -599,7 +615,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.RequestMsiLiveUpdateCatalogAsync();
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal("E1T52IMS.113", received.Categories[0].Entries[0].InstalledVersion);
         Assert.Equal(FrontendMsiLiveUpdateComparisonStatus.UpdateAvailable,
@@ -901,7 +917,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
-        Assert.Equal(94, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
         await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
     }
 
@@ -1883,9 +1899,9 @@ public sealed class FrontendNamedPipeTransportTests
     // Attribute arguments must be compile-time constants, so use the current protocol version
     // literal here to reach method-shape validation rather than failing the version check.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":94,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":94,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":94,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":95,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":95,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":95,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -2241,6 +2257,7 @@ public sealed class FrontendNamedPipeTransportTests
         public bool? LastGyroscopeEnabled { get; private set; }
         public QuickOverlayYButtonTarget? LastYButtonQuickJumpTarget { get; private set; }
         public bool? LastSimplifiedTdpControls { get; private set; }
+        public bool? LastSteamBigPictureScalingTo100Percent { get; private set; }
         public (uint AppId, SteamVirtualControllerPreference? Preference)? LastGameVirtualController { get; private set; }
         public FrontButtonMappingSettings? LastFrontButtonMapping { get; private set; }
         public BackButtonMappingSettings? LastBackButtonMapping { get; private set; }
@@ -2275,6 +2292,12 @@ public sealed class FrontendNamedPipeTransportTests
             TotalCalls++;
             LastSimplifiedTdpControls = enabled;
             return Task.FromResult(Settings with { SimplifiedTdpControls = enabled });
+        }
+        public Task<FrontendSettingsSnapshot> SetSteamBigPictureScalingTo100PercentAsync(bool enabled, CancellationToken t = default)
+        {
+            TotalCalls++;
+            LastSteamBigPictureScalingTo100Percent = enabled;
+            return Task.FromResult(Settings with { SteamBigPictureScalingTo100Percent = enabled });
         }
         public Task<FrontendSettingsSnapshot> SetExperimentalVirtualTouchpadEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastExperimentalVirtualTouchpadEnabled = enabled; return Task.FromResult(Settings with { ExperimentalVirtualTouchpadEnabled = enabled }); }
         public Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(FrontButtonMappingSettings mapping, CancellationToken t = default) { TotalCalls++; LastFrontButtonMapping = mapping; return Task.FromResult(Settings); }
