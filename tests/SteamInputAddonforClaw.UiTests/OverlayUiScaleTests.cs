@@ -63,6 +63,30 @@ public sealed class OverlayUiScaleTests
     }
 
     [Fact]
+    public void Runtime_display_scale_hint_reconfigures_only_the_existing_window_on_the_ui_dispatcher()
+    {
+        var root = FindRepositoryRoot();
+        var presentation = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"));
+        var app = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs"));
+        var refreshStart = presentation.IndexOf("internal void RefreshForDisplayScaleChange()", StringComparison.Ordinal);
+        Assert.True(refreshStart >= 0);
+        var refreshEnd = presentation.IndexOf("private void ConfigureWindow(", refreshStart, StringComparison.Ordinal);
+        Assert.True(refreshEnd > refreshStart);
+        var refresh = presentation[refreshStart..refreshEnd];
+
+        Assert.Contains("if (_isVisible)", refresh);
+        Assert.Contains("ConfigureWindow(alreadyVisible: true)", refresh);
+        Assert.Contains("else", refresh);
+        Assert.Contains("ConfigureWindow();", refresh);
+        Assert.DoesNotContain("ShowWithoutActivation", refresh);
+        Assert.DoesNotContain("ResetUiForShow", refresh);
+        Assert.DoesNotContain("BuildShell", refresh);
+        Assert.Contains("DisplayScaleChangedReceived += OnDisplayScaleChangedReceived", app);
+        Assert.Contains("TryEnqueue(() =>", app);
+        Assert.Contains("_window?.RefreshForDisplayScaleChange()", app);
+    }
+
+    [Fact]
     public void Toggle_scaling_wraps_only_the_native_toggle_and_preserves_its_existing_instance()
     {
         var source = File.ReadAllText(Path.Combine(

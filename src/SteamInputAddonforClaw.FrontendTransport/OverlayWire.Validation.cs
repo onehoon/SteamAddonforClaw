@@ -431,3 +431,12 @@ internal static class OverlayShortcutWireValidation
         || message.ClawHudMutationResponse is not null
         || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message);
 }
+
+internal static class OverlayDisplayScaleWireValidation
+{
+    internal static bool IsValidNotification(OverlayWireMessage? message) =>
+        message is not null
+        && message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind is OverlayWireMessageKind.DisplayScaleAppliedTo100 or OverlayWireMessageKind.DisplayScaleRestored
+        && message == new OverlayWireMessage(OverlayTransportProtocol.CurrentVersion, message.Kind);
+}

@@ -112,6 +112,7 @@ public partial class App : Application
             _client = new NamedPipeOverlayClient(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
             _client.FrontendSettingsStateReceived += OnFrontendSettingsStateReceived;
             _client.ControllerVibrationStateReceived += OnControllerVibrationStateReceived;
+            _client.DisplayScaleChangedReceived += OnDisplayScaleChangedReceived;
             // SF-V2-07/09 section 10.2/12.1: App owns the transport client; the Window's Device and
             // Profile bindings receive only this narrow mutation delegate, never the client itself.
             _window?.ConfigureQuickSettings(intent => _client.SendQuickSettingsMutationAsync(intent));
@@ -129,7 +130,31 @@ public partial class App : Application
         }
         finally
         {
-            if (_client is not null) await _client.DisposeAsync().ConfigureAwait(false);
+            if (_client is not null)
+            {
+                _client.DisplayScaleChangedReceived -= OnDisplayScaleChangedReceived;
+                await _client.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    private void OnDisplayScaleChangedReceived()
+    {
+        try
+        {
+            if (_dispatcherQueue?.TryEnqueue(() =>
+            {
+                try { _window?.RefreshForDisplayScaleChange(); }
+                catch (Exception exception)
+                {
+                    OverlayLog.Warn("Geometry", "Display-scale hint could not reconfigure the existing Overlay window.", exception);
+                }
+            }) != true)
+                OverlayLog.Debug("Geometry", "Display-scale hint was dropped because the Overlay dispatcher is unavailable.");
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Geometry", "Display-scale hint could not be queued; native DPI observation remains active.", exception);
         }
     }
 

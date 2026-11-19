@@ -126,7 +126,7 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.DoesNotContain("AddonQuickSettingsShortcutSlotId", overlay);
         Assert.DoesNotContain("setInterval", overlay);
         Assert.Contains("CurrentVersion = 95", frontendWire);
-        Assert.Contains("CurrentVersion = 23", overlayWire);
+        Assert.Contains("CurrentVersion = 24", overlayWire);
         Assert.DoesNotContain("CurrentVersion = 35", frontendWire);
         Assert.DoesNotContain("CurrentVersion = 8", overlayWire);
     }

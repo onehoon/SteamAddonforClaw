@@ -59,6 +59,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
 
     internal event Action<FrontendSettingsSnapshot, bool, bool>? FrontendSettingsStateReceived;
     internal event Action<FrontendControllerVibrationStrengthSnapshot>? ControllerVibrationStateReceived;
+    internal event Action? DisplayScaleChangedReceived;
 
     internal NamedPipeOverlayClient(string pipeName) => _pipeName = pipeName;
 
@@ -149,6 +150,13 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                         or OverlayWireMessageKind.ControllerVibrationState
                         or OverlayWireMessageKind.ControllerVibrationMutationResult))
                     throw new FrontendProtocolException("Unexpected Overlay production-controls payload.");
+                if (message.Kind is OverlayWireMessageKind.DisplayScaleAppliedTo100 or OverlayWireMessageKind.DisplayScaleRestored)
+                {
+                    if (!OverlayDisplayScaleWireValidation.IsValidNotification(message))
+                        throw new FrontendProtocolException("Invalid Overlay display-scale notification.");
+                    DisplayScaleChangedReceived?.Invoke();
+                    continue;
+                }
                 if (message.Kind == OverlayWireMessageKind.TabOrderState)
                 {
                     var order = ValidateTabOrderMessage(message);

@@ -121,25 +121,115 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         var bpmScalingRequested = true;
         uint activeAppId = 123;
         var runtime = CreateRuntime(store, display, scaling, () => bpmScalingRequested);
+        var scaleChanges = new List<DisplayScaleCommitKind>();
+        runtime.DisplayScaleCommitted += scaleChanges.Add;
         runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => activeAppId));
 
         Assert.True(runtime.Reconcile());
+        Assert.Equal([DisplayScaleCommitKind.AppliedTo100], scaleChanges);
         bpmScalingRequested = false;
         Assert.True(runtime.Reconcile());
         Assert.Equal(1, scaling.CaptureCalls);
         Assert.Equal(1, scaling.SetCalls);
         Assert.Equal(0, scaling.RestoreCalls);
+        Assert.Equal([DisplayScaleCommitKind.AppliedTo100, DisplayScaleCommitKind.AppliedTo100], scaleChanges);
 
         activeAppId = 0;
         bpmScalingRequested = true;
         Assert.True(runtime.Reconcile());
         Assert.Equal(1, scaling.CaptureCalls);
         Assert.Equal(0, scaling.RestoreCalls);
+        Assert.Equal(3, scaleChanges.Count(change => change == DisplayScaleCommitKind.AppliedTo100));
+        Assert.DoesNotContain(DisplayScaleCommitKind.Restored, scaleChanges);
 
         bpmScalingRequested = false;
         Assert.True(runtime.Reconcile());
         Assert.Equal(1, scaling.RestoreCalls);
         Assert.Equal(OriginalScale, scaling.Current);
+        Assert.Equal([
+            DisplayScaleCommitKind.AppliedTo100,
+            DisplayScaleCommitKind.AppliedTo100,
+            DisplayScaleCommitKind.AppliedTo100,
+            DisplayScaleCommitKind.Restored,
+        ], scaleChanges);
+        Assert.False(File.Exists(Recovery));
+    }
+
+    [Fact]
+    public void Scale_notifications_require_successful_apply_or_restore_and_callback_failures_are_contained()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        SaveSteamProfile(store, 123, resolution: null, scaling: true);
+        var display = new FakeDisplay { Current = OriginalMode };
+        var scaling = new FakeScaling { Current = OriginalScale, SetSucceeds = false };
+        var runtime = CreateRuntime(store, display, scaling);
+        var changes = new List<DisplayScaleCommitKind>();
+        runtime.DisplayScaleCommitted += changes.Add;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 123));
+
+        Assert.False(runtime.Reconcile());
+        Assert.DoesNotContain(DisplayScaleCommitKind.AppliedTo100, changes);
+
+        scaling.SetSucceeds = true;
+        Assert.True(runtime.Reconcile());
+        Assert.Contains(DisplayScaleCommitKind.AppliedTo100, changes);
+
+        scaling.RestoreSucceeds = false;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 0));
+        var restoresBeforeFailure = changes.Count(change => change == DisplayScaleCommitKind.Restored);
+        Assert.False(runtime.Reconcile());
+        Assert.Equal(restoresBeforeFailure, changes.Count(change => change == DisplayScaleCommitKind.Restored));
+
+        scaling.RestoreSucceeds = true;
+        runtime.DisplayScaleCommitted += _ => throw new InvalidOperationException("notification failure");
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(restoresBeforeFailure + 1, changes.Count(change => change == DisplayScaleCommitKind.Restored));
+    }
+
+    [Fact]
+    public void Already_100_percent_is_reported_as_a_verified_apply_without_a_native_write()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        SaveSteamProfile(store, 123, resolution: null, scaling: true);
+        var display = new FakeDisplay { Current = OriginalMode };
+        var scaling = new FakeScaling { Current = OriginalScale with { OriginalRelativeScale = 0 } };
+        var runtime = CreateRuntime(store, display, scaling);
+        var changes = new List<DisplayScaleCommitKind>();
+        runtime.DisplayScaleCommitted += changes.Add;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 123));
+
+        Assert.True(runtime.Reconcile());
+
+        Assert.Equal(0, scaling.SetCalls);
+        Assert.Equal([DisplayScaleCommitKind.AppliedTo100], changes);
+    }
+
+    [Fact]
+    public void Externally_restored_scale_is_notified_only_after_matching_the_captured_display_and_value()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        SaveSteamProfile(store, 123, resolution: null, scaling: true);
+        var display = new FakeDisplay { Current = OriginalMode };
+        var scaling = new FakeScaling { Current = OriginalScale };
+        var runtime = CreateRuntime(store, display, scaling);
+        var changes = new List<DisplayScaleCommitKind>();
+        runtime.DisplayScaleCommitted += changes.Add;
+        uint active = 123;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => active));
+
+        Assert.True(runtime.Reconcile());
+        Assert.Equal([DisplayScaleCommitKind.AppliedTo100], changes);
+
+        display.Current = new(1600, 900, 60, 32);
+        scaling.Current = OriginalScale;
+        active = 0;
+        Assert.True(runtime.Reconcile());
+
+        Assert.Equal([DisplayScaleCommitKind.AppliedTo100, DisplayScaleCommitKind.Restored], changes);
+        Assert.Equal(0, scaling.RestoreCalls);
         Assert.False(File.Exists(Recovery));
     }
 
@@ -537,9 +627,12 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         Assert.True(firstRuntime.Reconcile());
 
         var afterCrash = new GameDisplayResolutionRuntime(store, new(), _root, display, scaling);
+        var startupChanges = new List<DisplayScaleCommitKind>();
+        afterCrash.DisplayScaleCommitted += startupChanges.Add;
         afterCrash.StartupRecover();
         Assert.Equal(OriginalMode, display.Current);
         Assert.Equal(OriginalScale, scaling.Current);
+        Assert.Equal([DisplayScaleCommitKind.Restored], startupChanges);
         Assert.False(File.Exists(Recovery));
 
         File.WriteAllText(Recovery, "{\"Original\":{\"Width\":1920,\"Height\":1200,\"RefreshRate\":120,\"BitsPerPixel\":32},\"Target\":{\"Width\":1440,\"Height\":900}}");
