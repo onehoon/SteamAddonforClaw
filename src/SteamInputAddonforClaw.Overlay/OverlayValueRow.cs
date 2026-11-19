@@ -143,7 +143,7 @@ internal sealed class OverlayValueRow
         var valueControls = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Spacing = OverlayQamResources.Scale(8),
             VerticalAlignment = VerticalAlignment.Center,
         };
         valueControls.Children.Add(_previousButton);
@@ -190,7 +190,7 @@ internal sealed class OverlayValueRow
         var icon = new FontIcon
         {
             Glyph = glyph,
-            FontSize = 16,
+            FontSize = OverlayQamResources.Scale(16),
         };
         ButtonBase button = buttonKind == OverlayValueButtonKind.NumericStepper
             ? new RepeatButton

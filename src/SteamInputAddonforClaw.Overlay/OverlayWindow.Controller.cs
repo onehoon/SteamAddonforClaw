@@ -217,17 +217,22 @@ public sealed partial class OverlayWindow
         var colorPreview = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 10,
+            Spacing = OverlayQamResources.Scale(10),
             MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0),
             VerticalAlignment = VerticalAlignment.Center,
         };
-        colorPreview.Children.Add(new TextBlock { Text = "Color", VerticalAlignment = VerticalAlignment.Center });
+        colorPreview.Children.Add(new TextBlock
+        {
+            Text = "Color",
+            FontSize = OverlayQamResources.Scale(14),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
         var swatch = new Border
         {
-            Width = 26,
-            Height = 20,
-            CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(1),
+            Width = OverlayQamResources.Scale(26),
+            Height = OverlayQamResources.Scale(20),
+            CornerRadius = new CornerRadius(OverlayQamResources.Scale(4)),
+            BorderThickness = new Thickness(OverlayQamResources.Scale(1)),
             BorderBrush = OverlayQamResources.Brush("QamSubtleStrokeBrush"),
             VerticalAlignment = VerticalAlignment.Center,
         };

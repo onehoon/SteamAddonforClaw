@@ -71,7 +71,7 @@ public sealed partial class OverlayWindow
         {
             Height = OverlayQamResources.Get("QamSectionSeparatorThickness", new Thickness(0, 1, 0, 0)).Top,
             Background = OverlayQamResources.Brush("QamSeparatorBrush"),
-            Margin = new Thickness(rowMargin.Left, 0, rowMargin.Right, 12),
+            Margin = new Thickness(rowMargin.Left, 0, rowMargin.Right, OverlayQamResources.Scale(12)),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             IsHitTestVisible = false,
         };
@@ -195,7 +195,7 @@ public sealed partial class OverlayWindow
         {
             FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons"),
             Glyph = tile.IconGlyph,
-            FontSize = 24,
+            FontSize = OverlayQamResources.Scale(24),
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         var header = new StackPanel
@@ -203,7 +203,7 @@ public sealed partial class OverlayWindow
             Orientation = Orientation.Vertical,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
-            Spacing = hasStatus ? 4 : 6,
+            Spacing = OverlayQamResources.Scale(hasStatus ? 4 : 6),
         };
         header.Children.Add(icon);
         header.Children.Add(title);
@@ -224,7 +224,7 @@ public sealed partial class OverlayWindow
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
-            Spacing = hasStatus ? 4 : 0,
+            Spacing = OverlayQamResources.Scale(hasStatus ? 4 : 0),
         };
         content.Children.Add(header);
         content.Children.Add(status);
@@ -273,10 +273,10 @@ public sealed partial class OverlayWindow
         var titleMaxLines = hasStatus ? 1 : 2;
         if (controls.Title.MaxLines != titleMaxLines)
             controls.Title.MaxLines = titleMaxLines;
-        var headerSpacing = hasStatus ? 4 : 6;
+        var headerSpacing = OverlayQamResources.Scale(hasStatus ? 4 : 6);
         if (controls.Header.Spacing != headerSpacing)
             controls.Header.Spacing = headerSpacing;
-        var contentSpacing = hasStatus ? 4 : 0;
+        var contentSpacing = OverlayQamResources.Scale(hasStatus ? 4 : 0);
         if (controls.Content.Spacing != contentSpacing)
             controls.Content.Spacing = contentSpacing;
 

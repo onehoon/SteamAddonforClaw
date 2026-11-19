@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace SteamInputAddonforClaw.Overlay;
 
@@ -76,7 +77,16 @@ internal sealed class OverlayToggleRow
         AutomationProperties.SetName(_toggle, label);
         ApplyQamToggleResources(_toggle);
         _toggle.Toggled += OnToggleSwitchToggled;
-        Grid.SetColumn(_toggle, 1);
+        var toggleView = new Viewbox
+        {
+            Width = OverlayQamResources.Scale(40),
+            Height = OverlayQamResources.Scale(22),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Stretch = Stretch.Uniform,
+            Child = _toggle,
+        };
+        Grid.SetColumn(toggleView, 1);
 
         var grid = new Grid
         {
@@ -87,7 +97,7 @@ internal sealed class OverlayToggleRow
             },
         };
         grid.Children.Add(text);
-        grid.Children.Add(_toggle);
+        grid.Children.Add(toggleView);
 
         Container = OverlayRowChrome.Create(grid);
 

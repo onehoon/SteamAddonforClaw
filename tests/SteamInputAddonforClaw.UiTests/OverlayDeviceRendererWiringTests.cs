@@ -405,8 +405,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("rendered.Card =", reconcileSection);
         Assert.Contains("CreateOverlaySectionCard(sectionPanel, additionalTopPadding, additionalBottomPadding)", buildSection);
         Assert.Contains("ResolveOverlaySectionCardPadding(additionalTopPadding, additionalBottomPadding)", createCard);
-        Assert.Contains("sectionPadding.Top + additionalTopPadding", resolveCardPadding);
-        Assert.Contains("sectionPadding.Bottom + additionalBottomPadding", resolveCardPadding);
+        Assert.Contains("sectionPadding.Top + OverlayQamResources.Scale(additionalTopPadding)", resolveCardPadding);
+        Assert.Contains("sectionPadding.Bottom + OverlayQamResources.Scale(additionalBottomPadding)", resolveCardPadding);
 
         static double[] ThicknessValues(XDocument document, string key) =>
             document.Descendants().Single(element => (string?)element.Attribute(XName.Get(

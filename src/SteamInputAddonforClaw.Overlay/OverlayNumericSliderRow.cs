@@ -76,7 +76,7 @@ internal sealed class OverlayNumericSliderRow
 
         var content = new StackPanel
         {
-            Spacing = 2,
+            Spacing = OverlayQamResources.Scale(2),
             VerticalAlignment = VerticalAlignment.Center,
         };
         content.Children.Add(header);
