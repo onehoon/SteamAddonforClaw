@@ -119,6 +119,14 @@ public sealed partial class OverlayWindow
         return Task.CompletedTask;
     }
 
+    internal void RefreshForDisplayScaleChange()
+    {
+        if (_isVisible)
+            ConfigureWindow(alreadyVisible: true);
+        else
+            ConfigureWindow();
+    }
+
     private void ConfigureWindow(bool alreadyVisible = false)
     {
         var topInsetPx = CurrentClawHudTopInsetPx();
