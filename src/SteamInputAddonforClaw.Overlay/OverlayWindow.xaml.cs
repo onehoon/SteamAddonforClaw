@@ -21,6 +21,8 @@ public sealed partial class OverlayWindow : Window
     {
         _startupClawHudSettings = startupClawHudSettings;
         InitializeComponent();
+        AnimationViewport.Loaded += AnimationViewport_Loaded;
+        AnimationViewport.Unloaded += AnimationViewport_Unloaded;
         ProfileArtworkHost.Loaded += ProfileArtworkHost_Loaded;
         ProfileArtworkHost.Unloaded += ProfileArtworkHost_Unloaded;
         _rowSelectedBrush = OverlayQamResources.Brush("QamFocusBorderBrush");
@@ -31,6 +33,7 @@ public sealed partial class OverlayWindow : Window
         {
             StopRailClockUpdates();
             ObserveProfileArtworkXamlRoot(null);
+            ObserveOverlayScaleRoot(null);
             ClearProfileArtwork();
             CancelPendingControllerVibrationDraft();
             foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.Dispose();

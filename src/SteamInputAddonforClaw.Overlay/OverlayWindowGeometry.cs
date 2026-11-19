@@ -6,10 +6,6 @@ internal readonly record struct OverlayRect(int X, int Y, int Width, int Height)
 
 internal static class OverlayWindowGeometry
 {
-    private const int LegacyRightInsetForLeftAnchorPx = 48;
-    private const double LeftAnchorWidthDip = 452.0;
-    private const uint DefaultDpi = 96;
-
     internal static OverlayRect Calculate(
         int monitorLeft,
         int monitorTop,
@@ -20,22 +16,18 @@ internal static class OverlayWindowGeometry
     {
         var monitorWidth = Math.Max(0, monitorRight - monitorLeft);
         var monitorHeight = Math.Max(0, monitorBottom - monitorTop);
-        var effectiveDpi = dpi == 0 ? DefaultDpi : dpi;
 
         if (monitorWidth == 0 || monitorHeight == 0)
             return new OverlayRect(monitorLeft, monitorTop, 0, 0);
 
-        // Preserve the prior left edge by calculating it from the old capped and inset surface.
-        // The final window then fills from that anchor to the monitor's physical right edge.
-        var legacyRightInsetPx = Math.Min(LegacyRightInsetForLeftAnchorPx, monitorWidth);
-        var legacyRight = monitorRight - legacyRightInsetPx;
-        var legacyAvailableWidth = Math.Max(0, legacyRight - monitorLeft);
-        var legacyWidthPx = DipToPixels(LeftAnchorWidthDip, effectiveDpi);
-        var legacyWidth = Math.Min(legacyAvailableWidth, legacyWidthPx);
-        var x = legacyRight - legacyWidth;
+        // The UI uses a fixed 135% design scale. Keep the old physical right-anchor extension,
+        // while making the resulting window width independent of the monitor's Windows DPI.
+        _ = dpi;
+        var width = Math.Min(monitorWidth, OverlayUiScale.PhysicalWindowWidthPixels);
+        var x = monitorRight - width;
         var inset = Math.Clamp(topInsetPx, 0, monitorHeight);
 
-        return new OverlayRect(x, monitorTop + inset, Math.Max(0, monitorRight - x), monitorHeight - inset);
+        return new OverlayRect(x, monitorTop + inset, width, monitorHeight - inset);
     }
 
     internal static int ClawHudTopInsetPx(
@@ -68,7 +60,4 @@ internal static class OverlayWindowGeometry
                 _ => 34
             };
     }
-
-    private static int DipToPixels(double dip, uint dpi) =>
-        (int)Math.Round(dip * dpi / DefaultDpi, MidpointRounding.AwayFromZero);
 }

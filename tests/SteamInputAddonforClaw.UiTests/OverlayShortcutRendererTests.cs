@@ -142,7 +142,7 @@ public sealed class OverlayShortcutRendererTests
     {
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
         var start = presentation.IndexOf("internal Task HideForPocAsync()", StringComparison.Ordinal);
-        var end = presentation.IndexOf("private void ConfigureWindow()", start, StringComparison.Ordinal);
+        var end = presentation.IndexOf("private void ConfigureWindow(bool alreadyVisible = false)", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var hide = presentation[start..end];
         Assert.Contains("CancelUnsubmittedDrafts()", hide, StringComparison.Ordinal);

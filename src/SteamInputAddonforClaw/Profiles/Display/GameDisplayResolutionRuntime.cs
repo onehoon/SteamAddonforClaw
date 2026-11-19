@@ -5,6 +5,12 @@ using SteamInputAddonforClaw.Install;
 
 namespace SteamInputAddonforClaw.Profiles.Display;
 
+internal enum DisplayScaleCommitKind
+{
+    AppliedTo100,
+    Restored,
+}
+
 internal sealed class GameDisplayResolutionRuntime
 {
     private readonly ProfileStore _store;
@@ -16,6 +22,8 @@ internal sealed class GameDisplayResolutionRuntime
     private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null;
     private Recovery? _recovery;
     private bool _recoveryPending;
+
+    internal event Action<DisplayScaleCommitKind>? DisplayScaleCommitted;
 
     internal GameDisplayResolutionRuntime(
         ProfileStore store,
@@ -139,12 +147,16 @@ internal sealed class GameDisplayResolutionRuntime
             return FailClosed();
         }
 
-        if (scalingEnabled && recovery.OwnsScaling && recovery.OriginalScale is { } originalScale
-            && !_scaling.TrySetTo100(originalScale))
+        if (scalingEnabled && recovery.OwnsScaling && recovery.OriginalScale is { } originalScale)
         {
-            AppLog.Warn("Profiles.Display", "Display scaling apply failed; restoring owned display changes.", null,
-                ("ProfileTarget", active?.TargetLabel));
-            return FailClosed();
+            if (!_scaling.TrySetTo100(originalScale))
+            {
+                AppLog.Warn("Profiles.Display", "Display scaling apply failed; restoring owned display changes.", null,
+                    ("ProfileTarget", active?.TargetLabel));
+                return FailClosed();
+            }
+
+            NotifyDisplayScaleCommitted(DisplayScaleCommitKind.AppliedTo100);
         }
 
         if (!recovery.OwnsResolution && !recovery.OwnsScaling)
@@ -243,6 +255,7 @@ internal sealed class GameDisplayResolutionRuntime
                 || currentScale.OriginalRelativeScale != originalScale.OriginalRelativeScale)
                 return false;
             updated = recovery with { ScalingOwned = false };
+            NotifyDisplayScaleCommitted(DisplayScaleCommitKind.Restored);
             return true;
         }
 
@@ -253,7 +266,10 @@ internal sealed class GameDisplayResolutionRuntime
 
         var scaleRestored = _scaling.TryRestore(originalScale);
         if (scaleRestored)
+        {
             updated = recovery with { ScalingOwned = false };
+            NotifyDisplayScaleCommitted(DisplayScaleCommitKind.Restored);
+        }
 
         if (finalResolution is { } returnMode
             && (!TryCaptureMode(out var afterScale)
@@ -375,6 +391,16 @@ internal sealed class GameDisplayResolutionRuntime
             _recoveryPending = true;
             AppLog.Error("Profiles.Display", "Restored display recovery state could not be retired; new display overrides remain blocked.", exception);
             return false;
+        }
+    }
+
+    private void NotifyDisplayScaleCommitted(DisplayScaleCommitKind change)
+    {
+        try { DisplayScaleCommitted?.Invoke(change); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Profiles.Display", "Display scale notification callback failed; the display operation remains committed.", exception,
+                ("Change", change));
         }
     }
 

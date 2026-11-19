@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.Profiles.Display;
 
 namespace SteamInputAddonforClaw.Lifecycle;
 
@@ -270,6 +271,33 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         }
         try { await server.SendClawHudStateAsync(state).ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Warn("Overlay", "Overlay ClawHUD publish failed.", exception); }
+    }
+
+    internal async Task NotifyDisplayScaleChangedAsync(DisplayScaleCommitKind change)
+    {
+        NamedPipeOverlayServer? server;
+        lock (_sync)
+        {
+            if (_stopping) return;
+            server = _server;
+        }
+        if (server is null || !server.IsReady || server.State is not (OverlayState.Hidden or OverlayState.Visible)) return;
+
+        var notification = change switch
+        {
+            DisplayScaleCommitKind.AppliedTo100 => OverlayDisplayScaleChange.AppliedTo100,
+            DisplayScaleCommitKind.Restored => OverlayDisplayScaleChange.Restored,
+            _ => throw new ArgumentOutOfRangeException(nameof(change)),
+        };
+        try
+        {
+            await server.SendDisplayScaleChangedAsync(notification).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Display-scale notification failed; Overlay will use its existing DPI observers.", exception,
+                ("Change", change));
+        }
     }
 
     internal async Task RefreshShortcutAsync()

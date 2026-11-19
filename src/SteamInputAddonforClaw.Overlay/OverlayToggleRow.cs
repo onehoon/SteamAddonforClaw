@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace SteamInputAddonforClaw.Overlay;
 
@@ -43,6 +44,11 @@ internal sealed class OverlayToggleModel
 // requestChange callback, and the two never form a feedback loop.
 internal sealed class OverlayToggleRow
 {
+    // WinUI 2.3.9's default ToggleSwitch template has a 40-DIP track plus a 12-DIP column.
+    // The local pre/post content margins are 1 DIP each around its 20-DIP track height.
+    private const double NativeToggleWidthDip = 52;
+    private const double NativeToggleHeightDip = 22;
+
     private readonly OverlayToggleModel _model;
     private readonly ToggleSwitch _toggle;
     private bool _suppress;
@@ -76,7 +82,16 @@ internal sealed class OverlayToggleRow
         AutomationProperties.SetName(_toggle, label);
         ApplyQamToggleResources(_toggle);
         _toggle.Toggled += OnToggleSwitchToggled;
-        Grid.SetColumn(_toggle, 1);
+        var toggleView = new Viewbox
+        {
+            Width = OverlayQamResources.Scale(NativeToggleWidthDip),
+            Height = OverlayQamResources.Scale(NativeToggleHeightDip),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Stretch = Stretch.Uniform,
+            Child = _toggle,
+        };
+        Grid.SetColumn(toggleView, 1);
 
         var grid = new Grid
         {
@@ -87,7 +102,7 @@ internal sealed class OverlayToggleRow
             },
         };
         grid.Children.Add(text);
-        grid.Children.Add(_toggle);
+        grid.Children.Add(toggleView);
 
         Container = OverlayRowChrome.Create(grid);
 

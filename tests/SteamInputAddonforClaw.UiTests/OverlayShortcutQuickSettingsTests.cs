@@ -308,7 +308,7 @@ public sealed class OverlayShortcutQuickSettingsTests
         var build = shortcuts[buildStart..buildEnd];
 
         Assert.Contains("var rowMargin = OverlayQamResources.Get(\"QamRowMargin\", new Thickness(-16, 0, -16, 0));", build);
-        Assert.Contains("Margin = new Thickness(rowMargin.Left, 0, rowMargin.Right, 12)", build);
+        Assert.Contains("Margin = new Thickness(rowMargin.Left, 0, rowMargin.Right, OverlayQamResources.Scale(12))", build);
         Assert.Contains("HorizontalAlignment = HorizontalAlignment.Stretch", build);
         Assert.Contains("QamSectionSeparatorThickness", build);
         Assert.Contains("QamSeparatorBrush", build);

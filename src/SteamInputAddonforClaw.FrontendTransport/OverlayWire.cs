@@ -46,11 +46,13 @@ internal static class OverlayTransportProtocol
     // Version 21 adds repeat-only semantic Left/Right navigation actions for selected native numeric sliders.
     // Version 22 adds the configured Y-button QuickJump action and its correlated settings mutation.
     // Version 23 adds the Runtime-owned Simplified TDP Controls setting mutation.
-    internal const int CurrentVersion = 23;
+    // Version 24 adds payload-free Runtime notifications after verified display-scale apply/restore operations.
+    internal const int CurrentVersion = 24;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerForSteamMutationRequest, ControllerForSteamMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest, YButtonQuickJumpMutationRequest, YButtonQuickJumpMutationResult, SimplifiedTdpControlsMutationRequest, SimplifiedTdpControlsMutationResult }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerForSteamMutationRequest, ControllerForSteamMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest, YButtonQuickJumpMutationRequest, YButtonQuickJumpMutationResult, SimplifiedTdpControlsMutationRequest, SimplifiedTdpControlsMutationResult, DisplayScaleAppliedTo100, DisplayScaleRestored }
+internal enum OverlayDisplayScaleChange { AppliedTo100, Restored }
 internal enum OverlayCommand { Show, Hide, Shutdown, ShowActiveProfile }
 internal enum OverlayNavigationAction
 {

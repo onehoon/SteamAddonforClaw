@@ -39,7 +39,7 @@ public sealed class OverlayTransportTests
     [Fact]
     public void Active_profile_show_remains_a_narrow_overlay_command()
     {
-        Assert.Equal(23, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(24, OverlayTransportProtocol.CurrentVersion);
         Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
@@ -54,9 +54,34 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Display_scale_notifications_are_payload_free_and_version_24_only()
+    {
+        Assert.Equal(24, OverlayTransportProtocol.CurrentVersion);
+
+        foreach (var kind in new[]
+        {
+            OverlayWireMessageKind.DisplayScaleAppliedTo100,
+            OverlayWireMessageKind.DisplayScaleRestored,
+        })
+        {
+            var message = await RoundTripAsync(new(OverlayTransportProtocol.CurrentVersion, kind));
+            Assert.True(OverlayDisplayScaleWireValidation.IsValidNotification(message));
+            Assert.Equal(kind, message.Kind);
+            Assert.False(OverlayDisplayScaleWireValidation.IsValidNotification(message with
+            {
+                Error = "unexpected payload",
+            }));
+            Assert.False(OverlayDisplayScaleWireValidation.IsValidNotification(message with
+            {
+                ProtocolVersion = OverlayTransportProtocol.CurrentVersion - 1,
+            }));
+        }
+    }
+
+    [Fact]
     public async Task Repeat_only_navigation_actions_round_trip_and_unknown_navigation_is_rejected()
     {
-        Assert.Equal(23, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(24, OverlayTransportProtocol.CurrentVersion);
         Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
 
         foreach (var action in new[]
@@ -262,6 +287,63 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task V23_peer_is_rejected_by_the_overlay_server()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await OverlayWireCodec.WriteAsync(client, new(23, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        var response = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
+
+        Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);
+        Assert.Contains("version", response.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Display_scale_notifications_send_only_to_a_ready_hidden_or_visible_overlay()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        Assert.False(await server.SendDisplayScaleChangedAsync(OverlayDisplayScaleChange.AppliedTo100));
+        await server.StartAsync();
+        Assert.False(await server.SendDisplayScaleChangedAsync(OverlayDisplayScaleChange.AppliedTo100));
+
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var received = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sequence = 0;
+        client.DisplayScaleChangedReceived += () => received.TrySetResult(Interlocked.Increment(ref sequence));
+        var run = client.RunAsync(_ => Task.CompletedTask);
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(OverlayState.Hidden, server.State);
+        var readyGeneration = server.ReadyGeneration;
+        Assert.NotNull(readyGeneration);
+        Assert.True(await server.SendDisplayScaleChangedAsync(OverlayDisplayScaleChange.AppliedTo100));
+        Assert.Equal(1, await received.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        var visibleReceived = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        received = visibleReceived;
+        Assert.True(await server.SendDisplayScaleChangedAsync(OverlayDisplayScaleChange.Restored));
+        Assert.Equal(2, await visibleReceived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
+        var hiddenReceived = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        received = hiddenReceived;
+        Assert.Equal(OverlayState.Hidden, server.State);
+        Assert.True(await server.SendDisplayScaleChangedAsync(OverlayDisplayScaleChange.Restored));
+        Assert.Equal(3, await hiddenReceived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+        await client.DisposeAsync();
+        Assert.True(await server.WaitForDisconnectedAsync(readyGeneration.Value, TimeSpan.FromSeconds(5)));
+        Assert.False(await server.SendDisplayScaleChangedAsync(OverlayDisplayScaleChange.AppliedTo100));
+    }
+
+    [Fact]
     public async Task Pre_navigation_v2_peer_is_rejected_by_the_overlay_server()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
@@ -325,7 +407,7 @@ public sealed class OverlayTransportTests
         Assert.Equal(OverlayState.Ready, ready.State);
 
         var payload = System.Text.Encoding.UTF8.GetBytes(
-            "{\"ProtocolVersion\":23,\"Kind\":\"Navigation\",\"Navigation\":99}");
+            "{\"ProtocolVersion\":24,\"Kind\":\"Navigation\",\"Navigation\":99}");
         var prefix = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(prefix, payload.Length);
         await pipe.WriteAsync(prefix);
@@ -333,6 +415,40 @@ public sealed class OverlayTransportTests
         await pipe.FlushAsync();
 
         await Assert.ThrowsAsync<FrontendProtocolException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Overlay_client_rejects_a_display_scale_notification_with_any_payload()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var notifications = 0;
+        client.DisplayScaleChangedReceived += () => notifications++;
+        var run = client.RunAsync(_ => Task.CompletedTask);
+        await pipe.WaitForConnectionAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        using var writeGate = new SemaphoreSlim(1, 1);
+        var hello = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
+        Assert.Equal(OverlayWireMessageKind.Handshake, hello.Kind);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(pipe,
+            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState,
+                TabOrderState: AddonQuickSettingsTabOrderProduct.Create(AddonQuickSettingsTabOrderContract.DefaultOrder)),
+            writeGate, CancellationToken.None);
+        var ready = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
+        Assert.Equal(OverlayState.Ready, ready.State);
+
+        var payload = System.Text.Encoding.UTF8.GetBytes(
+            "{\"ProtocolVersion\":24,\"Kind\":\"DisplayScaleAppliedTo100\",\"Error\":\"unexpected\"}");
+        var prefix = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(prefix, payload.Length);
+        await pipe.WriteAsync(prefix);
+        await pipe.WriteAsync(payload);
+        await pipe.FlushAsync();
+
+        await Assert.ThrowsAsync<FrontendProtocolException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(0, notifications);
     }
 
     [Fact]

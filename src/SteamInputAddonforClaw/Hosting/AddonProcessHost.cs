@@ -260,6 +260,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _windowsAppRuntimePrerequisite = testWindowsAppRuntimePrerequisite ?? new WindowsAppRuntimePrerequisite();
         _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
+        _displayResolutionRuntime.DisplayScaleCommitted += OnDisplayScaleCommitted;
         _overlayController.OverlayDismissRequested += () => _ = HandleOverlayCloseReasonAsync("OutsideClick", surfaceAlreadyGone: false);
         _overlayController.VisibleSessionLost += () => _ = HandleOverlayCloseReasonAsync("VisibleSessionLost", surfaceAlreadyGone: true);
     }
@@ -4091,8 +4092,25 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.BeginProcessShutdown();
+        _displayResolutionRuntime.DisplayScaleCommitted -= OnDisplayScaleCommitted;
         try { _displayResolutionRuntime.Shutdown(); } catch (Exception exception) { AppLog.Error("Profiles.Display", "Display resolution shutdown restore failed.", exception); }
         _runtimeHost?.PrepareForShutdown();
+    }
+
+    private void OnDisplayScaleCommitted(DisplayScaleCommitKind change)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        _ = NotifyOverlayDisplayScaleChangedAsync(change);
+    }
+
+    private async Task NotifyOverlayDisplayScaleChangedAsync(DisplayScaleCommitKind change)
+    {
+        try { await _overlayController.NotifyDisplayScaleChangedAsync(change).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Display-scale notification failed; the display operation remains committed.", exception,
+                ("Change", change));
+        }
     }
 
     private void OnActualRunningAppIdChanged(uint appId)

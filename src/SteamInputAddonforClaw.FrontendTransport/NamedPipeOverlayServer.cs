@@ -264,6 +264,39 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
+    // A display-scale hint is not feature state. Deliver it only to an already-ready warm Overlay,
+    // whether hidden or visible, through the same per-connection write gate as every other frame.
+    internal async Task<bool> SendDisplayScaleChangedAsync(OverlayDisplayScaleChange change, CancellationToken token = default)
+    {
+        var kind = change switch
+        {
+            OverlayDisplayScaleChange.AppliedTo100 => OverlayWireMessageKind.DisplayScaleAppliedTo100,
+            OverlayDisplayScaleChange.Restored => OverlayWireMessageKind.DisplayScaleRestored,
+            _ => throw new ArgumentOutOfRangeException(nameof(change)),
+        };
+        var message = new OverlayWireMessage(OverlayTransportProtocol.CurrentVersion, kind);
+        if (!OverlayDisplayScaleWireValidation.IsValidNotification(message))
+            throw new FrontendProtocolException("Invalid Overlay display-scale notification.");
+
+        NamedPipeServerStream? pipe;
+        lock (_sync)
+        {
+            if (!_readyState || _state is not (OverlayState.Hidden or OverlayState.Visible)) return false;
+            pipe = _activePipe;
+        }
+        if (pipe is null) return false;
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe, message, _writeGate, linked.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
+        {
+            return false;
+        }
+    }
+
     internal async Task<bool> SendShortcutStateAsync(FrontendShortcutDashboardSnapshot state, CancellationToken token = default)
     {
         NamedPipeServerStream? pipe;
