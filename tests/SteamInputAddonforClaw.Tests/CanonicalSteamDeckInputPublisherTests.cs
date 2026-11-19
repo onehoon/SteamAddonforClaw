@@ -421,6 +421,248 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Overlay_return_trace_is_absent_without_an_explicit_arm()
+    {
+        var clock = new FakeStopwatchClock();
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(new Snapshot(default), sink, ticks, timestampProvider: clock.Read);
+        publisher.Start();
+
+        clock.Advance(TimeSpan.FromMilliseconds(200));
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(1);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var log = File.Exists(AppLog.CurrentLogFilePath) ? LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty;
+        Assert.DoesNotContain("OverlayReturn", log);
+    }
+
+    [Fact]
+    public async Task Explicit_overlay_return_arm_logs_existing_sink_submission_without_an_extra_publish()
+    {
+        var clock = new FakeStopwatchClock();
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(new Snapshot(default), sink, ticks, timestampProvider: clock.Read);
+        publisher.ArmOverlayReturnDiagnostics();
+        publisher.Start();
+
+        Assert.Equal(0, sink.Count);
+        clock.Advance(TimeSpan.FromMilliseconds(200));
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(1);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        Assert.Single(lines, line => line.Contains("Event=OverlayReturnTraceStarted", StringComparison.Ordinal));
+        var sample = Assert.Single(lines, line => line.Contains("Event=OverlayReturnInputSample", StringComparison.Ordinal));
+        Assert.Contains("ElapsedMs=200", sample);
+        Assert.Contains("SetStateAccepted=True", sample);
+        Assert.Contains("Event=OverlayReturnTraceCompleted", string.Join('\n', lines));
+        Assert.Equal(1, sink.Count);
+    }
+
+    [Fact]
+    public async Task Overlay_return_trace_logs_first_meaningful_stick_only_with_raw_and_submitted_axes()
+    {
+        var source = new Snapshot(new ControllerState(default, new StickState(2048, -4095), default, default, default));
+        var clock = new FakeStopwatchClock();
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: clock.Read);
+        publisher.ArmOverlayReturnDiagnostics();
+        publisher.Start();
+
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(1);
+        source.Value = new ControllerState(default, new StickState(4095, -4095), new StickState(0, 4096), default, default);
+        clock.Advance(TimeSpan.FromMilliseconds(20));
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(2);
+        source.Value = new ControllerState(default, new StickState(5000, -6000), new StickState(7000, -8000), default, default);
+        clock.Advance(TimeSpan.FromMilliseconds(20));
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(3);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        var movement = Assert.Single(lines, line => line.Contains("Event=OverlayReturnFirstStickMovement", StringComparison.Ordinal));
+        Assert.Contains("RawLX=4095", movement);
+        Assert.Contains("RawRY=4096", movement);
+        Assert.Contains("DeckLX=4095", movement);
+        Assert.Contains("DeckRY=4096", movement);
+        Assert.Contains("SetStateAccepted=True", movement);
+        Assert.Equal(3, sink.Count);
+    }
+
+    [Fact]
+    public async Task Overlay_return_first_button_edge_is_independent_and_ignores_buttons_held_at_resume()
+    {
+        var source = new Snapshot(new ControllerState(
+            new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+            default, default, default, default));
+        var clock = new FakeStopwatchClock();
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: clock.Read);
+        publisher.ArmOverlayReturnDiagnostics();
+        publisher.Start();
+
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(1); // A was already held at the resume baseline.
+        source.Value = new ControllerState(default, new StickState(5000, 0), default, default, default);
+        clock.Advance(TimeSpan.FromMilliseconds(10));
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(2);
+        source.Value = new ControllerState(
+            new GamepadButtons(false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+            new StickState(5000, 0), default, default, default);
+        clock.Advance(TimeSpan.FromMilliseconds(10));
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(3);
+        source.Value = new ControllerState(
+            new GamepadButtons(false, true, false, false, true, false, false, false, false, false, false, false, false, false, false, false),
+            new StickState(5000, 0), default, default, default);
+        clock.Advance(TimeSpan.FromMilliseconds(10));
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(4);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        var stick = Assert.Single(lines, line => line.Contains("Event=OverlayReturnFirstStickMovement", StringComparison.Ordinal));
+        var button = Assert.Single(lines, line => line.Contains("Event=OverlayReturnFirstButtonPress", StringComparison.Ordinal));
+        Assert.Contains("ElapsedMs=10", stick);
+        Assert.Contains("ElapsedMs=20", button);
+        Assert.Contains("Button=B", button);
+        Assert.DoesNotContain("DPadUp", button);
+        Assert.DoesNotContain("Button=A ", button);
+        Assert.Equal(4, sink.Count);
+    }
+
+    [Fact]
+    public async Task Overlay_return_trace_samples_every_200ms_and_completes_at_60_seconds()
+    {
+        var clock = new FakeStopwatchClock();
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(new Snapshot(default), sink, ticks, timestampProvider: clock.Read);
+        publisher.ArmOverlayReturnDiagnostics();
+        publisher.Start();
+
+        for (var tick = 1; tick <= 600; tick++)
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(100));
+            await ticks.TickAsync();
+            await sink.WaitForCountAsync(tick);
+        }
+
+        clock.Advance(TimeSpan.FromMilliseconds(4));
+        await ticks.TickAsync();
+        await sink.WaitForCountAsync(601);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        var samples = lines.Where(line => line.Contains("Event=OverlayReturnInputSample", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(300, samples.Length);
+        Assert.Contains("ElapsedMs=200", samples[0]);
+        Assert.Contains("ElapsedMs=60000", samples[^1]);
+        var completed = Assert.Single(lines, line => line.Contains("Event=OverlayReturnTraceCompleted", StringComparison.Ordinal));
+        Assert.Contains("SampleCount=300", completed);
+        Assert.Equal(601, sink.Count);
+    }
+
+    [Fact]
+    public async Task Overlay_return_diagnostics_stop_when_debug_is_disabled_and_do_not_rearm_on_restart()
+    {
+        var originalLevel = AppLog.MinimumLevelOverride;
+        try
+        {
+            var clock = new FakeStopwatchClock();
+            var sink = new FakeSink();
+            var ticks = new ManualTicks();
+            var publisher = new CanonicalSteamDeckInputPublisher(new Snapshot(default), sink, ticks, timestampProvider: clock.Read);
+            AppLog.MinimumLevelOverride = AppLogLevel.Info;
+            publisher.ArmOverlayReturnDiagnostics();
+            publisher.Start();
+            clock.Advance(TimeSpan.FromMilliseconds(200));
+            await ticks.TickAsync();
+            await sink.WaitForCountAsync(1);
+            await publisher.StopAsync();
+
+            AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+            publisher.Start();
+            await publisher.StopAsync();
+
+            AppLog.DrainForTests();
+            var log = File.Exists(AppLog.CurrentLogFilePath) ? LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty;
+            Assert.DoesNotContain("OverlayReturn", log);
+            Assert.Equal(1, sink.Count);
+        }
+        finally
+        {
+            AppLog.MinimumLevelOverride = originalLevel;
+        }
+    }
+
+    [Fact]
+    public async Task Overlay_return_trace_completes_on_stop_and_does_not_rearm_on_publisher_restart()
+    {
+        var clock = new FakeStopwatchClock();
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(new Snapshot(default), sink, ticks, timestampProvider: clock.Read);
+        publisher.ArmOverlayReturnDiagnostics();
+        publisher.Start();
+        await publisher.StopAsync();
+
+        publisher.Start();
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        Assert.Single(lines, line => line.Contains("Event=OverlayReturnTraceStarted", StringComparison.Ordinal));
+        var completed = Assert.Single(lines, line => line.Contains("Event=OverlayReturnTraceCompleted", StringComparison.Ordinal));
+        Assert.Contains("Reason=PublisherStopped", completed);
+        Assert.Equal(0, sink.Count);
+    }
+
+    [Fact]
+    public async Task Overlay_return_trace_observes_rejected_sink_without_changing_fault_handling()
+    {
+        var clock = new FakeStopwatchClock();
+        var sink = new FakeSink { Accept = false };
+        var ticks = new ManualTicks();
+        var faultCount = 0;
+        var faultObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalSteamDeckInputPublisher(new Snapshot(default), sink, ticks, _ =>
+        {
+            Interlocked.Increment(ref faultCount);
+            faultObserved.TrySetResult(true);
+        }, timestampProvider: clock.Read);
+        publisher.ArmOverlayReturnDiagnostics();
+        publisher.Start();
+
+        clock.Advance(TimeSpan.FromMilliseconds(200));
+        await ticks.TickAsync();
+        await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        var sample = Assert.Single(lines, line => line.Contains("Event=OverlayReturnInputSample", StringComparison.Ordinal));
+        Assert.Contains("SetStateAccepted=False", sample);
+        Assert.Equal(1, faultCount);
+        Assert.Equal(0, publisher.PublishedStateCount);
+        Assert.Equal(1, sink.Count);
+    }
+
+    [Fact]
     public async Task Failed_set_state_emits_terminal_pulse_summary_without_changing_fail_closed_behavior()
     {
         var now = 0L;
