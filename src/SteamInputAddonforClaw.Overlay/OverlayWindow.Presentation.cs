@@ -18,10 +18,17 @@ public sealed partial class OverlayWindow
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(80);
     private uint _lastConfiguredDpi;
     private int _lastAppliedClawHudTopInsetPx;
+    private XamlRoot? _overlayScaleObservedRoot;
     private DispatcherQueueTimer? _railClockTimer;
     private bool _railClockUpdateWarningLogged;
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
+
+    private void AnimationViewport_Loaded(object sender, RoutedEventArgs args) =>
+        ObserveOverlayScaleRoot(AnimationViewport.XamlRoot);
+
+    private void AnimationViewport_Unloaded(object sender, RoutedEventArgs args) =>
+        ObserveOverlayScaleRoot(null);
 
     private void OnSurfaceHostSizeChanged(object sender, SizeChangedEventArgs args)
     {
@@ -40,7 +47,7 @@ public sealed partial class OverlayWindow
         var initialStatePrepared = true;
         try
         {
-            SetVisualState(HiddenScale, HiddenTranslateYDip, HiddenOpacity);
+            SetVisualState(HiddenScale, ScaledHiddenTranslateYDip(), HiddenOpacity);
         }
         catch (Exception exception)
         {
@@ -63,12 +70,12 @@ public sealed partial class OverlayWindow
         OverlayLog.Debug("Animation", "Show animation started",
             ("DurationMs", ShowDuration.TotalMilliseconds),
             ("StartScale", HiddenScale), ("EndScale", 1.0),
-            ("StartTranslateYDip", HiddenTranslateYDip), ("EndTranslateYDip", 0.0),
+            ("StartTranslateYDip", ScaledHiddenTranslateYDip()), ("EndTranslateYDip", 0.0),
             ("StartOpacity", HiddenOpacity), ("EndOpacity", 1.0),
-            ("AnimationTranslateYPhysical", HiddenTranslateYDip * AnimationRasterizationScale()));
+            ("AnimationTranslateYPhysical", ScaledHiddenTranslateYDip() * AnimationRasterizationScale()));
         try
         {
-            await AnimateAsync(HiddenScale, 1.0f, HiddenTranslateYDip, 0.0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
+            await AnimateAsync(HiddenScale, 1.0f, ScaledHiddenTranslateYDip(), 0.0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
             TrySetVisibleVisualState();
             LogSurfaceBounds("Show.Visible");
             OverlayLog.Debug("Animation", "Show animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
@@ -112,11 +119,13 @@ public sealed partial class OverlayWindow
         return Task.CompletedTask;
     }
 
-    private void ConfigureWindow()
+    private void ConfigureWindow(bool alreadyVisible = false)
     {
         var topInsetPx = CurrentClawHudTopInsetPx();
-        WindowInterop.Configure(this, topInsetPx, out var rect, out _lastConfiguredDpi, out var monitorText);
+        WindowInterop.Configure(this, topInsetPx, out var rect, out _lastConfiguredDpi, out var monitorText, alreadyVisible);
         _lastAppliedClawHudTopInsetPx = topInsetPx;
+        ApplyOverlayUiScale(_lastConfiguredDpi / 96.0);
+        ObserveOverlayScaleRoot(AnimationViewport.XamlRoot);
         var scale = _lastConfiguredDpi / 96.0;
         OverlayLog.Debug("Geometry", "Overlay window configured",
             ("Monitor", monitorText),
@@ -126,6 +135,51 @@ public sealed partial class OverlayWindow
             ("OverlayWidthPx", rect.Width),
             ("OverlayHeightPx", rect.Height));
     }
+
+    private void ObserveOverlayScaleRoot(XamlRoot? xamlRoot)
+    {
+        if (ReferenceEquals(_overlayScaleObservedRoot, xamlRoot)) return;
+        if (_overlayScaleObservedRoot is not null)
+            _overlayScaleObservedRoot.Changed -= OverlayXamlRoot_Changed;
+        _overlayScaleObservedRoot = xamlRoot;
+        if (_overlayScaleObservedRoot is not null)
+            _overlayScaleObservedRoot.Changed += OverlayXamlRoot_Changed;
+    }
+
+    private void OverlayXamlRoot_Changed(XamlRoot sender, XamlRootChangedEventArgs args)
+    {
+        if (!double.IsFinite(sender.RasterizationScale) || sender.RasterizationScale <= 0)
+            return;
+
+        if (!ApplyOverlayUiScale(sender.RasterizationScale))
+            return;
+
+        _lastConfiguredDpi = (uint)Math.Round(sender.RasterizationScale * 96.0, MidpointRounding.AwayFromZero);
+        if (_isVisible)
+            ConfigureWindow(alreadyVisible: true);
+    }
+
+    private bool ApplyOverlayUiScale(double rasterizationScale)
+    {
+        var factor = OverlayUiScale.SizeFactorForRasterizationScale(rasterizationScale);
+        var previousFactor = OverlayQamResources.SizeFactor;
+        var previousRasterizationScale = OverlayUiScale.DesignScale / previousFactor;
+        var previousScrollOffset = BodyScroll.VerticalOffset;
+        if (!OverlayQamResources.SetSizeFactor(factor))
+            return false;
+
+        OverlayUiScale.ApplyExistingContentScale(AnimationViewport, factor / previousFactor);
+        if (_isVisible)
+        {
+            AnimationViewport.UpdateLayout();
+            var preservedScrollOffset = previousScrollOffset * previousRasterizationScale / rasterizationScale;
+            BodyScroll.ChangeView(null, preservedScrollOffset, null, disableAnimation: true);
+        }
+
+        return true;
+    }
+
+    private static double ScaledHiddenTranslateYDip() => OverlayQamResources.Scale(HiddenTranslateYDip);
 
     private void ReconcileVisibleClawHudTopInset(int topInsetPx)
     {
@@ -227,7 +281,7 @@ public sealed partial class OverlayWindow
 
     private void SetVisibleVisualState() => SetVisualState(1.0f, 0.0, 1.0);
 
-    private void SetHiddenVisualState() => SetVisualState(HiddenScale, HiddenTranslateYDip, HiddenOpacity);
+    private void SetHiddenVisualState() => SetVisualState(HiddenScale, ScaledHiddenTranslateYDip(), HiddenOpacity);
 
     private void TrySetVisibleVisualState()
     {

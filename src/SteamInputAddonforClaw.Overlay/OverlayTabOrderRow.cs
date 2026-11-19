@@ -43,7 +43,7 @@ internal sealed class AddonQuickSettingsTabOrderRow
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 4,
+            Spacing = OverlayQamResources.Scale(4),
             VerticalAlignment = VerticalAlignment.Center,
         };
         buttons.Children.Add(_moveEarlier);
@@ -102,11 +102,11 @@ internal sealed class AddonQuickSettingsTabOrderRow
             {
                 FontFamily = new FontFamily("Segoe Fluent Icons"),
                 Glyph = glyph,
-                FontSize = 16,
+                FontSize = OverlayQamResources.Scale(16),
             },
             Style = OverlayQamResources.Style("QamValueButtonStyle"),
-            MinWidth = OverlayQamResources.Get("QamValueButtonWidth", 40.0),
-            MinHeight = 28,
+            MinWidth = OverlayQamResources.Scale(OverlayQamResources.Get("QamValueButtonWidth", 40.0)),
+            MinHeight = OverlayQamResources.Scale(28),
             Padding = new Thickness(0),
         };
         AutomationProperties.SetName(button, accessibleName);

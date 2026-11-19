@@ -78,12 +78,18 @@
     <CornerRadius x:Key="QamValueButtonCornerRadius">6</CornerRadius>
     <x:Double x:Key="QamDiscreteValueMinWidth">88</x:Double>
     <FontFamily x:Key="QamFontFamily">Segoe UI Variable</FontFamily>
+    <x:Double x:Key="QamBodyFontSize">16</x:Double>
+    <x:Double x:Key="QamBodyLineHeight">20</x:Double>
+    <x:Double x:Key="QamCaptionFontSize">14</x:Double>
+    <x:Double x:Key="QamCaptionLineHeight">18</x:Double>
+    <x:Double x:Key="QamSectionHeaderFontSize">22</x:Double>
+    <x:Double x:Key="QamSectionHeaderLineHeight">28</x:Double>
 
     <Style x:Key="QamBodyTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource QamFontFamily}" />
-        <Setter Property="FontSize" Value="16" />
+        <Setter Property="FontSize" Value="{ThemeResource QamBodyFontSize}" />
         <Setter Property="FontWeight" Value="Normal" />
-        <Setter Property="LineHeight" Value="20" />
+        <Setter Property="LineHeight" Value="{ThemeResource QamBodyLineHeight}" />
         <Setter Property="Foreground" Value="{StaticResource QamSecondaryTextBrush}" />
     </Style>
     <Style x:Key="QamBodyStrongTextStyle" TargetType="TextBlock" BasedOn="{StaticResource QamBodyTextStyle}">
@@ -92,16 +98,16 @@
     </Style>
     <Style x:Key="QamCaptionTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource QamFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="{ThemeResource QamCaptionFontSize}" />
         <Setter Property="FontWeight" Value="Normal" />
-        <Setter Property="LineHeight" Value="18" />
+        <Setter Property="LineHeight" Value="{ThemeResource QamCaptionLineHeight}" />
         <Setter Property="Foreground" Value="{StaticResource QamDisabledTextBrush}" />
     </Style>
     <Style x:Key="QamSectionHeaderTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource QamFontFamily}" />
-        <Setter Property="FontSize" Value="22" />
+        <Setter Property="FontSize" Value="{ThemeResource QamSectionHeaderFontSize}" />
         <Setter Property="FontWeight" Value="Bold" />
-        <Setter Property="LineHeight" Value="28" />
+        <Setter Property="LineHeight" Value="{ThemeResource QamSectionHeaderLineHeight}" />
         <Setter Property="Foreground" Value="{StaticResource QamPrimaryTextBrush}" />
     </Style>
     <Style x:Key="QamValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource QamBodyTextStyle}" />
@@ -112,8 +118,8 @@
         <Setter Property="Padding" Value="0" />
         <Setter Property="MinWidth" Value="0" />
         <Setter Property="MinHeight" Value="0" />
-        <Setter Property="CornerRadius" Value="{StaticResource QamRowCornerRadius}" />
-        <Setter Property="BorderThickness" Value="{StaticResource QamSelectionBorderThickness}" />
+        <Setter Property="CornerRadius" Value="{ThemeResource QamRowCornerRadius}" />
+        <Setter Property="BorderThickness" Value="{ThemeResource QamSelectionBorderThickness}" />
         <Setter Property="BorderBrush" Value="{StaticResource QamFocusBorderBrush}" />
         <Setter Property="Background" Value="{StaticResource QamSectionBrush}" />
         <Setter Property="Foreground" Value="{StaticResource QamPrimaryTextBrush}" />
@@ -167,21 +173,21 @@
     </Style>
 
     <Style x:Key="QamTileButtonStyle" TargetType="Button" BasedOn="{StaticResource QamFlatButtonStyle}">
-        <Setter Property="Padding" Value="{StaticResource QamTilePadding}" />
-        <Setter Property="MinHeight" Value="{StaticResource QamTileMinHeight}" />
-        <Setter Property="CornerRadius" Value="{StaticResource QamTileCornerRadius}" />
+        <Setter Property="Padding" Value="{ThemeResource QamTilePadding}" />
+        <Setter Property="MinHeight" Value="{ThemeResource QamTileMinHeight}" />
+        <Setter Property="CornerRadius" Value="{ThemeResource QamTileCornerRadius}" />
         <Setter Property="Background" Value="{StaticResource QamTileBrush}" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
     </Style>
 
     <Style x:Key="QamRailButtonStyle" TargetType="Button" BasedOn="{StaticResource QamFlatButtonStyle}">
-        <Setter Property="Width" Value="{StaticResource QamRailButtonSize}" />
-        <Setter Property="Height" Value="{StaticResource QamRailItemHeight}" />
-        <Setter Property="MinWidth" Value="{StaticResource QamRailButtonSize}" />
-        <Setter Property="MinHeight" Value="{StaticResource QamRailItemHeight}" />
+        <Setter Property="Width" Value="{ThemeResource QamRailButtonSize}" />
+        <Setter Property="Height" Value="{ThemeResource QamRailItemHeight}" />
+        <Setter Property="MinWidth" Value="{ThemeResource QamRailButtonSize}" />
+        <Setter Property="MinHeight" Value="{ThemeResource QamRailItemHeight}" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="CornerRadius" Value="{StaticResource QamRailCornerRadius}" />
-        <Setter Property="BorderThickness" Value="{StaticResource QamSelectionBorderThickness}" />
+        <Setter Property="CornerRadius" Value="{ThemeResource QamRailCornerRadius}" />
+        <Setter Property="BorderThickness" Value="{ThemeResource QamSelectionBorderThickness}" />
         <Setter Property="BorderBrush" Value="{StaticResource QamFocusBorderBrush}" />
         <Setter Property="Background" Value="{StaticResource QamSectionBrush}" />
         <Setter Property="Foreground" Value="{StaticResource QamRailIconBrush}" />
@@ -193,7 +199,7 @@
          applied by OverlayToggleRow so these colors never affect unrelated app controls. -->
     <Style x:Key="QamToggleStyle" TargetType="ToggleSwitch" BasedOn="{StaticResource DefaultToggleSwitchStyle}">
         <Setter Property="MinWidth" Value="0" />
-        <Setter Property="MinHeight" Value="{StaticResource QamToggleMinHeight}" />
+        <Setter Property="MinHeight" Value="{ThemeResource QamToggleMinHeight}" />
         <Setter Property="IsTabStop" Value="False" />
         <Setter Property="IsFocusEngagementEnabled" Value="False" />
         <Setter Property="AllowFocusOnInteraction" Value="False" />
@@ -205,17 +211,17 @@
         <Setter Property="Background" Value="{StaticResource QamSliderTrackBrush}" />
         <Setter Property="Foreground" Value="{StaticResource QamSliderValueTrackBrush}" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Height" Value="{StaticResource QamSliderHeight}" />
+        <Setter Property="Height" Value="{ThemeResource QamSliderHeight}" />
         <Setter Property="IsTabStop" Value="False" />
         <Setter Property="IsFocusEngagementEnabled" Value="False" />
     </Style>
 
     <!-- Shared by Button and RepeatButton without changing either control's activation behavior. -->
     <Style x:Key="QamValueButtonStyle" TargetType="primitives:ButtonBase">
-        <Setter Property="MinWidth" Value="{StaticResource QamValueButtonWidth}" />
-        <Setter Property="MinHeight" Value="{StaticResource QamValueButtonHeight}" />
+        <Setter Property="MinWidth" Value="{ThemeResource QamValueButtonWidth}" />
+        <Setter Property="MinHeight" Value="{ThemeResource QamValueButtonHeight}" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="CornerRadius" Value="{StaticResource QamValueButtonCornerRadius}" />
+        <Setter Property="CornerRadius" Value="{ThemeResource QamValueButtonCornerRadius}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="BorderBrush" Value="{StaticResource QamFocusBorderBrush}" />
         <Setter Property="Background" Value="{StaticResource QamSectionBrush}" />

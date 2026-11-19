@@ -113,7 +113,7 @@ public sealed partial class OverlayWindow
         {
             Text = "›",
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(12, 0, 4, 0),
+            Margin = new Thickness(OverlayQamResources.Scale(12), 0, OverlayQamResources.Scale(4), 0),
         };
         OverlayQamResources.ApplyTextStyle(chevron, "QamBodyStrongTextStyle");
 

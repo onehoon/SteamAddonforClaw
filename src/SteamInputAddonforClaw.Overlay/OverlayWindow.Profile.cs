@@ -124,7 +124,7 @@ public sealed partial class OverlayWindow
             TextWrapping = TextWrapping.Wrap,
         };
         OverlayQamResources.ApplyTextStyle(_profileStatusMessage, "QamBodyStrongTextStyle");
-        _profileStatusMessage.FontSize = 16;
+        _profileStatusMessage.FontSize = OverlayQamResources.Scale(16);
         root.Children.Add(_profileStatusMessage);
         return root;
     }

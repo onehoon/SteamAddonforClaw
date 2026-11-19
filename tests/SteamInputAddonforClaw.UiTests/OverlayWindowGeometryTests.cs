@@ -11,7 +11,7 @@ public sealed class OverlayWindowGeometryTests
     {
         var result = OverlayWindowGeometry.Calculate(0, 0, 1920, 1200, 144);
 
-        Assert.Equal(new OverlayRect(1194, 0, 726, 1200), result);
+        Assert.Equal(new OverlayRect(1262, 0, 658, 1200), result);
     }
 
     [Theory]
@@ -62,7 +62,7 @@ public sealed class OverlayWindowGeometryTests
         var result = OverlayWindowGeometry.Calculate(0, 0, 1920, 1200, 144, insetPx);
 
         Assert.Equal(expectedInsetPx, insetPx);
-        Assert.Equal(new OverlayRect(1194, insetPx, 726, 1200 - insetPx), result);
+        Assert.Equal(new OverlayRect(1262, insetPx, 658, 1200 - insetPx), result);
         Assert.Equal(1920, result.X + result.Width);
         Assert.Equal(1200, result.Y + result.Height);
     }
@@ -74,9 +74,9 @@ public sealed class OverlayWindowGeometryTests
         var clampedResult = OverlayWindowGeometry.Calculate(0, 0, 10, 10, 192, int.MaxValue);
         var negativeInsetResult = OverlayWindowGeometry.Calculate(0, 0, 1920, 1200, 192, -1);
 
-        Assert.Equal(new OverlayRect(-726, -95, 726, 1175), insetResult);
+        Assert.Equal(new OverlayRect(-658, -95, 658, 1175), insetResult);
         Assert.Equal(new OverlayRect(0, 10, 10, 0), clampedResult);
-        Assert.Equal(new OverlayRect(968, 0, 952, 1200), negativeInsetResult);
+        Assert.Equal(new OverlayRect(1262, 0, 658, 1200), negativeInsetResult);
     }
 
     [Theory]
@@ -96,19 +96,16 @@ public sealed class OverlayWindowGeometryTests
     }
 
     [Theory]
-    [InlineData(96, 1420, 500)]
-    [InlineData(120, 1307, 613)]
-    [InlineData(144, 1194, 726)]
-    [InlineData(168, 1081, 839)]
-    [InlineData(192, 968, 952)]
-    public void Keeps_the_old_left_anchor_and_touches_the_other_monitor_edges_at_each_dpi(
-        uint dpi,
-        int expectedX,
-        int expectedWidth)
+    [InlineData(96)]
+    [InlineData(120)]
+    [InlineData(144)]
+    [InlineData(168)]
+    [InlineData(192)]
+    public void Uses_the_same_physical_surface_width_at_each_dpi(uint dpi)
     {
         var result = OverlayWindowGeometry.Calculate(0, 0, 1920, 1200, dpi);
 
-        Assert.Equal(new OverlayRect(expectedX, 0, expectedWidth, 1200), result);
+        Assert.Equal(new OverlayRect(1262, 0, 658, 1200), result);
         Assert.Equal(1920, result.X + result.Width);
         Assert.Equal(0, result.Y);
         Assert.Equal(1200, result.Y + result.Height);
@@ -119,7 +116,7 @@ public sealed class OverlayWindowGeometryTests
     {
         var result = OverlayWindowGeometry.Calculate(100, 40, 2020, 1240, 144);
 
-        Assert.Equal(new OverlayRect(1294, 40, 726, 1200), result);
+        Assert.Equal(new OverlayRect(1362, 40, 658, 1200), result);
     }
 
     [Fact]
@@ -127,7 +124,7 @@ public sealed class OverlayWindowGeometryTests
     {
         var result = OverlayWindowGeometry.Calculate(-1920, -120, 0, 1080, 144);
 
-        Assert.Equal(new OverlayRect(-726, -120, 726, 1200), result);
+        Assert.Equal(new OverlayRect(-658, -120, 658, 1200), result);
         Assert.Equal(0, result.X + result.Width);
         Assert.Equal(-120, result.Y);
         Assert.Equal(1080, result.Y + result.Height);
@@ -138,7 +135,7 @@ public sealed class OverlayWindowGeometryTests
     {
         var result = OverlayWindowGeometry.Calculate(0, 0, 1920, 1200, 144);
 
-        Assert.Equal(726, result.Width);
+        Assert.Equal(658, result.Width);
         Assert.False(Contains(result, result.X - 1, result.Y + result.Height / 2));
         Assert.False(Contains(result, result.X + result.Width, result.Y + result.Height / 2));
         Assert.True(Contains(result, result.X, result.Y + result.Height / 2));
@@ -150,7 +147,7 @@ public sealed class OverlayWindowGeometryTests
     {
         var result = OverlayWindowGeometry.Calculate(0, 0, 1920, 1200, 0);
 
-        Assert.Equal(new OverlayRect(1420, 0, 500, 1200), result);
+        Assert.Equal(new OverlayRect(1262, 0, 658, 1200), result);
     }
 
     [Fact]

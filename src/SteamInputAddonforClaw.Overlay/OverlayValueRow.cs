@@ -143,7 +143,7 @@ internal sealed class OverlayValueRow
         var valueControls = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Spacing = OverlayQamResources.Scale(8),
             VerticalAlignment = VerticalAlignment.Center,
         };
         valueControls.Children.Add(_previousButton);
@@ -190,7 +190,7 @@ internal sealed class OverlayValueRow
         var icon = new FontIcon
         {
             Glyph = glyph,
-            FontSize = 16,
+            FontSize = OverlayQamResources.Scale(16),
         };
         ButtonBase button = buttonKind == OverlayValueButtonKind.NumericStepper
             ? new RepeatButton
@@ -202,8 +202,8 @@ internal sealed class OverlayValueRow
 
         button.Content = icon;
         button.Style = OverlayQamResources.Style("QamValueButtonStyle");
-        button.MinWidth = OverlayQamResources.Get("QamValueButtonWidth", 40.0);
-        button.MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0);
+        button.MinWidth = OverlayQamResources.Scale(OverlayQamResources.Get("QamValueButtonWidth", 40.0));
+        button.MinHeight = OverlayQamResources.Scale(OverlayQamResources.Get("QamValueButtonHeight", 22.0));
         button.Padding = new Thickness(0);
         button.CornerRadius = OverlayQamResources.Get("QamValueButtonCornerRadius", new CornerRadius(6));
         button.BorderThickness = new Thickness(0);

@@ -1171,9 +1171,9 @@ public sealed partial class OverlayWindow
         var sectionPadding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 0, 16, 0));
         return new Thickness(
             sectionPadding.Left,
-            sectionPadding.Top + additionalTopPadding,
+            sectionPadding.Top + OverlayQamResources.Scale(additionalTopPadding),
             sectionPadding.Right,
-            sectionPadding.Bottom + additionalBottomPadding);
+            sectionPadding.Bottom + OverlayQamResources.Scale(additionalBottomPadding));
     }
 
     // Malformed/unsupported rows are skipped entirely: they are never registered for selection and
