@@ -1,12 +1,33 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'release-metadata.ps1')
 
+$repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$ciWorkflow = Get-Content -LiteralPath (Join-Path $repositoryRoot '.github/workflows/ci.yml') -Raw
+$releaseWorkflow = Get-Content -LiteralPath (Join-Path $repositoryRoot '.github/workflows/release.yml') -Raw
+
 function Assert-Equal {
     param($Expected, $Actual, [string]$Message)
     if ($Expected -ne $Actual) {
         throw "$Message Expected '$Expected', actual '$Actual'."
     }
 }
+
+$ciLines = Get-Content -LiteralPath (Join-Path $repositoryRoot '.github/workflows/ci.yml')
+$pullRequestIndex = [Array]::IndexOf($ciLines, '  pull_request:')
+Assert-Equal $true ($pullRequestIndex -ge 0) 'PR test workflow trigger exists'
+
+$pullRequestTriggerLines = @()
+for ($index = $pullRequestIndex + 1; $index -lt $ciLines.Count; $index++) {
+    if ($ciLines[$index] -match '^  [A-Za-z0-9_-]+:') {
+        break
+    }
+
+    $pullRequestTriggerLines += $ciLines[$index]
+}
+
+Assert-Equal $false ((($pullRequestTriggerLines -join "`n") -match '(?m)^    branches(?:-ignore)?:')) 'PR test workflow accepts every target branch'
+Assert-Equal $true ($releaseWorkflow -match '(?m)^  workflow_dispatch:') 'Release workflow remains manually dispatchable'
+Assert-Equal $false ($releaseWorkflow -match 'Verify main branch|refs/heads/main|Release can only run from main') 'Release workflow accepts a selected non-main branch'
 
 $firstStable = Get-NextReleaseMetadata -Tags @() -Channel stable
 Assert-Equal '0.1.0' $firstStable.Version 'First stable release version'
