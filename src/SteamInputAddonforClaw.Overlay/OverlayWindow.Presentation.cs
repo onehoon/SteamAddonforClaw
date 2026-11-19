@@ -119,10 +119,10 @@ public sealed partial class OverlayWindow
         return Task.CompletedTask;
     }
 
-    private void ConfigureWindow()
+    private void ConfigureWindow(bool alreadyVisible = false)
     {
         var topInsetPx = CurrentClawHudTopInsetPx();
-        WindowInterop.Configure(this, topInsetPx, out var rect, out _lastConfiguredDpi, out var monitorText);
+        WindowInterop.Configure(this, topInsetPx, out var rect, out _lastConfiguredDpi, out var monitorText, alreadyVisible);
         _lastAppliedClawHudTopInsetPx = topInsetPx;
         ApplyOverlayUiScale(_lastConfiguredDpi / 96.0);
         ObserveOverlayScaleRoot(AnimationViewport.XamlRoot);
@@ -156,7 +156,7 @@ public sealed partial class OverlayWindow
 
         _lastConfiguredDpi = (uint)Math.Round(sender.RasterizationScale * 96.0, MidpointRounding.AwayFromZero);
         if (_isVisible)
-            ConfigureWindow();
+            ConfigureWindow(alreadyVisible: true);
     }
 
     private bool ApplyOverlayUiScale(double rasterizationScale)

@@ -128,14 +128,17 @@ internal static class WindowInterop
         int topInsetPx,
         out OverlayRect rect,
         out uint dpi,
-        out string monitorText)
+        out string monitorText,
+        bool alreadyVisible = false)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
         EnsureWindowSubclass(hwnd);
         var foreground = GetForegroundWindow();
-        var monitor = foreground == IntPtr.Zero
-            ? MonitorFromPoint(new POINT(), MonitorDefaultToPrimary)
-            : MonitorFromWindow(foreground, MonitorDefaultToNearest);
+        var monitor = alreadyVisible
+            ? MonitorFromWindow(hwnd, MonitorDefaultToNearest)
+            : foreground == IntPtr.Zero
+                ? MonitorFromPoint(new POINT(), MonitorDefaultToPrimary)
+                : MonitorFromWindow(foreground, MonitorDefaultToNearest);
         if (monitor == IntPtr.Zero)
         {
             var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not select a target monitor.");
@@ -153,18 +156,21 @@ internal static class WindowInterop
 
         var monitorWidth = Math.Max(0, info.rcMonitor.Right - info.rcMonitor.Left);
         var monitorHeight = Math.Max(0, info.rcMonitor.Bottom - info.rcMonitor.Top);
-        if (!SetWindowPos(
-                hwnd,
-                IntPtr.Zero,
-                info.rcMonitor.Left,
-                info.rcMonitor.Top,
-                monitorWidth,
-                monitorHeight,
-                SwpNoActivate | SwpNoSendChanging | SwpNoZOrder))
+        if (!alreadyVisible)
         {
-            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window on the target monitor.");
-            OverlayLog.Error("Geometry", "Provisional Overlay placement failed.", exception, ("Operation", "SetWindowPos.Provisional"));
-            throw exception;
+            if (!SetWindowPos(
+                    hwnd,
+                    IntPtr.Zero,
+                    info.rcMonitor.Left,
+                    info.rcMonitor.Top,
+                    monitorWidth,
+                    monitorHeight,
+                    SwpNoActivate | SwpNoSendChanging | SwpNoZOrder))
+            {
+                var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window on the target monitor.");
+                OverlayLog.Error("Geometry", "Provisional Overlay placement failed.", exception, ("Operation", "SetWindowPos.Provisional"));
+                throw exception;
+            }
         }
 
         dpi = GetDpiForWindow(hwnd);
@@ -213,6 +219,7 @@ internal static class WindowInterop
             ("MonitorRight", info.rcMonitor.Right), ("MonitorBottom", info.rcMonitor.Bottom),
             ("Dpi", dpi), ("Scale", dpi / 96.0),
             ("MonitorWidth", monitorWidth), ("MonitorHeight", monitorHeight),
+            ("AlreadyVisible", alreadyVisible),
             ("ClawHudTopInsetPx", Math.Clamp(topInsetPx, 0, monitorHeight)),
             ("OverlayWidthPx", rect.Width), ("OverlayHeightPx", rect.Height));
     }

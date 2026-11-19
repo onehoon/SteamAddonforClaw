@@ -46,6 +46,11 @@ internal static class OverlayUiScale
 
     private static void ApplyLocalDimensions(FrameworkElement element, double ratio)
     {
+        // The parent Viewbox scales the complete native ToggleSwitch. Scaling its MinHeight here
+        // would make the Viewbox shrink the native template instead of enlarging it.
+        if (element is ToggleSwitch)
+            return;
+
         if (element.Name != "ProfileArtworkHost" && element.Name != "OpaquePanel")
             ScaleEffectiveDouble(element, FrameworkElement.WidthProperty, ratio, requirePositive: true);
 

@@ -167,7 +167,7 @@ public sealed class OverlayDelayedCommitNavigationTests
     {
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
         var hideStart = presentation.IndexOf("internal Task HideForPocAsync()", StringComparison.Ordinal);
-        var hideEnd = presentation.IndexOf("private void ConfigureWindow()", hideStart, StringComparison.Ordinal);
+        var hideEnd = presentation.IndexOf("private void ConfigureWindow(bool alreadyVisible = false)", hideStart, StringComparison.Ordinal);
         Assert.True(hideStart >= 0 && hideEnd > hideStart);
         var hide = presentation[hideStart..hideEnd];
         Assert.Contains("CancelUnsubmittedDrafts()", hide, StringComparison.Ordinal);

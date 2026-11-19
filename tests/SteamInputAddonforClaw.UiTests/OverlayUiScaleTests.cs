@@ -93,6 +93,49 @@ public sealed class OverlayUiScaleTests
     }
 
     [Fact]
+    public void Native_toggle_template_is_sized_only_by_its_viewbox()
+    {
+        var root = FindRepositoryRoot();
+        var scaleSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayUiScale.cs"));
+        var start = scaleSource.IndexOf("private static void ApplyLocalDimensions(", StringComparison.Ordinal);
+        var end = scaleSource.IndexOf("private static void ApplyNativeControlResources(", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var applyDimensions = scaleSource[start..end];
+        var toggleGuard = applyDimensions.IndexOf("if (element is ToggleSwitch)", StringComparison.Ordinal);
+        var widthScaling = applyDimensions.IndexOf("ScaleEffectiveDouble(element, FrameworkElement.WidthProperty", StringComparison.Ordinal);
+
+        Assert.True(toggleGuard >= 0 && widthScaling > toggleGuard,
+            "The native ToggleSwitch must remain at template size so its parent Viewbox scales the complete control.");
+        Assert.Contains("Width = OverlayQamResources.Scale(NativeToggleWidthDip)", File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs")));
+    }
+
+    [Fact]
+    public void Visible_dpi_reconfiguration_skips_the_provisional_full_monitor_resize()
+    {
+        var root = FindRepositoryRoot();
+        var interopSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "WindowInterop.cs"));
+        var presentationSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"));
+        var start = interopSource.IndexOf("internal static void Configure(", StringComparison.Ordinal);
+        var end = interopSource.IndexOf("internal static bool TryApplyVisibleClawHudTopInset(", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var configure = interopSource[start..end];
+        var provisionalGuard = configure.IndexOf("if (!alreadyVisible)", StringComparison.Ordinal);
+        var provisionalPlacement = configure.IndexOf("SwpNoActivate | SwpNoSendChanging | SwpNoZOrder", StringComparison.Ordinal);
+
+        Assert.Contains("bool alreadyVisible = false", configure);
+        Assert.Contains("var monitor = alreadyVisible", configure);
+        Assert.Contains("MonitorFromWindow(hwnd, MonitorDefaultToNearest)", configure);
+        Assert.True(provisionalGuard >= 0 && provisionalPlacement > provisionalGuard,
+            "Fullscreen provisional placement must only run for hidden initial/show placement.");
+        Assert.Contains("ConfigureWindow(alreadyVisible: true)", presentationSource);
+        Assert.Contains("WindowInterop.Configure(this, topInsetPx, out var rect, out _lastConfiguredDpi, out var monitorText, alreadyVisible)", presentationSource);
+    }
+
+    [Fact]
     public void Effective_style_dimensions_fonts_and_font_icons_are_scaled_for_existing_controls()
     {
         var root = FindRepositoryRoot();

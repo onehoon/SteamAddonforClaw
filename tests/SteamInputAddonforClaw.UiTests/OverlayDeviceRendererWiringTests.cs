@@ -1105,8 +1105,9 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("if (currentInsetPx != previousInsetPx)", stateReconcile);
         Assert.DoesNotContain("SetWindowPos", stateReconcile);
 
-        var configureWindow = SliceMethod(presentation, "private void ConfigureWindow()", "private void ReconcileVisibleClawHudTopInset(");
+        var configureWindow = SliceMethod(presentation, "private void ConfigureWindow(bool alreadyVisible = false)", "private void ReconcileVisibleClawHudTopInset(");
         Assert.Contains("WindowInterop.Configure(this, topInsetPx", configureWindow);
+        Assert.Contains("alreadyVisible)", configureWindow);
         Assert.True(configureWindow.IndexOf("WindowInterop.Configure(this, topInsetPx", StringComparison.Ordinal)
             < configureWindow.IndexOf("_lastAppliedClawHudTopInsetPx = topInsetPx", StringComparison.Ordinal));
 
@@ -1210,7 +1211,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
         var window = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
         var show = SliceMethod(presentation, "internal async Task ShowForPocAsync()", "internal Task HideForPocAsync()");
-        var hide = SliceMethod(presentation, "internal Task HideForPocAsync()", "private void ConfigureWindow()");
+        var hide = SliceMethod(presentation, "internal Task HideForPocAsync()", "private void ConfigureWindow(bool alreadyVisible = false)");
         var clock = SliceMethod(presentation, "private void UpdateRailClockText()", "private void LogSurfaceBounds(");
 
         Assert.Contains("UpdateRailClockText();", show);
