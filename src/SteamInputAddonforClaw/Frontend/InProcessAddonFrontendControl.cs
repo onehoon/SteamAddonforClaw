@@ -1243,6 +1243,36 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
+    public Task<FrontendSettingsSnapshot> SetSteamBigPictureScalingTo100PercentAsync(
+        bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var previous = _settings.SteamBigPictureScalingTo100Percent;
+        if (previous == enabled)
+            return Task.FromResult(MapSettings());
+
+        _settings.ChangeSteamBigPictureScalingTo100Percent(enabled);
+        if (_capturePresentationSnapshot is not null)
+        {
+            try
+            {
+                if (_capturePresentationSnapshot().BigPictureActive
+                    && (_displayResolutionRuntime is null || !_displayResolutionRuntime.Reconcile()))
+                    AppLog.Warn("Profiles.Display", "Saved Big Picture scaling preference but display reconcile did not complete.", null,
+                        ("Trigger", "BigPictureScalingPreferenceChanged"), ("Enabled", enabled));
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Profiles.Display", "Saved Big Picture scaling preference but display reconcile failed.", exception,
+                    ("Trigger", "BigPictureScalingPreferenceChanged"), ("Enabled", enabled));
+            }
+        }
+
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(MapSettings());
+    }
+
     public Task<FrontendSettingsSnapshot> SetQuickOverlayYButtonTargetAsync(
         QuickOverlayYButtonTarget target, CancellationToken cancellationToken = default)
     {
@@ -1926,7 +1956,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, SimplifiedTdpControls = _settings.SimplifiedTdpControls, FeatureSupport = _featureSupport, YButtonQuickJumpTarget = _settings.YButtonQuickJumpTarget, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { SteamVirtualController = _settings.SteamVirtualController, GyroscopeEnabled = _settings.GyroscopeEnabled, ControllerForSteam = CaptureControllerForSteam(), DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, ExperimentalVirtualTouchpadEnabled = _settings.ExperimentalVirtualTouchpadEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, SimplifiedTdpControls = _settings.SimplifiedTdpControls, SteamBigPictureScalingTo100Percent = _settings.SteamBigPictureScalingTo100Percent, FeatureSupport = _featureSupport, YButtonQuickJumpTarget = _settings.YButtonQuickJumpTarget, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1

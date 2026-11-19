@@ -33,6 +33,9 @@ public sealed record AppSettings(
     /// <summary>Shows only PL1 for supported Quick Settings TDP controls and derives PL2 from the model gap.</summary>
     public bool SimplifiedTdpControls { get; init; }
 
+    /// <summary>Temporarily uses 100% primary-display scaling while Steam Big Picture is active.</summary>
+    public bool SteamBigPictureScalingTo100Percent { get; init; }
+
     /// <summary>Persisted destination for Y-button Quick Jump while the Addon Overlay is captured.</summary>
     public QuickOverlayYButtonTarget YButtonQuickJumpTarget { get; init; } = QuickOverlayYButtonTarget.Profile;
 

@@ -15,14 +15,18 @@ public sealed partial class SettingsPage : UserControl
     private bool _active;
     private bool _applyingQuickSettingsPowerSourceOnly;
     private bool _applyingSimplifiedTdpControls;
+    private bool _applyingSteamBigPictureScaling;
     private bool _quickSettingsPreferencesRefreshInProgress;
     private bool _quickSettingsPreferencesRefreshPending;
     private bool _discardInFlightPowerSourceRefresh;
     private bool _discardInFlightSimplifiedTdpRefresh;
+    private bool _discardInFlightSteamBigPictureScalingRefresh;
     private bool _powerSourceMutationInProgress;
     private bool _simplifiedTdpMutationInProgress;
+    private bool _steamBigPictureScalingMutationInProgress;
     private bool _lastKnownQuickSettingsPowerSourceOnly;
     private bool _lastKnownSimplifiedTdpControls;
+    private bool _lastKnownSteamBigPictureScalingTo100Percent;
     private FrontendUpdateSnapshot _updateSnapshot = FrontendUpdateSnapshot.Unavailable;
     private int _updateOperationInProgress;
     private FrontendGamingHomeSnapshot _gamingHomeSnapshot = FrontendGamingHomeSnapshot.Unavailable(
@@ -52,8 +56,10 @@ public sealed partial class SettingsPage : UserControl
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         _lastKnownQuickSettingsPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
         _lastKnownSimplifiedTdpControls = bootstrap.Settings.SimplifiedTdpControls;
+        _lastKnownSteamBigPictureScalingTo100Percent = bootstrap.Settings.SteamBigPictureScalingTo100Percent;
         SetQuickSettingsPowerSourceOnly(_lastKnownQuickSettingsPowerSourceOnly);
         SetSimplifiedTdpControls(_lastKnownSimplifiedTdpControls);
+        SetSteamBigPictureScaling(_lastKnownSteamBigPictureScalingTo100Percent);
         UpdateQuickSettingsPreferenceControlStates();
         DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
         _lastKnownLogLevel = bootstrap.Settings.LogLevel;
@@ -81,13 +87,14 @@ public sealed partial class SettingsPage : UserControl
     internal void RequestQuickSettingsPreferencesRefresh()
     {
         if (!_active) return;
-        if (_quickSettingsPreferencesRefreshInProgress || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress)
+        if (_quickSettingsPreferencesRefreshInProgress || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress || _steamBigPictureScalingMutationInProgress)
         {
             _quickSettingsPreferencesRefreshPending = true;
             if (_quickSettingsPreferencesRefreshInProgress)
             {
                 _discardInFlightPowerSourceRefresh = true;
                 _discardInFlightSimplifiedTdpRefresh = true;
+                _discardInFlightSteamBigPictureScalingRefresh = true;
             }
             return;
         }
@@ -98,7 +105,7 @@ public sealed partial class SettingsPage : UserControl
     private async Task RefreshQuickSettingsPreferencesAsync()
     {
         if (!_active || _frontend is null) return;
-        if (_quickSettingsPreferencesRefreshInProgress || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress)
+        if (_quickSettingsPreferencesRefreshInProgress || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress || _steamBigPictureScalingMutationInProgress)
         {
             _quickSettingsPreferencesRefreshPending = true;
             return;
@@ -117,6 +124,11 @@ public sealed partial class SettingsPage : UserControl
                 _lastKnownSimplifiedTdpControls = bootstrap.Settings.SimplifiedTdpControls;
                 SetSimplifiedTdpControls(_lastKnownSimplifiedTdpControls);
             }
+            if (!_steamBigPictureScalingMutationInProgress && !_discardInFlightSteamBigPictureScalingRefresh)
+            {
+                _lastKnownSteamBigPictureScalingTo100Percent = bootstrap.Settings.SteamBigPictureScalingTo100Percent;
+                SetSteamBigPictureScaling(_lastKnownSteamBigPictureScalingTo100Percent);
+            }
         }
         catch (Exception exception)
         {
@@ -127,6 +139,7 @@ public sealed partial class SettingsPage : UserControl
             _quickSettingsPreferencesRefreshInProgress = false;
             _discardInFlightPowerSourceRefresh = false;
             _discardInFlightSimplifiedTdpRefresh = false;
+            _discardInFlightSteamBigPictureScalingRefresh = false;
             DrainPendingQuickSettingsPreferencesRefresh();
         }
     }
@@ -191,10 +204,40 @@ public sealed partial class SettingsPage : UserControl
         }
     }
 
+    private async void SteamBigPictureScalingToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_applyingSteamBigPictureScaling || _frontend is null || _steamBigPictureScalingMutationInProgress) return;
+        _discardInFlightSteamBigPictureScalingRefresh = _quickSettingsPreferencesRefreshInProgress;
+        _steamBigPictureScalingMutationInProgress = true;
+        UpdateQuickSettingsPreferenceControlStates();
+        try
+        {
+            var settings = await _frontend.SetSteamBigPictureScalingTo100PercentAsync(
+                SteamBigPictureScalingToggleSwitch.IsOn).ConfigureAwait(true);
+            _lastKnownSteamBigPictureScalingTo100Percent = settings.SteamBigPictureScalingTo100Percent;
+            SetSteamBigPictureScaling(_lastKnownSteamBigPictureScalingTo100Percent);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Settings", "Steam Big Picture display scaling preference update failed.", exception);
+            bool? refreshedValue = null;
+            try { refreshedValue = (await _frontend.GetBootstrapAsync().ConfigureAwait(true)).Settings.SteamBigPictureScalingTo100Percent; }
+            catch (Exception readbackException) { AppLog.Warn("Settings", "Steam Big Picture display scaling preference readback failed; keeping the last confirmed value.", readbackException); }
+            _lastKnownSteamBigPictureScalingTo100Percent = ResolvePreference(_lastKnownSteamBigPictureScalingTo100Percent, refreshedValue);
+            SetSteamBigPictureScaling(_lastKnownSteamBigPictureScalingTo100Percent);
+        }
+        finally
+        {
+            _steamBigPictureScalingMutationInProgress = false;
+            UpdateQuickSettingsPreferenceControlStates();
+            DrainPendingQuickSettingsPreferencesRefresh();
+        }
+    }
+
     private void DrainPendingQuickSettingsPreferencesRefresh()
     {
         if (!_quickSettingsPreferencesRefreshPending || _quickSettingsPreferencesRefreshInProgress
-            || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress || !_active)
+            || _powerSourceMutationInProgress || _simplifiedTdpMutationInProgress || _steamBigPictureScalingMutationInProgress || !_active)
             return;
 
         _quickSettingsPreferencesRefreshPending = false;
@@ -215,10 +258,18 @@ public sealed partial class SettingsPage : UserControl
         finally { _applyingSimplifiedTdpControls = false; }
     }
 
+    private void SetSteamBigPictureScaling(bool enabled)
+    {
+        _applyingSteamBigPictureScaling = true;
+        try { SteamBigPictureScalingToggleSwitch.IsOn = enabled; }
+        finally { _applyingSteamBigPictureScaling = false; }
+    }
+
     private void UpdateQuickSettingsPreferenceControlStates()
     {
         QuickSettingsPowerSourceOnlyToggleSwitch.IsEnabled = !_powerSourceMutationInProgress;
         SimplifiedTdpControlsToggleSwitch.IsEnabled = !_simplifiedTdpMutationInProgress;
+        SteamBigPictureScalingToggleSwitch.IsEnabled = !_steamBigPictureScalingMutationInProgress;
     }
 
     internal static bool ResolvePreference(bool lastKnownValue, bool? refreshedValue) => refreshedValue ?? lastKnownValue;

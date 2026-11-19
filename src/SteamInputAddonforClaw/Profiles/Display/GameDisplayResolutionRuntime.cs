@@ -12,6 +12,7 @@ internal sealed class GameDisplayResolutionRuntime
     private readonly IDisplayResolutionService _display;
     private readonly IDisplayScalingService _scaling;
     private readonly string _recoveryPath;
+    private readonly Func<bool> _isBigPictureScalingRequested;
     private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null;
     private Recovery? _recovery;
     private bool _recoveryPending;
@@ -21,12 +22,14 @@ internal sealed class GameDisplayResolutionRuntime
         ProfileMutationGate gate,
         string? dataRoot = null,
         IDisplayResolutionService? display = null,
-        IDisplayScalingService? scaling = null)
+        IDisplayScalingService? scaling = null,
+        Func<bool>? isBigPictureScalingRequested = null)
     {
         _store = store;
         _gate = gate;
         _display = display ?? new DisplayResolutionService();
         _scaling = scaling ?? new DisplayScalingService();
+        _isBigPictureScalingRequested = isBigPictureScalingRequested ?? (() => false);
         _recoveryPath = dataRoot is null
             ? AddonDataPaths.DisplayResolutionRecoveryPath
             : Path.Combine(dataRoot, "display-resolution-recovery.json");
@@ -80,7 +83,8 @@ internal sealed class GameDisplayResolutionRuntime
         }
 
         var target = active?.Display.Resolution;
-        var scalingEnabled = active?.Display.ScalingTo100Percent == true;
+        var profileScaling = active?.Display.ScalingTo100Percent == true;
+        var scalingEnabled = profileScaling || _isBigPictureScalingRequested();
         if (target is null && !scalingEnabled)
             return _recovery is null || RestoreAndRetireRecovery();
 

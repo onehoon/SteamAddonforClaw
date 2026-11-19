@@ -197,7 +197,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 92 adds the nullable Runtime current-power-source observation to FrontendBootstrapSnapshot.
 // Version 93 adds per-game 100% display scaling mutations and snapshot state.
 // v94 makes Device Maximum Processor State AC/DC selection nullable so each rail can be unmanaged.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 94; }
+// Version 95 adds the global Steam Big Picture 100% display scaling preference and mutation RPC.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 95; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -252,7 +253,7 @@ internal enum FrontendRpcMethod
     CaptureWindowsTweaks, SetWindowsTweak, AcknowledgeWindowsTweaksWarning,
     CaptureMaximumProcessorState, SetDeviceMaximumProcessorStateEnabled, SetDeviceMaximumProcessorStateAc, SetDeviceMaximumProcessorStateDc,
     RepairStartupTask, RequestMsiLiveUpdateCatalog, SetQuickOverlayYButtonTarget, SetSimplifiedTdpControls,
-    SetGameProfileScalingTo100Percent, SetXboxGameProfileScalingTo100Percent
+    SetGameProfileScalingTo100Percent, SetXboxGameProfileScalingTo100Percent, SetSteamBigPictureScalingTo100Percent
 }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
@@ -261,6 +262,7 @@ internal sealed record FrontendWireEnvelope(int ProtocolVersion, FrontendWireMes
 internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetQuickSettingsCurrentPowerSourceOnlyRequest(bool Enabled);
 internal sealed record SetSimplifiedTdpControlsRequest(bool Enabled);
+internal sealed record SetSteamBigPictureScalingTo100PercentRequest(bool Enabled);
 internal sealed record SetQuickOverlayYButtonTargetRequest(QuickOverlayYButtonTarget Target);
 internal sealed record SetSteamVirtualControllerRequest(SteamVirtualControllerPreference Preference);
 internal sealed record SetExperimentalVirtualTouchpadEnabledRequest(bool Enabled);

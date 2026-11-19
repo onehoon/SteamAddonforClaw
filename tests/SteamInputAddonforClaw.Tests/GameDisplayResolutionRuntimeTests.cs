@@ -85,6 +85,99 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void Big_Picture_only_scaling_applies_without_a_game_app_id_and_restores_when_BPM_closes()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        var display = new FakeDisplay { Current = OriginalMode };
+        var scaling = new FakeScaling { Current = OriginalScale };
+        var bpmScalingRequested = true;
+        var runtime = CreateRuntime(store, display, scaling, () => bpmScalingRequested);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 0));
+
+        runtime.StartupRecover();
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(1, scaling.CaptureCalls);
+        Assert.Equal(1, scaling.SetCalls);
+        Assert.Equal(OriginalMode, display.Current);
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
+        Assert.True(File.Exists(Recovery));
+
+        bpmScalingRequested = false;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(1, scaling.RestoreCalls);
+        Assert.Equal(OriginalScale, scaling.Current);
+        Assert.False(File.Exists(Recovery));
+    }
+
+    [Fact]
+    public void BPM_and_game_profile_share_one_scale_recovery_until_both_requests_end()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        SaveSteamProfile(store, 123, resolution: null, scaling: true);
+        var display = new FakeDisplay { Current = OriginalMode };
+        var scaling = new FakeScaling { Current = OriginalScale };
+        var bpmScalingRequested = true;
+        uint activeAppId = 123;
+        var runtime = CreateRuntime(store, display, scaling, () => bpmScalingRequested);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => activeAppId));
+
+        Assert.True(runtime.Reconcile());
+        bpmScalingRequested = false;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(1, scaling.CaptureCalls);
+        Assert.Equal(1, scaling.SetCalls);
+        Assert.Equal(0, scaling.RestoreCalls);
+
+        activeAppId = 0;
+        bpmScalingRequested = true;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(1, scaling.CaptureCalls);
+        Assert.Equal(0, scaling.RestoreCalls);
+
+        bpmScalingRequested = false;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(1, scaling.RestoreCalls);
+        Assert.Equal(OriginalScale, scaling.Current);
+        Assert.False(File.Exists(Recovery));
+    }
+
+    [Fact]
+    public void Big_Picture_scaling_restores_scale_but_keeps_game_resolution_until_its_profile_ends()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ProfileStore(Profiles);
+        SaveSteamProfile(store, 123, new() { Width = 1440, Height = 900 });
+        var operations = new List<string>();
+        var display = new FakeDisplay { Current = OriginalMode, Operations = operations };
+        var scaling = new FakeScaling { Current = OriginalScale, Operations = operations };
+        var bpmScalingRequested = true;
+        uint activeAppId = 123;
+        var runtime = CreateRuntime(store, display, scaling, () => bpmScalingRequested);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => activeAppId));
+
+        Assert.True(runtime.Reconcile());
+        Assert.Equal((1440, 900), (display.Current.Width, display.Current.Height));
+        Assert.Equal(scaling.MinimumRelativeScale, scaling.Current.OriginalRelativeScale);
+
+        operations.Clear();
+        bpmScalingRequested = false;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal((1440, 900), (display.Current.Width, display.Current.Height));
+        Assert.Equal(OriginalScale, scaling.Current);
+        Assert.True(File.Exists(Recovery));
+        Assert.True(operations.IndexOf("display.apply") < operations.IndexOf("scale.restore"));
+        Assert.True(operations.LastIndexOf("display.apply") > operations.IndexOf("scale.restore"));
+        Assert.DoesNotContain("display.restore", operations);
+
+        activeAppId = 0;
+        Assert.True(runtime.Reconcile());
+        Assert.Equal(OriginalMode, display.Current);
+        Assert.False(File.Exists(Recovery));
+    }
+
+    [Fact]
     public void Scaling_packet_structures_keep_the_reverse_engineered_native_sizes()
     {
         Assert.Equal(0x20, DisplayScalingService.DpiScaleGetInfoSize);
@@ -533,8 +626,9 @@ public sealed class GameDisplayResolutionRuntimeTests : IDisposable
         Assert.False(File.Exists(Recovery));
     }
 
-    private GameDisplayResolutionRuntime CreateRuntime(ProfileStore store, FakeDisplay display, FakeScaling scaling)
-        => new(store, new(), _root, display, scaling);
+    private GameDisplayResolutionRuntime CreateRuntime(ProfileStore store, FakeDisplay display, FakeScaling scaling,
+        Func<bool>? isBigPictureScalingRequested = null)
+        => new(store, new(), _root, display, scaling, isBigPictureScalingRequested);
 
     private static void SaveSteamProfile(ProfileStore store, uint appId, GameDisplayResolution? resolution, bool scaling = false)
     {

@@ -26,6 +26,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public bool ClawHudEnabled => Settings.ClawHudEnabled;
     public bool QuickSettingsCurrentPowerSourceOnly => Settings.QuickSettingsCurrentPowerSourceOnly;
     public bool SimplifiedTdpControls => Settings.SimplifiedTdpControls;
+    public bool SteamBigPictureScalingTo100Percent => Settings.SteamBigPictureScalingTo100Percent;
     public QuickOverlayYButtonTarget YButtonQuickJumpTarget => Settings.YButtonQuickJumpTarget;
     public bool ExperimentalVirtualTouchpadEnabled => Settings.ExperimentalVirtualTouchpadEnabled;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
@@ -262,6 +263,14 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     {
         if (Settings.SimplifiedTdpControls == enabled) return;
         var next = Settings with { SimplifiedTdpControls = enabled };
+        _settingsStore.Save(next);
+        Settings = next;
+    }
+
+    public void ChangeSteamBigPictureScalingTo100Percent(bool enabled)
+    {
+        if (Settings.SteamBigPictureScalingTo100Percent == enabled) return;
+        var next = Settings with { SteamBigPictureScalingTo100Percent = enabled };
         _settingsStore.Save(next);
         Settings = next;
     }

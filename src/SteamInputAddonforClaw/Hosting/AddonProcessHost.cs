@@ -246,7 +246,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
         _xboxGameProfileMutations = new(_profileStore, _profileMutationGate);
-        _displayResolutionRuntime = new(_profileStore, _profileMutationGate, testOnlyDataRoot);
+        _displayResolutionRuntime = new(_profileStore, _profileMutationGate, testOnlyDataRoot,
+            isBigPictureScalingRequested: () => _runtimeHost?.CapturePresentationSnapshot().BigPictureActive == true
+                && _runtimeStartupSettings?.SteamBigPictureScalingTo100Percent == true);
         var fpsMarker = testOnlyDataRoot is null ? AddonDataPaths.IntelFpsLimitOwnershipPath : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json");
         var fpsLimiter = testIntelFrameLimiterFactory?.Invoke(fpsMarker) ?? (testOnlyDataRoot is null ? new IntelFrameLimiter(fpsMarker) : new UnavailableIntelFrameLimiter());
         _intelFpsRuntime = new(_profileStore, _profileMutationGate, fpsLimiter, marker: fpsMarker);
@@ -4309,6 +4311,28 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         NotifySteamSessionStatusInvalidated();
         UpdateControllerCadenceDecision("BigPictureChanged");
         RequestControllerPresentationReconcile("BigPictureChanged");
+        ReconcileDisplayForBigPictureStateChanged();
+    }
+
+    private void ReconcileDisplayForBigPictureStateChanged()
+    {
+        // SteamSessionRuntime can report an already-active BPM while composition is still being
+        // constructed. The later device/profile startup reconcile uses the captured live state.
+        if (_runtimeHost is null || _runtimeStartupSettings is null
+            || Volatile.Read(ref _processShutdownStarted) != 0)
+            return;
+
+        try
+        {
+            if (!_displayResolutionRuntime.Reconcile())
+                AppLog.Warn("Profiles.Display", "Display scaling reconcile after a Big Picture state change did not complete.", null,
+                    ("Trigger", "BigPictureChanged"));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Display", "Display scaling reconcile after a Big Picture state change failed.", exception,
+                ("Trigger", "BigPictureChanged"));
+        }
     }
 
     private void OnXboxObservationReadinessChanged(bool canReliablyReportNoActiveGame)

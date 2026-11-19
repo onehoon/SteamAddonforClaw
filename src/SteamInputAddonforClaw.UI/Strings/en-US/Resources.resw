@@ -686,6 +686,8 @@ These settings are reversible where Windows and policy permit. Windows policy or
   <data name="Settings_QuickSettingsPowerSourceOnlyCard.Description" xml:space="preserve"><value>Show controls for the current AC or DC power source in the main pages and Quick Settings Overlay.</value></data>
   <data name="Settings_SimplifiedTdpControlsCard.Header" xml:space="preserve"><value>Simplified TDP Controls</value></data>
   <data name="Settings_SimplifiedTdpControlsCard.Description" xml:space="preserve"><value>Show PL1 only when the device has a known TDP gap; otherwise keep PL1 and PL2.</value></data>
+  <data name="Settings_SteamBigPictureScalingCard.Header" xml:space="preserve"><value>Steam Big Picture Display Scaling</value></data>
+  <data name="Settings_SteamBigPictureScalingCard.Description" xml:space="preserve"><value>Automatically set Windows display scaling to 100% while Steam Big Picture is open. Restore the previous scale when it closes.</value></data>
   <data name="Settings_AppThemeCard.Header" xml:space="preserve">
     <value>App theme</value>
   </data>

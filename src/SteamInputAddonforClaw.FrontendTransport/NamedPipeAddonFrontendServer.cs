@@ -282,6 +282,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetQuickSettingsCurrentPowerSourceOnlyAsync(FrontendWireCodec.Decode<SetQuickSettingsCurrentPowerSourceOnlyRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetSimplifiedTdpControls
         ? FrontendWireCodec.Payload(await _inner.SetSimplifiedTdpControlsAsync(FrontendWireCodec.Decode<SetSimplifiedTdpControlsRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetSteamBigPictureScalingTo100Percent
+        ? FrontendWireCodec.Payload(await _inner.SetSteamBigPictureScalingTo100PercentAsync(FrontendWireCodec.Decode<SetSteamBigPictureScalingTo100PercentRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetQuickOverlayYButtonTarget
         ? FrontendWireCodec.Payload(await _inner.SetQuickOverlayYButtonTargetAsync(FrontendWireCodec.Decode<SetQuickOverlayYButtonTargetRequest>(p).Target, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureAddonQuickSettingsShell

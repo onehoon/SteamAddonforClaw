@@ -678,6 +678,8 @@
   <data name="Settings_QuickSettingsPowerSourceOnlyCard.Description" xml:space="preserve"><value>메인 페이지와 빠른 설정 오버레이에 현재 AC 또는 DC 전원 옵션만 표시합니다.</value></data>
   <data name="Settings_SimplifiedTdpControlsCard.Header" xml:space="preserve"><value>간편 TDP 설정</value></data>
   <data name="Settings_SimplifiedTdpControlsCard.Description" xml:space="preserve"><value>기기에 알려진 TDP 간격이 있을 때만 PL1을 표시합니다. 그렇지 않으면 PL1과 PL2를 모두 표시합니다.</value></data>
+  <data name="Settings_SteamBigPictureScalingCard.Header" xml:space="preserve"><value>Steam Big Picture 디스플레이 배율</value></data>
+  <data name="Settings_SteamBigPictureScalingCard.Description" xml:space="preserve"><value>Steam Big Picture 실행 중 Windows 배율을 100%로 변경하고 종료하면 이전 배율로 복원합니다.</value></data>
   <data name="Settings_AppThemeCard.Header" xml:space="preserve">
     <value>테마</value>
   </data>
