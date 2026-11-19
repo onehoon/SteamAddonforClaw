@@ -105,7 +105,7 @@ internal sealed class AddonQuickSettingsTabOrderRow
                 FontSize = OverlayQamResources.Scale(16),
             },
             Style = OverlayQamResources.Style("QamValueButtonStyle"),
-            MinWidth = OverlayQamResources.Get("QamValueButtonWidth", 40.0),
+            MinWidth = OverlayQamResources.Scale(OverlayQamResources.Get("QamValueButtonWidth", 40.0)),
             MinHeight = OverlayQamResources.Scale(28),
             Padding = new Thickness(0),
         };

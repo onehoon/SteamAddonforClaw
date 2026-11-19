@@ -44,6 +44,11 @@ internal sealed class OverlayToggleModel
 // requestChange callback, and the two never form a feedback loop.
 internal sealed class OverlayToggleRow
 {
+    // WinUI 2.3.9's default ToggleSwitch template has a 40-DIP track plus a 12-DIP column.
+    // The local pre/post content margins are 1 DIP each around its 20-DIP track height.
+    private const double NativeToggleWidthDip = 52;
+    private const double NativeToggleHeightDip = 22;
+
     private readonly OverlayToggleModel _model;
     private readonly ToggleSwitch _toggle;
     private bool _suppress;
@@ -79,8 +84,8 @@ internal sealed class OverlayToggleRow
         _toggle.Toggled += OnToggleSwitchToggled;
         var toggleView = new Viewbox
         {
-            Width = OverlayQamResources.Scale(40),
-            Height = OverlayQamResources.Scale(22),
+            Width = OverlayQamResources.Scale(NativeToggleWidthDip),
+            Height = OverlayQamResources.Scale(NativeToggleHeightDip),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
             Stretch = Stretch.Uniform,

@@ -47,28 +47,28 @@ internal static class OverlayUiScale
     private static void ApplyLocalDimensions(FrameworkElement element, double ratio)
     {
         if (element.Name != "ProfileArtworkHost" && element.Name != "OpaquePanel")
-            ScaleLocalDouble(element, FrameworkElement.WidthProperty, ratio);
+            ScaleEffectiveDouble(element, FrameworkElement.WidthProperty, ratio, requirePositive: true);
 
         if (element.Name != "ProfileArtworkHost")
-            ScaleLocalDouble(element, FrameworkElement.HeightProperty, ratio);
+            ScaleEffectiveDouble(element, FrameworkElement.HeightProperty, ratio, requirePositive: true);
 
-        ScaleLocalDouble(element, FrameworkElement.MinWidthProperty, ratio);
-        ScaleLocalDouble(element, FrameworkElement.MinHeightProperty, ratio);
-        ScaleLocalDouble(element, FrameworkElement.MaxWidthProperty, ratio);
-        ScaleLocalDouble(element, FrameworkElement.MaxHeightProperty, ratio);
+        ScaleEffectiveDouble(element, FrameworkElement.MinWidthProperty, ratio, requirePositive: true);
+        ScaleEffectiveDouble(element, FrameworkElement.MinHeightProperty, ratio, requirePositive: true);
+        ScaleEffectiveDouble(element, FrameworkElement.MaxWidthProperty, ratio, requirePositive: true);
+        ScaleEffectiveDouble(element, FrameworkElement.MaxHeightProperty, ratio, requirePositive: true);
         ScaleLocalThickness(element, FrameworkElement.MarginProperty, ratio);
 
         if (element is Control control)
-        {
-            ScaleLocalDouble(control, Control.FontSizeProperty, ratio);
             ScaleLocalThickness(control, Control.PaddingProperty, ratio);
-        }
 
         if (element is TextBlock textBlock)
         {
-            ScaleLocalDouble(textBlock, TextBlock.FontSizeProperty, ratio);
-            ScaleLocalDouble(textBlock, TextBlock.LineHeightProperty, ratio);
+            ScaleEffectiveDouble(textBlock, TextBlock.FontSizeProperty, ratio, requirePositive: true);
+            ScaleEffectiveDouble(textBlock, TextBlock.LineHeightProperty, ratio, requirePositive: true);
         }
+
+        if (element is FontIcon fontIcon)
+            ScaleEffectiveDouble(fontIcon, FontIcon.FontSizeProperty, ratio, requirePositive: true);
 
         if (element is Border border)
         {
@@ -133,6 +133,18 @@ internal static class OverlayUiScale
     private static void ScaleLocalDouble(DependencyObject target, DependencyProperty property, double ratio)
     {
         if (target.ReadLocalValue(property) is double value && double.IsFinite(value))
+            target.SetValue(property, value * ratio);
+    }
+
+    private static void ScaleEffectiveDouble(
+        DependencyObject target,
+        DependencyProperty property,
+        double ratio,
+        bool requirePositive = false)
+    {
+        if (target.GetValue(property) is double value
+            && double.IsFinite(value)
+            && (!requirePositive || value > 0))
             target.SetValue(property, value * ratio);
     }
 

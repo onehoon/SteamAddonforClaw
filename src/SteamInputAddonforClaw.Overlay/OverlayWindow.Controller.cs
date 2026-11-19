@@ -218,7 +218,7 @@ public sealed partial class OverlayWindow
         {
             Orientation = Orientation.Horizontal,
             Spacing = OverlayQamResources.Scale(10),
-            MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0),
+            MinHeight = OverlayQamResources.Scale(OverlayQamResources.Get("QamValueButtonHeight", 22.0)),
             VerticalAlignment = VerticalAlignment.Center,
         };
         colorPreview.Children.Add(new TextBlock
@@ -242,7 +242,7 @@ public sealed partial class OverlayWindow
         {
             Child = colorPreview,
             Padding = OverlayQamResources.Get("QamDetailRowPadding", new Thickness(16, 5, 16, 5)),
-            MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0),
+            MinHeight = OverlayQamResources.Scale(OverlayQamResources.Get("QamValueButtonHeight", 22.0)),
         });
 
         _controllerLedRedRow = new OverlayValueRow("Red", OverlayValueRow.FormatInteger,

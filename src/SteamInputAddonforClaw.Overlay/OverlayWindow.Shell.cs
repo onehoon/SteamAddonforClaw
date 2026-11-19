@@ -52,7 +52,7 @@ public sealed partial class OverlayWindow
             ToolTipService.SetToolTip(button, label);
             button.Click += OnTabHeaderClick;
 
-            var tabHost = new Grid { Height = OverlayQamResources.Get("QamRailItemHeight", 64.0) };
+            var tabHost = new Grid { Height = OverlayQamResources.Scale(OverlayQamResources.Get("QamRailItemHeight", 64.0)) };
             Grid.SetRow(button, 0);
             tabHost.Children.Add(button);
 

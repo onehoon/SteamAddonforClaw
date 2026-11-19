@@ -21,7 +21,8 @@ public sealed class OverlayUiScaleTests
         var physicalShortcutTilePixels = OverlayUiScale.Scale(117.33333333333333, expectedFactor) * dpi / 96.0;
         var physicalShortcutGapPixels = OverlayUiScale.Scale(8, expectedFactor) * dpi / 96.0;
         var physicalRailPixels = OverlayUiScale.Scale(52, expectedFactor) * dpi / 96.0;
-        var physicalToggleWidthPixels = OverlayUiScale.Scale(40, expectedFactor) * dpi / 96.0;
+        var physicalToggleTrackWidthPixels = OverlayUiScale.Scale(40, expectedFactor) * dpi / 96.0;
+        var physicalToggleControlWidthPixels = OverlayUiScale.Scale(52, expectedFactor) * dpi / 96.0;
         var physicalSliderHeightPixels = OverlayUiScale.Scale(22, expectedFactor) * dpi / 96.0;
         var physicalSliderThumbPixels = OverlayUiScale.Scale(12, expectedFactor) * dpi / 96.0;
         var physicalSliderThumbRadiusPixels = OverlayUiScale.Scale(6, expectedFactor) * dpi / 96.0;
@@ -31,7 +32,8 @@ public sealed class OverlayUiScaleTests
         Assert.Equal(158.4, physicalShortcutTilePixels, precision: 10);
         Assert.Equal(10.8, physicalShortcutGapPixels, precision: 10);
         Assert.Equal(70.2, physicalRailPixels, precision: 10);
-        Assert.Equal(54, physicalToggleWidthPixels, precision: 10);
+        Assert.Equal(54, physicalToggleTrackWidthPixels, precision: 10);
+        Assert.Equal(70.2, physicalToggleControlWidthPixels, precision: 10);
         Assert.Equal(29.7, physicalSliderHeightPixels, precision: 10);
         Assert.Equal(16.2, physicalSliderThumbPixels, precision: 10);
         Assert.Equal(8.1, physicalSliderThumbRadiusPixels, precision: 10);
@@ -68,11 +70,93 @@ public sealed class OverlayUiScaleTests
             "src",
             "SteamInputAddonforClaw.Overlay",
             "OverlayToggleRow.cs"));
+        var qamResourceSource = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "SteamInputAddonforClaw.Overlay",
+            "Themes",
+            "QamOverlayResources.xaml"));
 
         Assert.Contains("var toggleView = new Viewbox", source);
+        Assert.Contains("private const double NativeToggleWidthDip = 52", source);
+        Assert.Contains("private const double NativeToggleHeightDip = 22", source);
+        Assert.Contains("Width = OverlayQamResources.Scale(NativeToggleWidthDip)", source);
+        Assert.Contains("Height = OverlayQamResources.Scale(NativeToggleHeightDip)", source);
+        Assert.Contains("ToggleSwitchPreContentMargin", source);
+        Assert.Contains("ToggleSwitchPostContentMargin", source);
+        Assert.Contains("<x:Double x:Key=\"QamToggleMinHeight\">22</x:Double>", qamResourceSource);
+        Assert.Contains("<x:Double x:Key=\"QamTogglePreContentMargin\">1</x:Double>", qamResourceSource);
+        Assert.Contains("<x:Double x:Key=\"QamTogglePostContentMargin\">1</x:Double>", qamResourceSource);
         Assert.Contains("Child = _toggle", source);
         Assert.Contains("grid.Children.Add(toggleView)", source);
         Assert.Contains("_toggle.Toggled += OnToggleSwitchToggled", source);
+    }
+
+    [Fact]
+    public void Effective_style_dimensions_fonts_and_font_icons_are_scaled_for_existing_controls()
+    {
+        var root = FindRepositoryRoot();
+        var scaleSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayUiScale.cs"));
+        var resourceSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayQamResources.cs"));
+        var styleSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+
+        Assert.Contains("target.GetValue(property)", scaleSource);
+        Assert.Contains("FrameworkElement.WidthProperty, ratio, requirePositive: true", scaleSource);
+        Assert.Contains("FrameworkElement.MinWidthProperty, ratio, requirePositive: true", scaleSource);
+        Assert.Contains("TextBlock.FontSizeProperty, ratio, requirePositive: true", scaleSource);
+        Assert.Contains("TextBlock.LineHeightProperty, ratio, requirePositive: true", scaleSource);
+        Assert.Contains("FontIcon.FontSizeProperty, ratio, requirePositive: true", scaleSource);
+        Assert.Contains("Setter Property=\"Height\" Value=\"{ThemeResource QamSliderHeight}\"", styleSource);
+        Assert.Contains("Setter Property=\"Width\" Value=\"{ThemeResource QamRailButtonSize}\"", styleSource);
+
+        Assert.Contains("text.FontSize = Scale(text.FontSize)", resourceSource);
+        Assert.Contains("text.LineHeight = Scale(text.LineHeight)", resourceSource);
+        Assert.DoesNotContain("\"QamBodyFontSize\"", resourceSource);
+        Assert.DoesNotContain("\"QamRailButtonSize\"", resourceSource);
+        Assert.DoesNotContain("\"QamSliderHeight\"", resourceSource);
+    }
+
+    [Fact]
+    public void Late_created_slider_and_value_buttons_use_the_active_size_factor()
+    {
+        var root = FindRepositoryRoot();
+        var sliderSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayNumericSliderRow.cs"));
+        var valueRowSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
+        var tabOrderSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
+
+        Assert.Contains("slider.Height = OverlayQamResources.Scale(OverlayQamResources.Get(\"QamSliderHeight\", 22.0))", sliderSource);
+        Assert.Contains("slider.Resources[\"SliderHorizontalHeight\"] = OverlayQamResources.Scale", sliderSource);
+        Assert.Contains("button.MinWidth = OverlayQamResources.Scale(OverlayQamResources.Get(\"QamValueButtonWidth\", 40.0))", valueRowSource);
+        Assert.Contains("button.MinHeight = OverlayQamResources.Scale(OverlayQamResources.Get(\"QamValueButtonHeight\", 22.0))", valueRowSource);
+        Assert.Contains("MinWidth = OverlayQamResources.Scale(OverlayQamResources.Get(\"QamValueButtonWidth\", 40.0))", tabOrderSource);
+    }
+
+    [Fact]
+    public void Late_created_font_icons_use_the_active_size_factor_or_scaled_rail_resource()
+    {
+        var root = FindRepositoryRoot();
+        var valueRowSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
+        var tabOrderSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
+        var shortcutsSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs"));
+        var shellSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"));
+        var qamSource = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayQamResources.cs"));
+
+        Assert.Contains("FontSize = OverlayQamResources.Scale(16)", valueRowSource);
+        Assert.Contains("FontSize = OverlayQamResources.Scale(16)", tabOrderSource);
+        Assert.Contains("FontSize = OverlayQamResources.Scale(24)", shortcutsSource);
+        Assert.Contains("FontSize = OverlayQamResources.Get(\"QamRailIconSize\", 24.0)", shellSource);
+        Assert.Contains("\"QamRailIconSize\"", qamSource);
     }
 
     [Fact]

@@ -9,19 +9,15 @@ internal static class OverlayQamResources
 {
     private static readonly string[] ScaledResourceKeys =
     [
-        "QamBodyFontSize", "QamBodyLineHeight",
-        "QamCaptionFontSize", "QamCaptionLineHeight",
-        "QamSectionHeaderFontSize", "QamSectionHeaderLineHeight",
         "QamPageTitleMargin", "QamBodyContentPadding", "QamSectionSpacing",
         "QamSectionPadding", "QamSectionCornerRadius", "QamDetailIndent",
         "QamDetailRowPadding", "QamRowSpacing", "QamRowPadding", "QamRowMargin",
         "QamSectionSeparatorThickness", "QamRowMinHeight", "QamRowCornerRadius",
-        "QamSelectionBorderThickness", "QamRailButtonSize", "QamRailItemHeight",
+        "QamSelectionBorderThickness",
         "QamRailIconSize", "QamRailSpacing", "QamRailHintIconSize", "QamRailHintGap",
         "QamRailCornerRadius", "QamTilePadding", "QamShortcutTileSize", "QamTileCornerRadius",
-        "QamTileMinHeight", "QamTileSpacing", "QamSliderTrackHeight", "QamSliderThumbWidth",
-        "QamSliderThumbHeight", "QamSliderThumbCornerRadius", "QamSliderHeight",
-        "QamValueButtonWidth", "QamValueButtonHeight", "QamValueButtonCornerRadius",
+        "QamTileSpacing", "QamSliderTrackHeight", "QamSliderThumbWidth",
+        "QamSliderThumbHeight", "QamSliderThumbCornerRadius", "QamValueButtonCornerRadius",
         "QamDiscreteValueMinWidth"
     ];
 
@@ -66,6 +62,13 @@ internal static class OverlayQamResources
     {
         if (Application.Current.Resources.TryGetValue(key, out var value) && value is Style style)
             text.Style = style;
+
+        // New rows are created after the initial tree traversal, so apply the active factor to
+        // the effective style values here. Existing rows are adjusted by OverlayUiScale instead.
+        if (double.IsFinite(text.FontSize) && text.FontSize > 0)
+            text.FontSize = Scale(text.FontSize);
+        if (double.IsFinite(text.LineHeight) && text.LineHeight > 0)
+            text.LineHeight = Scale(text.LineHeight);
     }
 
     private static object ScaleResource(object value, double factor) => value switch
