@@ -574,6 +574,77 @@ public sealed class MsiClawAddonPresentationTests
         await owner.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Overlay_return_trace_is_armed_only_when_the_production_steam_deck_publisher_resumes_after_overlay()
+    {
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousLevel = AppLog.MinimumLevelOverride;
+        var logDirectory = Path.Combine(Path.GetTempPath(), "MsiClawAddonPresentationTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(logDirectory);
+        AppLog.DirectoryOverride = logDirectory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+
+        var native = new FakeNative { EdgeCreateSucceeds = true };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
+        Assert.NotNull(runtime);
+        CanonicalSteamDeckInputPublisher? deckPublisher = null;
+        var ticks = new IdlePublisherTicks();
+        long timestamp = 0;
+        var owner = new MsiClawAddonPresentation(
+            runtime,
+            deckPublisherFactory: (source, sink, overlay, fault) =>
+            {
+                deckPublisher = new CanonicalSteamDeckInputPublisher(
+                    source, sink, ticks, fault, timestampProvider: () => timestamp, systemButtonOverlay: overlay);
+                return CreateProductionDeckPublisherAdapter(deckPublisher);
+            });
+
+        try
+        {
+            var source = new FakeSource();
+            await owner.AttachInitialAsync(source, WantsDeck(), default);
+            AppLog.DrainForTests();
+            var startupLog = File.Exists(AppLog.CurrentLogFilePath) ? LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty;
+            Assert.DoesNotContain("OverlayReturnTraceStarted", startupLog);
+
+            Assert.Equal(OverlayPauseOutcome.Paused, (await owner.PauseForOverlayAsync(default)).Outcome);
+            Assert.Equal(OverlayResumeOutcome.Resumed, (await owner.ResumeAfterOverlayAsync(source, default)).Outcome);
+
+            AppLog.DrainForTests();
+            Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'),
+                line => line.Contains("Event=OverlayReturnTraceStarted", StringComparison.Ordinal));
+            Assert.NotNull(deckPublisher);
+            Assert.True(deckPublisher.IsRunning);
+        }
+        finally
+        {
+            await owner.DisposeAsync();
+            AppLog.DrainForTests();
+            AppLog.MinimumLevelOverride = previousLevel;
+            AppLog.DirectoryOverride = previousDirectory;
+            if (Directory.Exists(logDirectory)) Directory.Delete(logDirectory, recursive: true);
+        }
+    }
+
+    private static IAddonPresentationPublisher CreateProductionDeckPublisherAdapter(CanonicalSteamDeckInputPublisher publisher)
+    {
+        var adapterType = typeof(MsiClawAddonPresentation).GetNestedType("PublisherAdapter", BindingFlags.NonPublic);
+        Assert.NotNull(adapterType);
+        var adapter = Activator.CreateInstance(adapterType!, BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null, args: [publisher], culture: null);
+        return Assert.IsAssignableFrom<IAddonPresentationPublisher>(adapter);
+    }
+
+    private sealed class IdlePublisherTicks : IInputReportTickSource
+    {
+        public ValueTask<bool> WaitForTickAsync(CancellationToken token)
+        {
+            var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            token.Register(static state => ((TaskCompletionSource<bool>)state!).TrySetCanceled(), waiter);
+            return new(waiter.Task);
+        }
+    }
+
     [Theory]
     [InlineData(SteamVirtualControllerPreference.SteamDeck, (int)AddonPresentationKind.SteamDeck)]
     [InlineData(SteamVirtualControllerPreference.DualSenseEdge, (int)AddonPresentationKind.DualSenseEdge)]

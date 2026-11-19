@@ -1160,6 +1160,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
             try
             {
+                if (kind == AddonPresentationKind.SteamDeck &&
+                    AppLog.IsEnabled(AppLogLevel.Debug) &&
+                    publisher is PublisherAdapter adapter)
+                {
+                    adapter.ArmOverlayReturnDiagnostics();
+                }
+
                 publisher.Start();
             }
             catch (Exception exception)
@@ -1920,6 +1927,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             else if (_deck is not null) _deck.Start();
             else _edge!.Start();
         }
+        internal void ArmOverlayReturnDiagnostics() => _deck?.ArmOverlayReturnDiagnostics();
         public Task StopAsync() => _xbox360?.StopAsync() ?? _deck?.StopAsync() ?? _edge!.StopAsync();
     }
 }

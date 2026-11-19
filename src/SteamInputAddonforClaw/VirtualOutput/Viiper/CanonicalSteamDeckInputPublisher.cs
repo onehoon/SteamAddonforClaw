@@ -46,9 +46,19 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private static readonly TimeSpan WakeAlarmThreshold = TimeSpan.FromMilliseconds(5);
     private static readonly TimeSpan ProductionPeriod = TimeSpan.FromMilliseconds(4);
     private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan OverlayReturnSampleInterval = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan OverlayReturnMaximumDuration = TimeSpan.FromSeconds(60);
     private const int DiagnosticStickActivityThreshold = 4096;
     private const ushort DiagnosticTriggerActivityThreshold = 1024;
     private const int DiagnosticTriggerMovementThreshold = 2048;
+    private static readonly (ulong Mask, string Name)[] OverlayReturnButtonNames =
+    [
+        (1UL << 0, "A"), (1UL << 1, "B"), (1UL << 2, "X"), (1UL << 3, "Y"),
+        (1UL << 4, "DPadUp"), (1UL << 5, "DPadRight"), (1UL << 6, "DPadDown"), (1UL << 7, "DPadLeft"),
+        (1UL << 8, "LB"), (1UL << 9, "RB"), (1UL << 10, "View"), (1UL << 11, "Menu"),
+        (1UL << 12, "L3"), (1UL << 13, "R3"), (1UL << 14, "LTFull"), (1UL << 15, "RTFull"),
+        (1UL << 16, "M2"), (1UL << 17, "M1"),
+    ];
 
     /// <summary>Test-only seam so the join-timeout fail-closed path can be exercised deterministically.</summary>
     internal TimeSpan WorkerJoinTimeoutForTests { get; set; } = DefaultWorkerJoinTimeout;
@@ -68,6 +78,15 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private int _faultReported;
     private long _publisherStartedTimestamp;
     private bool _firstOrdinaryInputPublished;
+    private bool _overlayReturnDiagnosticsArmed;
+    private bool _overlayReturnTraceActive;
+    private long _overlayReturnTraceStartTimestamp;
+    private long _overlayReturnLastSampleTimestamp;
+    private int _overlayReturnSampleCount;
+    private bool _overlayReturnFirstStickMovementLogged;
+    private bool _overlayReturnFirstButtonPressLogged;
+    private bool _overlayReturnHasButtonBaseline;
+    private ulong _overlayReturnPreviousButtonMask;
 
     // Production path only: dedicated worker thread driven by a real Windows high-resolution
     // one-shot timer, re-armed each iteration against the deadline schedule below. Never used when
@@ -146,6 +165,12 @@ internal sealed class CanonicalSteamDeckInputPublisher
     internal bool IsRunning => _task is { IsCompleted: false } || _workerThread is { IsAlive: true };
     internal int PublishedStateCount => _publishedStateCount;
 
+    /// <summary>Arms one Debug-only trace for the next publisher start after a successful Overlay return.</summary>
+    internal void ArmOverlayReturnDiagnostics()
+    {
+        _overlayReturnDiagnosticsArmed = AppLog.IsEnabled(AppLogLevel.Debug);
+    }
+
     /// <summary>
     /// Starts publishing. On the production (no explicit tick source) path this throws synchronously
     /// and cleans up any partially-created native handle if the timer cannot be created or armed --
@@ -159,6 +184,11 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _firstOrdinaryInputPublished = false;
         ResetTriggerDiagnosticSnapshot();
         ResetTimingDiagnosticsForNewRun();
+        var traceOverlayReturn = _overlayReturnDiagnosticsArmed && AppLog.IsEnabled(AppLogLevel.Debug);
+        _overlayReturnDiagnosticsArmed = false;
+        ResetOverlayReturnDiagnostics();
+        if (traceOverlayReturn)
+            StartOverlayReturnDiagnostics(_publisherStartedTimestamp);
 
         if (_ticks is not null)
         {
@@ -167,7 +197,15 @@ internal sealed class CanonicalSteamDeckInputPublisher
             return;
         }
 
-        StartProductionWorker();
+        try
+        {
+            StartProductionWorker();
+        }
+        catch
+        {
+            CompleteOverlayReturnDiagnostics("PublisherStartFailed");
+            throw;
+        }
     }
 
     internal async Task StopAsync()
@@ -180,10 +218,12 @@ internal sealed class CanonicalSteamDeckInputPublisher
             _stop.Dispose();
             _stop = null;
             _task = null;
+            CompleteOverlayReturnDiagnostics("PublisherStopped");
             return;
         }
 
         await StopProductionWorkerAsync().ConfigureAwait(false);
+        CompleteOverlayReturnDiagnostics("PublisherStopped");
     }
 
     private void StartProductionWorker()
@@ -310,7 +350,11 @@ internal sealed class CanonicalSteamDeckInputPublisher
 
                 var keepGoing = PublishCurrentStateOnce();
                 if (diagnosticsEnabled) RecordPublishWork(wake, _timestampProvider());
-                if (!keepGoing) return;
+                if (!keepGoing)
+                {
+                    CompleteOverlayReturnDiagnostics("PublisherStopped");
+                    return;
+                }
 
                 if (stopEvent.WaitOne(0)) return;
 
@@ -325,6 +369,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
         catch (Exception exception)
         {
             ReportFault(exception);
+            CompleteOverlayReturnDiagnostics("PublisherFaulted");
         }
     }
 
@@ -487,11 +532,19 @@ internal sealed class CanonicalSteamDeckInputPublisher
         {
             while (await ticks.WaitForTickAsync(token).ConfigureAwait(false))
             {
-                if (!PublishCurrentStateOnce()) return;
+                if (!PublishCurrentStateOnce())
+                {
+                    CompleteOverlayReturnDiagnostics("PublisherStopped");
+                    return;
+                }
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-        catch (Exception exception) { ReportFault(exception); }
+        catch (Exception exception)
+        {
+            ReportFault(exception);
+            CompleteOverlayReturnDiagnostics("PublisherFaulted");
+        }
     }
 
     /// <summary>
@@ -516,6 +569,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
         var pulseDiagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
         var callStart = diagnosticsEnabled || pulseDiagnosticsEnabled ? _timestampProvider() : 0;
         var accepted = _sink.SetState(state);
+        TraceOverlayReturnIfDue(rawState, state, accepted);
 
         if (diagnosticsEnabled)
         {
@@ -549,6 +603,170 @@ internal sealed class CanonicalSteamDeckInputPublisher
 
         if (diagnosticsEnabled) EmitHeartbeatIfDue();
         return true;
+    }
+
+    private void ResetOverlayReturnDiagnostics()
+    {
+        _overlayReturnTraceActive = false;
+        _overlayReturnTraceStartTimestamp = 0;
+        _overlayReturnLastSampleTimestamp = 0;
+        _overlayReturnSampleCount = 0;
+        _overlayReturnFirstStickMovementLogged = false;
+        _overlayReturnFirstButtonPressLogged = false;
+        _overlayReturnHasButtonBaseline = false;
+        _overlayReturnPreviousButtonMask = 0;
+    }
+
+    private void StartOverlayReturnDiagnostics(long startTimestamp)
+    {
+        _overlayReturnTraceActive = true;
+        _overlayReturnTraceStartTimestamp = startTimestamp;
+        _overlayReturnLastSampleTimestamp = startTimestamp;
+        AppLog.Debug("OverlayReturn", "Overlay-return input trace started.",
+            ("Event", "OverlayReturnTraceStarted"),
+            ("Presentation", "SteamDeck"),
+            ("ElapsedMs", 0),
+            ("TimeOrigin", "OverlayResumePublisherStart"));
+    }
+
+    /// <summary>
+    /// Observes the already-read physical snapshot and the exact state/result submitted by the
+    /// existing SetState call. Sink acceptance does not establish that Steam Input or a game consumed it.
+    /// This optional trace is fail-passive and never performs another input read or output write.
+    /// </summary>
+    private void TraceOverlayReturnIfDue(ControllerState rawState, SteamDeckDeviceState submittedState, bool accepted)
+    {
+        if (!_overlayReturnTraceActive) return;
+        if (!AppLog.IsEnabled(AppLogLevel.Debug))
+        {
+            _overlayReturnTraceActive = false;
+            return;
+        }
+
+        try
+        {
+            var now = _timestampProvider();
+            var elapsed = Stopwatch.GetElapsedTime(_overlayReturnTraceStartTimestamp, now);
+            var buttonMask = GetOverlayReturnButtonMask(rawState);
+            if (!_overlayReturnHasButtonBaseline)
+            {
+                // A button held through the Overlay transition is a baseline, not a new press edge.
+                _overlayReturnPreviousButtonMask = buttonMask;
+                _overlayReturnHasButtonBaseline = true;
+            }
+            else
+            {
+                var pressedEdges = buttonMask & ~_overlayReturnPreviousButtonMask;
+                _overlayReturnPreviousButtonMask = buttonMask;
+                if (!_overlayReturnFirstButtonPressLogged && pressedEdges != 0)
+                {
+                    _overlayReturnFirstButtonPressLogged = true;
+                    LogOverlayReturnObservation("OverlayReturnFirstButtonPress", elapsed, rawState, submittedState, accepted,
+                        string.Join(",", OverlayReturnButtonNames.Where(button => (pressedEdges & button.Mask) != 0).Select(button => button.Name)));
+                }
+            }
+
+            if (!_overlayReturnFirstStickMovementLogged && HasMeaningfulPhysicalStickMovement(rawState))
+            {
+                _overlayReturnFirstStickMovementLogged = true;
+                LogOverlayReturnObservation("OverlayReturnFirstStickMovement", elapsed, rawState, submittedState, accepted);
+            }
+
+            if (Stopwatch.GetElapsedTime(_overlayReturnLastSampleTimestamp, now) >= OverlayReturnSampleInterval)
+            {
+                LogOverlayReturnObservation("OverlayReturnInputSample", elapsed, rawState, submittedState, accepted);
+                _overlayReturnLastSampleTimestamp = now;
+                _overlayReturnSampleCount++;
+            }
+
+            if (elapsed >= OverlayReturnMaximumDuration)
+                CompleteOverlayReturnDiagnostics("WindowElapsed", now);
+        }
+        catch
+        {
+            // Diagnostics are optional and must never alter the normal publication/fault path.
+            _overlayReturnTraceActive = false;
+        }
+    }
+
+    private void LogOverlayReturnObservation(
+        string eventName,
+        TimeSpan elapsed,
+        ControllerState rawState,
+        SteamDeckDeviceState submittedState,
+        bool accepted,
+        string? button = null)
+    {
+        var fields = new List<(string Key, object? Value)>
+        {
+            ("Event", eventName),
+            ("ElapsedMs", elapsed.TotalMilliseconds),
+            ("RawLX", rawState.LeftStick.X),
+            ("RawLY", rawState.LeftStick.Y),
+            ("RawRX", rawState.RightStick.X),
+            ("RawRY", rawState.RightStick.Y),
+            ("DeckLX", submittedState.LStickX),
+            ("DeckLY", submittedState.LStickY),
+            ("DeckRX", submittedState.RStickX),
+            ("DeckRY", submittedState.RStickY),
+            ("SetStateAccepted", accepted),
+        };
+        if (button is not null) fields.Add(("Button", button));
+        AppLog.Debug("OverlayReturn", "Existing sink submission observed; Steam/game consumption is not confirmed.", [.. fields]);
+    }
+
+    private void CompleteOverlayReturnDiagnostics(string reason, long? timestamp = null)
+    {
+        if (!_overlayReturnTraceActive) return;
+        _overlayReturnTraceActive = false;
+        if (!AppLog.IsEnabled(AppLogLevel.Debug)) return;
+
+        try
+        {
+            var now = timestamp ?? _timestampProvider();
+            AppLog.Debug("OverlayReturn", "Overlay-return input trace completed.",
+                ("Event", "OverlayReturnTraceCompleted"),
+                ("ElapsedMs", Stopwatch.GetElapsedTime(_overlayReturnTraceStartTimestamp, now).TotalMilliseconds),
+                ("SampleCount", _overlayReturnSampleCount),
+                ("FirstStickMovementObserved", _overlayReturnFirstStickMovementLogged),
+                ("FirstButtonPressObserved", _overlayReturnFirstButtonPressLogged),
+                ("Reason", reason));
+        }
+        catch
+        {
+            // Diagnostics are optional and must never alter publisher shutdown.
+        }
+    }
+
+    private static bool HasMeaningfulPhysicalStickMovement(ControllerState state) =>
+        Math.Abs((int)state.LeftStick.X) >= DiagnosticStickActivityThreshold ||
+        Math.Abs((int)state.LeftStick.Y) >= DiagnosticStickActivityThreshold ||
+        Math.Abs((int)state.RightStick.X) >= DiagnosticStickActivityThreshold ||
+        Math.Abs((int)state.RightStick.Y) >= DiagnosticStickActivityThreshold;
+
+    private static ulong GetOverlayReturnButtonMask(ControllerState state)
+    {
+        var buttons = state.Buttons;
+        ulong mask = 0;
+        if (buttons.A) mask |= 1UL << 0;
+        if (buttons.B) mask |= 1UL << 1;
+        if (buttons.X) mask |= 1UL << 2;
+        if (buttons.Y) mask |= 1UL << 3;
+        if (buttons.DPadUp) mask |= 1UL << 4;
+        if (buttons.DPadRight) mask |= 1UL << 5;
+        if (buttons.DPadDown) mask |= 1UL << 6;
+        if (buttons.DPadLeft) mask |= 1UL << 7;
+        if (buttons.LeftBumper) mask |= 1UL << 8;
+        if (buttons.RightBumper) mask |= 1UL << 9;
+        if (buttons.Back) mask |= 1UL << 10;
+        if (buttons.Start) mask |= 1UL << 11;
+        if (buttons.LeftStickClick) mask |= 1UL << 12;
+        if (buttons.RightStickClick) mask |= 1UL << 13;
+        if (buttons.LeftTriggerFull) mask |= 1UL << 14;
+        if (buttons.RightTriggerFull) mask |= 1UL << 15;
+        if (state.Auxiliary.Count > (int)AuxiliaryButtonSlot.LeftRear && state.Auxiliary[(int)AuxiliaryButtonSlot.LeftRear]) mask |= 1UL << 16;
+        if (state.Auxiliary.Count > (int)AuxiliaryButtonSlot.RightRear && state.Auxiliary[(int)AuxiliaryButtonSlot.RightRear]) mask |= 1UL << 17;
+        return mask;
     }
 
     private void LogTriggerTransitionIfNeeded(SteamDeckDeviceState state, bool diagnosticsEnabled)
