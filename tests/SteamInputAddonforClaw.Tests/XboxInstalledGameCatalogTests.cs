@@ -142,6 +142,175 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task Successful_empty_targeted_lookup_accepts_verified_gdk_content_with_store_key_only()
+    {
+        var folder = CreateGame("flat-file-empty-registration", ValidConfig);
+        WriteDeclaredExecutable(folder, "Sample.exe");
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => Success()));
+
+        var game = Assert.Single(result.Games);
+        Assert.Equal("store:9NABC123", game.Identity.Key);
+        Assert.Equal("9NABC123", game.Identity.StoreId);
+        Assert.Null(game.Identity.PackageFamilyName);
+    }
+
+    [Fact]
+    public async Task Adjacent_manifest_can_verify_gdk_content_when_declared_executable_is_not_visible()
+    {
+        var folder = CreateGame("flat-file-manifest", ValidConfig);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(folder.ConfigPath)!, "appxmanifest.xml"), "<Package />");
+
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => Success()));
+
+        var game = Assert.Single(result.Games);
+        Assert.Equal("store:9NABC123", game.Identity.Key);
+        Assert.Null(game.Identity.PackageFamilyName);
+    }
+
+    [Fact]
+    public async Task Different_registered_location_uses_verified_gdk_fallback_without_attaching_package_family()
+    {
+        var folder = CreateGame("flat-file-mismatched-registration", ValidConfig);
+        WriteDeclaredExecutable(folder, "Sample.exe");
+        var unrelatedRoot = Path.Combine(_directory, "other-install");
+        Directory.CreateDirectory(unrelatedRoot);
+        var package = Package("Sample_1.0.0.0_x64__test", "Unrelated_family", unrelatedRoot);
+
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => Success(package)));
+
+        var game = Assert.Single(result.Games);
+        Assert.Equal("store:9NABC123", game.Identity.Key);
+        Assert.Null(game.Identity.PackageFamilyName);
+    }
+
+    [Fact]
+    public async Task Different_registered_location_without_local_artifact_is_still_skipped()
+    {
+        var folder = CreateGame("different-location-without-artifact", ValidConfig);
+        var package = Package("Sample_1.0.0.0_x64__test", "Sample_family", Path.Combine(_directory, "other-install"));
+
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => Success(package)));
+
+        Assert.Empty(result.Games);
+        Assert.Equal(1, result.SkippedGameCount);
+    }
+    [Fact]
+    public async Task No_store_id_never_uses_flat_file_fallback_without_exact_registered_path()
+    {
+        var config = ValidConfig.Replace("<StoreId>9NABC123</StoreId>", string.Empty, StringComparison.Ordinal);
+        var emptyRegistrationFolder = CreateGame("no-store-empty-registration", config);
+        var differentPathFolder = CreateGame("no-store-different-path", config);
+        WriteDeclaredExecutable(emptyRegistrationFolder, "Sample.exe");
+        WriteDeclaredExecutable(differentPathFolder, "Sample.exe");
+        var package = Package("Sample_1.0.0.0_x64__test", "Sample_family", Path.Combine(_directory, "unrelated-root"));
+
+        var result = await ScanAsync(new FakeGameFolderSource([emptyRegistrationFolder, differentPathFolder]),
+            new FakePackageSource(_ => Success(package)));
+
+        Assert.Empty(result.Games);
+        Assert.Equal(2, result.SkippedGameCount);
+    }
+
+    [Fact]
+    public async Task Unsafe_executable_path_and_contradictory_package_identity_are_rejected_even_with_artifacts()
+    {
+        Directory.CreateDirectory(_directory);
+        var outsideExecutable = Path.Combine(_directory, "outside.exe");
+        File.WriteAllText(outsideExecutable, "placeholder");
+        var unsafeConfig = ValidConfig.Replace("Name=\"Sample.exe\"", "Name=\"..\\..\\outside.exe\"", StringComparison.Ordinal);
+        var unsafeFolder = CreateGame("unsafe-executable", unsafeConfig);
+        var normalizedTraversalConfig = ValidConfig.Replace("Name=\"Sample.exe\"", "Name=\"nested\\..\\Sample.exe\"", StringComparison.Ordinal);
+        var normalizedTraversalFolder = CreateGame("normalized-traversal", normalizedTraversalConfig);
+        WriteDeclaredExecutable(normalizedTraversalFolder, "Sample.exe");
+        var conflictingFolder = CreateGame("identity-conflict", ValidConfig);
+        WriteDeclaredExecutable(conflictingFolder, "Sample.exe");
+        var contradictoryPackage = new XboxInstalledPackage("Other.Game", "CN=Other", "Other_1.0_x64", "Other_family",
+            "Other", [new("Installed", conflictingFolder.GameDirectory)]);
+
+        var result = await ScanAsync(new FakeGameFolderSource([unsafeFolder, normalizedTraversalFolder, conflictingFolder]),
+            new FakePackageSource(_ => Success(contradictoryPackage)));
+
+        Assert.Empty(result.Games);
+        Assert.Equal(3, result.SkippedGameCount);
+    }
+
+    [Fact]
+    public async Task Dtd_config_is_rejected_before_targeted_package_lookup()
+    {
+        const string dtdConfig = "<!DOCTYPE Game [<!ENTITY name 'Sample.Game'>]><Game><Identity Name='&name;' Publisher='CN=Sample'/><StoreId>9NABC123</StoreId><ExecutableList><Executable Name='Sample.exe'/></ExecutableList></Game>";
+        var folder = CreateGame("dtd", dtdConfig);
+        var packageSource = new FakePackageSource(_ => Success());
+
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), packageSource);
+
+        Assert.Empty(result.Games);
+        Assert.Equal(1, result.SkippedGameCount);
+        Assert.Equal(0, packageSource.CallCount);
+    }
+
+    [Fact]
+    public async Task Duplicate_store_keys_across_discovered_folders_are_deduplicated()
+    {
+        var first = CreateGame("same-store-first", ValidConfig);
+        var second = CreateGame("same-store-second", ValidConfig);
+        WriteDeclaredExecutable(first, "Sample.exe");
+        WriteDeclaredExecutable(second, "Sample.exe");
+
+        var result = await ScanAsync(new FakeGameFolderSource([first, second]), new FakePackageSource(_ => Success()));
+
+        Assert.Equal("store:9NABC123", Assert.Single(result.Games).Identity.Key);
+    }
+
+    [Fact]
+    public async Task Successful_empty_lookup_and_lookup_exception_have_distinct_diagnostics()
+    {
+        var previousLevel = AppLog.MinimumLevelOverride;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        try
+        {
+            var emptyFolder = CreateGame("diagnostic-empty", ValidConfig);
+            WriteDeclaredExecutable(emptyFolder, "Sample.exe");
+            await ScanAsync(new FakeGameFolderSource([emptyFolder]), new FakePackageSource(_ => Success()));
+
+            var noPathFolder = CreateGame("diagnostic-no-path", ValidConfig);
+            WriteDeclaredExecutable(noPathFolder, "Sample.exe");
+            var noPathPackage = new XboxInstalledPackage("Sample.Game", "CN=Sample", "Sample_1.0_x64", "Sample_family",
+                "Sample", []);
+            await ScanAsync(new FakeGameFolderSource([noPathFolder]), new FakePackageSource(_ => Success(noPathPackage)));
+
+            var differentPathFolder = CreateGame("diagnostic-different-path", ValidConfig);
+            WriteDeclaredExecutable(differentPathFolder, "Sample.exe");
+            var differentPathPackage = Package("Sample_1.0_x64", "Sample_family", Path.Combine(_directory, "elsewhere"));
+            await ScanAsync(new FakeGameFolderSource([differentPathFolder]), new FakePackageSource(_ => Success(differentPathPackage)));
+
+            var conflictFolder = CreateGame("diagnostic-conflict", ValidConfig);
+            WriteDeclaredExecutable(conflictFolder, "Sample.exe");
+            var conflictingPackage = new XboxInstalledPackage("Other.Game", "CN=Other", "Other_1.0_x64", "Other_family",
+                "Other", [new("Installed", conflictFolder.GameDirectory)]);
+            await ScanAsync(new FakeGameFolderSource([conflictFolder]), new FakePackageSource(_ => Success(conflictingPackage)));
+
+            var failedFolder = CreateGame("diagnostic-failure", ValidConfig);
+            var failedLookup = new XboxInstalledPackageEnumeration([], false, true, "Package lookup unavailable.");
+            await ScanAsync(new FakeGameFolderSource([failedFolder]), new FakePackageSource(_ => failedLookup));
+            AppLog.DrainForTests();
+            var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+
+            Assert.Contains("Reason=TargetLookupReturnedZeroPackages", log, StringComparison.Ordinal);
+            Assert.Contains("Reason=MatchingIdentityHasZeroOrUnavailablePaths", log, StringComparison.Ordinal);
+            Assert.Contains("Reason=MatchingIdentityHasDifferentRegisteredLocations", log, StringComparison.Ordinal);
+            Assert.Contains("Reason=ContradictoryPackageIdentity", log, StringComparison.Ordinal);
+            Assert.Contains("Action=AcceptStoreIdFallback", log, StringComparison.Ordinal);
+            Assert.Contains("Action=Reject", log, StringComparison.Ordinal);
+            Assert.Contains("Targeted package lookup failed; retaining the existing Store ID identity.", log, StringComparison.Ordinal);
+            Assert.Contains("TargetedPackageLookupFailureCount=1", log, StringComparison.Ordinal);
+        }
+        finally
+        {
+            AppLog.MinimumLevelOverride = previousLevel;
+        }
+    }
+
+    [Fact]
     public async Task Targeted_package_lookup_failure_keeps_existing_store_key_without_inventing_family_key()
     {
         var folder = CreateGame("lookup-failure", ValidConfig);
@@ -202,6 +371,7 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     public async Task Package_name_and_publisher_must_match_the_config_identity()
     {
         var folder = CreateGame("mismatched", ValidConfig);
+        WriteDeclaredExecutable(folder, "Sample.exe");
         var package = new XboxInstalledPackage("Other.Game", "CN=Other", "Other_1.0_x64", "Other_family",
             "Other", [new("Installed", folder.GameDirectory)]);
         var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => Success(package)));
@@ -314,6 +484,14 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
         var configPath = Path.Combine(contentDirectory, "MicrosoftGame.config");
         File.WriteAllText(configPath, config);
         return new(gameDirectory, configPath);
+    }
+
+    private static void WriteDeclaredExecutable(XboxInstalledGameFolder folder, string executableName)
+    {
+        var contentDirectory = Path.GetDirectoryName(folder.ConfigPath)!;
+        var executable = Path.Combine(contentDirectory, executableName.Replace('\\', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, "test placeholder");
     }
 
     private static XboxInstalledPackage Package(string fullName, string familyName, string rootPath) =>
