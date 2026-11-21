@@ -239,6 +239,42 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
+    // A Steam AppID is an optimization hint, not an active Profile snapshot. Keep it separate from
+    // the visible-only page path and serialize it with commands on the existing gates.
+    internal async Task<bool> SendSteamArtworkPrewarmAsync(uint appId, CancellationToken token = default)
+    {
+        lock (_sync)
+        {
+            if (!_readyState || _state != OverlayState.Hidden) return false;
+        }
+
+        await _commandGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            NamedPipeServerStream? pipe;
+            lock (_sync)
+            {
+                if (!_readyState)
+                    return false;
+                if (_state != OverlayState.Hidden)
+                    return false;
+                pipe = _activePipe;
+            }
+            if (pipe is null) return false;
+
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.SteamArtworkPrewarm, SteamArtworkAppId: appId),
+                _writeGate, linked.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
+        {
+            return false;
+        }
+        finally { _commandGate.Release(); }
+    }
+
     // ClawHUD is the only feature snapshot also delivered to a Ready hidden Overlay, so its
     // persisted settings can establish the next Show's geometry before the first visible frame.
     internal async Task<bool> SendClawHudStateAsync(FrontendClawHudSnapshot state, CancellationToken token = default)
@@ -495,7 +531,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         // SendCommandAsync write interleave 4-byte prefixes and payloads on the same byte stream.
         var hello = await OverlayWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false);
         if (hello.Kind != OverlayWireMessageKind.Handshake || hello.ProtocolVersion != OverlayTransportProtocol.CurrentVersion ||
-            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(hello) || OverlayProductionControlsWireValidation.HasPayload(hello))
+            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(hello) || OverlayProductionControlsWireValidation.HasPayload(hello)
+            || OverlaySteamArtworkWireValidation.HasPayload(hello))
         {
             await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProtocolError, Error: "Overlay protocol version mismatch."), _writeGate, connection.Token).ConfigureAwait(false);
             return;
@@ -511,6 +548,10 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
             var message = await OverlayWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false);
             if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                 throw new FrontendProtocolException("Invalid Overlay state message.");
+            if (OverlaySteamArtworkWireValidation.HasPayload(message) && !OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message))
+                throw new FrontendProtocolException("Invalid Overlay Steam artwork prewarm hint.");
+            if (message.Kind == OverlayWireMessageKind.SteamArtworkPrewarm)
+                throw new FrontendProtocolException("Steam artwork prewarm hints are Runtime-to-Overlay only.");
             if (OverlayProductionControlsWireValidation.HasPayload(message) && message.Kind is not (
                     OverlayWireMessageKind.ControllerLedMutationRequest or OverlayWireMessageKind.ControllerLedMutationResult
                     or OverlayWireMessageKind.CurrentPowerSourceMutationRequest or OverlayWireMessageKind.CurrentPowerSourceMutationResult

@@ -119,7 +119,7 @@ public partial class App : Application
             OverlayLog.Info("Transport", "Overlay command loop starting.");
             await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync,
                 HandleQuickSettingsPageAsync, HandleClawHudAsync, HandleShortcutStateAsync,
-                HandleBackButtonMappingStateAsync).ConfigureAwait(false);
+                HandleBackButtonMappingStateAsync, HandleSteamArtworkPrewarm).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -274,6 +274,23 @@ public partial class App : Application
         }))
             completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for M1 / M2 mapping application."));
         return completion.Task;
+    }
+
+    // The pipe reader only enqueues this optimization hint. Steam path lookup and WinUI bitmap
+    // decoding run on their existing background/UI paths and cannot delay a following Show command.
+    private void HandleSteamArtworkPrewarm(uint appId)
+    {
+        if (_dispatcherQueue?.TryEnqueue(() =>
+        {
+            try { _window?.PrewarmSteamArtwork(appId); }
+            catch (Exception exception)
+            {
+                OverlayLog.Debug("ProfileArtwork", "Steam artwork prewarm failed; visible fallback remains available.",
+                    ("AppId", appId), ("ExceptionType", exception.GetType().Name));
+            }
+        }) != true)
+            OverlayLog.Debug("ProfileArtwork", "Steam artwork prewarm hint was dropped because the Overlay dispatcher is unavailable.",
+                ("AppId", appId));
     }
 
     private void OnFrontendSettingsStateReceived(FrontendSettingsSnapshot settings, bool ledAvailable, bool settingsAvailable)

@@ -440,3 +440,20 @@ internal static class OverlayDisplayScaleWireValidation
         && message.Kind is OverlayWireMessageKind.DisplayScaleAppliedTo100 or OverlayWireMessageKind.DisplayScaleRestored
         && message == new OverlayWireMessage(OverlayTransportProtocol.CurrentVersion, message.Kind);
 }
+
+internal static class OverlaySteamArtworkWireValidation
+{
+    internal static bool HasPayload(OverlayWireMessage message) => message.SteamArtworkAppId is not null;
+
+    internal static bool IsValidPrewarmHint(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.SteamArtworkPrewarm
+        && message.SteamArtworkAppId is not null
+        && message.Command is null && message.Navigation is null && message.State is null && message.Error is null
+        && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null
+        && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null
+        && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null
+        && !OverlayShortcutWireValidation.HasShortcutPayload(message)
+        && !OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message)
+        && !OverlayProductionControlsWireValidation.HasPayload(message);
+}

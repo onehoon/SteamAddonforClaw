@@ -45,13 +45,44 @@ public sealed class OverlayWarmupStartupOrderTests
             controllerStartup, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Steam_artwork_hints_replay_runtime_authority_without_joining_startup_or_visibility_paths()
+    {
+        var host = HostSource();
+        var controller = File.ReadAllText(Path.Combine(RepositoryRoot(), "src/SteamInputAddonforClaw/Lifecycle/OverlayProcessController.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var actualAppIdChanged = Method(host, "private void OnActualRunningAppIdChanged(uint appId)", "private void OnActiveXboxGameChanged(");
+        var xboxChanged = Method(host, "private void OnActiveXboxGameChanged(ActiveXboxGame? activeGame)", "private void RefreshVisibleOverlayForActiveTargetChange()");
+        var publish = Method(controller, "private async Task PublishCurrentSteamArtworkHintAsync()", "private void OnNoRunningGameProfileRecheckRequested(");
+        var startCore = Method(controller, "private async Task<bool> StartCoreAsync(", "private async Task PublishCurrentSteamArtworkHintAsync()");
+        var visibility = Method(controller, "private async Task<bool> SetVisibilityAsync(", "// OQ4 section 10:");
+
+        Assert.Contains("BindSteamArtworkPrewarmAuthority(() => _runtimeHost?.ActualRunningAppId ?? 0)", host, StringComparison.Ordinal);
+        Assert.Contains("_overlayController.NotifySteamArtworkTargetChanged();", actualAppIdChanged, StringComparison.Ordinal);
+        Assert.Contains("_overlayController.NotifySteamArtworkTargetChanged();", xboxChanged, StringComparison.Ordinal);
+        Assert.DoesNotContain("await _overlayController.NotifySteamArtworkTargetChanged()", host, StringComparison.Ordinal);
+        Assert.Contains("NotifySteamArtworkTargetChanged();", startCore, StringComparison.Ordinal);
+        Assert.Contains("if (_stopping) return;", publish, StringComparison.Ordinal);
+        Assert.Contains("if (visible)", publish, StringComparison.Ordinal);
+        Assert.Contains("server.State != OverlayState.Hidden", publish, StringComparison.Ordinal);
+        Assert.Contains("captureAppId?.Invoke()", publish, StringComparison.Ordinal);
+        Assert.Contains("SendSteamArtworkPrewarmAsync(appId)", publish, StringComparison.Ordinal);
+        Assert.Contains("else\n                NotifySteamArtworkTargetChanged();", visibility, StringComparison.Ordinal);
+        Assert.DoesNotContain("SteamGameArtworkResolver", controller, StringComparison.Ordinal);
+    }
+
     private static string HostSource()
+    {
+        return File.ReadAllText(Path.Combine(RepositoryRoot(), "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+    }
+
+    private static string RepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
             directory = directory.Parent;
-        return File.ReadAllText(Path.Combine(directory!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"))
-            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        return directory!.FullName;
     }
 
     private static string Method(string source, string startSignature, string endSignature)

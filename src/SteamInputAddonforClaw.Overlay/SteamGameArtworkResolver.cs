@@ -28,12 +28,20 @@ internal static class SteamGameArtworkResolver
         if (appId is null)
             return [];
 
+        return ResolveArtworkCandidates(appId.Value);
+    }
+
+    internal static IReadOnlyList<string> ResolveArtworkCandidates(uint appId)
+    {
+        if (appId == 0)
+            return [];
+
         var steamRoot = LocateSteamRoot();
         if (steamRoot is null)
             return [];
 
         var accountId = ResolveCurrentSteamAccountId(steamRoot);
-        return ResolveArtworkCandidates(steamRoot, appId.Value, accountId);
+        return ResolveArtworkCandidates(steamRoot, appId, accountId);
     }
 
     internal static IReadOnlyList<string> ResolveArtworkCandidates(

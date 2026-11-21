@@ -10,9 +10,9 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayShortcutTransportTests
 {
     [Fact]
-    public void Overlay_protocol_is_v13_and_rejects_a_v12_peer()
+    public void Overlay_protocol_is_v25_and_rejects_a_v12_peer()
     {
-        Assert.Equal(24, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(25, OverlayTransportProtocol.CurrentVersion);
     }
 
     [Fact]

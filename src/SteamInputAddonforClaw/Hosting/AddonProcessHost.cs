@@ -898,6 +898,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             mutateSettings: MutateOverlayFrontendSettingsAsync,
             captureVibration: token => _frontendControl!.CaptureControllerVibrationStrengthAsync(token),
             mutateVibration: MutateOverlayControllerVibrationAsync);
+        _overlayController.BindSteamArtworkPrewarmAuthority(() => _runtimeHost?.ActualRunningAppId ?? 0);
         // SF-V2-02 section 17: refresh a currently visible/captured Overlay on ordinary Runtime
         // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
         // scheduled once shutdown admission closes.
@@ -4127,6 +4128,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         ReconcileEffectiveBackButtonMapping("RunningAppIdChanged");
         ReconcileEffectiveGameProfile("ActualRunningAppIdChanged");
         RefreshVisibleOverlayForActiveTargetChange();
+        _overlayController.NotifySteamArtworkTargetChanged();
     }
 
     private void OnActiveXboxGameChanged(ActiveXboxGame? activeGame)
@@ -4139,6 +4141,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             () => ReconcileEffectiveBackButtonMapping("XboxActiveGameChanged"),
             () => ReconcileEffectiveGameProfile("ActiveXboxGameChanged"));
         RefreshVisibleOverlayForActiveTargetChange();
+        _overlayController.NotifySteamArtworkTargetChanged();
     }
 
     private void RefreshVisibleOverlayForActiveTargetChange()

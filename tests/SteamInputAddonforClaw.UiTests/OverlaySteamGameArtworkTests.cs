@@ -211,6 +211,83 @@ public sealed class OverlaySteamGameArtworkTests
         Assert.Null(OverlayWindow.ProfileArtworkDecodePixelWidth(500, 0));
     }
 
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    public void Hidden_geometry_predecode_matches_the_first_visible_decode_key(double rasterizationScale)
+    {
+        var profileWidth = OverlayWindow.ProfileArtworkWidthFromConfiguredWindow(658, rasterizationScale);
+        Assert.NotNull(profileWidth);
+        var decodePixelWidth = OverlayWindow.ProfileArtworkDecodePixelWidth(profileWidth.Value, rasterizationScale);
+
+        Assert.Equal(588, decodePixelWidth);
+        Assert.True(OverlayWindow.IsProfileArtworkCacheCompatible(
+            AppId, decodePixelWidth!.Value, rasterizationScale,
+            AppId, OverlayWindow.ProfileArtworkDecodePixelWidth(profileWidth.Value, rasterizationScale)!.Value,
+            rasterizationScale));
+        Assert.Null(OverlayWindow.ProfileArtworkWidthFromConfiguredWindow(0, rasterizationScale));
+        Assert.Null(OverlayWindow.ProfileArtworkWidthFromConfiguredWindow(658, double.NaN));
+    }
+
+    [Fact]
+    public void Stale_or_authoritatively_mismatched_prewarm_cannot_replace_the_current_game()
+    {
+        Assert.True(OverlayWindow.IsProfileArtworkPrewarmIdentityCurrent(570, 570, false, false, null));
+        Assert.True(OverlayWindow.IsProfileArtworkPrewarmIdentityCurrent(570, 570, true, false, null));
+        Assert.True(OverlayWindow.IsProfileArtworkPrewarmIdentityCurrent(570, 570, true, true, 570));
+        Assert.False(OverlayWindow.IsProfileArtworkPrewarmIdentityCurrent(570, 571, false, false, null));
+        Assert.False(OverlayWindow.IsProfileArtworkPrewarmIdentityCurrent(570, 570, true, true, 571));
+        Assert.False(OverlayWindow.IsProfileArtworkPrewarmIdentityCurrent(570, 570, true, true, null));
+    }
+
+    [Fact]
+    public void App_id_prewarm_uses_existing_candidate_priority_and_preserves_matching_work_across_show()
+    {
+        using var tree = new SteamTree();
+        tree.WriteManifest(AppId);
+        var grid = Path.Combine(tree.Root, "userdata", "1", "config", "grid");
+        var custom = tree.WriteArtwork(Path.Combine(grid, $"{AppId}.png"));
+        var library = tree.WriteArtwork(Path.Combine(tree.Root, "appcache", "librarycache", AppId.ToString(), "library_header.jpg"));
+        var expected = new[] { custom, library };
+        Assert.Equal(expected, SteamGameArtworkResolver.ResolveArtworkCandidates(tree.Root, AppId, 1));
+        Assert.Equal(expected, SteamGameArtworkResolver.ResolveArtworkCandidates(tree.Root, SteamPage(AppId), 1));
+
+        var resolver = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "SteamGameArtworkResolver.cs"));
+        var appIdLookup = ExtractMethod(resolver, "internal static IReadOnlyList<string> ResolveArtworkCandidates(uint appId)");
+        var app = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs"));
+        var prewarmDispatch = ExtractMethod(app, "private void HandleSteamArtworkPrewarm(uint appId)");
+        var profile = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
+        var prewarm = ExtractMethod(profile, "internal void PrewarmSteamArtwork(uint appId)");
+        var ensurePrewarm = ExtractMethod(profile, "private void ReevaluateHiddenProfileArtworkPrewarm()");
+        var hide = ExtractMethod(profile, "private void HideProfileArtworkPreservingCache()");
+        var visibleUpdate = ExtractMethod(profile, "private void UpdateProfileArtwork(QuickSettingsPageSnapshot? page)");
+        var worker = ExtractMethod(profile, "private async Task ResolveAndPrewarmProfileArtworkAsync(");
+        var currentRequest = ExtractMethod(profile, "private bool IsCurrentProfileArtworkPrewarmRequest(");
+
+        Assert.Contains("LocateSteamRoot()", appIdLookup, StringComparison.Ordinal);
+        Assert.Contains("ResolveCurrentSteamAccountId(steamRoot)", appIdLookup, StringComparison.Ordinal);
+        Assert.Contains("ResolveArtworkCandidates(steamRoot, appId, accountId)", appIdLookup, StringComparison.Ordinal);
+        Assert.Contains("_dispatcherQueue?.TryEnqueue(() =>", prewarmDispatch, StringComparison.Ordinal);
+        Assert.Contains("_window?.PrewarmSteamArtwork(appId)", prewarmDispatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("await", prewarmDispatch, StringComparison.Ordinal);
+        Assert.Contains("if (_isVisible)", prewarm, StringComparison.Ordinal);
+        Assert.Contains("if (appId == 0)", prewarm, StringComparison.Ordinal);
+        Assert.Contains("ReevaluateHiddenProfileArtworkPrewarm();", prewarm, StringComparison.Ordinal);
+        Assert.Contains("if (_isVisible || _profileArtworkPrewarmAppId is not { } appId)", ensurePrewarm, StringComparison.Ordinal);
+        Assert.Contains("Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(appId)", worker, StringComparison.Ordinal);
+        Assert.Contains("TryLoadProfileArtworkAsync(paths, decodePixelWidth, cancellationToken)", worker, StringComparison.Ordinal);
+        Assert.Contains("_profileArtworkCachedBitmap = bitmap;", worker, StringComparison.Ordinal);
+        Assert.Contains("IsCurrentProfileArtworkTarget(appId)", worker, StringComparison.Ordinal);
+        Assert.Contains("IsProfileArtworkPrewarmIdentityCurrent(appId, _profileArtworkPrewarmAppId", currentRequest, StringComparison.Ordinal);
+        Assert.Contains("var keepPrewarm = _profileArtworkRequestIsPrewarm", hide, StringComparison.Ordinal);
+        Assert.Contains("_profileArtworkPrewarmAppId == _profileArtworkRequestedAppId", hide, StringComparison.Ordinal);
+        Assert.Contains("_profileArtworkPrewarmAppId == appId", visibleUpdate, StringComparison.Ordinal);
+        Assert.Contains("_profileArtworkPrewarmAppId = null;", ExtractMethod(profile, "private void ClearProfileArtwork()"), StringComparison.Ordinal);
+        Assert.Contains("ProfileArtworkMaximumAttempts = 2", profile, StringComparison.Ordinal);
+        Assert.Contains("Task.Delay(ProfileArtworkRetryDelay, cancellationToken)", ExtractMethod(profile, "private async Task ResolveAndApplyProfileArtworkAsync("), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Xbox_profile_target_uses_exact_store_keys_and_a_non_cropped_sixteen_to_nine_hero()
     {
@@ -285,14 +362,20 @@ public sealed class OverlaySteamGameArtworkTests
         var explicitWidth = currentKey.IndexOf("var explicitWidth = ProfileArtworkHost.Width;", StringComparison.Ordinal);
         var measuredFallback = currentKey.IndexOf(": ProfileArtworkHost.ActualWidth;", StringComparison.Ordinal);
         Assert.True(explicitWidth >= 0 && measuredFallback > explicitWidth);
-        Assert.Contains("xamlRoot.RasterizationScale", currentKey, StringComparison.Ordinal);
+        Assert.Contains("ProfileArtworkHost.XamlRoot?.RasterizationScale", currentKey, StringComparison.Ordinal);
+        Assert.Contains("ProfileArtworkWidthFromConfiguredWindow(_lastConfiguredOverlayWidthPx, scale)", currentKey, StringComparison.Ordinal);
         Assert.Contains("ApplyProfileArtworkLayout(e.NewSize.Width, IsXboxProfileTarget(CurrentProfileArtworkPage()));", sizeChanged, StringComparison.Ordinal);
+        Assert.Contains("ReevaluateHiddenProfileArtworkPrewarm();", sizeChanged, StringComparison.Ordinal);
         Assert.Contains("ShouldUpdateProfileArtworkSize(ProfileArtworkHost.Width, ProfileArtworkHost.Height, width, height)", applyLayout, StringComparison.Ordinal);
         var widthAssignment = applyLayout.IndexOf("ProfileArtworkHost.Width = width;", StringComparison.Ordinal);
         var imageStretch = applyLayout.IndexOf("ProfileArtworkImage.Stretch = stretch;", StringComparison.Ordinal);
         Assert.True(widthAssignment >= 0 && imageStretch > widthAssignment);
         Assert.Contains("ReevaluateProfileArtworkForCurrentPage();", sizeChanged, StringComparison.Ordinal);
-        Assert.Contains("ReevaluateProfileArtworkForCurrentPage();", sizeChanged, StringComparison.Ordinal);
+        var tabRailColumn = xaml.Descendants().Single(element => element.Name.LocalName == "ColumnDefinition"
+            && Attribute(element, "Width") == "52");
+        var scale = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayUiScale.cs"));
+        Assert.NotNull(tabRailColumn);
+        Assert.Contains("internal const double TabRailWidthDip = 52.0;", scale, StringComparison.Ordinal);
         Assert.Contains("ObserveProfileArtworkXamlRoot(ProfileArtworkHost.XamlRoot);", loaded, StringComparison.Ordinal);
         Assert.Contains("_profileArtworkObservedXamlRoot.Changed += ProfileArtworkXamlRoot_Changed;", profile, StringComparison.Ordinal);
         Assert.Contains("ReevaluateProfileArtworkForCurrentPage();", profile, StringComparison.Ordinal);

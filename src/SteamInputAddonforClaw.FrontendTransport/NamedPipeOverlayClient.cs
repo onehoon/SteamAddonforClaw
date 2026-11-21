@@ -112,7 +112,19 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         Func<FrontendShortcutDashboardSnapshot, Task>? shortcutStateHandler,
         Func<OverlayBackButtonMappingState, Task>? backButtonMappingHandler,
         CancellationToken token = default)
+        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, quickSettingsPageHandler,
+            clawHudHandler, shortcutStateHandler, backButtonMappingHandler, null, token).ConfigureAwait(false);
 
+    internal async Task RunAsync(
+        Func<OverlayCommand, Task> commandHandler,
+        Func<OverlayNavigationAction, Task>? navigationHandler,
+        Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
+        Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
+        Func<FrontendClawHudSnapshot, Task>? clawHudHandler,
+        Func<FrontendShortcutDashboardSnapshot, Task>? shortcutStateHandler,
+        Func<OverlayBackButtonMappingState, Task>? backButtonMappingHandler,
+        Action<uint>? steamArtworkPrewarmHandler,
+        CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -122,13 +134,15 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.Handshake), _writeGate, linked.Token).ConfigureAwait(false);
         var accepted = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
         if (accepted.Kind != OverlayWireMessageKind.HandshakeAccepted || accepted.ProtocolVersion != OverlayTransportProtocol.CurrentVersion ||
-            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(accepted) || OverlayProductionControlsWireValidation.HasPayload(accepted))
+            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(accepted) || OverlayProductionControlsWireValidation.HasPayload(accepted)
+            || OverlaySteamArtworkWireValidation.HasPayload(accepted))
             throw new FrontendProtocolException("Overlay handshake was rejected.");
 
         // OQ5-UI-09 section 6: apply the mandatory initial authoritative order BEFORE reporting Ready.
         var initial = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
         if (initial.ProtocolVersion != OverlayTransportProtocol.CurrentVersion || initial.Kind != OverlayWireMessageKind.TabOrderState ||
-            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(initial) || OverlayProductionControlsWireValidation.HasPayload(initial))
+            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(initial) || OverlayProductionControlsWireValidation.HasPayload(initial)
+            || OverlaySteamArtworkWireValidation.HasPayload(initial))
             throw new FrontendProtocolException("Overlay did not receive an initial tab-order state.");
         var initialOrder = ValidateTabOrderMessage(initial);
         if (tabOrderHandler is not null)
@@ -142,6 +156,15 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 var message = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
                 if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                     throw new FrontendProtocolException("Invalid Overlay message.");
+                if (OverlaySteamArtworkWireValidation.HasPayload(message) && !OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message))
+                    throw new FrontendProtocolException("Invalid Overlay Steam artwork prewarm hint.");
+                if (message.Kind == OverlayWireMessageKind.SteamArtworkPrewarm)
+                {
+                    if (!OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message))
+                        throw new FrontendProtocolException("Invalid Overlay Steam artwork prewarm hint.");
+                    steamArtworkPrewarmHandler?.Invoke(message.SteamArtworkAppId!.Value);
+                    continue;
+                }
                 if (OverlayProductionControlsWireValidation.HasPayload(message) && message.Kind is not (
                         OverlayWireMessageKind.FrontendSettingsState or OverlayWireMessageKind.ControllerLedMutationResult
                         or OverlayWireMessageKind.CurrentPowerSourceMutationResult or OverlayWireMessageKind.ControllerForSteamMutationResult

@@ -39,7 +39,7 @@ public sealed class OverlayTransportTests
     [Fact]
     public void Active_profile_show_remains_a_narrow_overlay_command()
     {
-        Assert.Equal(24, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(25, OverlayTransportProtocol.CurrentVersion);
         Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
@@ -54,9 +54,9 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
-    public async Task Display_scale_notifications_are_payload_free_and_version_24_only()
+    public async Task Display_scale_notifications_remain_payload_free_under_protocol_version_25()
     {
-        Assert.Equal(24, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(25, OverlayTransportProtocol.CurrentVersion);
 
         foreach (var kind in new[]
         {
@@ -79,9 +79,86 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Steam_artwork_prewarm_is_a_typed_exclusive_hint_and_zero_clears_it()
+    {
+        Assert.Equal(25, OverlayTransportProtocol.CurrentVersion);
+        var message = new OverlayWireMessage(OverlayTransportProtocol.CurrentVersion,
+            OverlayWireMessageKind.SteamArtworkPrewarm, SteamArtworkAppId: 570);
+        var roundTrip = await RoundTripAsync(message);
+
+        Assert.Equal(message, roundTrip);
+        Assert.True(OverlaySteamArtworkWireValidation.IsValidPrewarmHint(roundTrip));
+        Assert.True(OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message with { SteamArtworkAppId = 0 }));
+        Assert.False(OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message with { SteamArtworkAppId = null }));
+        Assert.False(OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message with { ProtocolVersion = 24 }));
+        Assert.False(OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message with { Command = OverlayCommand.Show }));
+        Assert.False(OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message with { State = OverlayState.Hidden }));
+        Assert.False(OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message with
+        {
+            QuickSettingsPage = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "No game"),
+        }));
+        Assert.False(OverlaySteamArtworkWireValidation.IsValidPrewarmHint(message with
+        {
+            Kind = OverlayWireMessageKind.Navigation,
+            Navigation = OverlayNavigationAction.NavigateDown,
+        }));
+    }
+
+    [Fact]
+    public async Task Ready_hidden_overlay_receives_prewarm_without_blocking_show_or_enabling_hidden_profile_pages()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+
+        var prewarmReceived = new TaskCompletionSource<uint>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var showReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var decodeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var decodeGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var run = client.RunAsync(command =>
+        {
+            if (command is OverlayCommand.Show or OverlayCommand.ShowActiveProfile)
+                showReceived.TrySetResult();
+            return Task.CompletedTask;
+        }, null, null, null, null, null, null, appId =>
+        {
+            prewarmReceived.TrySetResult(appId);
+            _ = Task.Run(async () =>
+            {
+                decodeStarted.TrySetResult();
+                await decodeGate.Task;
+            });
+        });
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(OverlayState.Hidden, server.State);
+        Assert.False(await server.SendQuickSettingsPageStateAsync(
+            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Hidden page must remain unavailable.")));
+        Assert.True(await server.SendSteamArtworkPrewarmAsync(570));
+        Assert.Equal(570u, await prewarmReceived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        await decodeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        await showReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(decodeGate.Task.IsCompleted);
+        Assert.Equal(OverlayState.Visible, server.State);
+        Assert.False(await server.SendSteamArtworkPrewarmAsync(571));
+        Assert.True(await server.SendQuickSettingsPageStateAsync(
+            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Visible page is permitted.")));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
+        Assert.False(await server.SendQuickSettingsPageStateAsync(
+            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Hidden page remains unavailable.")));
+        decodeGate.TrySetResult();
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Repeat_only_navigation_actions_round_trip_and_unknown_navigation_is_rejected()
     {
-        Assert.Equal(24, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(25, OverlayTransportProtocol.CurrentVersion);
         Assert.Equal(95, FrontendTransportProtocol.CurrentVersion);
 
         foreach (var action in new[]
@@ -287,7 +364,7 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
-    public async Task V23_peer_is_rejected_by_the_overlay_server()
+    public async Task V24_peer_is_rejected_by_the_overlay_server()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
         await using var server = new NamedPipeOverlayServer(pipeName);
@@ -295,7 +372,7 @@ public sealed class OverlayTransportTests
         await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         await client.ConnectAsync(5000);
         using var writeGate = new SemaphoreSlim(1, 1);
-        await OverlayWireCodec.WriteAsync(client, new(23, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(client, new(24, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
         var response = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
 
         Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);
@@ -407,7 +484,7 @@ public sealed class OverlayTransportTests
         Assert.Equal(OverlayState.Ready, ready.State);
 
         var payload = System.Text.Encoding.UTF8.GetBytes(
-            "{\"ProtocolVersion\":24,\"Kind\":\"Navigation\",\"Navigation\":99}");
+            "{\"ProtocolVersion\":25,\"Kind\":\"Navigation\",\"Navigation\":99}");
         var prefix = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(prefix, payload.Length);
         await pipe.WriteAsync(prefix);
@@ -440,7 +517,7 @@ public sealed class OverlayTransportTests
         Assert.Equal(OverlayState.Ready, ready.State);
 
         var payload = System.Text.Encoding.UTF8.GetBytes(
-            "{\"ProtocolVersion\":24,\"Kind\":\"DisplayScaleAppliedTo100\",\"Error\":\"unexpected\"}");
+            "{\"ProtocolVersion\":25,\"Kind\":\"DisplayScaleAppliedTo100\",\"Error\":\"unexpected\"}");
         var prefix = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(prefix, payload.Length);
         await pipe.WriteAsync(prefix);
