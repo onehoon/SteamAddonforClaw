@@ -565,7 +565,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
         var reset = ExtractMethod(shell, "private void ResetUiForShow()");
-        var show = ExtractMethod(presentation, "internal async Task ShowForPocAsync()");
+        var show = ExtractMethod(presentation, "internal Task ShowForPocAsync()");
         var dispatch = ExtractMethod(app, "private Task HandleCommandAsync(OverlayCommand command)");
 
         Assert.Contains("PrepareActiveProfileFirstShow();", reset);
@@ -1210,7 +1210,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
         var window = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
-        var show = SliceMethod(presentation, "internal async Task ShowForPocAsync()", "internal Task HideForPocAsync()");
+        var show = SliceMethod(presentation, "internal Task ShowForPocAsync()", "internal Task HideForPocAsync()");
         var hide = SliceMethod(presentation, "internal Task HideForPocAsync()", "private void ConfigureWindow(bool alreadyVisible = false)");
         var clock = SliceMethod(presentation, "private void UpdateRailClockText()", "private void LogSurfaceBounds(");
 

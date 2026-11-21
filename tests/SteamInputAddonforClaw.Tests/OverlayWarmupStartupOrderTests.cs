@@ -71,6 +71,30 @@ public sealed class OverlayWarmupStartupOrderTests
         Assert.DoesNotContain("SteamGameArtworkResolver", controller, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Shortcut_tiles_are_seeded_after_overlay_ready_without_waiting_or_prefetching_settings_pages()
+    {
+        var controller = File.ReadAllText(Path.Combine(RepositoryRoot(), "src/SteamInputAddonforClaw/Lifecycle/OverlayProcessController.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var startCore = Method(controller, "private async Task<bool> StartCoreAsync(", "private async Task PublishCurrentSteamArtworkHintAsync()");
+        var refresh = Method(controller, "internal async Task RefreshShortcutAsync()", "internal async Task RefreshBackButtonMappingAsync()");
+        var server = File.ReadAllText(Path.Combine(RepositoryRoot(), "src/SteamInputAddonforClaw.FrontendTransport/NamedPipeOverlayServer.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var shortcutSend = Method(server, "internal async Task<bool> SendShortcutStateAsync(", "internal async Task<bool> SendBackButtonMappingStateAsync(");
+
+        var ready = startCore.IndexOf("Overlay Ready confirmed.", StringComparison.Ordinal);
+        var prewarm = startCore.IndexOf("_ = RefreshShortcutAsync();", StringComparison.Ordinal);
+        Assert.True(ready >= 0 && prewarm > ready);
+        Assert.DoesNotContain("await RefreshShortcutAsync()", startCore, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshQuickSettingsAsync", startCore, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshControllerVibrationAsync", startCore, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Hidden", refresh, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Visible", refresh, StringComparison.Ordinal);
+        Assert.Contains("server.SendShortcutStateAsync(snapshot)", refresh, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Hidden", shortcutSend, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Visible", shortcutSend, StringComparison.Ordinal);
+    }
+
     private static string HostSource()
     {
         return File.ReadAllText(Path.Combine(RepositoryRoot(), "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"))

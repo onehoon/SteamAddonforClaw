@@ -89,10 +89,27 @@ public sealed partial class OverlayWindow
             OverlayLog.Warn("Shortcut", "Ignored a malformed Shortcut dashboard snapshot.");
             return false;
         }
-        RefreshShortcutSelection(snapshot);
+        var stopwatch = Stopwatch.StartNew();
+        var reconciliation = RefreshShortcutSelection(snapshot);
         LogShortcutTileReadyIfNeeded(snapshot);
+        var tileCount = snapshot.Available ? snapshot.Tiles.Count : 0;
+        var prewarmReady = !_isVisible && IsShortcutSnapshotRendered(snapshot);
+        var mode = reconciliation.IsUnchanged ? "AlreadyReady"
+            : reconciliation.AddedTileIds.Count > 0 ? "Rebuilt"
+            : "Updated";
+        OverlayLog.Debug("Performance", "OverlayShortcutTileReconcile",
+            ("Surface", _isVisible ? "Visible" : "ReadyHidden"),
+            ("TileCount", tileCount), ("DurationMs", stopwatch.Elapsed.TotalMilliseconds),
+            ("TilePrewarmReady", prewarmReady), ("Mode", mode),
+            ("AddedTileCount", reconciliation.AddedTileIds.Count),
+            ("UpdatedTileCount", reconciliation.UpdatedTileIds.Count));
         return true;
     }
+
+    private bool IsShortcutSnapshotRendered(FrontendShortcutDashboardSnapshot snapshot) =>
+        snapshot.Available && snapshot.Tiles.Count > 0 && _shortcutGrid is not null
+        && _renderedShortcutTiles.SequenceEqual(snapshot.Tiles)
+        && _shortcutTiles.Count == snapshot.Tiles.Count;
 
     private void LogShortcutTileReadyIfNeeded(FrontendShortcutDashboardSnapshot snapshot)
     {
@@ -121,9 +138,9 @@ public sealed partial class OverlayWindow
         // The calling transport path records failures; this surface intentionally renders no status text.
     }
 
-    private void RenderShortcutSnapshot()
+    private OverlayShortcutTileReconciliation RenderShortcutSnapshot()
     {
-        if (_shortcutGrid is null) return;
+        if (_shortcutGrid is null) return new([], [], [], []);
 
         IReadOnlyList<FrontendShortcutTile> tiles = _shortcutSnapshot.Available
             ? _shortcutSnapshot.Tiles
@@ -132,7 +149,7 @@ public sealed partial class OverlayWindow
         if (reconciliation.IsUnchanged)
         {
             ApplyShortcutSelectionVisual();
-            return;
+            return reconciliation;
         }
 
         foreach (var tileId in reconciliation.RemovedTileIds)
@@ -173,6 +190,7 @@ public sealed partial class OverlayWindow
 
         _renderedShortcutTiles = tiles.ToArray();
         ApplyShortcutSelectionVisual();
+        return reconciliation;
     }
 
     private ShortcutTileControls CreateShortcutTile(FrontendShortcutTile tile, int index, bool selected)

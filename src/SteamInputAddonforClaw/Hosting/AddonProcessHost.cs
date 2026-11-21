@@ -2698,16 +2698,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         return false;
     }
 
-    // No polling: this runs only from the Runtime's StateInvalidated event. The narrow frontend
-    // settings snapshot also keeps a Ready hidden Overlay's log threshold current; other state
-    // refreshes remain gated by the existing captured and visible facts below.
+    // No polling: this runs only from the Runtime's StateInvalidated event. Frontend settings and
+    // Shortcut tiles stay warm while hidden; page and controller-feature refreshes remain gated below.
     private void OnFrontendStateInvalidatedForOverlay(object? sender, EventArgs e)
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
         _ = _overlayController.RefreshFrontendSettingsAsync();
+        // Shortcut tiles are the only feature snapshot intentionally kept warm while hidden.
+        _ = _overlayController.RefreshShortcutAsync();
         if (!_overlayCaptureActive) return;
         if (!_overlayController.IsVisible) return;
-        _ = _overlayController.RefreshShortcutAsync();
         _ = _overlayController.RefreshBackButtonMappingAsync();
         _ = _overlayController.RefreshControllerVibrationAsync();
         // Section 23: an admitted Overlay mutation already returns a fresh authoritative page; a

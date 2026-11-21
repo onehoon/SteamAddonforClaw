@@ -65,7 +65,7 @@ public sealed class OverlayShortcutRendererTests
         var shortcutTabStart = shell.IndexOf("if (selected == AddonQuickSettingsTabId.Shortcut)", StringComparison.Ordinal);
         var shortcutTabEnd = shell.IndexOf("OnProfileTabSelectionChanged", shortcutTabStart, StringComparison.Ordinal);
         var shortcutTabSelection = shell[shortcutTabStart..shortcutTabEnd];
-        var showStart = presentation.IndexOf("internal async Task ShowForPocAsync()", StringComparison.Ordinal);
+        var showStart = presentation.IndexOf("internal Task ShowForPocAsync()", StringComparison.Ordinal);
         var hideStart = presentation.IndexOf("internal Task HideForPocAsync()", showStart, StringComparison.Ordinal);
         var show = presentation[showStart..hideStart];
 
@@ -92,7 +92,7 @@ public sealed class OverlayShortcutRendererTests
         var buildStart = renderer.IndexOf("private FrameworkElement BuildShortcutPage()", StringComparison.Ordinal);
         var buildEnd = renderer.IndexOf("internal bool ApplyShortcutState(", buildStart, StringComparison.Ordinal);
         var build = renderer[buildStart..buildEnd];
-        var renderStart = renderer.IndexOf("private void RenderShortcutSnapshot()", StringComparison.Ordinal);
+        var renderStart = renderer.IndexOf("private OverlayShortcutTileReconciliation RenderShortcutSnapshot()", StringComparison.Ordinal);
         var renderEnd = renderer.IndexOf("private ShortcutTileControls CreateShortcutTile(", renderStart, StringComparison.Ordinal);
         var render = renderer[renderStart..renderEnd];
 
@@ -126,7 +126,7 @@ public sealed class OverlayShortcutRendererTests
     {
         var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
         var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
-        var refreshStart = navigation.IndexOf("private void RefreshShortcutSelection(", StringComparison.Ordinal);
+        var refreshStart = navigation.IndexOf("private OverlayShortcutTileReconciliation RefreshShortcutSelection(", StringComparison.Ordinal);
         var refreshEnd = navigation.IndexOf("private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor", refreshStart, StringComparison.Ordinal);
         var refresh = navigation[refreshStart..refreshEnd];
 

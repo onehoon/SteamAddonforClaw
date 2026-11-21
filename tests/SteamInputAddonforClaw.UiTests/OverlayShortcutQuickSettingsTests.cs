@@ -30,7 +30,7 @@ public sealed class OverlayShortcutQuickSettingsTests
         Assert.DoesNotContain("QuickSettingsPageId.Shortcut", quickSettings, StringComparison.Ordinal);
         Assert.DoesNotContain("new OverlayQuickSettingsPageBinding(\n            QuickSettingsPageId.Shortcut", quickSettings, StringComparison.Ordinal);
 
-        var tileGridStart = shortcuts.IndexOf("private void RenderShortcutSnapshot()", StringComparison.Ordinal);
+        var tileGridStart = shortcuts.IndexOf("private OverlayShortcutTileReconciliation RenderShortcutSnapshot()", StringComparison.Ordinal);
         var tileGridEnd = shortcuts.IndexOf("private ShortcutTileControls CreateShortcutTile(", tileGridStart, StringComparison.Ordinal);
         var tileRenderer = shortcuts[tileGridStart..tileGridEnd];
         Assert.Contains("OverlayShortcutTileReconciliation.Between(_renderedShortcutTiles, tiles)", tileRenderer, StringComparison.Ordinal);
@@ -213,7 +213,7 @@ public sealed class OverlayShortcutQuickSettingsTests
         var applyDevice = ExtractMethod(quickSettings, "internal string ApplyQuickSettingsPage(QuickSettingsPageSnapshot page)");
         var applyProfile = ExtractMethod(profile, "internal string ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
         var refresh = ExtractMethod(quickSettings, "private void RefreshShortcutQuickSettingsView(QuickSettingsRowId? preferredShortcutRowId)");
-        var show = ExtractMethod(presentation, "internal async Task ShowForPocAsync()");
+        var show = ExtractMethod(presentation, "internal Task ShowForPocAsync()");
         var hide = ExtractMethod(presentation, "internal Task HideForPocAsync()");
 
         Assert.Contains("_devicePageReceivedThisShow = false;", reset);
@@ -238,7 +238,8 @@ public sealed class OverlayShortcutQuickSettingsTests
         Assert.Contains("SectionReconcile", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
         Assert.Contains("FullRebuild", ExtractMethod(quickSettings, "private void RenderQuickSettingsPage("));
 
-        Assert.Contains("_showStartedTimestamp = Stopwatch.GetTimestamp();", show);
+        Assert.Contains("var showIdentity = Stopwatch.GetTimestamp();", show);
+        Assert.Contains("_showStartedTimestamp = showIdentity;", show);
         Assert.Contains("OverlayShortcutContentReady", refresh);
         Assert.Contains("Stopwatch.GetElapsedTime(_showStartedTimestamp)", refresh);
         Assert.Contains("HideProfileArtworkPreservingCache();", hide);
@@ -324,10 +325,14 @@ public sealed class OverlayShortcutQuickSettingsTests
     public void Shortcut_tile_readiness_is_measured_after_grid_apply_once_per_show()
     {
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
         var shortcuts = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
         var handler = ExtractMethod(app, "private Task HandleShortcutStateAsync(");
+        var controller = ReadSource("src", "SteamInputAddonforClaw", "Lifecycle", "OverlayProcessController.cs");
+        var showVisibility = ExtractMethod(controller, "private async Task<bool> SetVisibilityAsync(");
+        var show = ExtractMethod(presentation, "internal Task ShowForPocAsync()");
         var apply = ExtractMethod(shortcuts, "internal bool ApplyShortcutState(");
         var ready = ExtractMethod(shortcuts, "private void LogShortcutTileReadyIfNeeded(");
         var reset = ExtractMethod(shell, "private void ResetUiForShow()");
@@ -348,24 +353,47 @@ public sealed class OverlayShortcutQuickSettingsTests
         Assert.Contains("_shortcutGrid is null", ready, StringComparison.Ordinal);
         Assert.Contains("_renderedShortcutTiles.Count", ready, StringComparison.Ordinal);
         Assert.Contains("Stopwatch.GetElapsedTime(_showStartedTimestamp)", ready, StringComparison.Ordinal);
+        Assert.Contains("OverlayShortcutTileReconcile", apply, StringComparison.Ordinal);
+        Assert.Contains("ReadyHidden", apply, StringComparison.Ordinal);
+        Assert.Contains("AlreadyReady", apply, StringComparison.Ordinal);
+        Assert.Contains("OverlayShowWindowCommitted", show, StringComparison.Ordinal);
+        Assert.Contains("TilePrewarmReady", show, StringComparison.Ordinal);
+        Assert.Contains("PrewarmedTileCount", show, StringComparison.Ordinal);
+        Assert.Contains("TileRenderOnShow", show, StringComparison.Ordinal);
+        var commandSend = showVisibility.IndexOf("server.SendCommandAsync(command)", StringComparison.Ordinal);
+        var stateCommit = showVisibility.IndexOf("lock (_sync) _visible = show;", StringComparison.Ordinal);
+        var visibleAck = showVisibility.IndexOf("OverlayShowVisibleAck", StringComparison.Ordinal);
+        Assert.True(commandSend >= 0 && commandSend < stateCommit && stateCommit < visibleAck);
         Assert.Contains("_shortcutTileReadyLoggedThisShow = false;", reset, StringComparison.Ordinal);
         Assert.Contains("OverlayShortcutContentReady", quickSettings, StringComparison.Ordinal);
         Assert.Contains("_shortcutContentReadyLoggedThisShow", quickSettings, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Shortcut_show_animation_is_shorter_without_detaching_acknowledgement_or_hide()
+    public void Shortcut_show_acknowledges_visible_commit_before_animation_and_guards_old_completions()
     {
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
-        var show = ExtractMethod(presentation, "internal async Task ShowForPocAsync()");
+        var window = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+        var show = ExtractMethod(presentation, "internal Task ShowForPocAsync()");
         var hide = ExtractMethod(presentation, "internal Task HideForPocAsync()");
+        var completion = ExtractMethod(presentation, "private async Task CompleteShowAnimationAsync(");
+        var animate = ExtractMethod(presentation, "private async Task AnimateAsync(");
+        var closed = ExtractMethod(window, "Closed += (_, _) =>");
 
         Assert.Contains("ShowDuration = TimeSpan.FromMilliseconds(80)", presentation, StringComparison.Ordinal);
-        Assert.Contains("await AnimateAsync(", show, StringComparison.Ordinal);
-        Assert.Contains("if (!initialStatePrepared || !AnimationsEnabled())", show, StringComparison.Ordinal);
-        Assert.Contains("catch (Exception exception)", show, StringComparison.Ordinal);
-        Assert.Contains("TrySetVisibleVisualState();", show, StringComparison.Ordinal);
+        Assert.Contains("SetVisualState(HiddenScale, ScaledHiddenTranslateYDip(), HiddenOpacity);", show, StringComparison.Ordinal);
+        Assert.DoesNotContain("catch (Exception", show, StringComparison.Ordinal);
+        Assert.True(show.IndexOf("WindowInterop.ShowWithoutActivation(this);", StringComparison.Ordinal)
+            < show.IndexOf("_isVisible = true;", StringComparison.Ordinal));
+        Assert.Contains("_ = CompleteShowAnimationAsync(showIdentity, stopwatch);", show, StringComparison.Ordinal);
+        Assert.DoesNotContain("await AnimateAsync(", show, StringComparison.Ordinal);
+        Assert.Contains("await AnimateAsync(", completion, StringComparison.Ordinal);
+        Assert.Contains("if (!IsCurrentVisibleShow(showIdentity)) return;", completion, StringComparison.Ordinal);
+        Assert.Contains("if (!IsCurrentVisibleShow(showIdentity)) return;", animate, StringComparison.Ordinal);
         Assert.Contains("ResetUiForShow();", show, StringComparison.Ordinal);
+        Assert.Contains("StopShowAnimations();", hide, StringComparison.Ordinal);
+        Assert.Contains("_isVisible = false;", closed, StringComparison.Ordinal);
+        Assert.Contains("StopShowAnimations();", closed, StringComparison.Ordinal);
         Assert.Contains("return Task.CompletedTask", hide, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowForPocAsync();", presentation, StringComparison.Ordinal);
     }

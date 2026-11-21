@@ -32,6 +32,8 @@ public sealed partial class OverlayWindow : Window
         Closed += (_, _) =>
         {
             StopRailClockUpdates();
+            _isVisible = false;
+            StopShowAnimations();
             ObserveProfileArtworkXamlRoot(null);
             ObserveOverlayScaleRoot(null);
             ClearProfileArtwork();

@@ -5,7 +5,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayClawHudHiddenRefreshContractTests
 {
     [Fact]
-    public void ClawHud_capture_and_wire_send_are_ready_hidden_or_visible_while_other_refreshes_stay_visible_only()
+    public void Hidden_refreshes_are_limited_to_shortcut_tiles_and_existing_clawhud_geometry_state()
     {
         var root = FindRepositoryRoot();
         var controller = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw", "Lifecycle", "OverlayProcessController.cs"));
@@ -20,6 +20,8 @@ public sealed class OverlayClawHudHiddenRefreshContractTests
         var mutateClawHud = Method(host, "internal async Task<FrontendClawHudMutationResult> MutateClawHudFrontendAsync(", "internal void TestOnly_SetStartupForInitialization(");
         var clawHudStateChanged = Method(host, "private void OnClawHudStateChanged(", "private void StartBackgroundUpdate()");
         var genericInvalidation = Method(host, "private void OnFrontendStateInvalidatedForOverlay(", "private async Task<OverlayShortcutExecutionOutcome> HandleOverlayShortcutExecutionAsync(");
+        var shortcutRefresh = Method(controller, "internal async Task RefreshShortcutAsync()", "internal async Task RefreshBackButtonMappingAsync()");
+        var shortcutSend = Method(server, "internal async Task<bool> SendShortcutStateAsync(", "internal async Task<bool> SendBackButtonMappingStateAsync(");
 
         Assert.Contains("OverlayState.Hidden", clawHudRefresh, StringComparison.Ordinal);
         Assert.Contains("OverlayState.Visible", clawHudRefresh, StringComparison.Ordinal);
@@ -33,6 +35,15 @@ public sealed class OverlayClawHudHiddenRefreshContractTests
         Assert.Contains("!_overlayController.IsVisible", clawHudStateChanged, StringComparison.Ordinal);
         Assert.Contains("if (!_overlayCaptureActive) return;", genericInvalidation, StringComparison.Ordinal);
         Assert.Contains("if (!_overlayController.IsVisible) return;", genericInvalidation, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Hidden", shortcutRefresh, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Visible", shortcutRefresh, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Hidden", shortcutSend, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Visible", shortcutSend, StringComparison.Ordinal);
+        Assert.Contains("RefreshShortcutAsync()", genericInvalidation, StringComparison.Ordinal);
+        Assert.True(genericInvalidation.IndexOf("RefreshShortcutAsync()", StringComparison.Ordinal)
+            < genericInvalidation.IndexOf("if (!_overlayCaptureActive) return;", StringComparison.Ordinal));
+        Assert.Contains("OverlayState.Visible", quickSettingsRefresh, StringComparison.Ordinal);
+        Assert.Contains("OverlayState.Visible", sendQuickSettings, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

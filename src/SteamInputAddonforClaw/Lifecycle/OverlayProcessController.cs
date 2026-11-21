@@ -314,7 +314,9 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         NamedPipeOverlayServer? server;
         var capture = _captureShortcut;
         lock (_sync) server = _server;
-        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+        if (server is null || capture is null || !server.IsReady
+            || server.State is not (OverlayState.Hidden or OverlayState.Visible)) return;
+        var surfaceState = server.State;
 
         FrontendShortcutDashboardSnapshot snapshot;
         var captureStopwatch = Stopwatch.StartNew();
@@ -331,6 +333,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         AppLog.Debug("Overlay", "Shortcut dashboard snapshot captured.",
             ("Event", "OverlayShortcutCapture"), ("ElapsedMs", captureStopwatch.Elapsed.TotalMilliseconds),
             ("TileCount", snapshot.Tiles.Count), ("Available", snapshot.Available),
+            ("Surface", surfaceState == OverlayState.Hidden ? "ReadyHidden" : "Visible"),
             ("Outcome", captureFailed ? "ExceptionFallback" : snapshot.Available ? "Available" : "Unavailable"));
 
         var sendStopwatch = Stopwatch.StartNew();
@@ -339,6 +342,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             var accepted = await server.SendShortcutStateAsync(snapshot).ConfigureAwait(false);
             AppLog.Debug("Overlay", "Shortcut dashboard snapshot publish completed.",
                 ("Event", "OverlayShortcutSend"), ("ElapsedMs", sendStopwatch.Elapsed.TotalMilliseconds),
+                ("Surface", surfaceState == OverlayState.Hidden ? "ReadyHidden" : "Visible"),
                 ("Outcome", accepted ? "Accepted" : "Declined"));
             if (!accepted)
                 AppLog.Warn("Overlay", "Overlay Shortcut state publish was not accepted.");
@@ -347,6 +351,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         {
             AppLog.Debug("Overlay", "Shortcut dashboard snapshot publish completed.",
                 ("Event", "OverlayShortcutSend"), ("ElapsedMs", sendStopwatch.Elapsed.TotalMilliseconds),
+                ("Surface", surfaceState == OverlayState.Hidden ? "ReadyHidden" : "Visible"),
                 ("Outcome", "Declined"), ("ExceptionType", exception.GetType().Name));
             AppLog.Warn("Overlay", "Overlay Shortcut state publish failed.", null,
                 ("ExceptionType", exception.GetType().Name));
@@ -474,9 +479,15 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             lock (_sync) _visible = show;
             AppLog.Info("Overlay", "Overlay command acknowledged.", ("Command", command), ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds));
             if (show)
+            {
+                AppLog.Debug("Overlay", "OverlayShowVisibleAck",
+                    ("ElapsedMs", requested.Elapsed.TotalMilliseconds),
+                    ("Process", warmProcess ? "Warm" : "Cold"),
+                    ("PID", pid), ("Command", command));
                 AppLog.Debug("Overlay", "OverlayShowCommand",
                     ("ElapsedMs", requested.Elapsed.TotalMilliseconds), ("Process", warmProcess ? "Warm" : "Cold"),
                     ("PID", pid), ("Command", command));
+            }
             else
                 NotifySteamArtworkTargetChanged();
             return true;
@@ -580,6 +591,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             return false;
         }
         AppLog.Info("Overlay", "Overlay Ready confirmed.", ("PID", process.Id), ("ElapsedMs", startup.ElapsedMilliseconds));
+        _ = RefreshShortcutAsync();
         NotifySteamArtworkTargetChanged();
         return true;
     }
