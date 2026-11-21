@@ -206,6 +206,73 @@ public sealed class XboxStoreArtworkResolverTests
         Assert.Equal("KR", result.Market);
     }
 
+    [Theory]
+    [InlineData("ko-KR", "KR", "ko")]
+    [InlineData("en-GB", "GB", "en")]
+    public async Task Catalog_accepts_a_neutral_language_tag_for_the_requested_market(
+        string windowsUiLanguage,
+        string expectedMarket,
+        string catalogLanguage)
+    {
+        using var temp = new TempDirectory();
+        var catalogMarkets = new List<string>();
+        using var client = CreateClient((request, _) =>
+        {
+            var uri = request.RequestUri!;
+            if (uri.AbsolutePath.Contains("/v7.0/products/", StringComparison.Ordinal))
+            {
+                catalogMarkets.Add(uri.Query.Contains($"market={expectedMarket}", StringComparison.Ordinal) ? expectedMarket : "US");
+                return Json(ProductWithLanguage(StoreId, catalogLanguage, Image("Poster", 2, 3)));
+            }
+
+            return PngImage(2, 3);
+        });
+        using var resolver = new XboxStoreArtworkResolver(client, temp.Path);
+
+        var result = await resolver.ResolveCatalogCardAsync(StoreKey, windowsUiLanguage);
+
+        Assert.NotNull(result);
+        Assert.Equal(expectedMarket, result.Market);
+        Assert.Equal([expectedMarket], catalogMarkets);
+    }
+
+    [Fact]
+    public async Task Catalog_prefers_the_exact_localized_language_when_neutral_and_exact_entries_exist()
+    {
+        using var temp = new TempDirectory();
+        string? requestedImagePath = null;
+        using var client = CreateClient((request, _) =>
+        {
+            var uri = request.RequestUri!;
+            if (uri.AbsolutePath.Contains("/v7.0/products/", StringComparison.Ordinal))
+            {
+                var body = JsonSerializer.Serialize(new
+                {
+                    Product = new
+                    {
+                        ProductId = StoreId,
+                        LocalizedProperties = new object[]
+                        {
+                            new { Language = "ko", Images = new[] { Image("Poster", 2, 3, "//store-images.s-microsoft.com/image/poster-neutral") } },
+                            new { Language = "ko-KR", Images = new[] { Image("Poster", 2, 3, "//store-images.s-microsoft.com/image/poster-exact") } },
+                        },
+                    },
+                });
+                return Json(body);
+            }
+
+            requestedImagePath = uri.AbsolutePath;
+            return PngImage(2, 3);
+        });
+        using var resolver = new XboxStoreArtworkResolver(client, temp.Path);
+
+        var result = await resolver.ResolveCatalogCardAsync(StoreKey, "ko-KR");
+
+        Assert.NotNull(result);
+        Assert.Equal("KR", result.Market);
+        Assert.Equal("/image/poster-exact", requestedImagePath);
+    }
+
     [Fact]
     public async Task Hero_uses_titled_then_superhero_then_us_market()
     {

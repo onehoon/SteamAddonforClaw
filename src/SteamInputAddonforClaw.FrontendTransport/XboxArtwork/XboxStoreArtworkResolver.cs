@@ -544,37 +544,44 @@ public sealed class XboxStoreArtworkResolver : IDisposable
             return new CatalogSnapshot(expectedStoreId, market.Market, market.Language, DateTimeOffset.UtcNow,
                 new Dictionary<string, CatalogImage>(StringComparer.Ordinal));
 
+        var requestedCulture = CultureInfo.GetCultureInfo(market.Language);
+        var languageTags = string.Equals(requestedCulture.Name, requestedCulture.TwoLetterISOLanguageName, StringComparison.OrdinalIgnoreCase)
+            ? new[] { requestedCulture.Name }
+            : new[] { requestedCulture.Name, requestedCulture.TwoLetterISOLanguageName };
         var images = new Dictionary<string, CatalogImage>(StringComparer.Ordinal);
-        foreach (var localized in localizedProperties.EnumerateArray())
+        foreach (var languageTag in languageTags)
         {
-            if (localized.ValueKind != JsonValueKind.Object
-                || !TryGetString(localized, "Language", out var localizedLanguage)
-                || !string.Equals(localizedLanguage, market.Language, StringComparison.OrdinalIgnoreCase)
-                || !localized.TryGetProperty("Images", out var imageArray)
-                || imageArray.ValueKind != JsonValueKind.Array)
-                continue;
-
-            foreach (var entry in imageArray.EnumerateArray())
+            foreach (var localized in localizedProperties.EnumerateArray())
             {
-                if (entry.ValueKind != JsonValueKind.Object
-                    || !TryGetString(entry, "ImagePurpose", out var purpose)
-                    || !IsKnownPurpose(purpose)
-                    || images.ContainsKey(purpose)
-                    || !TryGetString(entry, "Uri", out var uri)
-                    || !TryCreateAllowedImageUri(uri, out _))
+                if (localized.ValueKind != JsonValueKind.Object
+                    || !TryGetString(localized, "Language", out var localizedLanguage)
+                    || !string.Equals(localizedLanguage, languageTag, StringComparison.OrdinalIgnoreCase)
+                    || !localized.TryGetProperty("Images", out var imageArray)
+                    || imageArray.ValueKind != JsonValueKind.Array)
                     continue;
 
-                var width = TryGetInt32(entry, "Width");
-                var height = TryGetInt32(entry, "Height");
-                var fileSize = TryGetInt64(entry, "FileSizeInBytes");
-                if (fileSize is > MaximumImageBytes
-                    || width is <= 0 or > MaximumImageDimension
-                    || height is <= 0 or > MaximumImageDimension
-                    || width is { } imageWidth && height is { } imageHeight && (long)imageWidth * imageHeight > MaximumImagePixels
-                    || !IsExpectedAspectRatio(purpose, width, height))
-                    continue;
+                foreach (var entry in imageArray.EnumerateArray())
+                {
+                    if (entry.ValueKind != JsonValueKind.Object
+                        || !TryGetString(entry, "ImagePurpose", out var purpose)
+                        || !IsKnownPurpose(purpose)
+                        || images.ContainsKey(purpose)
+                        || !TryGetString(entry, "Uri", out var uri)
+                        || !TryCreateAllowedImageUri(uri, out _))
+                        continue;
 
-                images.Add(purpose, new CatalogImage(uri, width, height, fileSize));
+                    var width = TryGetInt32(entry, "Width");
+                    var height = TryGetInt32(entry, "Height");
+                    var fileSize = TryGetInt64(entry, "FileSizeInBytes");
+                    if (fileSize is > MaximumImageBytes
+                        || width is <= 0 or > MaximumImageDimension
+                        || height is <= 0 or > MaximumImageDimension
+                        || width is { } imageWidth && height is { } imageHeight && (long)imageWidth * imageHeight > MaximumImagePixels
+                        || !IsExpectedAspectRatio(purpose, width, height))
+                        continue;
+
+                    images.Add(purpose, new CatalogImage(uri, width, height, fileSize));
+                }
             }
         }
 
