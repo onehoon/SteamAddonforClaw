@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Threading.Channels;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
@@ -32,27 +33,32 @@ public sealed class OverlayShortcutTransportTests
     }
 
     [Fact]
-    public async Task Shortcut_state_round_trips_all_tiles_in_runtime_order()
+    public async Task Shortcut_state_round_trips_all_tiles_while_hidden_and_visible()
     {
         var pipeName = NewPipeName();
         var expected = Snapshot("First", "Second", "Third", "Fourth", "Fifth", "Sixth");
-        var received = new TaskCompletionSource<FrontendShortcutDashboardSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = Channel.CreateUnbounded<FrontendShortcutDashboardSnapshot>();
         await using var server = new NamedPipeOverlayServer(pipeName);
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
         var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, shortcutStateHandler: state =>
         {
-            received.TrySetResult(state);
+            received.Writer.TryWrite(state);
             return Task.CompletedTask;
         });
 
         Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(OverlayState.Hidden, server.State);
+        Assert.True(await server.SendShortcutStateAsync(expected));
+        var hidden = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(expected.Tiles, hidden.Tiles);
+
         Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
         Assert.True(await server.SendShortcutStateAsync(expected));
 
-        var actual = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(expected.Tiles, actual.Tiles);
-        Assert.Equal(expected.Tiles.Select(tile => tile.Title), actual.Tiles.Select(tile => tile.Title));
+        var visible = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(expected.Tiles, visible.Tiles);
+        Assert.Equal(expected.Tiles.Select(tile => tile.Title), visible.Tiles.Select(tile => tile.Title));
 
         Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
         await run.WaitAsync(TimeSpan.FromSeconds(5));
@@ -410,7 +416,7 @@ public sealed class OverlayShortcutTransportTests
     }
 
     [Fact]
-    public async Task Controller_refresh_is_hidden_session_noop_and_publish_loss_does_not_stop_the_overlay()
+    public async Task Controller_prewarm_and_hidden_invalidation_publish_shortcuts_without_showing_the_overlay()
     {
         var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
         var overlayDirectory = Path.Combine(root, "overlay");
@@ -418,6 +424,7 @@ public sealed class OverlayShortcutTransportTests
         File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
         var pipeName = FrontendPipeEndpoint.CreateOverlayForCurrentUser();
         var captureCount = 0;
+        var received = Channel.CreateUnbounded<FrontendShortcutDashboardSnapshot>();
         Process? StartTestProcess(ProcessStartInfo _) => Process.Start(new ProcessStartInfo
         {
             FileName = "cmd.exe", Arguments = "/c timeout /t 30 /nobreak >nul",
@@ -435,15 +442,29 @@ public sealed class OverlayShortcutTransportTests
                 },
                 (_, _) => Task.FromResult(new OverlayShortcutExecutionOutcome(true)));
             await using var client = new NamedPipeOverlayClient(pipeName);
-            var run = client.RunAsync(_ => Task.CompletedTask);
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, shortcutStateHandler: state =>
+            {
+                received.Writer.TryWrite(state);
+                return Task.CompletedTask;
+            });
 
             Assert.True(await controller.StartAsync());
+            var prewarmed = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("Tile", prewarmed.Tiles.Single().Title);
+            Assert.Equal(1, captureCount);
+            Assert.False(controller.IsVisible);
+
             await controller.RefreshShortcutAsync();
-            Assert.Equal(0, captureCount);
+            var hiddenUpdate = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("Tile", hiddenUpdate.Tiles.Single().Title);
+            Assert.Equal(2, captureCount);
+            Assert.False(controller.IsVisible);
 
             Assert.True(await controller.ShowAsync());
             await controller.RefreshShortcutAsync();
-            Assert.Equal(1, captureCount);
+            var visibleUpdate = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("Tile", visibleUpdate.Tiles.Single().Title);
+            Assert.Equal(3, captureCount);
 
             // Simulate the transport peer disappearing while the process is still tracked/visible.
             await client.DisposeAsync();

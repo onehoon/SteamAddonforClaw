@@ -284,7 +284,7 @@ public sealed partial class OverlayWindow
         if (bringIntoView) BringSelectedRowIntoView();
     }
 
-    private void RefreshShortcutSelection(FrontendShortcutDashboardSnapshot snapshot)
+    private OverlayShortcutTileReconciliation RefreshShortcutSelection(FrontendShortcutDashboardSnapshot snapshot)
     {
         Guid? selectedTileId = GetSelectedShortcutTile()?.TileId;
         _shortcutSnapshot = snapshot;
@@ -297,7 +297,7 @@ public sealed partial class OverlayWindow
             : 0;
         _shortcutSelection.Configure(snapshot.Available ? snapshot.Tiles.Count : 0, columns,
             preferredIndex >= 0 ? preferredIndex : fallbackIndex);
-        RenderShortcutSnapshot();
+        return RenderShortcutSnapshot();
     }
 
     private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(AddonQuickSettingsTabId tab)

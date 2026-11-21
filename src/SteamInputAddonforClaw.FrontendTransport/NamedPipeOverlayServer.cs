@@ -333,12 +333,13 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
+    // Shortcut visuals may be prepared in a Ready hidden Overlay; execution admission remains Visible-only.
     internal async Task<bool> SendShortcutStateAsync(FrontendShortcutDashboardSnapshot state, CancellationToken token = default)
     {
         NamedPipeServerStream? pipe;
         lock (_sync)
         {
-            if (!_readyState || _state != OverlayState.Visible) return false;
+            if (!_readyState || _state is not (OverlayState.Hidden or OverlayState.Visible)) return false;
             pipe = _activePipe;
         }
         if (pipe is null) return false;

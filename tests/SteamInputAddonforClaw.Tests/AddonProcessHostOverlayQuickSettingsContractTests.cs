@@ -261,9 +261,11 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.True(shutdownGuard >= 0 && shutdownGuard < settingsRefresh);
         Assert.True(settingsRefresh < captureGuard && captureGuard < visibilityGuard);
         Assert.Equal(1, CountOccurrences(method, "RefreshFrontendSettingsAsync()"));
+        var shortcutRefresh = method.IndexOf("RefreshShortcutAsync()", StringComparison.Ordinal);
+        Assert.True(settingsRefresh < shortcutRefresh && shortcutRefresh < captureGuard,
+            "Shortcut tiles must refresh while hidden before the visible-capture guards.");
         foreach (var otherRefresh in new[]
         {
-            "RefreshShortcutAsync()",
             "RefreshBackButtonMappingAsync()",
             "RefreshControllerVibrationAsync()",
             "RefreshQuickSettingsAsync()",

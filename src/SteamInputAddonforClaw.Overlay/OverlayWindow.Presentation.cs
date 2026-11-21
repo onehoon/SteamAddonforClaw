@@ -38,61 +38,56 @@ public sealed partial class OverlayWindow
 
     internal void PrepareHidden() => ConfigureWindow();
 
-    internal async Task ShowForPocAsync()
+    internal Task ShowForPocAsync()
     {
-        _showStartedTimestamp = Stopwatch.GetTimestamp();
+        var showIdentity = Stopwatch.GetTimestamp();
+        _showStartedTimestamp = showIdentity;
         // Commit the configured first tab before any visual work so a warm process that was
         // previously showing another tab never flashes it for a frame during the reveal.
         ResetUiForShow();
         ConfigureWindow();
-        var initialStatePrepared = true;
-        try
-        {
-            SetVisualState(HiddenScale, ScaledHiddenTranslateYDip(), HiddenOpacity);
-        }
-        catch (Exception exception)
-        {
-            initialStatePrepared = false;
-            OverlayLog.Error("Animation", "Show animation initial state failed; keeping Overlay visible.", exception);
-        }
+        SetVisualState(HiddenScale, ScaledHiddenTranslateYDip(), HiddenOpacity);
         UpdateRailClockText();
         WindowInterop.ShowWithoutActivation(this);
         _isVisible = true;
         StartRailClockUpdates();
         WindowInterop.ArmOutsideClickDismissal(this, outsideClick => OutsideClickDismissRequested?.Invoke(outsideClick));
-        if (!initialStatePrepared || !AnimationsEnabled())
+        var prewarmedTileCount = IsShortcutSnapshotRendered(_shortcutSnapshot)
+            ? _renderedShortcutTiles.Count
+            : 0;
+        OverlayLog.Debug("Performance", "OverlayShowWindowCommitted",
+            ("ElapsedMs", Stopwatch.GetElapsedTime(showIdentity).TotalMilliseconds),
+            ("TilePrewarmReady", prewarmedTileCount > 0),
+            ("PrewarmedTileCount", prewarmedTileCount),
+            ("TileRenderOnShow", prewarmedTileCount == 0 && _shortcutSnapshot.Available && _shortcutSnapshot.Tiles.Count > 0));
+        if (prewarmedTileCount > 0)
+            LogShortcutTileReadyIfNeeded(_shortcutSnapshot);
+
+        if (!AnimationsEnabled())
         {
             TrySetVisibleVisualState();
             LogSurfaceBounds("Show.Visible");
-            return;
+            OverlayLog.Debug("Performance", "OverlayShowAnimationFinish",
+                ("Outcome", "AnimationsDisabled"), ("ElapsedMs", Stopwatch.GetElapsedTime(showIdentity).TotalMilliseconds));
+            return Task.CompletedTask;
         }
 
         var stopwatch = Stopwatch.StartNew();
-        OverlayLog.Debug("Animation", "Show animation started",
+        OverlayLog.Debug("Performance", "OverlayShowAnimationStart",
             ("DurationMs", ShowDuration.TotalMilliseconds),
             ("StartScale", HiddenScale), ("EndScale", 1.0),
             ("StartTranslateYDip", ScaledHiddenTranslateYDip()), ("EndTranslateYDip", 0.0),
             ("StartOpacity", HiddenOpacity), ("EndOpacity", 1.0),
             ("AnimationTranslateYPhysical", ScaledHiddenTranslateYDip() * AnimationRasterizationScale()));
-        try
-        {
-            await AnimateAsync(HiddenScale, 1.0f, ScaledHiddenTranslateYDip(), 0.0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
-            TrySetVisibleVisualState();
-            LogSurfaceBounds("Show.Visible");
-            OverlayLog.Debug("Animation", "Show animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
-        }
-        catch (Exception exception)
-        {
-            OverlayLog.Error("Animation", "Show animation failed; keeping Overlay visible.", exception);
-            TrySetVisibleVisualState();
-            LogSurfaceBounds("Show.Visible.AnimationFallback");
-        }
+        _ = CompleteShowAnimationAsync(showIdentity, stopwatch);
+        return Task.CompletedTask;
     }
 
     internal Task HideForPocAsync()
     {
         StopRailClockUpdates();
         _isVisible = false;
+        StopShowAnimations();
         _numericSliderRepeatTarget.Clear();
         // Normal user Back/outside-click flushes valid drafts before sending DismissRequested.
         // A Runtime-forced Hide remains lifecycle cleanup: cancel any still-unsubmitted work and
@@ -301,6 +296,48 @@ public sealed partial class OverlayWindow
 
     private void SetVisibleVisualState() => SetVisualState(1.0f, 0.0, 1.0);
 
+    private bool IsCurrentVisibleShow(long showIdentity) =>
+        _isVisible && _showStartedTimestamp == showIdentity;
+
+    private void StopShowAnimations()
+    {
+        try
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(AnimatedContent);
+            visual.StopAnimation(nameof(visual.Scale));
+            visual.StopAnimation(nameof(visual.Offset));
+            visual.StopAnimation(nameof(visual.Opacity));
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Animation", "Could not stop an active Overlay reveal animation.", exception);
+        }
+    }
+
+    private async Task CompleteShowAnimationAsync(long showIdentity, Stopwatch stopwatch)
+    {
+        try
+        {
+            await AnimateAsync(HiddenScale, 1.0f, ScaledHiddenTranslateYDip(), 0.0,
+                HiddenOpacity, 1.0, ShowDuration, easeIn: false, showIdentity: showIdentity);
+            if (!IsCurrentVisibleShow(showIdentity)) return;
+
+            TrySetVisibleVisualState();
+            LogSurfaceBounds("Show.Visible");
+            OverlayLog.Debug("Performance", "OverlayShowAnimationFinish",
+                ("Outcome", "Completed"), ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
+        }
+        catch (Exception exception)
+        {
+            if (!IsCurrentVisibleShow(showIdentity)) return;
+            OverlayLog.Error("Animation", "Show animation failed; keeping Overlay visible.", exception);
+            TrySetVisibleVisualState();
+            LogSurfaceBounds("Show.Visible.AnimationFallback");
+            OverlayLog.Debug("Performance", "OverlayShowAnimationFinish",
+                ("Outcome", "VisibleFallback"), ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
+        }
+    }
+
     private void SetHiddenVisualState() => SetVisualState(HiddenScale, ScaledHiddenTranslateYDip(), HiddenOpacity);
 
     private void TrySetVisibleVisualState()
@@ -332,7 +369,8 @@ public sealed partial class OverlayWindow
         double startOpacity,
         double endOpacity,
         TimeSpan duration,
-        bool easeIn)
+        bool easeIn,
+        long showIdentity)
     {
         var visual = ElementCompositionPreview.GetElementVisual(AnimatedContent);
         SetAnimationCenterPoint(visual);
@@ -361,6 +399,7 @@ public sealed partial class OverlayWindow
         visual.StartAnimation(nameof(visual.Opacity), opacity);
         batch.End();
         await completion.Task;
+        if (!IsCurrentVisibleShow(showIdentity)) return;
         visual.StopAnimation(nameof(visual.Scale));
         visual.StopAnimation(nameof(visual.Offset));
         visual.StopAnimation(nameof(visual.Opacity));
