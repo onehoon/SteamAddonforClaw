@@ -6,6 +6,7 @@ public static class FrontendLaunchArguments
 {
     public const string LogDirectoryOption = "--log-directory";
     public const string LogLevelOption = "--log-level";
+    private const string PersistentDataDirectoryName = "SteamInputAddonforClaw-Data";
 
     public static string ResolveLogDirectory(string[] args)
     {
@@ -17,7 +18,18 @@ public static class FrontendLaunchArguments
             break;
         }
 
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw-Data", "logs");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), PersistentDataDirectoryName, "logs");
+    }
+
+    public static string ResolveDataDirectory(string[] args)
+    {
+        var logDirectory = Path.GetFullPath(ResolveLogDirectory(args));
+        var normalizedLogDirectory = Path.TrimEndingDirectorySeparator(logDirectory);
+        if (string.Equals(Path.GetFileName(normalizedLogDirectory), "logs", StringComparison.OrdinalIgnoreCase)
+            && Directory.GetParent(normalizedLogDirectory) is { } dataDirectory)
+            return dataDirectory.FullName;
+
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), PersistentDataDirectoryName);
     }
 
     public static FrontendLogLevel ResolveLogLevel(string[] args)

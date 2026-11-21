@@ -46,4 +46,16 @@ public sealed class FrontendLaunchArgumentsTests
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw-Data", "logs"),
             FrontendLaunchArguments.ResolveLogDirectory([FrontendLaunchArguments.LogLevelOption, "Debug"]));
     }
+
+    [Fact]
+    public void Stable_data_directory_uses_the_shared_log_root_and_ignores_unrelated_log_paths()
+    {
+        const string logDirectory = @"C:\Users\Test User\Addon Data\logs";
+        Assert.Equal(@"C:\Users\Test User\Addon Data",
+            FrontendLaunchArguments.ResolveDataDirectory([FrontendLaunchArguments.LogDirectoryOption, logDirectory]));
+
+        var fallback = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw-Data");
+        Assert.Equal(fallback,
+            FrontendLaunchArguments.ResolveDataDirectory([FrontendLaunchArguments.LogDirectoryOption, @"C:\Temp\somewhere-else"]));
+    }
 }

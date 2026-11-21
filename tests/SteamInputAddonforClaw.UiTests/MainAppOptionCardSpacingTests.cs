@@ -82,9 +82,12 @@ public sealed class MainAppOptionCardSpacingTests
         Assert.Equal("0,0,8,8", (string?)steamCard.Attribute("Margin"));
 
         var xbox = ReadPage("XboxPage.xaml");
-        var catalogLayout = Assert.Single(xbox.Descendants(), element => element.Name.LocalName == "UniformGridLayout");
-        Assert.Equal("12", (string?)catalogLayout.Attribute("MinColumnSpacing"));
-        Assert.Equal("12", (string?)catalogLayout.Attribute("MinRowSpacing"));
+        var xboxItemsPanel = Assert.Single(xbox.Descendants(), element => element.Name.LocalName == "ItemsWrapGrid");
+        Assert.Equal("183", (string?)xboxItemsPanel.Attribute("ItemWidth"));
+        Assert.Equal("270.5", (string?)xboxItemsPanel.Attribute("ItemHeight"));
+        var xboxCard = Assert.Single(xbox.Descendants(), element => element.Name.LocalName == "Border"
+            && element.Attribute(Xaml + "Name")?.Value == "GameCardRoot");
+        Assert.Equal("0,0,8,8", (string?)xboxCard.Attribute("Margin"));
     }
 
     private static XElement ReadPage(string file)

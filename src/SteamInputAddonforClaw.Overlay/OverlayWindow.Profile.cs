@@ -3,7 +3,10 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System.Diagnostics;
+using System.Globalization;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.FrontendTransport.XboxArtwork;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -34,21 +37,23 @@ public sealed partial class OverlayWindow
     private double _profileArtworkCachedRasterizationScale;
     private BitmapImage? _profileArtworkCachedBitmap;
     private XamlRoot? _profileArtworkObservedXamlRoot;
+    private XboxStoreArtworkResolver? _xboxArtworkResolver;
+    private string? _xboxProfileArtworkRequestedKey;
+    private int _xboxProfileArtworkRequestedDecodePixelWidth;
+    private double _xboxProfileArtworkRequestedRasterizationScale;
+    private CancellationTokenSource? _xboxProfileArtworkRequestCancellation;
+    private string? _xboxProfileArtworkCachedLookupKey;
+    private string? _xboxProfileArtworkCachedSourceMarket;
+    private string? _xboxProfileArtworkCachedPurpose;
+    private int _xboxProfileArtworkCachedDecodePixelWidth;
+    private double _xboxProfileArtworkCachedRasterizationScale;
+    private BitmapImage? _xboxProfileArtworkCachedBitmap;
 
     internal event Action? NoRunningGameProfileRecheckRequested;
 
     private void ProfileContentColumn_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var (width, height) = CalculateProfileArtworkSize(e.NewSize.Width);
-        if (ShouldUpdateProfileArtworkSize(ProfileArtworkHost.Width, ProfileArtworkHost.Height, width, height))
-        {
-            ProfileArtworkHost.Width = width;
-            ProfileArtworkHost.Height = height;
-            ProfileArtworkHost.Clip = new RectangleGeometry
-            {
-                Rect = new Rect(0, 0, width, height)
-            };
-        }
+        ApplyProfileArtworkLayout(e.NewSize.Width, IsXboxProfileTarget(CurrentProfileArtworkPage()));
 
         if (double.IsFinite(e.NewSize.Width) && e.NewSize.Width > 0)
             ReevaluateProfileArtworkForCurrentPage();
@@ -91,6 +96,47 @@ public sealed partial class OverlayWindow
             ? Math.Max(0, rightColumnWidth)
             : 0;
         return (width, width * 430.0 / 920.0);
+    }
+
+    internal static (double Width, double Height) CalculateXboxProfileArtworkSize(double rightColumnWidth)
+    {
+        var width = double.IsFinite(rightColumnWidth) ? Math.Max(0, rightColumnWidth) : 0;
+        return (width, width * 9.0 / 16.0);
+    }
+
+    private QuickSettingsPageSnapshot? CurrentProfileArtworkPage() =>
+        _quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)
+            ? surface.Binding?.AuthoritativePage
+            : null;
+
+    private static bool IsXboxProfileTarget(QuickSettingsPageSnapshot? page) =>
+        page is { PageId: QuickSettingsPageId.Profile, Available: true,
+            ProfileTarget: { Kind: QuickSettingsProfileTargetKind.Xbox, IsStructurallyValid: true } };
+
+    internal static string? EligibleXboxStoreGameKey(QuickSettingsPageSnapshot? page)
+    {
+        if (!IsXboxProfileTarget(page)
+            || page?.ProfileTarget?.XboxGameKey is not { } gameKey
+            || !XboxStoreArtworkResolver.TryGetStoreId(gameKey, out _))
+            return null;
+        return gameKey;
+    }
+
+    private void ApplyProfileArtworkLayout(double rightColumnWidth, bool xbox)
+    {
+        var (width, height) = xbox
+            ? CalculateXboxProfileArtworkSize(rightColumnWidth)
+            : CalculateProfileArtworkSize(rightColumnWidth);
+        if (ShouldUpdateProfileArtworkSize(ProfileArtworkHost.Width, ProfileArtworkHost.Height, width, height))
+        {
+            ProfileArtworkHost.Width = width;
+            ProfileArtworkHost.Height = height;
+            ProfileArtworkHost.Clip = new RectangleGeometry { Rect = new Rect(0, 0, width, height) };
+        }
+
+        var stretch = xbox ? Stretch.Uniform : Stretch.UniformToFill;
+        if (ProfileArtworkImage.Stretch != stretch)
+            ProfileArtworkImage.Stretch = stretch;
     }
 
     internal static bool ShouldUpdateProfileArtworkSize(
@@ -183,11 +229,26 @@ public sealed partial class OverlayWindow
 
     private void UpdateProfileArtwork(QuickSettingsPageSnapshot? page)
     {
+        var isXbox = IsXboxProfileTarget(page);
+        var width = ProfileContentColumn.ActualWidth;
+        if (!double.IsFinite(width) || width <= 0)
+            width = double.IsFinite(ProfileArtworkHost.Width) ? ProfileArtworkHost.Width : 0;
+        ApplyProfileArtworkLayout(width, isXbox);
+
         if (!_isVisible || !_profilePageReceivedThisShow)
         {
             HideProfileArtworkPreservingCache();
             return;
         }
+
+        if (isXbox)
+        {
+            UpdateXboxProfileArtwork(page);
+            return;
+        }
+
+        CancelXboxProfileArtworkRequest();
+        _xboxProfileArtworkRequestedKey = null;
 
         var appId = SteamGameArtworkResolver.EligibleSteamAppId(page);
         if (appId is null)
@@ -247,6 +308,223 @@ public sealed partial class OverlayWindow
             ("AppId", appId.Value), ("Cache", "Miss"), ("DecodePixelWidth", decodePixelWidth),
             ("RasterizationScale", rasterizationScale), ("Stage", "Lookup"), ("RetryUsed", false));
         _ = ResolveAndApplyProfileArtworkAsync(appId.Value, page!, requestCancellation);
+    }
+
+    private void UpdateXboxProfileArtwork(QuickSettingsPageSnapshot? page)
+    {
+        var gameKey = EligibleXboxStoreGameKey(page);
+        if (gameKey is null)
+        {
+            ClearProfileArtwork();
+            return;
+        }
+
+        if (!IsProfileArtworkPresentationTab(_tabState.SelectedTab))
+        {
+            HideProfileArtworkPreservingCache();
+            return;
+        }
+
+        CancelProfileArtworkRequest();
+        _profileArtworkRequestedAppId = null;
+        var (rasterizationScale, requestedDecodePixelWidth) = CurrentProfileArtworkDecodeKey();
+        if (requestedDecodePixelWidth is not { } decodePixelWidth)
+        {
+            HideProfileArtworkPreservingCache();
+            return;
+        }
+
+        var culture = CultureInfo.CurrentUICulture.Name;
+        var (market, language) = XboxStoreArtworkResolver.ResolveMarketAndLanguage(culture);
+        var lookupKey = BuildXboxArtworkLookupKey(gameKey, market, language);
+        if (_xboxProfileArtworkCachedBitmap is { } cachedBitmap
+            && IsXboxProfileArtworkCacheCompatible(
+                _xboxProfileArtworkCachedLookupKey, _xboxProfileArtworkCachedDecodePixelWidth,
+                _xboxProfileArtworkCachedRasterizationScale, lookupKey, decodePixelWidth, rasterizationScale))
+        {
+            CancelXboxProfileArtworkRequest();
+            _xboxProfileArtworkRequestedKey = lookupKey;
+            _xboxProfileArtworkRequestedDecodePixelWidth = decodePixelWidth;
+            _xboxProfileArtworkRequestedRasterizationScale = rasterizationScale;
+            ApplyXboxProfileArtwork(gameKey, cachedBitmap);
+            OverlayLog.Debug("ProfileArtwork", "Applied cached Xbox Profile hero.",
+                ("Market", _xboxProfileArtworkCachedSourceMarket ?? "Unknown"),
+                ("Purpose", _xboxProfileArtworkCachedPurpose ?? "Unknown"),
+                ("DecodePixelWidth", decodePixelWidth), ("RasterizationScale", rasterizationScale));
+            return;
+        }
+
+        if (_xboxProfileArtworkCachedBitmap is not null)
+            DiscardCachedXboxProfileArtwork();
+
+        if (_xboxProfileArtworkRequestedKey == lookupKey
+            && _xboxProfileArtworkRequestCancellation is { IsCancellationRequested: false }
+            && _xboxProfileArtworkRequestedDecodePixelWidth == decodePixelWidth
+            && Math.Abs(_xboxProfileArtworkRequestedRasterizationScale - rasterizationScale) < 0.0001)
+            return;
+
+        HideProfileArtworkPreservingCache();
+        _xboxProfileArtworkRequestedKey = lookupKey;
+        _xboxProfileArtworkRequestedDecodePixelWidth = decodePixelWidth;
+        _xboxProfileArtworkRequestedRasterizationScale = rasterizationScale;
+        var requestCancellation = new CancellationTokenSource();
+        _xboxProfileArtworkRequestCancellation = requestCancellation;
+        _xboxArtworkResolver ??= new XboxStoreArtworkResolver(
+            XboxStoreArtworkResolver.ResolveCacheDirectory([FrontendLaunchArguments.LogDirectoryOption, OverlayLog.DirectoryPath]),
+            diagnostic => OverlayLog.Debug("XboxArtwork", "Optional Xbox artwork lookup completed.",
+                ("StoreId", diagnostic.StoreId), ("Market", diagnostic.Market), ("Purpose", diagnostic.Purpose),
+                ("Outcome", diagnostic.Outcome), ("DurationMs", diagnostic.DurationMs), ("ErrorType", diagnostic.ErrorType ?? "None")));
+        _ = ResolveAndApplyXboxProfileArtworkAsync(gameKey, lookupKey, _xboxArtworkResolver, requestCancellation);
+    }
+
+    internal static string BuildXboxArtworkLookupKey(string canonicalGameKey, string market, string language) =>
+        $"{canonicalGameKey}|{market}|{language}";
+
+    internal static bool IsXboxProfileArtworkCacheCompatible(
+        string? cachedLookupKey,
+        int cachedDecodePixelWidth,
+        double cachedRasterizationScale,
+        string requestedLookupKey,
+        int requestedDecodePixelWidth,
+        double requestedRasterizationScale) =>
+        string.Equals(cachedLookupKey, requestedLookupKey, StringComparison.Ordinal)
+        && cachedDecodePixelWidth == requestedDecodePixelWidth
+        && Math.Abs(cachedRasterizationScale - requestedRasterizationScale) < 0.0001;
+
+    private async Task ResolveAndApplyXboxProfileArtworkAsync(
+        string gameKey,
+        string lookupKey,
+        XboxStoreArtworkResolver resolver,
+        CancellationTokenSource requestCancellation)
+    {
+        var cancellationToken = requestCancellation.Token;
+        try
+        {
+            var result = await resolver.ResolveProfileHeroAsync(gameKey, CultureInfo.CurrentUICulture.Name, cancellationToken);
+            if (!IsCurrentXboxProfileArtworkRequest(gameKey, lookupKey, requestCancellation))
+                return;
+            if (result is null)
+            {
+                ProfileArtworkImage.Source = null;
+                ProfileArtworkHost.Visibility = Visibility.Collapsed;
+                PageTitle.Visibility = Visibility.Visible;
+                OverlayLog.Debug("ProfileArtwork", "Xbox Profile hero unavailable; retaining the title fallback.",
+                    ("Market", XboxStoreArtworkResolver.ResolveMarketAndLanguage(CultureInfo.CurrentUICulture.Name).Market));
+                return;
+            }
+
+            var decodePixelWidth = _xboxProfileArtworkRequestedDecodePixelWidth;
+            var bitmap = await TryLoadXboxProfileArtworkAsync(result.Path, decodePixelWidth, cancellationToken);
+            if (!IsCurrentXboxProfileArtworkRequest(gameKey, lookupKey, requestCancellation))
+                return;
+            if (bitmap is null)
+            {
+                ProfileArtworkImage.Source = null;
+                ProfileArtworkHost.Visibility = Visibility.Collapsed;
+                PageTitle.Visibility = Visibility.Visible;
+                OverlayLog.Debug("ProfileArtwork", "Xbox Profile hero could not be decoded; retaining the title fallback.",
+                    ("Market", result.Market), ("Purpose", result.Purpose));
+                return;
+            }
+
+            _xboxProfileArtworkCachedLookupKey = lookupKey;
+            _xboxProfileArtworkCachedSourceMarket = result.Market;
+            _xboxProfileArtworkCachedPurpose = result.Purpose;
+            _xboxProfileArtworkCachedDecodePixelWidth = decodePixelWidth;
+            _xboxProfileArtworkCachedRasterizationScale = _xboxProfileArtworkRequestedRasterizationScale;
+            _xboxProfileArtworkCachedBitmap = bitmap;
+            ApplyXboxProfileArtwork(gameKey, bitmap);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            OverlayLog.Debug("ProfileArtwork", "Canceled stale Xbox Profile artwork lookup.");
+        }
+        catch (Exception exception)
+        {
+            if (IsCurrentXboxProfileArtworkRequest(gameKey, lookupKey, requestCancellation))
+            {
+                ProfileArtworkImage.Source = null;
+                ProfileArtworkHost.Visibility = Visibility.Collapsed;
+                PageTitle.Visibility = Visibility.Visible;
+            }
+            OverlayLog.Debug("ProfileArtwork", "Optional Xbox Profile artwork failed.",
+                ("ErrorType", exception.GetType().Name));
+        }
+        finally
+        {
+            if (ReferenceEquals(_xboxProfileArtworkRequestCancellation, requestCancellation))
+            {
+                requestCancellation.Dispose();
+                _xboxProfileArtworkRequestCancellation = null;
+            }
+        }
+    }
+
+    private static async Task<BitmapImage?> TryLoadXboxProfileArtworkAsync(
+        string path,
+        int decodePixelWidth,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var file = await StorageFile.GetFileFromPathAsync(path);
+            using var stream = await file.OpenReadAsync();
+            var bitmap = new BitmapImage { DecodePixelWidth = decodePixelWidth };
+            await bitmap.SetSourceAsync(stream);
+            cancellationToken.ThrowIfCancellationRequested();
+            return bitmap;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private bool IsCurrentXboxProfileArtworkRequest(
+        string gameKey,
+        string lookupKey,
+        CancellationTokenSource requestCancellation) =>
+        !requestCancellation.IsCancellationRequested
+        && ReferenceEquals(_xboxProfileArtworkRequestCancellation, requestCancellation)
+        && string.Equals(_xboxProfileArtworkRequestedKey, lookupKey, StringComparison.Ordinal)
+        && IsCurrentXboxProfileArtworkTarget(gameKey);
+
+    private bool IsCurrentXboxProfileArtworkTarget(string gameKey)
+    {
+        var currentGameKey = EligibleXboxStoreGameKey(CurrentProfileArtworkPage());
+        var (market, language) = XboxStoreArtworkResolver.ResolveMarketAndLanguage(CultureInfo.CurrentUICulture.Name);
+        var currentLookupKey = currentGameKey is null ? null : BuildXboxArtworkLookupKey(currentGameKey, market, language);
+        return IsCurrentXboxProfileArtworkIdentity(
+            gameKey, _xboxProfileArtworkRequestedKey, currentGameKey, currentLookupKey,
+            _isVisible, _profilePageReceivedThisShow, _tabState.SelectedTab);
+    }
+
+    internal static bool IsCurrentXboxProfileArtworkIdentity(
+        string requestedGameKey,
+        string? requestedLookupKey,
+        string? currentGameKey,
+        string? currentLookupKey,
+        bool isVisible,
+        bool profilePageReceived,
+        AddonQuickSettingsTabId selectedTab) =>
+        isVisible
+        && profilePageReceived
+        && IsProfileArtworkPresentationTab(selectedTab)
+        && string.Equals(requestedGameKey, currentGameKey, StringComparison.Ordinal)
+        && string.Equals(requestedLookupKey, currentLookupKey, StringComparison.Ordinal);
+
+    private void ApplyXboxProfileArtwork(string gameKey, BitmapImage bitmap)
+    {
+        if (!IsCurrentXboxProfileArtworkTarget(gameKey)) return;
+        ProfileArtworkImage.Source = bitmap;
+        ProfileArtworkImage.Stretch = Stretch.Uniform;
+        ProfileArtworkHost.Visibility = Visibility.Visible;
+        PageTitle.Visibility = Visibility.Collapsed;
     }
 
     private async Task ResolveAndApplyProfileArtworkAsync(
@@ -502,10 +780,19 @@ public sealed partial class OverlayWindow
         _profileArtworkRequestCancellation = null;
     }
 
+    private void CancelXboxProfileArtworkRequest()
+    {
+        _xboxProfileArtworkRequestCancellation?.Cancel();
+        _xboxProfileArtworkRequestCancellation?.Dispose();
+        _xboxProfileArtworkRequestCancellation = null;
+    }
+
     private void HideProfileArtworkPreservingCache()
     {
         CancelProfileArtworkRequest();
+        CancelXboxProfileArtworkRequest();
         _profileArtworkRequestedAppId = null;
+        _xboxProfileArtworkRequestedKey = null;
         ProfileArtworkImage.Source = null;
         ProfileArtworkHost.Visibility = Visibility.Collapsed;
         PageTitle.Visibility = Visibility.Visible;
@@ -519,10 +806,28 @@ public sealed partial class OverlayWindow
         _profileArtworkCachedBitmap = null;
     }
 
+    private void DiscardCachedXboxProfileArtwork()
+    {
+        _xboxProfileArtworkCachedLookupKey = null;
+        _xboxProfileArtworkCachedSourceMarket = null;
+        _xboxProfileArtworkCachedPurpose = null;
+        _xboxProfileArtworkCachedDecodePixelWidth = 0;
+        _xboxProfileArtworkCachedRasterizationScale = 0;
+        _xboxProfileArtworkCachedBitmap = null;
+    }
+
+    private void DisposeXboxArtworkResolver()
+    {
+        CancelXboxProfileArtworkRequest();
+        _xboxArtworkResolver?.Dispose();
+        _xboxArtworkResolver = null;
+    }
+
     private void ClearProfileArtwork()
     {
         HideProfileArtworkPreservingCache();
         DiscardCachedProfileArtwork();
+        DiscardCachedXboxProfileArtwork();
     }
 
     private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)

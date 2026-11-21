@@ -212,12 +212,59 @@ public sealed class OverlaySteamGameArtworkTests
     }
 
     [Fact]
+    public void Xbox_profile_target_uses_exact_store_keys_and_a_non_cropped_sixteen_to_nine_hero()
+    {
+        var xboxPage = new QuickSettingsPageSnapshot(
+            QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("store:9PK8PHLCQDF6"), true, null, [], []);
+        var nonStoreXboxPage = new QuickSettingsPageSnapshot(
+            QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("pfn:package_identity"), true, null, [], []);
+        var steamPage = SteamPage(AppId);
+        var hero = OverlayWindow.CalculateXboxProfileArtworkSize(448);
+        var steam = OverlayWindow.CalculateProfileArtworkSize(448);
+
+        Assert.Equal("store:9PK8PHLCQDF6", OverlayWindow.EligibleXboxStoreGameKey(xboxPage));
+        Assert.Null(OverlayWindow.EligibleXboxStoreGameKey(nonStoreXboxPage));
+        Assert.Null(OverlayWindow.EligibleXboxStoreGameKey(steamPage));
+        Assert.Equal(448, hero.Width);
+        Assert.Equal(252, hero.Height);
+        Assert.Equal(448 * 430.0 / 920.0, steam.Height, precision: 8);
+        Assert.True(hero.Height > steam.Height);
+    }
+
+    [Fact]
+    public void Xbox_hero_cache_and_delayed_completion_are_scoped_to_game_market_and_visible_profile_tabs()
+    {
+        var firstKey = OverlayWindow.BuildXboxArtworkLookupKey("store:first", "KR", "ko-KR");
+        var secondKey = OverlayWindow.BuildXboxArtworkLookupKey("store:second", "KR", "ko-KR");
+        var usKey = OverlayWindow.BuildXboxArtworkLookupKey("store:first", "US", "en-US");
+
+        Assert.True(OverlayWindow.IsXboxProfileArtworkCacheCompatible(firstKey, 672, 1.5, firstKey, 672, 1.5));
+        Assert.False(OverlayWindow.IsXboxProfileArtworkCacheCompatible(firstKey, 672, 1.5, secondKey, 672, 1.5));
+        Assert.False(OverlayWindow.IsXboxProfileArtworkCacheCompatible(firstKey, 672, 1.5, usKey, 672, 1.5));
+        Assert.False(OverlayWindow.IsXboxProfileArtworkCacheCompatible(firstKey, 672, 1.5, firstKey, 673, 1.5));
+
+        Assert.True(OverlayWindow.IsCurrentXboxProfileArtworkIdentity(
+            "store:first", firstKey, "store:first", firstKey, true, true, AddonQuickSettingsTabId.Profile));
+        Assert.True(OverlayWindow.IsCurrentXboxProfileArtworkIdentity(
+            "store:first", firstKey, "store:first", firstKey, true, true, AddonQuickSettingsTabId.Shortcut));
+        Assert.False(OverlayWindow.IsCurrentXboxProfileArtworkIdentity(
+            "store:first", firstKey, "store:second", secondKey, true, true, AddonQuickSettingsTabId.Profile));
+        Assert.False(OverlayWindow.IsCurrentXboxProfileArtworkIdentity(
+            "store:first", firstKey, "store:first", usKey, true, true, AddonQuickSettingsTabId.Profile));
+        Assert.False(OverlayWindow.IsCurrentXboxProfileArtworkIdentity(
+            "store:first", firstKey, "store:first", firstKey, false, true, AddonQuickSettingsTabId.Profile));
+        Assert.False(OverlayWindow.IsCurrentXboxProfileArtworkIdentity(
+            "store:first", firstKey, "store:first", firstKey, true, true, AddonQuickSettingsTabId.Device));
+    }
+
+    [Fact]
     public void First_profile_snapshot_waits_for_real_layout_and_rechecks_on_size_or_raster_scale_change()
     {
         var profile = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
         var update = ExtractMethod(profile, "private void UpdateProfileArtwork(QuickSettingsPageSnapshot? page)");
         var currentKey = ExtractMethod(profile, "private (double RasterizationScale, int? DecodePixelWidth) CurrentProfileArtworkDecodeKey()");
         var sizeChanged = ExtractMethod(profile, "private void ProfileContentColumn_SizeChanged(");
+        var applyLayout = ExtractMethod(profile, "private void ApplyProfileArtworkLayout(");
         var recheck = ExtractMethod(profile, "private void ReevaluateProfileArtworkForCurrentPage()");
         var loaded = ExtractMethod(profile, "private void ProfileArtworkHost_Loaded(");
         var xaml = XDocument.Load(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml"));
@@ -239,10 +286,12 @@ public sealed class OverlaySteamGameArtworkTests
         var measuredFallback = currentKey.IndexOf(": ProfileArtworkHost.ActualWidth;", StringComparison.Ordinal);
         Assert.True(explicitWidth >= 0 && measuredFallback > explicitWidth);
         Assert.Contains("xamlRoot.RasterizationScale", currentKey, StringComparison.Ordinal);
-        Assert.Contains("ShouldUpdateProfileArtworkSize(ProfileArtworkHost.Width, ProfileArtworkHost.Height, width, height)", sizeChanged, StringComparison.Ordinal);
-        var widthAssignment = sizeChanged.IndexOf("ProfileArtworkHost.Width = width;", StringComparison.Ordinal);
-        var imageReevaluation = sizeChanged.IndexOf("ReevaluateProfileArtworkForCurrentPage();", StringComparison.Ordinal);
-        Assert.True(widthAssignment >= 0 && imageReevaluation > widthAssignment);
+        Assert.Contains("ApplyProfileArtworkLayout(e.NewSize.Width, IsXboxProfileTarget(CurrentProfileArtworkPage()));", sizeChanged, StringComparison.Ordinal);
+        Assert.Contains("ShouldUpdateProfileArtworkSize(ProfileArtworkHost.Width, ProfileArtworkHost.Height, width, height)", applyLayout, StringComparison.Ordinal);
+        var widthAssignment = applyLayout.IndexOf("ProfileArtworkHost.Width = width;", StringComparison.Ordinal);
+        var imageStretch = applyLayout.IndexOf("ProfileArtworkImage.Stretch = stretch;", StringComparison.Ordinal);
+        Assert.True(widthAssignment >= 0 && imageStretch > widthAssignment);
+        Assert.Contains("ReevaluateProfileArtworkForCurrentPage();", sizeChanged, StringComparison.Ordinal);
         Assert.Contains("ReevaluateProfileArtworkForCurrentPage();", sizeChanged, StringComparison.Ordinal);
         Assert.Contains("ObserveProfileArtworkXamlRoot(ProfileArtworkHost.XamlRoot);", loaded, StringComparison.Ordinal);
         Assert.Contains("_profileArtworkObservedXamlRoot.Changed += ProfileArtworkXamlRoot_Changed;", profile, StringComparison.Ordinal);
