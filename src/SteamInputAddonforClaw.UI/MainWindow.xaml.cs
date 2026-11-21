@@ -32,7 +32,6 @@ public sealed partial class MainWindow : Window
         MainNavigationPage.Shortcut,
         MainNavigationPage.Tweaks,
         MainNavigationPage.Profile,
-        MainNavigationPage.Xbox,
     ];
 
     private readonly IAddonFrontendControl _frontend;
@@ -70,8 +69,7 @@ public sealed partial class MainWindow : Window
     private FanHardwareProbePage? _fanHardwareProbeContent;
     private MsiUpdatesPage? _msiUpdatesContent;
     private ControllerPage? _controllerContent;
-    private ProfilePage? _profileContent;
-    private XboxPage? _xboxContent;
+    private ProfilesPage? _profilesContent;
     private OverlayPage? _overlayContent;
     private QuickOverlayPage? _quickOverlayContent;
     private ShortcutPage? _shortcutContent;
@@ -215,8 +213,11 @@ public sealed partial class MainWindow : Window
             _controllerContent.BackButtonMappingEditRequested -= OnControllerBackButtonMappingEditRequested;
             _controllerContent.ControllerLedEditRequested -= OnControllerLedEditRequested;
         }
-        if (_profileContent is not null)
-            _profileContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
+        if (_profilesContent is not null)
+        {
+            _profilesContent.SteamActivityRefreshRequested -= OnSteamActivityRefreshRequested;
+            _profilesContent.Shutdown();
+        }
     }
 
     private SettingsPage GetOrCreateSettingsPage()
@@ -261,26 +262,16 @@ public sealed partial class MainWindow : Window
         return _controllerContent = page;
     }
 
-    private ProfilePage GetOrCreateProfilePage()
+    private ProfilesPage GetOrCreateProfilesPage()
     {
-        if (_profileContent is not null) return _profileContent;
+        if (_profilesContent is not null) return _profilesContent;
 
-        var page = new ProfilePage();
+        var page = new ProfilesPage();
         page.Initialize(_frontend, _bootstrap.FeatureSupport);
         page.SetSteamActivity(_latestSystemStatus?.Steam.Active);
         page.SteamActivityRefreshRequested += OnSteamActivityRefreshRequested;
-        ProfilePageHost.Content = page;
-        return _profileContent = page;
-    }
-
-    private XboxPage GetOrCreateXboxPage()
-    {
-        if (_xboxContent is not null) return _xboxContent;
-
-        var page = new XboxPage();
-        page.Initialize(_frontend);
-        XboxPageHost.Content = page;
-        return _xboxContent = page;
+        ProfilesPageHost.Content = page;
+        return _profilesContent = page;
     }
 
     private OverlayPage GetOrCreateOverlayPage()
@@ -442,7 +433,7 @@ public sealed partial class MainWindow : Window
 
     private void OnSteamActivityRefreshRequested(object? sender, EventArgs args)
     {
-        _profileContent?.SetSteamActivity(null);
+        _profilesContent?.SetSteamActivity(null);
         _ = RefreshSystemStatusAsync();
     }
 
@@ -550,8 +541,7 @@ public sealed partial class MainWindow : Window
         MainNavigationPage.QuickOverlay => _quickOverlayContent is not null,
         MainNavigationPage.Shortcut => _shortcutContent is not null,
         MainNavigationPage.Tweaks => _tweaksContent is not null,
-        MainNavigationPage.Profile => _profileContent is not null,
-        MainNavigationPage.Xbox => _xboxContent is not null,
+        MainNavigationPage.Profile => _profilesContent is not null,
         MainNavigationPage.MsiUpdates => _msiUpdatesContent is not null,
         _ => true,
     };
@@ -569,8 +559,7 @@ public sealed partial class MainWindow : Window
                 case MainNavigationPage.QuickOverlay: _ = GetOrCreateQuickOverlayPage(); break;
                 case MainNavigationPage.Shortcut: _ = GetOrCreateShortcutPage(); break;
                 case MainNavigationPage.Tweaks: _ = GetOrCreateTweaksPage(); break;
-                case MainNavigationPage.Profile: _ = GetOrCreateProfilePage(); break;
-                case MainNavigationPage.Xbox: _ = GetOrCreateXboxPage(); break;
+                case MainNavigationPage.Profile: _ = GetOrCreateProfilesPage(); break;
                 case MainNavigationPage.HowToUse: _ = GetOrCreateHowToUsePage(); break;
             }
 
@@ -705,8 +694,7 @@ public sealed partial class MainWindow : Window
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
         var wasSettings = SettingsPageHost.Visibility == Visibility.Visible;
         var wasMsiUpdates = MsiUpdatesPageHost.Visibility == Visibility.Visible;
-        var wasProfile = ProfilePageHost.Visibility == Visibility.Visible;
-        var wasXbox = XboxPageHost.Visibility == Visibility.Visible;
+        var wasProfile = ProfilesPageHost.Visibility == Visibility.Visible;
         var wasShortcut = ShortcutPageHost.Visibility == Visibility.Visible;
         var wasClawSensorProbe = _clawSensorProbeContent is not null &&
             ReferenceEquals(DeveloperContentHost.Content, _clawSensorProbeContent);
@@ -724,8 +712,7 @@ public sealed partial class MainWindow : Window
         MsiUpdatesPageHost.Visibility = page == MainNavigationPage.MsiUpdates ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.MsiUpdates && !wasMsiUpdates) _msiUpdatesContent!.Activate();
         else if (wasMsiUpdates && page != MainNavigationPage.MsiUpdates) _msiUpdatesContent?.Deactivate();
-        ProfilePageHost.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
-        XboxPageHost.Visibility = page == MainNavigationPage.Xbox ? Visibility.Visible : Visibility.Collapsed;
+        ProfilesPageHost.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         ControllerPageHost.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
         OverlayPageHost.Visibility = page == MainNavigationPage.Overlay ? Visibility.Visible : Visibility.Collapsed;
         QuickOverlayPageHost.Visibility = page == MainNavigationPage.QuickOverlay ? Visibility.Visible : Visibility.Collapsed;
@@ -746,13 +733,11 @@ public sealed partial class MainWindow : Window
         else if (wasDevice) DeviceContent.Deactivate();
         if (page == MainNavigationPage.Profile)
         {
-            _profileContent!.SetSteamActivity(null);
-            _profileContent.Activate();
+            _profilesContent!.SetSteamActivity(null);
+            _profilesContent.Activate();
             _ = RefreshSystemStatusAsync();
         }
-        else if (wasProfile) _profileContent?.Deactivate();
-        if (page == MainNavigationPage.Xbox) _xboxContent!.Activate();
-        else if (wasXbox) _xboxContent?.Deactivate();
+        else if (wasProfile) _profilesContent?.Deactivate();
         if (page == MainNavigationPage.Overlay) _overlayContent!.Activate();
         if (page == MainNavigationPage.QuickOverlay) _quickOverlayContent!.Activate();
         if (page == MainNavigationPage.Shortcut) _shortcutContent!.Activate();
@@ -788,7 +773,6 @@ public sealed partial class MainWindow : Window
         MainNavigationPage.MsiUpdates => "MsiUpdates",
         MainNavigationPage.Controller => "Controller",
         MainNavigationPage.Profile => "Profile",
-        MainNavigationPage.Xbox => "Xbox",
         MainNavigationPage.Overlay => "Overlay",
         MainNavigationPage.QuickOverlay => "QuickOverlay",
         MainNavigationPage.Shortcut => "Shortcut",
@@ -801,7 +785,7 @@ public sealed partial class MainWindow : Window
     {
         if (_prerequisiteSetupInProgress)
         {
-            _profileContent?.SetSteamActivity(null);
+            _profilesContent?.SetSteamActivity(null);
             return;
         }
         if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0)
@@ -816,7 +800,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            _profileContent?.SetSteamActivity(null);
+            _profilesContent?.SetSteamActivity(null);
             if (exception is FrontendTransportException
                 && exception is not FrontendProtocolException
                 && exception is not FrontendRemoteException)
@@ -846,7 +830,7 @@ public sealed partial class MainWindow : Window
     private void RenderSystemStatus(FrontendStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
-        _profileContent?.SetSteamActivity(snapshot.Steam.Active);
+        _profilesContent?.SetSteamActivity(snapshot.Steam.Active);
         DeviceContent.RenderDeviceSummary(snapshot);
         _settingsContent?.RenderRequiredComponents(snapshot);
         if (snapshot.CanInstallRequiredComponents)

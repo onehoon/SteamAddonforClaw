@@ -144,7 +144,7 @@ public sealed class UiArchitectureTests
         Assert.Equal(new[] { "DevicePage" }, eagerPages);
 
         var hosts = pageHostGrid.Elements().Where(element => element.Name.LocalName == "ContentControl").ToArray();
-        Assert.Equal(11, hosts.Length);
+        Assert.Equal(10, hosts.Length);
         Assert.All(hosts, host =>
         {
             Assert.Equal("Collapsed", (string?)host.Attribute("Visibility"));
@@ -189,7 +189,7 @@ public sealed class UiArchitectureTests
 
         var warmupOrder = mainWindow[mainWindow.IndexOf("DeferredWarmupPages =", StringComparison.Ordinal)..
             mainWindow.IndexOf("private readonly IAddonFrontendControl", StringComparison.Ordinal)];
-        foreach (var page in new[] { "Controller", "Settings", "Overlay", "Shortcut", "Tweaks", "Profile", "Xbox" })
+        foreach (var page in new[] { "Controller", "Settings", "Overlay", "Shortcut", "Tweaks", "Profile" })
             Assert.Contains($"MainNavigationPage.{page}", warmupOrder, StringComparison.Ordinal);
         Assert.DoesNotContain("MainNavigationPage.HowToUse", warmupOrder, StringComparison.Ordinal);
         Assert.DoesNotContain("MainNavigationPage.QuickOverlay", warmupOrder, StringComparison.Ordinal);
@@ -215,7 +215,7 @@ public sealed class UiArchitectureTests
         var statusRender = ExtractMethod(mainWindow, "private void RenderSystemStatus(FrontendStatusSnapshot snapshot)");
         Assert.Contains("_latestSystemStatus = snapshot", statusRender, StringComparison.Ordinal);
         Assert.DoesNotContain("_controllerContent?.SetSteamActivity(snapshot.Steam.Active)", statusRender, StringComparison.Ordinal);
-        Assert.Contains("_profileContent?.SetSteamActivity(snapshot.Steam.Active)", statusRender, StringComparison.Ordinal);
+        Assert.Contains("_profilesContent?.SetSteamActivity(snapshot.Steam.Active)", statusRender, StringComparison.Ordinal);
         Assert.Contains("_settingsContent?.RenderRequiredComponents(snapshot)", statusRender, StringComparison.Ordinal);
 
         var controllerPage = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml.cs"));

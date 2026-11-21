@@ -116,7 +116,7 @@ public sealed class SteamVirtualControllerUiTests
         var mainWindow = ReadSource("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs");
         Assert.Contains("page.ApplyControllerForSteamSettings(_bootstrap.Settings)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_controllerContent!.Activate()", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("_profileContent.Activate()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_profilesContent.Activate()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshSystemStatusAsync()", mainWindow, StringComparison.Ordinal);
     }
 

@@ -23,6 +23,7 @@ public sealed partial class XboxPage : UserControl
 {
     private IAddonFrontendControl? _frontend;
     private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents, _suppressControllerEvents, _suppressGpuEvents;
+    private bool _hostedByUnifiedProfiles;
     private bool _catalogLoaded;
     private bool _explicitArtworkRetryRequested;
     private IReadOnlyList<FrontendXboxGameCatalogEntry> _catalog = [];
@@ -82,6 +83,32 @@ public sealed partial class XboxPage : UserControl
     }
 
     internal void Initialize(IAddonFrontendControl frontend) { _frontend = frontend; ApplyGameProfilePresentationLayout(); }
+    internal event EventHandler? UnifiedProfilesBackRequested;
+
+    internal void ActivateForUnifiedProfiles(bool refreshSelectedProfile = true)
+    {
+        _hostedByUnifiedProfiles = true;
+        if (_active) return;
+        _active = true;
+        if (_frontend is not null)
+        {
+            _frontend.StateInvalidated += OnStateInvalidated;
+            _ = RefreshQuickSettingsPreferencesAsync();
+        }
+        if (refreshSelectedProfile && _selectedGame is { } selected)
+            _ = CaptureSelectedAsync(selected.Key);
+    }
+
+    internal async Task OpenGameFromUnifiedProfilesAsync(FrontendXboxGameCatalogEntry game)
+    {
+        ActivateForUnifiedProfiles(refreshSelectedProfile: false);
+        SelectedGameNameText.Text = game.DisplayName;
+        CatalogPanel.Visibility = Visibility.Collapsed;
+        DetailPanel.Visibility = Visibility.Visible;
+        RefreshGamesButton.Visibility = Visibility.Collapsed;
+        await SelectGameAsync(game);
+    }
+
     internal void Activate()
     {
         if (_active) return;
@@ -762,7 +789,12 @@ public sealed partial class XboxPage : UserControl
         SelectedGameNameText.Text = game.DisplayName; CatalogPanel.Visibility = Visibility.Collapsed; DetailPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Collapsed;
         await SelectGameAsync(game);
     }
-    private void BackButton_Click(object sender, RoutedEventArgs e) => ReturnToCatalog();
+    private void BackButton_Click(object sender, RoutedEventArgs e)
+    {
+        ReturnToCatalog();
+        if (_hostedByUnifiedProfiles)
+            UnifiedProfilesBackRequested?.Invoke(this, EventArgs.Empty);
+    }
     private void ReturnToCatalog()
     {
         ClearSelection();

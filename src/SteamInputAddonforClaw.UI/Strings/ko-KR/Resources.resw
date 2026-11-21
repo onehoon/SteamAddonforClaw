@@ -225,7 +225,6 @@
   <data name="Controller_BackTarget_View" xml:space="preserve"><value>View</value></data>
   <data name="Controller_BackTarget_Menu" xml:space="preserve"><value>Menu</value></data>
   <data name="Controller_BackTarget_XboxGuide" xml:space="preserve"><value>XBOX Guide</value></data>
-  <data name="MainNav_Steam.Content" xml:space="preserve"><value>Steam</value></data>
   <data name="Steam_BackButton.Content" xml:space="preserve"><value>Back</value></data>
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
   <data name="Steam_Catalog_NoVisibleGames" xml:space="preserve"><value>표시할 게임이 없습니다.</value></data>
@@ -293,7 +292,6 @@
   <data name="Steam_VirtualControllerCard.Description" xml:space="preserve"><value>Overrides the Controller default for this Steam game.</value></data>
   <data name="Steam_VirtualControllerCard.Header" xml:space="preserve"><value>Virtual Controller</value></data>
 
-  <data name="MainNav_Xbox.Content" xml:space="preserve"><value>XBOX</value></data>
   <data name="Xbox_BackButton.Content" xml:space="preserve"><value>Back</value></data>
   <data name="Xbox_BackMapping_InvalidTargets" xml:space="preserve"><value>Choose valid M1 and M2 targets before saving the per-game mapping.</value></data>
   <data name="Xbox_BackMapping_UpdateFailed" xml:space="preserve"><value>M1 / M2 mapping could not be updated.</value></data>
@@ -764,4 +762,22 @@
   <data name="Device_AutoStart_Issue_StableExecutableMissing" xml:space="preserve"><value>설치된 애플리케이션의 안정된 실행 경로를 사용할 수 없습니다.</value></data>
   <data name="Device_AutoStart_Issue_RegistrationFailed" xml:space="preserve"><value>Windows에서 시작 작업을 만들거나 업데이트하지 못했습니다.</value></data>
   <data name="Device_AutoStart_Issue_ReadbackUnverified" xml:space="preserve"><value>복구 후 시작 작업을 확인하지 못했습니다.</value></data>
+  <data name="MainNav_Profiles.Content" xml:space="preserve"><value>프로필</value></data>
+  <data name="Profiles_GameProfilesTitle.Text" xml:space="preserve"><value>게임 프로필</value></data>
+  <data name="Profiles_FilterAll.Text" xml:space="preserve"><value>전체</value></data>
+  <data name="Profiles_FilterSteam.Text" xml:space="preserve"><value>Steam</value></data>
+  <data name="Profiles_FilterXbox.Text" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Profiles_SearchBox.PlaceholderText" xml:space="preserve"><value>게임 검색...</value></data>
+  <data name="Profiles_RefreshButton.Content" xml:space="preserve"><value>↻ 새로 고침</value></data>
+  <data name="Profiles_EmptyCatalog.Text" xml:space="preserve"><value>현재 필터 또는 검색과 일치하는 게임이 없습니다.</value></data>
+  <data name="Profiles_SteamLabel" xml:space="preserve"><value>Steam</value></data>
+  <data name="Profiles_XboxLabel" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Profiles_GameAutomationName" xml:space="preserve"><value>{0}, {1} 게임</value></data>
+  <data name="Profiles_FavoriteUnknownAutomationName" xml:space="preserve"><value>{0}의 즐겨찾기 상태를 사용할 수 없음</value></data>
+  <data name="Profiles_FavoriteRemoveAutomationName" xml:space="preserve"><value>{0}을(를) 즐겨찾기에서 제거</value></data>
+  <data name="Profiles_FavoriteAddAutomationName" xml:space="preserve"><value>{0}을(를) 즐겨찾기에 추가</value></data>
+  <data name="Profiles_SteamCatalogWarning" xml:space="preserve"><value>Steam 게임을 새로 고치지 못했습니다. 기존 결과가 있으면 계속 표시합니다.</value></data>
+  <data name="Profiles_XboxCatalogWarning" xml:space="preserve"><value>XBOX 게임을 새로 고치지 못했습니다. 기존 결과가 있으면 계속 표시합니다.</value></data>
+  <data name="Profiles_FavoriteStateUnavailable" xml:space="preserve"><value>일부 게임의 즐겨찾기 상태를 사용할 수 없습니다.</value></data>
+  <data name="Profiles_FavoriteSaveFailed" xml:space="preserve"><value>즐겨찾기를 저장하지 못했습니다.</value></data>
 </root>

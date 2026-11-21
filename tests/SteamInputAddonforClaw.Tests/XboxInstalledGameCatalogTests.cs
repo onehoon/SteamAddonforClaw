@@ -28,8 +28,7 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     {
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
-        if (Directory.Exists(_directory))
-            Directory.Delete(_directory, recursive: true);
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
     }
 
     [Fact]
@@ -66,9 +65,7 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     public void Config_parser_accepts_xml_namespaces_by_local_name()
     {
         const string xml = "<Game xmlns=\"urn:sample\"><Identity Name=\"Game\" Publisher=\"Publisher\"/><ExecutableList><Executable Name=\"Game.exe\"/></ExecutableList></Game>";
-
         var parsed = MicrosoftGameConfigReader.Parse(xml);
-
         Assert.True(parsed.RecognizedRoot);
         Assert.Equal("Game", parsed.Config?.IdentityName);
     }
@@ -82,7 +79,6 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     public void Config_parser_rejects_invalid_config_shapes(string xml, bool xmlParsed, string failure)
     {
         var parsed = MicrosoftGameConfigReader.Parse(xml);
-
         Assert.Equal(xmlParsed, parsed.XmlParsed);
         Assert.Null(parsed.Config);
         Assert.Contains(failure, parsed.FailureReason, StringComparison.Ordinal);
@@ -92,9 +88,7 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     public void Config_parser_blocks_dtd_and_entity_expansion()
     {
         const string xml = "<!DOCTYPE Game [<!ENTITY name 'Game'>]><Game><Identity Name='&name;' Publisher='Publisher'/><ExecutableList><Executable Name='Game.exe'/></ExecutableList></Game>";
-
         var parsed = MicrosoftGameConfigReader.Parse(xml);
-
         Assert.False(parsed.XmlParsed);
         Assert.Null(parsed.Config);
     }
@@ -103,7 +97,6 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     public void Canonical_key_prefers_store_id_then_package_family_then_identity_tuple()
     {
         var config = MicrosoftGameConfigReader.Parse(ValidConfig).Config!;
-
         Assert.Equal("store:9NABC123", XboxGameIdentity.CreateKey(" 9NABC123 ", "Sample_family", config));
         Assert.Equal("pfn:Sample_family", XboxGameIdentity.CreateKey(null, " Sample_family ", config));
         Assert.Equal("identity:SAMPLE.GAME|CN%3DSAMPLE|PC", XboxGameIdentity.CreateKey(null, null, config));
@@ -111,50 +104,13 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     }
 
     [Fact]
-    public async Task Package_family_key_ignores_version_and_display_name_changes()
+    public async Task Valid_game_config_uses_registered_package_and_preserves_store_identity()
     {
-        var originalConfig = ValidConfig.Replace("<StoreId>9NABC123</StoreId>", string.Empty, StringComparison.Ordinal);
-        var updatedConfig = originalConfig.Replace("Sample title", "Updated title", StringComparison.Ordinal);
-        var originalRoot = CreatePackage("original", originalConfig);
-        var updatedRoot = CreatePackage("updated", updatedConfig);
-        var original = await ScanAsync(new FakePackageSource(true, null,
-            Package("Sample_1.0.0.0_x64__test", "Sample_family", "Old title", Location("Effective", originalRoot))));
-        var updated = await ScanAsync(new FakePackageSource(true, null,
-            Package("Sample_2.0.0.0_x64__test", "Sample_family", "New title", Location("Effective", updatedRoot))));
+        var folder = CreateGame("valid", ValidConfig);
+        var package = Package("Sample_1.0.0.0_x64__test", "Sample_family", folder.GameDirectory);
+        var packageSource = new FakePackageSource(_ => Success(package));
 
-        var originalGame = Assert.Single(original.Games);
-        var updatedGame = Assert.Single(updated.Games);
-        Assert.Equal("pfn:Sample_family", originalGame.Identity.Key);
-        Assert.Equal(originalGame.Identity.Key, updatedGame.Identity.Key);
-        Assert.NotEqual(originalGame.Identity.DisplayName, updatedGame.Identity.DisplayName);
-    }
-
-    [Fact]
-    public void Title_id_is_metadata_and_never_becomes_key_authority()
-    {
-        var config = MicrosoftGameConfigReader.Parse(ValidConfig.Replace("<StoreId>9NABC123</StoreId>", string.Empty, StringComparison.Ordinal)).Config!;
-
-        Assert.Equal("12345678", config.TitleId);
-        Assert.StartsWith("identity:", XboxGameIdentity.CreateKey(null, null, config), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Zero_packages_completes_with_an_empty_catalog()
-    {
-        var result = await ScanAsync(new FakePackageSource(true, null));
-
-        Assert.Equal(XboxInstalledGameCatalogOutcome.Completed, result.Outcome);
-        Assert.Empty(result.Games);
-        Assert.Null(result.FailureReason);
-    }
-
-    [Fact]
-    public async Task Valid_game_config_produces_a_production_catalog_entry()
-    {
-        var root = CreatePackage("valid", ValidConfig);
-
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            Package("Sample_1.0.0.0_x64__test", "Sample_family", "Sample package", Location("Installed", root))));
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), packageSource);
 
         var game = Assert.Single(result.Games);
         Assert.Equal(XboxInstalledGameCatalogOutcome.Completed, result.Outcome);
@@ -162,217 +118,249 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
         Assert.Equal("Sample title", game.Identity.DisplayName);
         Assert.Equal("9NABC123", game.Identity.StoreId);
         Assert.Equal("Sample_family", game.Identity.PackageFamilyName);
+        Assert.Equal("Sample.Game", Assert.Single(packageSource.Configurations).IdentityName);
     }
 
     [Fact]
-    public async Task Ordinary_package_without_config_is_skipped_without_scan_failure()
+    public async Task Empty_folder_scan_completes_with_an_empty_catalog()
     {
-        var root = CreatePackage("ordinary", null);
+        var result = await ScanAsync(new FakeGameFolderSource([]), new FakePackageSource(_ => Success()));
+        Assert.Equal(XboxInstalledGameCatalogOutcome.Completed, result.Outcome);
+        Assert.Empty(result.Games);
+        Assert.Null(result.FailureReason);
+    }
 
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            Package("Ordinary_1.0.0.0_x64__test", "Ordinary_family", "Ordinary app", Location("Installed", root))));
+    [Fact]
+    public async Task Stale_folder_without_a_registered_package_is_not_reported_as_installed()
+    {
+        var folder = CreateGame("stale", ValidConfig);
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => Success()));
 
         Assert.Equal(XboxInstalledGameCatalogOutcome.Completed, result.Outcome);
         Assert.Empty(result.Games);
-        Assert.Equal(0, result.SkippedPackageCount);
+        Assert.Equal(1, result.SkippedGameCount);
     }
 
     [Fact]
-    public async Task Malformed_config_does_not_abort_a_later_valid_package()
+    public async Task Targeted_package_lookup_failure_keeps_existing_store_key_without_inventing_family_key()
     {
-        var malformedRoot = CreatePackage("malformed", "<Game>");
-        var validRoot = CreatePackage("later-valid", ValidConfig);
+        var folder = CreateGame("lookup-failure", ValidConfig);
+        var failedLookup = new XboxInstalledPackageEnumeration([], false, true, "Package lookup unavailable.");
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => failedLookup));
 
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            Package("Malformed_1.0.0.0_x64__test", "Malformed_family", "Malformed", Location("Installed", malformedRoot)),
-            Package("Valid_1.0.0.0_x64__test", "Valid_family", "Valid", Location("Installed", validRoot))));
-
+        var game = Assert.Single(result.Games);
+        Assert.Equal("store:9NABC123", game.Identity.Key);
+        Assert.Null(game.Identity.PackageFamilyName);
         Assert.Equal(XboxInstalledGameCatalogOutcome.Completed, result.Outcome);
-        Assert.Equal(1, result.SkippedPackageCount);
-        Assert.Equal("store:9NABC123", Assert.Single(result.Games).Identity.Key);
     }
 
     [Fact]
-    public async Task Duplicate_package_and_game_observations_do_not_duplicate_catalog_entries()
+    public async Task Targeted_lookup_failure_without_store_id_does_not_create_an_unverified_identity()
     {
-        var root = CreatePackage("duplicate", ValidConfig);
-        var first = Package("Duplicate_1.0.0.0_x64__test", "Duplicate_family", "Duplicate", Location("Installed", root));
-        var secondVersion = Package("Duplicate_2.0.0.0_x64__test", "Duplicate_family", "Duplicate", Location("Installed", root));
+        var config = ValidConfig.Replace("<StoreId>9NABC123</StoreId>", string.Empty, StringComparison.Ordinal);
+        var folder = CreateGame("no-store-id", config);
+        var failedLookup = new XboxInstalledPackageEnumeration([], false, true, "Package lookup unavailable.");
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => failedLookup));
 
-        var result = await ScanAsync(new FakePackageSource(true, null, first, first, secondVersion));
-
-        Assert.Single(result.Games);
-    }
-
-    [Fact]
-    public async Task Effective_and_installed_locations_with_the_same_root_are_deduplicated_case_insensitively()
-    {
-        var root = CreatePackage("same-root", ValidConfig);
-        var distinctLocations = XboxInstalledGameCatalog.DistinctLocations(
-            [Location("Effective", root), Location("Installed", root.ToUpperInvariant())]);
-
-        Assert.Equal("Effective", Assert.Single(distinctLocations).Kind);
-
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            Package("Sample_1.0.0.0_x64__test", "Sample_family", "Sample", Location("Effective", root), Location("Installed", root.ToUpperInvariant()))));
-
-        var game = Assert.Single(result.Games);
-        Assert.Equal("store:9NABC123", game.Identity.Key);
-        Assert.Equal("Sample title", game.Identity.DisplayName);
-    }
-
-    [Fact]
-    public async Task Config_in_installed_location_is_used_when_effective_location_has_no_config()
-    {
-        var effectiveRoot = CreatePackage("effective-empty", null);
-        var installedRoot = CreatePackage("installed-config", ValidConfig);
-
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            Package("Sample_1.0.0.0_x64__test", "Sample_family", "Sample", Location("Effective", effectiveRoot), Location("Installed", installedRoot))));
-
-        var game = Assert.Single(result.Games);
-        Assert.Equal("store:9NABC123", game.Identity.Key);
-        Assert.Equal("Sample title", game.Identity.DisplayName);
-    }
-
-    [Fact]
-    public async Task Effective_location_has_precedence_when_both_locations_contain_a_valid_config()
-    {
-        var effectiveRoot = CreatePackage("effective-config", ValidConfig.Replace("9NABC123", "9NEFFECTIVE", StringComparison.Ordinal));
-        var installedRoot = CreatePackage("installed-config", ValidConfig.Replace("9NABC123", "9NINSTALLED", StringComparison.Ordinal));
-
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            Package("Sample_1.0.0.0_x64__test", "Sample_family", "Sample", Location("Effective", effectiveRoot), Location("Installed", installedRoot))));
-
-        var game = Assert.Single(result.Games);
-        Assert.Equal("store:9NEFFECTIVE", game.Identity.Key);
-        Assert.Equal("Sample title", game.Identity.DisplayName);
-    }
-
-    [Fact]
-    public async Task Package_metadata_config_location_is_accepted_without_payload_path_assumptions()
-    {
-        var metadataRoot = CreatePackage("package-metadata-on-c", ValidConfig);
-
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            Package("Sample_1.0.0.0_x64__test", "Sample_family", "Sample", Location("Installed", metadataRoot))));
-
-        var game = Assert.Single(result.Games);
-        Assert.Equal("store:9NABC123", game.Identity.Key);
-        Assert.Equal("Sample title", game.Identity.DisplayName);
-    }
-
-    [Theory]
-    [InlineData(true, 1)]
-    [InlineData(false, 2)]
-    public async Task Enumeration_source_failure_maps_to_global_outcome_without_fallback(bool unavailable, int expected)
-    {
-        var source = new FakePackageSource(new XboxInstalledPackageEnumeration([], false, unavailable, "synthetic enumeration failure"));
-
-        var result = await ScanAsync(source);
-
-        Assert.Equal(1, source.CallCount);
-        Assert.Equal((XboxInstalledGameCatalogOutcome)expected, result.Outcome);
+        Assert.Equal(XboxInstalledGameCatalogOutcome.Unavailable, result.Outcome);
         Assert.Empty(result.Games);
-        Assert.Equal("synthetic enumeration failure", result.FailureReason);
+        Assert.Equal("Package lookup unavailable.", result.FailureReason);
     }
 
     [Fact]
-    public async Task Package_metadata_failure_does_not_abort_later_valid_packages()
+    public async Task Registered_package_location_must_contain_the_discovered_config()
     {
-        var root = CreatePackage("after-metadata-failure", ValidConfig);
-        var badPackage = new XboxInstalledPackage("broken", "broken_full", "broken_family", "Broken", [], MetadataFailure: "metadata failure");
+        var folder = CreateGame("leftover", ValidConfig);
+        var unrelatedRoot = Path.Combine(_directory, "different-install");
+        Directory.CreateDirectory(unrelatedRoot);
+        var result = await ScanAsync(new FakeGameFolderSource([folder]),
+            new FakePackageSource(_ => Success(Package("Sample_1.0.0.0_x64__test", "Sample_family", unrelatedRoot))));
 
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            badPackage,
-            Package("Valid_1.0.0.0_x64__test", "Valid_family", "Valid", Location("Installed", root))));
+        Assert.Empty(result.Games);
+        Assert.Equal(1, result.SkippedGameCount);
+    }
 
-        Assert.Equal(1, result.SkippedPackageCount);
+    [Fact]
+    public async Task Package_family_key_remains_stable_across_version_and_title_changes()
+    {
+        var firstFolder = CreateGame("version-one", ValidConfig.Replace("<StoreId>9NABC123</StoreId>", string.Empty, StringComparison.Ordinal));
+        var secondFolder = CreateGame("version-two", ValidConfig.Replace("<StoreId>9NABC123</StoreId>", string.Empty, StringComparison.Ordinal)
+            .Replace("Sample title", "Updated title", StringComparison.Ordinal));
+        var first = await ScanAsync(new FakeGameFolderSource([firstFolder]), new FakePackageSource(_ =>
+            Success(Package("Sample_1.0.0.0_x64__test", "Sample_family", firstFolder.GameDirectory))));
+        var updated = await ScanAsync(new FakeGameFolderSource([secondFolder]), new FakePackageSource(_ =>
+            Success(Package("Sample_2.0.0.0_x64__test", "Sample_family", secondFolder.GameDirectory))));
+
+        var firstGame = Assert.Single(first.Games);
+        var updatedGame = Assert.Single(updated.Games);
+        Assert.Equal("pfn:Sample_family", firstGame.Identity.Key);
+        Assert.Equal(firstGame.Identity.Key, updatedGame.Identity.Key);
+        Assert.NotEqual(firstGame.Identity.DisplayName, updatedGame.Identity.DisplayName);
+    }
+
+    [Fact]
+    public async Task Package_name_and_publisher_must_match_the_config_identity()
+    {
+        var folder = CreateGame("mismatched", ValidConfig);
+        var package = new XboxInstalledPackage("Other.Game", "CN=Other", "Other_1.0_x64", "Other_family",
+            "Other", [new("Installed", folder.GameDirectory)]);
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => Success(package)));
+        Assert.Empty(result.Games);
+    }
+
+    [Fact]
+    public async Task Malformed_or_oversize_config_does_not_abort_later_valid_game()
+    {
+        var malformed = CreateGame("malformed", "<Game>");
+        var oversized = CreateGame("oversized", "<Game>" + new string(' ', 2 * 1024 * 1024) + "</Game>");
+        var valid = CreateGame("valid-after-invalid", ValidConfig);
+        var packageSource = new FakePackageSource(_ => Success(Package("Sample_1.0.0.0_x64__test", "Sample_family", valid.GameDirectory)));
+        var result = await ScanAsync(new FakeGameFolderSource([malformed, oversized, valid]), packageSource);
+
         Assert.Single(result.Games);
+        Assert.Equal("store:9NABC123", result.Games[0].Identity.Key);
+        Assert.Equal(2, result.SkippedGameCount);
+        Assert.Equal(1, packageSource.CallCount);
     }
 
     [Fact]
-    public async Task Package_location_failure_does_not_abort_other_packages()
+    public async Task Duplicate_folder_observations_and_profile_keys_do_not_duplicate_games()
     {
-        var root = CreatePackage("after-location-failure", ValidConfig);
-        var badPackage = new XboxInstalledPackage("broken", "broken_full", "broken_family", "Broken", [], LocationFailure: "location failure");
+        var folder = CreateGame("duplicate", ValidConfig);
+        var package = Package("Sample_1.0.0.0_x64__test", "Sample_family", folder.GameDirectory);
+        var packageSource = new FakePackageSource(_ => Success(package, package));
+        var result = await ScanAsync(new FakeGameFolderSource([folder, folder]), packageSource);
 
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            badPackage,
-            Package("Valid_1.0.0.0_x64__test", "Valid_family", "Valid", Location("Installed", root))));
-
-        Assert.Equal(1, result.SkippedPackageCount);
         Assert.Single(result.Games);
+        Assert.Equal(1, packageSource.CallCount);
     }
 
     [Fact]
-    public async Task Config_over_limit_is_skipped_and_later_packages_are_still_scanned()
+    public async Task Folder_discovery_failure_maps_to_global_catalog_outcome()
     {
-        var largeRoot = CreatePackage("large", "<Game>" + new string(' ', 2 * 1024 * 1024) + "</Game>");
-        var validRoot = CreatePackage("after-large", ValidConfig);
-
-        var result = await ScanAsync(new FakePackageSource(true, null,
-            Package("Large_1.0.0.0_x64__test", "Large_family", "Large", Location("Installed", largeRoot)),
-            Package("Valid_1.0.0.0_x64__test", "Valid_family", "Valid", Location("Installed", validRoot))));
-
-        Assert.Equal(1, result.SkippedPackageCount);
-        Assert.Single(result.Games);
+        var failure = new XboxInstalledGameFolderEnumeration([], false, true, "folder discovery unavailable");
+        var result = await ScanAsync(new FakeGameFolderSource(failure), new FakePackageSource(_ => Success()));
+        Assert.Equal(XboxInstalledGameCatalogOutcome.Unavailable, result.Outcome);
+        Assert.Empty(result.Games);
+        Assert.Equal("folder discovery unavailable", result.FailureReason);
     }
 
     [Fact]
-    public async Task Cancellation_is_observed_before_package_enumeration()
+    public async Task Cancellation_is_observed_before_folder_discovery()
     {
-        var source = new FakePackageSource(true, null);
+        var source = new FakeGameFolderSource([]);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ScanAsync(source, cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ScanAsync(source, new FakePackageSource(_ => Success()), cancellation.Token));
         Assert.Equal(0, source.CallCount);
     }
 
     [Fact]
-    public async Task Cancellation_during_package_enumeration_is_observed_before_scan()
+    public async Task Cancellation_during_folder_discovery_is_observed_before_game_scanning()
     {
         using var cancellation = new CancellationTokenSource();
-        var source = new FakePackageSource(new([], true, false, null), token => cancellation.Cancel());
+        var source = new FakeGameFolderSource([], _ => cancellation.Cancel());
+        var packageSource = new FakePackageSource(_ => Success());
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ScanAsync(source, cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ScanAsync(source, packageSource, cancellation.Token));
         Assert.Equal(1, source.CallCount);
+        Assert.Equal(0, packageSource.CallCount);
     }
 
-    private async Task<XboxInstalledGameCatalogResult> ScanAsync(FakePackageSource source, CancellationToken cancellationToken = default) =>
-        await new XboxInstalledGameCatalog(source).ScanAsync(cancellationToken);
-
-    private string CreatePackage(string name, string? config)
+    [Fact]
+    public void Registered_locations_are_deduplicated_case_insensitively()
     {
-        var path = Path.Combine(_directory, name);
-        Directory.CreateDirectory(path);
-        if (config is not null)
-            File.WriteAllText(Path.Combine(path, "MicrosoftGame.config"), config);
-        return path;
+        var locations = XboxInstalledGameCatalog.DistinctLocations(
+            [new("Effective", _directory), new("Installed", _directory.ToUpperInvariant())]);
+        Assert.Equal("Effective", Assert.Single(locations).Kind);
     }
 
-    private static XboxInstalledPackageLocation Location(string kind, string rootPath) => new(kind, rootPath);
-
-    private static XboxInstalledPackage Package(string fullName, string familyName, string displayName, params XboxInstalledPackageLocation[] locations) =>
-        new("PackageName", fullName, familyName, displayName, locations);
-
-    private sealed class FakePackageSource(
-        XboxInstalledPackageEnumeration enumeration,
-        Action<CancellationToken>? onEnumerate = null) : IXboxInstalledPackageSource
+    [Theory]
+    [InlineData("Effective")]
+    [InlineData("Installed")]
+    public async Task Either_registered_package_location_can_confirm_the_discovered_game(string locationKind)
     {
-        public int CallCount { get; private set; }
+        var folder = CreateGame("registered-location", ValidConfig);
+        var package = new XboxInstalledPackage("Sample.Game", "CN=Sample", "Sample_1.0_x64", "Sample_family",
+            "Registered display", [new(locationKind, folder.GameDirectory)]);
 
-        public FakePackageSource(bool succeeded, string? failureReason, params XboxInstalledPackage[] packages)
-            : this(new(packages, succeeded, false, failureReason)) { }
+        var result = await ScanAsync(new FakeGameFolderSource([folder]), new FakePackageSource(_ => Success(package)));
 
-        public XboxInstalledPackageEnumeration Enumerate(CancellationToken cancellationToken)
+        Assert.Single(result.Games);
+    }
+
+    [Fact]
+    public void Normal_catalog_registration_uses_the_targeted_package_query_only()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
+            "src", "SteamInputAddonforClaw", "Xbox", "XboxInstalledGameCatalog.cs"));
+        var normalized = System.Text.RegularExpressions.Regex.Replace(source, @"\s+", " ");
+
+        Assert.Contains("FindPackagesForUser( string.Empty, config.IdentityName, config.IdentityPublisher);", normalized, StringComparison.Ordinal);
+        Assert.DoesNotContain("FindPackagesForUser( string.Empty )", normalized, StringComparison.Ordinal);
+    }
+
+    private async Task<XboxInstalledGameCatalogResult> ScanAsync(
+        FakeGameFolderSource folderSource,
+        FakePackageSource packageSource,
+        CancellationToken cancellationToken = default) =>
+        await new XboxInstalledGameCatalog(folderSource, packageSource).ScanAsync(cancellationToken);
+
+    private XboxInstalledGameFolder CreateGame(string name, string config)
+    {
+        var gameDirectory = Path.Combine(_directory, name);
+        var contentDirectory = Path.Combine(gameDirectory, "Content");
+        Directory.CreateDirectory(contentDirectory);
+        var configPath = Path.Combine(contentDirectory, "MicrosoftGame.config");
+        File.WriteAllText(configPath, config);
+        return new(gameDirectory, configPath);
+    }
+
+    private static XboxInstalledPackage Package(string fullName, string familyName, string rootPath) =>
+        new("Sample.Game", "CN=Sample", fullName, familyName, "Registered display", [new("Installed", rootPath)]);
+
+    private static XboxInstalledPackageEnumeration Success(params XboxInstalledPackage[] packages) => new(packages, true, false, null);
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+        return directory!.FullName;
+    }
+
+    private sealed class FakeGameFolderSource(
+        XboxInstalledGameFolderEnumeration enumeration,
+        Action<CancellationToken>? onEnumerate = null) : IXboxInstalledGameFolderSource
+    {
+        internal int CallCount { get; private set; }
+
+        internal FakeGameFolderSource(IReadOnlyList<XboxInstalledGameFolder> folders, Action<CancellationToken>? onEnumerate = null)
+            : this(new XboxInstalledGameFolderEnumeration(folders, true, false, null), onEnumerate) { }
+
+        public XboxInstalledGameFolderEnumeration Enumerate(CancellationToken cancellationToken)
         {
             CallCount++;
             cancellationToken.ThrowIfCancellationRequested();
             onEnumerate?.Invoke(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             return enumeration;
+        }
+    }
+
+    private sealed class FakePackageSource(
+        Func<MicrosoftGameConfig, XboxInstalledPackageEnumeration> resolve) : IXboxInstalledPackageSource
+    {
+        internal int CallCount { get; private set; }
+        internal List<MicrosoftGameConfig> Configurations { get; } = [];
+
+        public XboxInstalledPackageEnumeration FindForGame(MicrosoftGameConfig config, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            Configurations.Add(config);
+            return resolve(config);
         }
     }
 }

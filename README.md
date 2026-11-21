@@ -2,7 +2,7 @@
 
 Steam Addon for Claw adds controller integration and game-specific performance controls for supported MSI Claw handhelds. It can present the built-in controller as a Steam Deck or DualSense Edge while Steam gaming is active, and as an Xbox 360 controller otherwise. You can choose a global Steam controller and an optional per-game Steam override, configure the controller's front and rear buttons, set per-game performance options, and use a performance HUD, shortcuts, a separate Quick Settings Overlay, and Windows gaming-home behavior.
 
-This guide describes the features currently exposed by the app. The Main App includes **Device**, **MSI Update**, **Controller**, **Steam**, **XBOX**, **ClawHUD**, **Quick Overlay**, **Shortcut**, **Tweaks**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
+This guide describes the features currently exposed by the app. The Main App includes **Device**, **MSI Update**, **Controller**, **Profiles**, **ClawHUD**, **Quick Overlay**, **Shortcut**, **Tweaks**, **How to Use**, and **Settings**. **Quick Settings Overlay** is a separate controller-friendly window; it is not Steam Quick Access and it is not the ClawHUD.
 
 ## Table of contents
 
@@ -16,8 +16,7 @@ This guide describes the features currently exposed by the app. The Main App inc
   - [Device](#device)
   - [MSI Update](#msi-update)
   - [Controller](#controller)
-  - [Steam](#steam)
-  - [XBOX](#xbox)
+  - [Profiles](#profiles)
   - [ClawHUD](#clawhud)
   - [Quick Overlay](#quick-overlay)
   - [Shortcut](#shortcut)
@@ -157,9 +156,13 @@ Where supported, **Joystick LED** can be enabled or disabled, with one static co
 
 The **Vibration Strength** section also includes **Vibration Recovery → Restore** for all three supported models. It temporarily disconnects the virtual controller, so save and close your game first. A success message does not guarantee that the motors are working; use both **Test** buttons afterward. Automatic vibration recovery is not enabled by default.
 
-### Steam
+### Profiles
 
-The **Steam** page lists installed Steam games and Non-Steam shortcuts that Steam recognizes. Use **Refresh**, search, and the favorite control to find a game. Select a game to edit its profile. Recognized games receive an enabled profile automatically, so you can configure it before launching the game. The profile takes a one-time snapshot of the current Device performance values when it is created; later Device changes do not overwrite that game-specific snapshot.
+The **Profiles** page shows Steam library games, Steam Non-Steam shortcuts, and recognized installed XBOX games together in one cover library. Choose **All**, **Steam**, or **XBOX** to filter the games, search by name (or Steam AppID), and use **Refresh** to update both catalogs. Changing filters or search text does not rescan games. Favorites from both platforms sort ahead of other games.
+
+Select a card to open that platform's existing game-profile editor. Returning to the library keeps the current filter, search, and scroll position. Recognized games receive an enabled profile automatically, so you can configure it before launching the game. A profile takes a one-time snapshot of the current Device performance values when it is created; later Device changes do not overwrite that game-specific snapshot.
+
+#### Steam profiles
 
 The first profile card is **Virtual Controller**. Choose **Use default**, **Steam Deck**, or **DualSense Edge**. The choice can be edited while Steam / Big Picture is idle. With Big Picture active, a game's explicit override is selected automatically when Steam reports that game as active, then the global choice is restored when the game ends and Big Picture remains active. **Use default** always inherits **Controller → Controller for Steam Game**.
 
@@ -175,9 +178,9 @@ Per-game options include:
 
 When the game profile is active, its configured **TDP Control**, **CPU Boost**, and **Windows Power Mode** values take priority over the matching Device values. When there is no active game profile, the Device values apply. These three settings are managed when configured and have no per-feature on/off switch. **Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**, and **Display Scaling to 100%** are game-profile-only controls and do not have Device-level fallback settings. When the game is no longer active, the profile-only controls stop applying and the Device values become effective again. Display scaling restores the captured scale as part of its display recovery; an unsupported or failed Windows operation keeps recovery pending. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
 
-### XBOX
+#### XBOX profiles
 
-The **XBOX** page lists recognized installed Xbox/Microsoft Store games available to the current Windows user. Use **Refresh**, search, and favorites, then select a game to edit its profile. Recognized games receive an enabled profile automatically, so you can configure it before launch. The profile takes a one-time snapshot of the current Device performance values when it is created; later Device changes do not overwrite that game-specific snapshot. Not every Store app or Game Pass title is necessarily recognized by the catalog.
+The XBOX filter discovers modern GDK flat-file game installations in registered `.GamingRoot` libraries or the narrow `[drive]:\XboxGames` fallback. It validates each game folder against its registered package before listing it. Legacy titles available only under protected `WindowsApps`/older MSIXVC layouts are outside this fast discovery path; not every Store app or Game Pass title is necessarily recognized by the catalog.
 
 The performance options match the Steam profile options: TDP Control, CPU Boost, Windows Power Mode, Minimum GPU Clock, Intel FPS Limit, Resolution, and **Display Scaling to 100%**. The XBOX profile also has a controller section for **Use global M1 / M2 mapping**. Turn that off to choose per-game Xbox 360 targets for M1 and M2. Steam Deck presentation still keeps M1 as R4 and M2 as L4.
 
@@ -278,7 +281,7 @@ When the game stops being active, the profile-only settings stop applying and co
 
 ## Non-Steam games
 
-To use a Steam profile for a regular Windows game, first add that game to Steam as a **Non-Steam Game**. The **Steam** page lists shortcuts that Steam recognizes, and creates an enabled profile when the game is discovered so you can configure it there. Start the game through its Steam shortcut and confirm Steam continues to show it as active. Some launchers close their own shortcut when they start a separate game process; if Steam then stops recognizing the shortcut, the Addon may stop applying that profile too.
+To use a Steam profile for a regular Windows game, first add that game to Steam as a **Non-Steam Game**. The **Profiles** page lists shortcuts that Steam recognizes, and creates an enabled profile when the game is discovered so you can configure it there. Start the game through its Steam shortcut and confirm Steam continues to show it as active. Some launchers close their own shortcut when they start a separate game process; if Steam then stops recognizing the shortcut, the Addon may stop applying that profile too.
 
 ## Quick Settings Overlay
 
@@ -363,7 +366,7 @@ Check that the button you are pressing is assigned to **Quick Settings Overlay**
 
 ### A game profile does not apply
 
-In **Steam** or **XBOX**, select the correct game and confirm the profile and setting values are available. Recognized games are enabled automatically. For Steam, confirm Steam still recognizes the game as active. Check whether the setting is for **Plugged in** or **On battery**. Configured TDP Control, CPU Boost, and Windows Power Mode values in the active profile take priority over Device values. Minimum GPU Clock, Intel FPS Limit, and Resolution are profile-only settings and apply only when their feature controls are enabled.
+In **Profiles**, select the correct Steam or XBOX game and confirm the profile and setting values are available. Recognized games are enabled automatically. For Steam, confirm Steam still recognizes the game as active. Check whether the setting is for **Plugged in** or **On battery**. Configured TDP Control, CPU Boost, and Windows Power Mode values in the active profile take priority over Device values. Minimum GPU Clock, Intel FPS Limit, and Resolution are profile-only settings and apply only when their feature controls are enabled.
 
 ### A Non-Steam profile stops applying after a launcher closes
 
@@ -375,7 +378,7 @@ Open **ClawHUD**, enable **Enable HUD**, and check **Display mode**. If the stat
 
 ### An XBOX game is missing
 
-Use **Refresh** and search again. The catalog contains recognized installed Xbox/Microsoft Store games for the current Windows user; it does not guarantee that every Store app or subscription title will appear.
+Use **Refresh** and search again. The fast catalog path discovers modern GDK flat-file installations from `.GamingRoot` libraries or `[drive]:\XboxGames`; it does not scan all Windows packages. Legacy WindowsApps-only titles and some Store or subscription apps may not appear.
 
 ### Required components are not ready
 
@@ -386,7 +389,7 @@ Open **Settings → Required Components** to see the reported status. Follow the
 - Only the MSI Claw models listed in [Supported devices](#supported-devices) are recognized.
 - Some settings depend on hardware, Windows, Intel graphics support, or game support and may be unavailable on a particular device or title.
 - Intel FPS limiting is not supported by every game. Minimum GPU Clock is available only when the graphics driver exposes selectable values; actual clocks remain subject to power and thermal limits.
-- The XBOX catalog includes recognized installed titles, not every app in Microsoft Store or Game Pass.
+- The XBOX catalog targets modern GDK flat-file installations and does not include legacy WindowsApps-only titles through this fast path; it does not guarantee every Microsoft Store or Game Pass app will appear.
 - Steam profile tracking depends on Steam continuing to report the game or shortcut as active. Some launcher chains can cause a profile to stop applying when Steam loses that association.
 - Quick Settings Overlay is separate from Steam Quick Access. The Addon does not inject an Addon tab into Steam's menu.
 - **Steam Deck and DualSense Edge** support motion input. On a tested A2VM 8, Steam Deck Gyro To Mouse could feel choppy; DualSense Edge was smoother in that comparison. Results may differ by game and device. Configure gyro activation and sensitivity in **Steam Input**.

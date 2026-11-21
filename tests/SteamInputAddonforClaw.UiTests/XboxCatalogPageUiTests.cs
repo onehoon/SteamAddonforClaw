@@ -24,16 +24,24 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
-    public void Steam_and_Xbox_remain_distinct_accessible_navigation_destinations()
+    public void Steam_and_Xbox_share_one_profiles_navigation_and_one_cover_grid()
     {
         var mainXaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml"));
         var items = mainXaml.Descendants().Where(element => element.Name.LocalName == "NavigationViewItem").ToArray();
-        Assert.Single(items, element => (string?)element.Attribute("Tag") == "Profile");
-        Assert.Single(items, element => (string?)element.Attribute("Tag") == "Xbox");
+        var profilesItem = Assert.Single(items, element => (string?)element.Attribute("Tag") == "Profile");
+        Assert.Equal("MainNav_Profiles", (string?)profilesItem.Attribute(XName.Get("Uid", "http://schemas.microsoft.com/winfx/2006/xaml")));
+        Assert.DoesNotContain(items, element => (string?)element.Attribute("Tag") == "Xbox");
 
         var navigation = new MainNavigationState();
         Assert.Equal(MainNavigationPage.Profile, navigation.SelectNavigationItem(false, "Profile"));
-        Assert.Equal(MainNavigationPage.Xbox, navigation.SelectNavigationItem(false, "Xbox"));
+        Assert.Equal(MainNavigationPage.Device, navigation.SelectNavigationItem(false, "Xbox"));
+
+        var profilesXaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilesPage.xaml"));
+        Assert.Single(profilesXaml.Descendants(), element => element.Name.LocalName == "SelectorBar");
+        Assert.Equal(3, profilesXaml.Descendants().Count(element => element.Name.LocalName == "SelectorBarItem"));
+        Assert.Single(profilesXaml.Descendants(), element => element.Name.LocalName == "GridView"
+            && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "GameGrid");
+        Assert.Contains("ProfilesCatalogPolicy.FilterAndSort", File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilesPage.xaml.cs")), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -346,9 +354,10 @@ public sealed class XboxCatalogPageUiTests
         Assert.DoesNotContain("if (_catalogLoaded)", refresh, StringComparison.Ordinal);
         Assert.DoesNotContain("ScanXboxGamesAsync", activate, StringComparison.Ordinal);
         Assert.DoesNotContain("ScanXboxGamesAsync", windowCode, StringComparison.Ordinal);
-        Assert.Contains("_xboxContent!.Activate()", showPage, StringComparison.Ordinal);
-        Assert.Contains("else if (wasXbox) _xboxContent?.Deactivate()", showPage, StringComparison.Ordinal);
-        Assert.Contains("GetOrCreateXboxPage()", materialize, StringComparison.Ordinal);
+        Assert.Contains("_profilesContent.Activate()", showPage, StringComparison.Ordinal);
+        Assert.Contains("else if (wasProfile) _profilesContent?.Deactivate()", showPage, StringComparison.Ordinal);
+        Assert.Contains("GetOrCreateProfilesPage()", materialize, StringComparison.Ordinal);
+        Assert.DoesNotContain("MainNavigationPage.Xbox", windowCode, StringComparison.Ordinal);
         Assert.DoesNotContain(".Activate()", materialize, StringComparison.Ordinal);
         var stateInvalidation = Method(pageCode, "private void OnStateInvalidated", "private async Task RefreshQuickSettingsPreferencesAsync");
         Assert.Contains("RefreshQuickSettingsPreferencesAsync", stateInvalidation, StringComparison.Ordinal);
@@ -357,6 +366,8 @@ public sealed class XboxCatalogPageUiTests
         Assert.DoesNotContain("PackageCatalog", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("RefreshCatalogTimer", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("PeriodicCatalogScan", pageCode, StringComparison.Ordinal);
+        var unifiedActivate = Method(pageCode, "internal void ActivateForUnifiedProfiles(", "internal async Task OpenGameFromUnifiedProfilesAsync");
+        Assert.DoesNotContain("ScanXboxGamesAsync", unifiedActivate, StringComparison.Ordinal);
     }
 
     [Fact]
