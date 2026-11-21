@@ -37,14 +37,14 @@ internal sealed class ProfilesLibraryItem : INotifyPropertyChanged
     internal FrontendProfileGameCatalogEntry? SteamGame { get; private set; }
     internal FrontendXboxGameCatalogEntry? XboxGame { get; private set; }
     internal bool IsXbox => XboxGame is not null;
-    internal string Name => SteamGame?.Name ?? XboxGame?.DisplayName ?? string.Empty;
-    internal string PlatformLabel => MainUiStrings.Get(IsXbox ? "Profiles_XboxLabel" : "Profiles_SteamLabel", IsXbox ? "XBOX" : "Steam");
-    internal string AutomationName => string.Format(CultureInfo.CurrentUICulture,
+    public string Name => SteamGame?.Name ?? XboxGame?.DisplayName ?? string.Empty;
+    public string PlatformLabel => MainUiStrings.Get(IsXbox ? "Profiles_XboxLabel" : "Profiles_SteamLabel", IsXbox ? "XBOX" : "Steam");
+    public string AutomationName => string.Format(CultureInfo.CurrentUICulture,
         MainUiStrings.Get("Profiles_GameAutomationName", "{0}, {1}"), Name, PlatformLabel);
     internal bool Favorite => SteamGame?.Favorite ?? XboxGame?.Favorite ?? false;
-    internal bool FavoriteStateKnown => SteamGame?.FavoriteStateKnown ?? XboxGame?.FavoriteStateKnown ?? false;
-    internal string FavoriteGlyph => !FavoriteStateKnown ? "—" : Favorite ? "★" : "☆";
-    internal string FavoriteAutomationName
+    public bool FavoriteStateKnown => SteamGame?.FavoriteStateKnown ?? XboxGame?.FavoriteStateKnown ?? false;
+    public string FavoriteGlyph => !FavoriteStateKnown ? "—" : Favorite ? "★" : "☆";
+    public string FavoriteAutomationName
     {
         get
         {
@@ -57,12 +57,12 @@ internal sealed class ProfilesLibraryItem : INotifyPropertyChanged
             return string.Format(CultureInfo.CurrentUICulture, MainUiStrings.Get(key, fallback), Name);
         }
     }
-    internal BitmapImage? Artwork => _artwork;
-    internal Visibility PosterVisibility => _artwork is not null && (!IsXbox || _artworkPurpose == "Poster")
+    public BitmapImage? Artwork => _artwork;
+    public Visibility PosterVisibility => _artwork is not null && (!IsXbox || _artworkPurpose == "Poster")
         ? Visibility.Visible : Visibility.Collapsed;
-    internal Visibility BoxArtVisibility => _artwork is not null && IsXbox && _artworkPurpose == "BoxArt"
+    public Visibility BoxArtVisibility => _artwork is not null && IsXbox && _artworkPurpose == "BoxArt"
         ? Visibility.Visible : Visibility.Collapsed;
-    internal Visibility FallbackVisibility => _artwork is null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility FallbackVisibility => _artwork is null ? Visibility.Visible : Visibility.Collapsed;
 
     internal static ProfilesLibraryItem FromSteam(FrontendProfileGameCatalogEntry game) => new(game);
     internal static ProfilesLibraryItem FromXbox(FrontendXboxGameCatalogEntry game) => new(game);

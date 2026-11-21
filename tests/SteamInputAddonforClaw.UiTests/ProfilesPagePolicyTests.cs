@@ -9,6 +9,28 @@ namespace SteamInputAddonforClaw.UiTests;
 public sealed class ProfilesPagePolicyTests
 {
     [Fact]
+    public void Xaml_runtime_bindings_resolve_to_public_instance_getters()
+    {
+        var root = FindRepositoryRoot();
+        var xamlPath = Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilesPage.xaml");
+        var xaml = File.ReadAllText(xamlPath);
+        var bindingProperties = System.Text.RegularExpressions.Regex.Matches(
+                xaml, @"\{Binding\s+([A-Za-z_][A-Za-z0-9_]*)\}")
+            .Select(match => match.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(bindingProperties);
+        foreach (var propertyName in bindingProperties)
+        {
+            var property = typeof(ProfilesLibraryItem).GetProperty(
+                propertyName, BindingFlags.Instance | BindingFlags.Public);
+            Assert.True(property?.GetMethod?.IsPublic == true,
+                $"ProfilesPage.xaml binding '{propertyName}' must resolve to a public instance getter.");
+        }
+    }
+
+    [Fact]
     public async Task Fake_frontend_feeds_one_mixed_catalog_with_platform_scoped_identity_and_filters()
     {
         var frontend = DispatchProxy.Create<IAddonFrontendControl, FakeProfilesFrontendProxy>();
