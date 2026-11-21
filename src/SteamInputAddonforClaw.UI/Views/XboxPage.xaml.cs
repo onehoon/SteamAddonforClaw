@@ -1,11 +1,21 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using CommunityToolkit.WinUI.Controls;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Globalization;
+using Windows.Storage;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.FrontendTransport.XboxArtwork;
 using SteamInputAddonforClaw.UI;
+using SteamInputAddonforClaw.UI.Diagnostics;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -14,7 +24,18 @@ public sealed partial class XboxPage : UserControl
     private IAddonFrontendControl? _frontend;
     private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents, _suppressControllerEvents, _suppressGpuEvents;
     private bool _catalogLoaded;
+    private bool _explicitArtworkRetryRequested;
     private IReadOnlyList<FrontendXboxGameCatalogEntry> _catalog = [];
+    private readonly Dictionary<SelectorItem, RealizedXboxGameCard> _realizedGameCards = [];
+    private readonly Dictionary<string, GameCardItem> _gameCardItems = new(StringComparer.Ordinal);
+    private readonly DispatcherQueueTimer _coverGridResizeTimer;
+    private ObservableCollection<GameCardItem> _visibleGameCards = new();
+    private ItemsWrapGrid? _coverItemsPanel;
+    private XamlRoot? _observedXamlRoot;
+    private double _lastRasterizationScale = double.NaN;
+    private double _pendingLayoutRasterizationScale = 1.0;
+    private SteamCoverGridLayout? _coverGridLayout;
+    private XboxStoreArtworkResolver? _artworkResolver;
     private FrontendXboxGameCatalogEntry? _selectedGame;
     private FrontendXboxGameProfileSnapshot? _snapshot;
     private CancellationTokenSource? _scanCancellation, _captureCancellation;
@@ -39,6 +60,13 @@ public sealed partial class XboxPage : UserControl
     public XboxPage()
     {
         InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; BackButtonMappingUiOptions.AddTargets(M1BackButtonTargetComboBox); BackButtonMappingUiOptions.AddTargets(M2BackButtonTargetComboBox); LocalizeXboxBackTargets(M1BackButtonTargetComboBox); LocalizeXboxBackTargets(M2BackButtonTargetComboBox); SetEditorsEnabled(false);
+        GameGrid.ItemsSource = _visibleGameCards;
+        _coverGridResizeTimer = DispatcherQueue.CreateTimer();
+        _coverGridResizeTimer.Interval = TimeSpan.FromMilliseconds(180);
+        _coverGridResizeTimer.IsRepeating = false;
+        _coverGridResizeTimer.Tick += CoverGridResizeTimer_Tick;
+        Loaded += XboxPage_Loaded;
+        Unloaded += XboxPage_Unloaded;
 }
     private static void LocalizeXboxBackTargets(ComboBox comboBox)
     {
@@ -64,6 +92,9 @@ public sealed partial class XboxPage : UserControl
             _ = RefreshQuickSettingsPreferencesAsync();
         }
 
+        EnsureArtworkResolver();
+        RestartMissingGameCardArtworkLoads();
+
         if (_catalogLoaded)
         {
             ApplyCatalogFilter();
@@ -80,6 +111,10 @@ public sealed partial class XboxPage : UserControl
             _frontend.StateInvalidated -= OnStateInvalidated;
         // Top-level navigation hides the page but does not retire its selected profile context.
         CancelCapture(); CancelGpuMinimumClockDebounce();
+        _coverGridResizeTimer.Stop();
+        CancelPendingGameCardArtworkLoads();
+        _artworkResolver?.Dispose();
+        _artworkResolver = null;
     }
 
     private void OnStateInvalidated(object? sender, EventArgs e)
@@ -272,11 +307,16 @@ public sealed partial class XboxPage : UserControl
     }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
-        => await RefreshGamesAsync();
+    {
+        _explicitArtworkRetryRequested = true;
+        await RefreshGamesAsync();
+    }
 
     private async Task RefreshGamesAsync()
     {
         if (!_active || _frontend is null) return;
+        var explicitArtworkRetry = _explicitArtworkRetryRequested;
+        _explicitArtworkRetryRequested = false;
         var scan = new CancellationTokenSource();
         var previous = _scanCancellation;
         _scanCancellation = scan;
@@ -291,6 +331,7 @@ public sealed partial class XboxPage : UserControl
             {
                 _catalog = snapshot.Games;
                 _catalogLoaded = true;
+                PruneGameCardItems();
                 FavoriteStateInfoBar.IsOpen = _catalog.Any(game => !game.FavoriteStateKnown);
             }
 
@@ -299,7 +340,7 @@ public sealed partial class XboxPage : UserControl
             _selectedGame = selectedKey is null ? null : _catalog.FirstOrDefault(x => x.Key == selectedKey);
             if (snapshot.Outcome != FrontendXboxGameCatalogOutcome.Ready)
             {
-                GameGrid.ItemsSource = Array.Empty<GameCardItem>();
+                _visibleGameCards.Clear();
                 FavoriteStateInfoBar.IsOpen = false;
                 ReturnToCatalog();
                 ShowError(snapshot.FailureMessage ?? MainUiStrings.Get("Xbox_Catalog_LoadFailed", "XBOX game catalog could not be loaded."), null);
@@ -307,6 +348,7 @@ public sealed partial class XboxPage : UserControl
             else
             {
                 ApplyCatalogFilter();
+                RestartMissingGameCardArtworkLoads(explicitArtworkRetry);
                 if (_selectedGame is null)
                 {
                     ReturnToCatalog();
@@ -320,7 +362,7 @@ public sealed partial class XboxPage : UserControl
         {
             if (IsCurrentScan(_scanCancellation, scan) && _active)
             {
-                GameGrid.ItemsSource = Array.Empty<GameCardItem>();
+                _visibleGameCards.Clear();
                 FavoriteStateInfoBar.IsOpen = false;
                 ReturnToCatalog();
                 ShowError(MainUiStrings.Get("Xbox_Catalog_RefreshFailed", "XBOX game catalog could not be refreshed."), exception);
@@ -333,7 +375,386 @@ public sealed partial class XboxPage : UserControl
     private void ApplyCatalogFilter()
     {
         var query = GameSearchBox.Text.Trim();
-        GameGrid.ItemsSource = FilterAndSort(_catalog, query).Select(x => new GameCardItem(x)).ToArray();
+        var desired = FilterAndSort(_catalog, query).Select(GetOrUpdateGameCardItem).ToArray();
+        ReconcileVisibleGameCards(_visibleGameCards, desired);
+    }
+
+    private GameCardItem GetOrUpdateGameCardItem(FrontendXboxGameCatalogEntry game)
+    {
+        if (!_gameCardItems.TryGetValue(game.Key, out var item))
+        {
+            item = new GameCardItem(game);
+            _gameCardItems.Add(game.Key, item);
+        }
+        else
+        {
+            item.UpdateGame(game);
+        }
+
+        return item;
+    }
+
+    private void PruneGameCardItems()
+    {
+        var currentKeys = _catalog.Select(game => game.Key).ToHashSet(StringComparer.Ordinal);
+        foreach (var card in _realizedGameCards.Values.Where(card => !currentKeys.Contains(card.Item.Game.Key)).ToArray())
+        {
+            card.CancelLoad();
+            card.ClearArtwork();
+        }
+
+        foreach (var key in _gameCardItems.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
+            _gameCardItems.Remove(key);
+    }
+
+    private void EnsureArtworkResolver()
+    {
+        _artworkResolver ??= new XboxStoreArtworkResolver(
+            XboxStoreArtworkResolver.ResolveCacheDirectory([FrontendLaunchArguments.LogDirectoryOption, UiLog.DirectoryPath]),
+            diagnostic => UiLog.Debug("Xbox.Artwork", "Optional Xbox artwork lookup completed.",
+                ("StoreId", diagnostic.StoreId), ("Market", diagnostic.Market), ("Purpose", diagnostic.Purpose),
+                ("Outcome", diagnostic.Outcome), ("DurationMs", diagnostic.DurationMs), ("ErrorType", diagnostic.ErrorType ?? "None")));
+    }
+
+    private void XboxPage_Loaded(object sender, RoutedEventArgs e)
+    {
+        AttachXamlRoot();
+        RestartMissingGameCardArtworkLoads();
+    }
+
+    private void XboxPage_Unloaded(object sender, RoutedEventArgs e)
+    {
+        _coverGridResizeTimer.Stop();
+        DetachXamlRoot();
+        DetachCoverItemsPanel();
+        CancelPendingGameCardArtworkLoads();
+    }
+
+    private void CoverItemsPanel_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ItemsWrapGrid itemsPanel)
+            AttachCoverItemsPanel(itemsPanel);
+    }
+
+    private void AttachCoverItemsPanel(ItemsWrapGrid itemsPanel)
+    {
+        if (!ReferenceEquals(_coverItemsPanel, itemsPanel))
+        {
+            DetachCoverItemsPanel();
+            _coverItemsPanel = itemsPanel;
+            _coverItemsPanel.SizeChanged += GameGridItemsPanel_SizeChanged;
+            _coverGridLayout = null;
+        }
+
+        ApplyCoverGridLayout(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
+    }
+
+    private void DetachCoverItemsPanel()
+    {
+        if (_coverItemsPanel is not null)
+            _coverItemsPanel.SizeChanged -= GameGridItemsPanel_SizeChanged;
+        _coverItemsPanel = null;
+    }
+
+    private void AttachXamlRoot()
+    {
+        var xamlRoot = GameGrid.XamlRoot;
+        if (ReferenceEquals(_observedXamlRoot, xamlRoot))
+            return;
+
+        DetachXamlRoot();
+        _observedXamlRoot = xamlRoot;
+        if (_observedXamlRoot is not null)
+            _observedXamlRoot.Changed += XamlRoot_Changed;
+    }
+
+    private void DetachXamlRoot()
+    {
+        if (_observedXamlRoot is not null)
+            _observedXamlRoot.Changed -= XamlRoot_Changed;
+        _observedXamlRoot = null;
+        _lastRasterizationScale = double.NaN;
+    }
+
+    private void XamlRoot_Changed(XamlRoot sender, XamlRootChangedEventArgs args)
+    {
+        var scale = NormalizeRasterizationScale(sender.RasterizationScale);
+        if (Math.Abs(_lastRasterizationScale - scale) >= 0.0001)
+            ApplyCoverGridLayout(scale);
+    }
+
+    private void GameGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (SteamCoverGridLayout.HasMeaningfulWidthChange(e.PreviousSize.Width, e.NewSize.Width))
+            ScheduleCoverGridLayoutUpdate(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
+    }
+
+    private void GameGridItemsPanel_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (SteamCoverGridLayout.HasMeaningfulWidthChange(e.PreviousSize.Width, e.NewSize.Width))
+            ScheduleCoverGridLayoutUpdate(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
+    }
+
+    private void ScheduleCoverGridLayoutUpdate(double rasterizationScale)
+    {
+        if (_coverItemsPanel is null)
+            return;
+
+        _pendingLayoutRasterizationScale = NormalizeRasterizationScale(rasterizationScale);
+        _coverGridResizeTimer.Stop();
+        _coverGridResizeTimer.Start();
+    }
+
+    private void CoverGridResizeTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        ApplyCoverGridLayout(_pendingLayoutRasterizationScale);
+    }
+
+    private void ApplyCoverGridLayout(double rasterizationScale)
+    {
+        rasterizationScale = NormalizeRasterizationScale(rasterizationScale);
+        if (_coverItemsPanel is not { } itemsPanel
+            || !SteamCoverGridLayout.TryCalculate(itemsPanel.ActualWidth, rasterizationScale, 175, out var nextLayout))
+            return;
+
+        _lastRasterizationScale = rasterizationScale;
+        if (_coverGridLayout is { } current && LayoutsMatch(current, nextLayout))
+        {
+            GameGrid.Opacity = 1;
+            return;
+        }
+
+        _coverGridLayout = nextLayout;
+        itemsPanel.ItemWidth = nextLayout.SlotWidthDip;
+        itemsPanel.ItemHeight = nextLayout.SlotHeightDip;
+        foreach (var card in _realizedGameCards.Values)
+            SetCardLayout(card.Root, nextLayout);
+        GameGrid.Opacity = 1;
+    }
+
+    internal static bool LayoutsMatch(SteamCoverGridLayout left, SteamCoverGridLayout right) =>
+        left.Columns == right.Columns
+        && Math.Abs(left.CoverWidthDip - right.CoverWidthDip) < 0.01
+        && Math.Abs(left.CoverHeightDip - right.CoverHeightDip) < 0.01
+        && Math.Abs(left.ColumnGapDip - right.ColumnGapDip) < 0.01
+        && Math.Abs(left.RowGapDip - right.RowGapDip) < 0.01;
+
+    private static double NormalizeRasterizationScale(double rasterizationScale) =>
+        double.IsFinite(rasterizationScale) && rasterizationScale > 0 ? rasterizationScale : 1.0;
+
+    private void GameGrid_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        var container = args.ItemContainer;
+        if (args.InRecycleQueue)
+        {
+            if (_realizedGameCards.Remove(container, out var recycledCard))
+            {
+                recycledCard.CancelLoad();
+                recycledCard.ClearArtwork();
+            }
+            return;
+        }
+
+        if (args.Item is not GameCardItem item)
+            return;
+
+        if (container.ContentTemplateRoot is not Border root)
+        {
+            if (args.Phase == 0)
+                args.RegisterUpdateCallback(GameGrid_ContainerContentChanging);
+            return;
+        }
+
+        if (!ReferenceEquals(root.DataContext, item))
+            root.DataContext = item;
+        if (root.FindName("OpenGameButton") is Button openButton && !ReferenceEquals(openButton.DataContext, item))
+            openButton.DataContext = item;
+        if (root.FindName("FavoriteButton") is Button favoriteButton && !ReferenceEquals(favoriteButton.DataContext, item))
+            favoriteButton.DataContext = item;
+        if (_coverGridLayout is { } layout)
+            SetCardLayout(root, layout);
+
+        if (_realizedGameCards.TryGetValue(container, out var existing))
+        {
+            if (existing.Matches(item))
+            {
+                existing.Item = item;
+                if (item.Artwork is not null || existing.LoadCancellation is not null || existing.LoadAttempted)
+                    return;
+            }
+            else
+            {
+                existing.CancelLoad();
+                existing.Reset(item);
+            }
+        }
+        else
+        {
+            existing = new RealizedXboxGameCard(container, root, item);
+            _realizedGameCards.Add(container, existing);
+        }
+
+        StartGameCardArtworkLoad(existing);
+    }
+
+    private void StartGameCardArtworkLoad(RealizedXboxGameCard card, bool forceRetry = false)
+    {
+        if (!_active || card.Item.Artwork is not null || card.LoadCancellation is not null || _artworkResolver is null)
+            return;
+        if (card.LoadAttempted && !forceRetry)
+            return;
+
+        card.LoadAttempted = true;
+        card.LoadCancellation = new CancellationTokenSource();
+        var generation = ++card.Generation;
+        _ = LoadGameCardArtworkAsync(card, generation, card.Item.Game, _artworkResolver, forceRetry, card.LoadCancellation.Token);
+    }
+
+    private async Task LoadGameCardArtworkAsync(
+        RealizedXboxGameCard card,
+        long generation,
+        FrontendXboxGameCatalogEntry game,
+        XboxStoreArtworkResolver resolver,
+        bool forceRetry,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var artwork = await resolver.ResolveCatalogCardAsync(game.Key, CultureInfo.CurrentUICulture.Name, cancellationToken, forceRetry);
+            if (artwork is null || !IsCurrentGameCard(card, generation, game.Key))
+                return;
+
+            var bitmap = await TryLoadXboxArtworkAsync(artwork.Path, CurrentCardDecodePixelWidth(), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (bitmap is null || !IsCurrentGameCard(card, generation, game.Key))
+                return;
+
+            card.Item.SetArtwork(bitmap, artwork.Purpose);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            UiLog.Debug("Xbox.Artwork", "Optional Xbox card artwork could not be displayed.", ("ErrorType", exception.GetType().Name));
+        }
+        finally
+        {
+            if (IsCurrentGameCard(card, generation, game.Key))
+            {
+                card.LoadCancellation?.Dispose();
+                card.LoadCancellation = null;
+                if (cancellationToken.IsCancellationRequested)
+                    card.LoadAttempted = false;
+            }
+        }
+    }
+
+    private async Task<BitmapImage?> TryLoadXboxArtworkAsync(string path, int decodePixelWidth, CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var file = await StorageFile.GetFileFromPathAsync(path);
+            using var stream = await file.OpenReadAsync();
+            var bitmap = new BitmapImage { DecodePixelWidth = decodePixelWidth };
+            await bitmap.SetSourceAsync(stream);
+            cancellationToken.ThrowIfCancellationRequested();
+            return bitmap;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private int CurrentCardDecodePixelWidth()
+    {
+        var widthDip = _coverGridLayout?.CoverWidthDip ?? 175;
+        var scale = NormalizeRasterizationScale(GameGrid.XamlRoot?.RasterizationScale ?? 1.0);
+        return (int)Math.Clamp(Math.Ceiling(widthDip * scale), 1, 1200);
+    }
+
+    private bool IsCurrentGameCard(RealizedXboxGameCard card, long generation, string gameKey) =>
+        _active
+        && _realizedGameCards.TryGetValue(card.Container, out var current)
+        && ReferenceEquals(current, card)
+        && IsCurrentXboxArtworkResult(generation, card.Generation, gameKey, card.Item.Game.Key)
+        && card.Root.DataContext is GameCardItem item
+        && ReferenceEquals(card.Item, item)
+        && item.Game.Key == gameKey;
+
+    internal static bool IsCurrentXboxArtworkResult(
+        long requestedGeneration,
+        long currentGeneration,
+        string requestedGameKey,
+        string currentGameKey) =>
+        requestedGeneration == currentGeneration
+        && string.Equals(requestedGameKey, currentGameKey, StringComparison.Ordinal);
+
+    private void RestartMissingGameCardArtworkLoads(bool forceRetry = false)
+    {
+        foreach (var card in _realizedGameCards.Values.ToArray())
+        {
+            if (forceRetry && card.Item.Artwork is null)
+                card.LoadAttempted = false;
+            StartGameCardArtworkLoad(card, forceRetry);
+        }
+    }
+
+    private void CancelPendingGameCardArtworkLoads()
+    {
+        foreach (var card in _realizedGameCards.Values)
+        {
+            if (card.LoadCancellation is null)
+                continue;
+            card.CancelLoad();
+            card.LoadAttempted = false;
+        }
+    }
+
+    private static void SetCardLayout(FrameworkElement card, SteamCoverGridLayout layout)
+    {
+        if (Math.Abs(card.Width - layout.CoverWidthDip) >= 0.0001)
+            card.Width = layout.CoverWidthDip;
+        if (Math.Abs(card.Height - layout.CoverHeightDip) >= 0.0001)
+            card.Height = layout.CoverHeightDip;
+        var margin = new Thickness(0, 0, layout.ColumnGapDip, layout.RowGapDip);
+        if (!card.Margin.Equals(margin))
+            card.Margin = margin;
+    }
+
+    internal static void ReconcileVisibleGameCards(
+        ObservableCollection<GameCardItem> current,
+        IReadOnlyList<GameCardItem> desired)
+    {
+        for (var index = 0; index < desired.Count; index++)
+        {
+            var desiredItem = desired[index];
+            if (index < current.Count && ReferenceEquals(current[index], desiredItem))
+                continue;
+
+            var existingIndex = -1;
+            for (var candidate = index + 1; candidate < current.Count; candidate++)
+            {
+                if (ReferenceEquals(current[candidate], desiredItem))
+                {
+                    existingIndex = candidate;
+                    break;
+                }
+            }
+
+            if (existingIndex >= 0)
+                current.Move(existingIndex, index);
+            else
+                current.Insert(index, desiredItem);
+        }
+
+        while (current.Count > desired.Count)
+            current.RemoveAt(current.Count - 1);
     }
     private async void GameCardButton_Click(object sender, RoutedEventArgs e)
     {
@@ -796,13 +1217,85 @@ public sealed partial class XboxPage : UserControl
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
     private sealed record PowerModeItem(WindowsPowerMode Mode, string Label);
     private sealed record ResolutionItem(int? Width, int? Height, string Label);
-    private sealed record GameCardItem(FrontendXboxGameCatalogEntry Game)
+    internal sealed class GameCardItem(FrontendXboxGameCatalogEntry game) : INotifyPropertyChanged
     {
+        private BitmapImage? _artwork;
+        private string? _artworkPurpose;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public FrontendXboxGameCatalogEntry Game { get; private set; } = game;
         public string Key => Game.Key;
         public string DisplayName => Game.DisplayName;
         public bool Favorite => Game.Favorite;
         public bool FavoriteStateKnown => Game.FavoriteStateKnown;
         public string FavoriteGlyph => GetFavoriteGlyph(Game.Favorite, Game.FavoriteStateKnown);
+        public string FavoriteAutomationName => string.Format(CultureInfo.CurrentUICulture,
+            Game.FavoriteStateKnown
+                ? Game.Favorite ? "Remove {0} from favorites" : "Add {0} to favorites"
+                : "Favorite state unavailable for {0}", Game.DisplayName);
+        public BitmapImage? Artwork => _artwork;
+        public Visibility PosterVisibility => _artwork is not null && _artworkPurpose == "Poster" ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility BoxArtVisibility => _artwork is not null && _artworkPurpose == "BoxArt" ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility FallbackVisibility => _artwork is null ? Visibility.Visible : Visibility.Collapsed;
+
+        internal void UpdateGame(FrontendXboxGameCatalogEntry game)
+        {
+            if (Game == game) return;
+            var favoriteChanged = Game.Favorite != game.Favorite || Game.FavoriteStateKnown != game.FavoriteStateKnown;
+            Game = game;
+            Notify(nameof(Game));
+            Notify(nameof(DisplayName));
+            if (favoriteChanged)
+            {
+                Notify(nameof(Favorite));
+                Notify(nameof(FavoriteStateKnown));
+                Notify(nameof(FavoriteGlyph));
+                Notify(nameof(FavoriteAutomationName));
+            }
+        }
+
+        internal void SetArtwork(BitmapImage? artwork, string? purpose)
+        {
+            if (ReferenceEquals(_artwork, artwork) && _artworkPurpose == purpose) return;
+            _artwork = artwork;
+            _artworkPurpose = purpose;
+            Notify(nameof(Artwork));
+            Notify(nameof(PosterVisibility));
+            Notify(nameof(BoxArtVisibility));
+            Notify(nameof(FallbackVisibility));
+        }
+
+        private void Notify(string propertyName) => PropertyChanged?.Invoke(this, new(propertyName));
+    }
+
+    private sealed class RealizedXboxGameCard(SelectorItem container, Border root, GameCardItem item)
+    {
+        public SelectorItem Container { get; } = container;
+        public Border Root { get; } = root;
+        public GameCardItem Item { get; set; } = item;
+        public long Generation { get; set; }
+        public bool LoadAttempted { get; set; }
+        public CancellationTokenSource? LoadCancellation { get; set; }
+
+        public bool Matches(GameCardItem other) => Item.Game.Key == other.Game.Key;
+
+        public void Reset(GameCardItem item)
+        {
+            Item = item;
+            Generation++;
+            LoadAttempted = false;
+            Item.SetArtwork(null, null);
+        }
+
+        public void ClearArtwork() => Item.SetArtwork(null, null);
+
+        public void CancelLoad()
+        {
+            Generation++;
+            LoadCancellation?.Cancel();
+            LoadCancellation?.Dispose();
+            LoadCancellation = null;
+        }
     }
 
     internal static string GetFavoriteGlyph(bool favorite, bool stateKnown) =>

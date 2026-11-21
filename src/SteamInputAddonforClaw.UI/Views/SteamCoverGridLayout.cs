@@ -21,11 +21,18 @@ internal readonly record struct SteamCoverGridLayout(
     private const double MaximumSlotWidthDip = MaximumCoverWidthDip + MaximumGapDip;
 
     internal static bool TryCalculate(double availableWidthDip, out SteamCoverGridLayout layout) =>
-        TryCalculate(availableWidthDip, 1.0, out layout);
+        TryCalculate(availableWidthDip, 1.0, PreferredCoverWidthDip, out layout);
 
     internal static bool TryCalculate(
         double availableWidthDip,
         double rasterizationScale,
+        out SteamCoverGridLayout layout) =>
+        TryCalculate(availableWidthDip, rasterizationScale, PreferredCoverWidthDip, out layout);
+
+    internal static bool TryCalculate(
+        double availableWidthDip,
+        double rasterizationScale,
+        double preferredCoverWidthDip,
         out SteamCoverGridLayout layout)
     {
         layout = default;
@@ -33,6 +40,9 @@ internal readonly record struct SteamCoverGridLayout(
             return false;
         if (!double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
             rasterizationScale = 1.0;
+        if (!double.IsFinite(preferredCoverWidthDip))
+            preferredCoverWidthDip = PreferredCoverWidthDip;
+        preferredCoverWidthDip = Math.Clamp(preferredCoverWidthDip, MinimumCoverWidthDip, MaximumCoverWidthDip);
 
         var availableWidthPixelsExact = availableWidthDip * rasterizationScale;
         var maximumSlotPixelsExact = MaximumSlotWidthDip * rasterizationScale;
@@ -63,7 +73,7 @@ internal readonly record struct SteamCoverGridLayout(
         var maximumFeasibleColumns = availableWidthPixels >= minimumSlotPixels
             ? Math.Max(1, availableWidthPixels / minimumSlotPixels)
             : 1;
-        var preferredSlotPixelsExact = PreferredSlotWidthDip * rasterizationScale;
+        var preferredSlotPixelsExact = (preferredCoverWidthDip + MinimumGapDip) * rasterizationScale;
         if (!double.IsFinite(preferredSlotPixelsExact) || preferredSlotPixelsExact <= 0)
             return false;
 
@@ -91,7 +101,7 @@ internal readonly record struct SteamCoverGridLayout(
         else
         {
             var preferredCoverPixels = (long)Math.Round(
-                PreferredCoverWidthDip * rasterizationScale,
+                preferredCoverWidthDip * rasterizationScale,
                 MidpointRounding.AwayFromZero);
             gapPixels = Math.Clamp(slotWidthPixels - preferredCoverPixels, minimumGapPixels, maximumGapPixels);
             coverWidthPixels = slotWidthPixels - gapPixels;

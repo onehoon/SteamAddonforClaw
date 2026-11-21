@@ -35,6 +35,7 @@ public sealed partial class OverlayWindow : Window
             ObserveProfileArtworkXamlRoot(null);
             ObserveOverlayScaleRoot(null);
             ClearProfileArtwork();
+            DisposeXboxArtworkResolver();
             CancelPendingControllerVibrationDraft();
             foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.Dispose();
         };

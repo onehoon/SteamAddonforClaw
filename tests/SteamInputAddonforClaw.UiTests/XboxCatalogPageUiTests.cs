@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using System.Collections.ObjectModel;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Views;
@@ -64,13 +65,79 @@ public sealed class XboxCatalogPageUiTests
         foreach (var internalField in new[] { "StoreId", "TitleId", "PackageFamilyName", "PackageFullName", "ConfigPath", "Executable", "AUMID", "ProcessPath" })
         {
             Assert.DoesNotContain(internalField, xaml, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(internalField, code, StringComparison.OrdinalIgnoreCase);
+            if (internalField != "StoreId")
+                Assert.DoesNotContain(internalField, code, StringComparison.OrdinalIgnoreCase);
         }
         Assert.DoesNotContain("Text=\"{Binding Key}\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("StoreId", code, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("TitleId", code, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("PackageFullName", code, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ConfigPath", code, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Xbox_catalog_uses_the_recycled_steam_proportioned_card_grid_with_poster_boxart_and_title_fallbacks()
+    {
+        var document = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml"));
+        var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var grid = document.Descendants().Single(element => element.Name.LocalName == "GridView"
+            && (string?)element.Attribute(xaml + "Name") == "GameGrid");
+        var template = grid.Descendants().Single(element => element.Name.LocalName == "DataTemplate");
+        var card = template.Descendants().Single(element => element.Name.LocalName == "Border"
+            && (string?)element.Attribute(xaml + "Name") == "GameCardRoot");
+        var poster = template.Descendants().Single(element => element.Name.LocalName == "Image"
+            && (string?)element.Attribute(xaml + "Name") == "PosterImage");
+        var boxArt = template.Descendants().Single(element => element.Name.LocalName == "Grid"
+            && (string?)element.Attribute(xaml + "Name") == "BoxArtPanel");
+        var panel = grid.Descendants().Single(element => element.Name.LocalName == "ItemsWrapGrid");
+
+        Assert.Equal("175", (string?)card.Attribute("Width"));
+        Assert.Equal("262.5", (string?)card.Attribute("Height"));
+        Assert.Equal("0", (string?)card.Attribute("CornerRadius"));
+        Assert.Equal("UniformToFill", (string?)poster.Attribute("Stretch"));
+        Assert.Equal("Uniform", (string?)boxArt.Descendants().Single(element => element.Name.LocalName == "Image").Attribute("Stretch"));
+        Assert.Equal(new[] { "2*", "*" }, boxArt.Descendants().Where(element => element.Name.LocalName == "RowDefinition")
+            .Select(element => (string?)element.Attribute("Height")));
+        Assert.NotNull(template.Descendants().SingleOrDefault(element => element.Name.LocalName == "TextBlock"
+            && (string?)element.Attribute(xaml + "Name") == "FallbackCard"));
+        Assert.Contains("Loaded=\"CoverItemsPanel_Loaded\"", panel.ToString(), StringComparison.Ordinal);
+        Assert.Contains("ContainerContentChanging=\"GameGrid_ContainerContentChanging\"", grid.ToString(), StringComparison.Ordinal);
+        Assert.Contains("CancelLoad()", code, StringComparison.Ordinal);
+        Assert.Contains("IsCurrentGameCard(card, generation, game.Key)", code, StringComparison.Ordinal);
+        Assert.Contains("ApplyCoverGridLayout(double rasterizationScale)", code, StringComparison.Ordinal);
+        Assert.Contains("TryCalculate(itemsPanel.ActualWidth, rasterizationScale, 175", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("ItemsRepeater", grid.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    public void Xbox_cover_layout_keeps_two_to_three_cards_at_common_rasterization_scales(double scale)
+    {
+        Assert.True(SteamCoverGridLayout.TryCalculate(720, scale, 175, out var layout));
+        Assert.InRange(layout.CoverWidthDip, SteamCoverGridLayout.MinimumCoverWidthDip, 175);
+        Assert.Equal(layout.CoverWidthDip * 1.5, layout.CoverHeightDip, precision: 8);
+        Assert.True(layout.Columns > 0);
+    }
+
+    [Fact]
+    public void Xbox_search_reconciliation_reuses_card_instances_and_delayed_recycled_results_are_rejected()
+    {
+        var alpha = new XboxPage.GameCardItem(new("store:alpha", "Alpha"));
+        var beta = new XboxPage.GameCardItem(new("store:beta", "Beta"));
+        var gamma = new XboxPage.GameCardItem(new("store:gamma", "Gamma"));
+        var visible = new ObservableCollection<XboxPage.GameCardItem> { alpha, beta, gamma };
+
+        XboxPage.ReconcileVisibleGameCards(visible, [gamma, alpha]);
+
+        Assert.Equal(new[] { gamma, alpha }, visible);
+        Assert.Same(gamma, visible[0]);
+        Assert.Same(alpha, visible[1]);
+        Assert.False(XboxPage.IsCurrentXboxArtworkResult(3, 4, "store:alpha", "store:beta"));
+        Assert.False(XboxPage.IsCurrentXboxArtworkResult(3, 3, "store:alpha", "store:beta"));
+        Assert.True(XboxPage.IsCurrentXboxArtworkResult(3, 3, "store:alpha", "store:alpha"));
     }
 
     [Fact]
@@ -288,7 +355,8 @@ public sealed class XboxCatalogPageUiTests
         Assert.DoesNotContain("RefreshGamesAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureSelectedAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("PackageCatalog", pageCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("Timer", pageCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshCatalogTimer", pageCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("PeriodicCatalogScan", pageCode, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -305,7 +373,7 @@ public sealed class XboxCatalogPageUiTests
         Assert.DoesNotContain("CancelScan()", deactivate, StringComparison.Ordinal);
         Assert.Contains("capture.Token", capture, StringComparison.Ordinal);
         Assert.Contains("IsCurrentProfileResponse(_active, _selectedGame?.Key, key, snapshot.Key)", capture, StringComparison.Ordinal);
-        Assert.True(failure >= 0 && refresh.IndexOf("GameGrid.ItemsSource = Array.Empty<GameCardItem>()", failure, StringComparison.Ordinal) > failure);
+        Assert.True(failure >= 0 && refresh.IndexOf("_visibleGameCards.Clear();", failure, StringComparison.Ordinal) > failure);
         Assert.True(exceptionGuard > failure);
         Assert.Contains("if (ReferenceEquals(_scanCancellation, scan)) _scanCancellation = null", refresh, StringComparison.Ordinal);
         Assert.Equal(1, refresh.Split("_catalogLoaded = true", StringSplitOptions.None).Length - 1);
@@ -438,7 +506,7 @@ public sealed class XboxCatalogPageUiTests
         Assert.DoesNotContain("RefreshGamesAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureSelectedAsync", stateInvalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("ActualRunningAppId", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("Reconcile", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReconcileQuickSettings", code, StringComparison.Ordinal);
     }
 
     private static string Method(string source, string startMarker, string endMarker)
