@@ -783,8 +783,8 @@ public sealed partial class OverlayWindow
     {
         var elapsed = Stopwatch.StartNew();
         var lookup = Stopwatch.StartNew();
-        var decode = Stopwatch.StartNew();
         var candidateCount = 0;
+        var prewarmSucceeded = false;
         var cancellationToken = requestCancellation.Token;
         try
         {
@@ -802,6 +802,7 @@ public sealed partial class OverlayWindow
             }
             finally
             {
+                lookup.Stop();
                 OverlayLog.Debug("Performance", "OverlayArtworkLookup",
                     ("AppId", appId), ("ElapsedMs", lookup.Elapsed.TotalMilliseconds),
                     ("CandidateCount", paths.Count), ("Prefetch", true));
@@ -827,6 +828,7 @@ public sealed partial class OverlayWindow
             }
 
             BitmapImage? bitmap;
+            var decode = Stopwatch.StartNew();
             try
             {
                 bitmap = await TryLoadProfileArtworkAsync(paths, decodePixelWidth, cancellationToken);
@@ -858,6 +860,7 @@ public sealed partial class OverlayWindow
             _profileArtworkCachedDecodePixelWidth = decodePixelWidth;
             _profileArtworkCachedRasterizationScale = rasterizationScale;
             _profileArtworkCachedBitmap = bitmap;
+            prewarmSucceeded = true;
             if (IsCurrentProfileArtworkTarget(appId))
             {
                 ApplyProfileArtwork(appId, bitmap);
@@ -887,9 +890,19 @@ public sealed partial class OverlayWindow
         {
             if (ReferenceEquals(_profileArtworkRequestCancellation, requestCancellation))
             {
+                var wasCanceled = requestCancellation.IsCancellationRequested;
                 requestCancellation.Dispose();
                 _profileArtworkRequestCancellation = null;
                 _profileArtworkRequestIsPrewarm = false;
+
+                if (ShouldStartVisibleArtworkFallbackAfterPrewarmFailure(
+                        candidateCount, prewarmSucceeded, wasCanceled, IsCurrentProfileArtworkTarget(appId)))
+                {
+                    OverlayLog.Debug("ProfileArtwork", "Prewarm did not produce artwork for the visible Profile; starting the existing visible fallback.",
+                        ("AppId", appId), ("CandidateCount", candidateCount),
+                        ("Stage", candidateCount == 0 ? "NoCandidate" : "OpenOrDecodeFailed"));
+                    UpdateProfileArtwork(CurrentProfileArtworkPage());
+                }
             }
         }
     }
@@ -1007,6 +1020,13 @@ public sealed partial class OverlayWindow
         uint? authoritativeProfileAppId) =>
         currentPrewarmAppId == requestedAppId
         && (!isVisible || !profilePageReceived || authoritativeProfileAppId == requestedAppId);
+
+    internal static bool ShouldStartVisibleArtworkFallbackAfterPrewarmFailure(
+        int candidateCount,
+        bool prewarmSucceeded,
+        bool requestCanceled,
+        bool isCurrentVisibleTarget) =>
+        (candidateCount == 0 || !prewarmSucceeded) && !requestCanceled && isCurrentVisibleTarget;
 
     private (double RasterizationScale, int? DecodePixelWidth) CurrentProfileArtworkDecodeKey()
     {

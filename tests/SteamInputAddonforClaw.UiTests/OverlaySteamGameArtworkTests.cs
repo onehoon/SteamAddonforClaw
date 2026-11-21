@@ -241,6 +241,37 @@ public sealed class OverlaySteamGameArtworkTests
         Assert.False(OverlayWindow.IsProfileArtworkPrewarmIdentityCurrent(570, 570, true, true, null));
     }
 
+    [Theory]
+    [InlineData(0, false, false, true, true)]
+    [InlineData(1, false, false, true, true)]
+    [InlineData(1, true, false, true, false)]
+    [InlineData(0, false, true, true, false)]
+    [InlineData(1, false, false, false, false)]
+    public void First_show_failure_hands_off_only_current_uncanceled_prewarm_to_existing_fallback(
+        int candidateCount,
+        bool prewarmSucceeded,
+        bool requestCanceled,
+        bool isCurrentVisibleTarget,
+        bool expected)
+    {
+        Assert.Equal(expected, OverlayWindow.ShouldStartVisibleArtworkFallbackAfterPrewarmFailure(
+            candidateCount, prewarmSucceeded, requestCanceled, isCurrentVisibleTarget));
+    }
+
+    [Fact]
+    public void No_candidate_or_decode_failure_hands_the_current_show_to_the_existing_bounded_loader()
+    {
+        var profile = File.ReadAllText(ReadRepositoryFile("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
+        var worker = ExtractMethod(profile, "private async Task ResolveAndPrewarmProfileArtworkAsync(");
+
+        Assert.Contains("if (candidateCount == 0)", worker, StringComparison.Ordinal);
+        Assert.Contains("if (bitmap is null)", worker, StringComparison.Ordinal);
+        Assert.Contains("ShouldStartVisibleArtworkFallbackAfterPrewarmFailure(", worker, StringComparison.Ordinal);
+        Assert.Contains("UpdateProfileArtwork(CurrentProfileArtworkPage());", worker, StringComparison.Ordinal);
+        Assert.Contains("(\"DecodeMs\", 0)", worker, StringComparison.Ordinal);
+        Assert.Contains("ProfileArtworkMaximumAttempts = 2", profile, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void App_id_prewarm_uses_existing_candidate_priority_and_preserves_matching_work_across_show()
     {
@@ -277,6 +308,12 @@ public sealed class OverlaySteamGameArtworkTests
         Assert.Contains("if (_isVisible || _profileArtworkPrewarmAppId is not { } appId)", ensurePrewarm, StringComparison.Ordinal);
         Assert.Contains("Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(appId)", worker, StringComparison.Ordinal);
         Assert.Contains("TryLoadProfileArtworkAsync(paths, decodePixelWidth, cancellationToken)", worker, StringComparison.Ordinal);
+        Assert.True(worker.IndexOf("lookup.Stop();", StringComparison.Ordinal)
+            < worker.IndexOf("OverlayArtworkLookup", StringComparison.Ordinal));
+        Assert.True(worker.IndexOf("var decode = Stopwatch.StartNew();", StringComparison.Ordinal)
+            < worker.IndexOf("TryLoadProfileArtworkAsync(paths, decodePixelWidth, cancellationToken)", StringComparison.Ordinal));
+        Assert.True(worker.IndexOf("TryLoadProfileArtworkAsync(paths, decodePixelWidth, cancellationToken)", StringComparison.Ordinal)
+            < worker.IndexOf("decode.Stop();", StringComparison.Ordinal));
         Assert.Contains("_profileArtworkCachedBitmap = bitmap;", worker, StringComparison.Ordinal);
         Assert.Contains("IsCurrentProfileArtworkTarget(appId)", worker, StringComparison.Ordinal);
         Assert.Contains("IsProfileArtworkPrewarmIdentityCurrent(appId, _profileArtworkPrewarmAppId", currentRequest, StringComparison.Ordinal);
