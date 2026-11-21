@@ -7,6 +7,7 @@ internal sealed record XboxInstalledPackageLocation(string Kind, string RootPath
 
 internal sealed record XboxInstalledPackage(
     string PackageName,
+    string PackagePublisher,
     string PackageFullName,
     string PackageFamilyName,
     string DisplayName,
@@ -22,23 +23,29 @@ internal sealed record XboxInstalledPackageEnumeration(
 
 internal interface IXboxInstalledPackageSource
 {
-    XboxInstalledPackageEnumeration Enumerate(CancellationToken cancellationToken);
+    XboxInstalledPackageEnumeration FindForGame(MicrosoftGameConfig config, CancellationToken cancellationToken);
 }
 
 internal sealed class WindowsXboxInstalledPackageSource : IXboxInstalledPackageSource
 {
-    public XboxInstalledPackageEnumeration Enumerate(CancellationToken cancellationToken)
+    public XboxInstalledPackageEnumeration FindForGame(MicrosoftGameConfig config, CancellationToken cancellationToken)
     {
-        var packages = new List<XboxInstalledPackage>();
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            var installedPackages = new PackageManager().FindPackagesForUser(string.Empty);
+            var packages = new List<XboxInstalledPackage>();
+            var installedPackages = new PackageManager().FindPackagesForUser(
+                string.Empty, config.IdentityName, config.IdentityPublisher);
             foreach (var package in installedPackages)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     var id = package.Id;
+                    if (!string.Equals(id.Name, config.IdentityName, StringComparison.OrdinalIgnoreCase)
+                        || !string.Equals(id.Publisher, config.IdentityPublisher, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
                     var locations = new List<XboxInstalledPackageLocation>();
                     var locationFailures = new List<string>();
                     try { AddLocation(locations, "Effective", package.EffectiveLocation?.Path); }
@@ -48,6 +55,7 @@ internal sealed class WindowsXboxInstalledPackageSource : IXboxInstalledPackageS
 
                     packages.Add(new XboxInstalledPackage(
                         id.Name,
+                        id.Publisher,
                         id.FullName,
                         id.FamilyName,
                         package.DisplayName,
@@ -61,7 +69,7 @@ internal sealed class WindowsXboxInstalledPackageSource : IXboxInstalledPackageS
                 catch (Exception exception)
                 {
                     packages.Add(new XboxInstalledPackage(
-                        "<Package metadata unavailable>", string.Empty, string.Empty, string.Empty, [],
+                        config.IdentityName, config.IdentityPublisher, string.Empty, string.Empty, string.Empty, [],
                         MetadataFailure: MicrosoftGameConfigReader.Describe(exception)));
                 }
             }
@@ -75,7 +83,7 @@ internal sealed class WindowsXboxInstalledPackageSource : IXboxInstalledPackageS
         catch (Exception exception)
         {
             var unavailable = exception is NotSupportedException or TypeLoadException or EntryPointNotFoundException or DllNotFoundException;
-            return new(packages, false, unavailable, MicrosoftGameConfigReader.Describe(exception));
+            return new([], false, unavailable, MicrosoftGameConfigReader.Describe(exception));
         }
     }
 
@@ -102,110 +110,170 @@ internal sealed record XboxInstalledGameCatalogResult(
     XboxInstalledGameCatalogOutcome Outcome,
     IReadOnlyList<XboxInstalledGameCatalogEntry> Games,
     string? FailureReason,
-    int SkippedPackageCount = 0);
+    int SkippedGameCount = 0);
 
-internal sealed class XboxInstalledGameCatalog(IXboxInstalledPackageSource? packageSource = null)
+internal sealed class XboxInstalledGameCatalog(
+    IXboxInstalledGameFolderSource? folderSource = null,
+    IXboxInstalledPackageSource? packageSource = null)
 {
     private const long MaximumConfigBytes = 2 * 1024 * 1024;
+    private readonly IXboxInstalledGameFolderSource _folderSource = folderSource ?? new WindowsXboxInstalledGameFolderSource();
     private readonly IXboxInstalledPackageSource _packageSource = packageSource ?? new WindowsXboxInstalledPackageSource();
 
     internal async Task<XboxInstalledGameCatalogResult> ScanAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         AppLog.Info("XboxCatalog", "Installed XBOX game catalog scan requested.",
-            ("Api", "PackageManager.FindPackagesForUser(current user)"));
+            ("Discovery", "GDK flat-file game folders"), ("Marker", ".GamingRoot"));
 
-        var enumeration = await Task.Run(() => _packageSource.Enumerate(cancellationToken), cancellationToken).ConfigureAwait(false);
+        var enumeration = await Task.Run(() => _folderSource.Enumerate(cancellationToken), cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (!enumeration.Succeeded)
         {
             var outcome = enumeration.Unavailable ? XboxInstalledGameCatalogOutcome.Unavailable : XboxInstalledGameCatalogOutcome.Failed;
-            AppLog.Warn("XboxCatalog", "Current-user package enumeration failed.", null,
+            AppLog.Warn("XboxCatalog", "Xbox game-folder discovery failed.", null,
                 ("Outcome", outcome), ("Reason", enumeration.FailureReason));
             return new(outcome, [], enumeration.FailureReason);
         }
 
         var games = new List<XboxInstalledGameCatalogEntry>();
-        var seenPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenGameDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenGameKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var skippedPackageCount = 0;
+        var skippedGameCount = enumeration.SkippedFolderCount;
+        var packageLookupFailureCount = 0;
+        var unavailablePackageLookup = false;
+        var failureReasons = new List<string>();
 
-        foreach (var package in enumeration.Packages)
+        foreach (var gameFolder in enumeration.Folders)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var packageObservation = string.IsNullOrWhiteSpace(package.PackageFullName)
-                ? $"{package.PackageName}|{package.PackageFamilyName}|{string.Join('|', package.Locations.Select(location => location.RootPath))}"
-                : package.PackageFullName;
-            if (!seenPackages.Add(packageObservation))
-                continue;
-
-            if (package.MetadataFailure is { } metadataFailure)
+            string normalizedGameDirectory;
+            try
             {
-                skippedPackageCount++;
-                AppLog.Debug("XboxCatalog", "Package metadata could not be read; package skipped.",
-                    ("Package", PackageIdentity(package)), ("Reason", metadataFailure));
+                normalizedGameDirectory = Path.GetFullPath(gameFolder.GameDirectory);
+            }
+            catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
+            {
+                skippedGameCount++;
                 continue;
             }
+            if (!seenGameDirectories.Add(normalizedGameDirectory)) continue;
 
-            var sawFailure = !string.IsNullOrWhiteSpace(package.LocationFailure);
-            var foundGame = false;
-            foreach (var location in DistinctLocations(package.Locations))
+            var read = await ReadConfigAsync(gameFolder.ConfigPath, cancellationToken).ConfigureAwait(false);
+            if (read.Config is not { } config)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var configPath = Path.Combine(location.RootPath, "MicrosoftGame.config");
-                var read = await ReadConfigAsync(configPath, cancellationToken).ConfigureAwait(false);
-                if (!read.Found)
-                {
-                    if (read.FailureReason is { } locationFailure)
-                    {
-                        sawFailure = true;
-                        AppLog.Debug("XboxCatalog", "Package location could not be scanned.",
-                            ("Package", PackageIdentity(package)), ("LocationKind", location.Kind),
-                            ("ConfigPath", configPath), ("Reason", locationFailure));
-                    }
-                    continue;
-                }
-
-                if (read.Config is not { } config)
-                {
-                    sawFailure = true;
-                    AppLog.Debug("XboxCatalog", "MicrosoftGame.config candidate rejected; scanning the next package location.",
-                        ("Package", PackageIdentity(package)), ("ConfigPath", configPath),
-                        ("Reason", read.FailureReason));
-                    continue;
-                }
-
-                var identity = new XboxGameIdentity(
-                    XboxGameIdentity.CreateKey(config.StoreId, package.PackageFamilyName, config),
-                    FirstNonBlank(config.DefaultDisplayName, package.DisplayName, package.PackageName, PackageIdentity(package)),
-                    config.StoreId,
-                    BlankToNull(package.PackageFamilyName));
-
-                if (seenGameKeys.Add(identity.Key))
-                {
-                    games.Add(new(identity));
-                    AppLog.Info("XboxCatalog", "Installed XBOX game identity accepted.",
-                        ("Key", identity.Key), ("PackageFullName", package.PackageFullName),
-                        ("PackageFamilyName", identity.PackageFamilyName), ("StoreId", identity.StoreId));
-                }
-                foundGame = true;
-                break;
+                skippedGameCount++;
+                AppLog.Debug("XboxCatalog", "GDK game folder has no usable MicrosoftGame.config; folder skipped.",
+                    ("GameDirectory", normalizedGameDirectory), ("ConfigPath", gameFolder.ConfigPath),
+                    ("Reason", read.FailureReason ?? "Missing config"));
+                continue;
             }
 
-            if (!foundGame && (sawFailure || package.Locations.Count == 0))
+            var registration = _packageSource.FindForGame(config, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!registration.Succeeded)
             {
-                skippedPackageCount++;
-                if (package.Locations.Count == 0 && string.IsNullOrWhiteSpace(package.LocationFailure))
-                    AppLog.Debug("XboxCatalog", "Package had no usable Effective or Installed location.",
-                        ("Package", PackageIdentity(package)));
+                packageLookupFailureCount++;
+                unavailablePackageLookup |= registration.Unavailable;
+                if (registration.FailureReason is { Length: > 0 } failureReason)
+                    failureReasons.Add(failureReason);
+
+                // Keep the already persisted Store ID key stable when Windows package lookup is
+                // temporarily unavailable. A successful lookup returning no matching package is
+                // handled below as a stale/uninstalled folder and is never surfaced.
+                if (!string.IsNullOrWhiteSpace(config.StoreId))
+                    AddGame(games, seenGameKeys, config, null, normalizedGameDirectory);
+                else
+                    skippedGameCount++;
+                continue;
             }
+            var matchingPackage = FindMatchingRegisteredPackage(config, gameFolder.GameDirectory, gameFolder.ConfigPath, registration.Packages);
+            if (matchingPackage is null)
+            {
+                skippedGameCount++;
+                AppLog.Debug("XboxCatalog", "Xbox game folder has no registered package at its discovered location; stale folder skipped.",
+                    ("GameDirectory", normalizedGameDirectory), ("IdentityName", config.IdentityName));
+                continue;
+            }
+
+            AddGame(games, seenGameKeys, config, matchingPackage, normalizedGameDirectory);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        if (games.Count == 0 && packageLookupFailureCount > 0)
+        {
+            var outcome = unavailablePackageLookup
+                ? XboxInstalledGameCatalogOutcome.Unavailable
+                : XboxInstalledGameCatalogOutcome.Failed;
+            var reason = string.Join("; ", failureReasons.Distinct(StringComparer.Ordinal));
+            AppLog.Warn("XboxCatalog", "Targeted Xbox package lookup failed for every candidate game.", null,
+                ("Outcome", outcome), ("FailedLookupCount", packageLookupFailureCount), ("Reason", reason));
+            return new(outcome, [], string.IsNullOrEmpty(reason) ? "Targeted package lookup failed." : reason, skippedGameCount);
+        }
+
         AppLog.Info("XboxCatalog", "Installed XBOX game catalog scan completed.",
             ("Outcome", XboxInstalledGameCatalogOutcome.Completed),
-            ("InstalledGameCount", games.Count), ("SkippedPackageCount", skippedPackageCount));
-        return new(XboxInstalledGameCatalogOutcome.Completed, games, null, skippedPackageCount);
+            ("InstalledGameCount", games.Count), ("SkippedGameCount", skippedGameCount),
+            ("TargetedPackageLookupFailureCount", packageLookupFailureCount));
+        return new(XboxInstalledGameCatalogOutcome.Completed, games, null, skippedGameCount);
+    }
+
+    private static void AddGame(
+        List<XboxInstalledGameCatalogEntry> games,
+        HashSet<string> seenGameKeys,
+        MicrosoftGameConfig config,
+        XboxInstalledPackage? package,
+        string gameDirectory)
+    {
+        var packageFamilyName = BlankToNull(package?.PackageFamilyName);
+        var storeId = BlankToNull(config.StoreId);
+        var identity = new XboxGameIdentity(
+            XboxGameIdentity.CreateKey(storeId, packageFamilyName, config),
+            FirstNonBlank(config.DefaultDisplayName, package?.DisplayName, package?.PackageName, config.IdentityName),
+            storeId,
+            packageFamilyName);
+
+        if (!seenGameKeys.Add(identity.Key)) return;
+        games.Add(new(identity));
+        AppLog.Info("XboxCatalog", "Installed XBOX game identity accepted.",
+            ("Key", identity.Key), ("GameDirectory", gameDirectory),
+            ("PackageFamilyName", identity.PackageFamilyName), ("StoreId", identity.StoreId));
+    }
+
+    private static XboxInstalledPackage? FindMatchingRegisteredPackage(
+        MicrosoftGameConfig config,
+        string gameDirectory,
+        string configPath,
+        IReadOnlyList<XboxInstalledPackage> packages)
+    {
+        foreach (var package in packages)
+        {
+            if (package.MetadataFailure is not null
+                || !string.Equals(package.PackageName, config.IdentityName, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(package.PackagePublisher, config.IdentityPublisher, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var location in DistinctLocations(package.Locations))
+                if (IsRegisteredGameLocation(gameDirectory, configPath, location.RootPath))
+                    return package;
+        }
+        return null;
+    }
+
+    private static bool IsRegisteredGameLocation(string gameDirectory, string configPath, string registeredLocation)
+    {
+        try
+        {
+            var fullGameDirectory = Path.GetFullPath(gameDirectory);
+            var fullRegisteredLocation = Path.TrimEndingDirectorySeparator(Path.GetFullPath(registeredLocation));
+            var configDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetDirectoryName(configPath)!));
+            return string.Equals(fullRegisteredLocation, fullGameDirectory, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fullRegisteredLocation, configDirectory, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException or System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     internal static IReadOnlyList<XboxInstalledPackageLocation> DistinctLocations(
@@ -230,7 +298,7 @@ internal sealed class XboxInstalledGameCatalog(IXboxInstalledPackageSource? pack
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            return new(false, null, null);
+            return new(null, null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -238,7 +306,7 @@ internal sealed class XboxInstalledGameCatalog(IXboxInstalledPackageSource? pack
         }
         catch (Exception exception)
         {
-            return new(false, null, MicrosoftGameConfigReader.Describe(exception));
+            return new(null, MicrosoftGameConfigReader.Describe(exception));
         }
 
         await using (stream.ConfigureAwait(false))
@@ -246,10 +314,10 @@ internal sealed class XboxInstalledGameCatalog(IXboxInstalledPackageSource? pack
             try
             {
                 if (stream.Length > MaximumConfigBytes)
-                    return new(true, null, $"MicrosoftGame.config exceeds the {MaximumConfigBytes:N0}-byte limit.");
+                    return new(null, $"MicrosoftGame.config exceeds the {MaximumConfigBytes:N0}-byte limit.");
 
                 var result = await MicrosoftGameConfigReader.ReadAsync(stream, cancellationToken).ConfigureAwait(false);
-                return new(true, result.Config, result.FailureReason);
+                return new(result.Config, result.FailureReason);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -257,18 +325,15 @@ internal sealed class XboxInstalledGameCatalog(IXboxInstalledPackageSource? pack
             }
             catch (Exception exception)
             {
-                return new(true, null, MicrosoftGameConfigReader.Describe(exception));
+                return new(null, MicrosoftGameConfigReader.Describe(exception));
             }
         }
     }
-
-    private static string PackageIdentity(XboxInstalledPackage package) =>
-        FirstNonBlank(package.PackageFullName, package.PackageFamilyName, package.PackageName, "<Unknown package>");
 
     private static string FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? "<Unavailable>";
 
     private static string? BlankToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private sealed record ConfigRead(bool Found, MicrosoftGameConfig? Config, string? FailureReason);
+    private sealed record ConfigRead(MicrosoftGameConfig? Config, string? FailureReason);
 }

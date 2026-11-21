@@ -27,6 +27,7 @@ public sealed partial class ProfilePage : UserControl
     private FrontendModelFeatureSupport _featureSupport = FrontendModelFeatureSupport.None;
     private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents, _suppressGpuEvents;
     private bool _catalogLoaded, _catalogScanInProgress;
+    private bool _hostedByUnifiedProfiles;
     private bool? _steamActive;
     private int _steamVirtualControllerMutationInProgress;
     private int _artworkDiagnosticFlags;
@@ -68,6 +69,7 @@ public sealed partial class ProfilePage : UserControl
         Unloaded += ProfilePage_Unloaded;
 }
     internal event EventHandler? SteamActivityRefreshRequested;
+    internal event EventHandler? UnifiedProfilesBackRequested;
     internal void Initialize(IAddonFrontendControl frontend, FrontendModelFeatureSupport? featureSupport = null)
     {
         _frontend = frontend;
@@ -91,6 +93,27 @@ public sealed partial class ProfilePage : UserControl
 
         if (ShouldStartCatalogScan(_catalogLoaded, _catalogScanInProgress))
             _ = RefreshGamesAsync();
+    }
+
+    internal void ActivateForUnifiedProfiles(bool recaptureSelectedProfile = true)
+    {
+        _hostedByUnifiedProfiles = true;
+        if (_active) return;
+        _active = true;
+        if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated;
+        RestartMissingGameCardArtworkLoads();
+        if (recaptureSelectedProfile && _selectedGame is { } selected)
+            _ = CaptureSelectedAsync(selected.AppId);
+    }
+
+    internal async Task OpenGameFromUnifiedProfilesAsync(FrontendProfileGameCatalogEntry game)
+    {
+        ActivateForUnifiedProfiles(recaptureSelectedProfile: false);
+        SelectedGameNameText.Text = game.Name;
+        CatalogPanel.Visibility = Visibility.Collapsed;
+        DetailPanel.Visibility = Visibility.Visible;
+        RefreshGamesButton.Visibility = Visibility.Collapsed;
+        await SelectGameAsync(game);
     }
 
     internal static bool ShouldStartCatalogScan(bool catalogLoaded, bool scanInProgress) =>
@@ -656,6 +679,11 @@ public sealed partial class ProfilePage : UserControl
     private void BackButton_Click(object sender, RoutedEventArgs e)
     {
         CancelTdpDebounce(); CancelFpsDebounce(); CancelGpuMinimumClockDebounce();
+        if (_hostedByUnifiedProfiles)
+        {
+            UnifiedProfilesBackRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
         DetailPanel.Visibility = Visibility.Collapsed;
         CatalogPanel.Visibility = Visibility.Visible;
         RefreshGamesButton.Visibility = Visibility.Visible;

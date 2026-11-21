@@ -225,7 +225,6 @@
   <data name="Controller_BackTarget_View" xml:space="preserve"><value>View</value></data>
   <data name="Controller_BackTarget_Menu" xml:space="preserve"><value>Menu</value></data>
   <data name="Controller_BackTarget_XboxGuide" xml:space="preserve"><value>XBOX Guide</value></data>
-  <data name="MainNav_Steam.Content" xml:space="preserve"><value>Steam</value></data>
   <data name="Steam_BackButton.Content" xml:space="preserve"><value>Back</value></data>
   <data name="Steam_Catalog_NoGames" xml:space="preserve"><value>No installed Steam games were found.</value></data>
   <data name="Steam_Catalog_NoVisibleGames" xml:space="preserve"><value>No games to display.</value></data>
@@ -293,7 +292,6 @@
   <data name="Steam_VirtualControllerCard.Description" xml:space="preserve"><value>Overrides the Controller default for this Steam game.</value></data>
   <data name="Steam_VirtualControllerCard.Header" xml:space="preserve"><value>Virtual Controller</value></data>
 
-  <data name="MainNav_Xbox.Content" xml:space="preserve"><value>XBOX</value></data>
   <data name="Xbox_BackButton.Content" xml:space="preserve"><value>Back</value></data>
   <data name="Xbox_BackMapping_InvalidTargets" xml:space="preserve"><value>Choose valid M1 and M2 targets before saving the per-game mapping.</value></data>
   <data name="Xbox_BackMapping_UpdateFailed" xml:space="preserve"><value>M1 / M2 mapping could not be updated.</value></data>
@@ -772,4 +770,22 @@ These settings are reversible where Windows and policy permit. Windows policy or
   <data name="Device_AutoStart_Issue_StableExecutableMissing" xml:space="preserve"><value>The stable installed application path is unavailable.</value></data>
   <data name="Device_AutoStart_Issue_RegistrationFailed" xml:space="preserve"><value>Windows could not create or update the startup task.</value></data>
   <data name="Device_AutoStart_Issue_ReadbackUnverified" xml:space="preserve"><value>The startup task could not be verified after the repair attempt.</value></data>
+  <data name="MainNav_Profiles.Content" xml:space="preserve"><value>Profiles</value></data>
+  <data name="Profiles_GameProfilesTitle.Text" xml:space="preserve"><value>Game Profiles</value></data>
+  <data name="Profiles_FilterAll.Text" xml:space="preserve"><value>All</value></data>
+  <data name="Profiles_FilterSteam.Text" xml:space="preserve"><value>Steam</value></data>
+  <data name="Profiles_FilterXbox.Text" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Profiles_SearchBox.PlaceholderText" xml:space="preserve"><value>Search games...</value></data>
+  <data name="Profiles_RefreshButton.Content" xml:space="preserve"><value>↻ Refresh</value></data>
+  <data name="Profiles_EmptyCatalog.Text" xml:space="preserve"><value>No games match the current filter or search.</value></data>
+  <data name="Profiles_SteamLabel" xml:space="preserve"><value>Steam</value></data>
+  <data name="Profiles_XboxLabel" xml:space="preserve"><value>XBOX</value></data>
+  <data name="Profiles_GameAutomationName" xml:space="preserve"><value>{0}, {1} game</value></data>
+  <data name="Profiles_FavoriteUnknownAutomationName" xml:space="preserve"><value>Favorite state unavailable for {0}</value></data>
+  <data name="Profiles_FavoriteRemoveAutomationName" xml:space="preserve"><value>Remove {0} from favorites</value></data>
+  <data name="Profiles_FavoriteAddAutomationName" xml:space="preserve"><value>Add {0} to favorites</value></data>
+  <data name="Profiles_SteamCatalogWarning" xml:space="preserve"><value>Steam games could not be refreshed. Existing results, if any, are still shown.</value></data>
+  <data name="Profiles_XboxCatalogWarning" xml:space="preserve"><value>XBOX games could not be refreshed. Existing results, if any, are still shown.</value></data>
+  <data name="Profiles_FavoriteStateUnavailable" xml:space="preserve"><value>Favorite status is unavailable for some games.</value></data>
+  <data name="Profiles_FavoriteSaveFailed" xml:space="preserve"><value>Favorite could not be saved.</value></data>
 </root>

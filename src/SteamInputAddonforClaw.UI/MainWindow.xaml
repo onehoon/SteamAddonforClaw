@@ -35,14 +35,9 @@
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7FC;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Uid="MainNav_Steam" Content="Steam" Tag="Profile">
+            <NavigationViewItem x:Uid="MainNav_Profiles" Content="Profiles" Tag="Profile">
                 <NavigationViewItem.Icon>
                     <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8F1;" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
-            <NavigationViewItem x:Uid="MainNav_Xbox" Content="XBOX" Tag="Xbox">
-                <NavigationViewItem.Icon>
-                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE990;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem x:Uid="MainNav_ClawHud" Content="ClawHUD" Tag="Overlay">
@@ -77,8 +72,7 @@
 
             <ContentControl x:Name="MsiUpdatesPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="ControllerPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
-            <ContentControl x:Name="ProfilePageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
-            <ContentControl x:Name="XboxPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
+            <ContentControl x:Name="ProfilesPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="OverlayPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="QuickOverlayPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />
             <ContentControl x:Name="ShortcutPageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Visibility="Collapsed" />

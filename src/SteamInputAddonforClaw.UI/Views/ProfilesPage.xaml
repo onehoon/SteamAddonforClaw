@@ -1,0 +1,134 @@
+<UserControl
+    x:Class="SteamInputAddonforClaw.Views.ProfilesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    HorizontalContentAlignment="Stretch">
+    <UserControl.Resources>
+        <Style x:Key="ProfilesCoverGridViewItemStyle" TargetType="GridViewItem">
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style x:Key="ProfilesFavoriteStarButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+        </Style>
+    </UserControl.Resources>
+    <Grid Padding="20,16" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Uid="Profiles_GameProfilesTitle" FontSize="24" FontWeight="SemiBold" Text="Game Profiles" />
+
+        <Grid x:Name="LibraryPanel" Grid.Row="1" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <SelectorBar x:Name="GameFilterSelector" SelectionChanged="GameFilterSelector_SelectionChanged">
+                    <SelectorBarItem x:Uid="Profiles_FilterAll" Tag="All" Text="All" />
+                    <SelectorBarItem x:Uid="Profiles_FilterSteam" Tag="Steam" Text="Steam" />
+                    <SelectorBarItem x:Uid="Profiles_FilterXbox" Tag="Xbox" Text="XBOX" />
+                </SelectorBar>
+                <TextBox x:Name="GameSearchBox" x:Uid="Profiles_SearchBox" Grid.Column="1" MinWidth="180"
+                         PlaceholderText="Search games..." TextChanged="GameSearchBox_TextChanged" />
+                <Button x:Name="RefreshGamesButton" x:Uid="Profiles_RefreshButton" Grid.Column="2"
+                        Content="↻ Refresh" Style="{StaticResource AccentButtonStyle}"
+                        Click="RefreshGamesButton_Click" />
+            </Grid>
+
+            <InfoBar x:Name="CatalogWarningInfoBar" Grid.Row="1" IsClosable="False" IsOpen="False"
+                     Severity="Warning" />
+            <Grid Grid.Row="2">
+                <GridView x:Name="GameGrid" Margin="0" HorizontalAlignment="Stretch" Padding="0"
+                          BorderThickness="0" Opacity="0" SelectionMode="None" IsItemClickEnabled="False"
+                          CanDragItems="False" CanReorderItems="False" UseLayoutRounding="False"
+                          ItemContainerTransitions="{x:Null}" ItemContainerStyle="{StaticResource ProfilesCoverGridViewItemStyle}"
+                          ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          ScrollViewer.VerticalScrollMode="Enabled" ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                          SizeChanged="GameGrid_SizeChanged" ContainerContentChanging="GameGrid_ContainerContentChanging">
+                    <GridView.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <ItemsWrapGrid Orientation="Horizontal" ItemWidth="183" ItemHeight="270.5" Margin="0"
+                                           Loaded="CoverItemsPanel_Loaded" />
+                        </ItemsPanelTemplate>
+                    </GridView.ItemsPanel>
+                    <GridView.ItemTemplate>
+                        <DataTemplate>
+                            <Border x:Name="CardRoot" Width="175" Height="262.5" Margin="0,0,8,8"
+                                    CornerRadius="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                <Grid>
+                                    <Image x:Name="PosterImage" Source="{Binding Artwork}"
+                                           Visibility="{Binding PosterVisibility}" Stretch="UniformToFill"
+                                           IsHitTestVisible="False" />
+                                    <Grid x:Name="BoxArtPanel" Visibility="{Binding BoxArtVisibility}"
+                                          IsHitTestVisible="False">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="2*" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Image Source="{Binding Artwork}" Stretch="Uniform" />
+                                        <TextBlock Grid.Row="1" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                                                   TextWrapping="WrapWholeWords" TextTrimming="CharacterEllipsis"
+                                                   MaxLines="3" VerticalAlignment="Center" Margin="8,2" />
+                                    </Grid>
+                                    <TextBlock x:Name="FallbackCard" Visibility="{Binding FallbackVisibility}"
+                                               Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                                               TextWrapping="WrapWholeWords" TextTrimming="CharacterEllipsis"
+                                               MaxLines="5" TextAlignment="Center" VerticalAlignment="Center"
+                                               HorizontalAlignment="Center" Margin="12" />
+                                    <Button x:Name="OpenGameButton" Tag="{Binding}" Click="GameCardButton_Click"
+                                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                                            Background="Transparent" BorderThickness="0" Padding="0"
+                                            AutomationProperties.Name="{Binding AutomationName}"
+                                            ToolTipService.ToolTip="{Binding AutomationName}" />
+                                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8"
+                                            Padding="6,2" CornerRadius="2"
+                                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                            IsHitTestVisible="False">
+                                        <TextBlock Text="{Binding PlatformLabel}" FontSize="11" FontWeight="SemiBold" />
+                                    </Border>
+                                    <Button x:Name="FavoriteButton" Style="{StaticResource ProfilesFavoriteStarButtonStyle}"
+                                            Width="32" Height="32" MinWidth="0" MinHeight="0" Padding="0"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8"
+                                            IsEnabled="{Binding FavoriteStateKnown}" Tag="{Binding}"
+                                            Click="FavoriteButton_Click"
+                                            AutomationProperties.Name="{Binding FavoriteAutomationName}"
+                                            ToolTipService.ToolTip="{Binding FavoriteAutomationName}">
+                                        <TextBlock Text="{Binding FavoriteGlyph}" FontSize="24" FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </GridView.ItemTemplate>
+                </GridView>
+                <TextBlock x:Name="EmptyCatalogText" x:Uid="Profiles_EmptyCatalog" Text="No games match this view."
+                           Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           TextWrapping="Wrap" />
+            </Grid>
+        </Grid>
+
+        <ContentControl x:Name="DetailHost" Grid.Row="1" Visibility="Collapsed"
+                         HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+    </Grid>
+</UserControl>
