@@ -99,7 +99,11 @@ public sealed class XboxGameInstallFolderSourceTests : IDisposable
         var game = CreateGame(accessibleDrive, "XboxGames", "Available");
         var inaccessibleRoot = Path.GetFullPath(inaccessibleDrive);
         var source = new WindowsXboxInstalledGameFolderSource(
-            () => [inaccessibleDrive, accessibleDrive],
+            () =>
+            [
+                new(inaccessibleDrive, DriveType.Fixed, true),
+                new(accessibleDrive, DriveType.Fixed, true),
+            ],
             path =>
             {
                 if (Path.GetFullPath(Path.GetDirectoryName(path)!) == inaccessibleRoot)
@@ -114,6 +118,39 @@ public sealed class XboxGameInstallFolderSourceTests : IDisposable
 
         Assert.Equal(Path.GetFullPath(game), Assert.Single(result.Folders).GameDirectory);
         Assert.True(result.SkippedFolderCount > 0);
+    }
+
+    [Fact]
+    public void Ready_removable_drive_is_scanned_and_not_ready_removable_drive_is_skipped()
+    {
+        var removableDrive = CreateDirectory("drive-removable-ready");
+        var notReadyDrive = CreateDirectory("drive-removable-not-ready");
+        var game = CreateGame(removableDrive, "XboxGames", "Removable Game");
+        CreateGame(notReadyDrive, "XboxGames", "Not Ready Game");
+        WriteGamingRoot(removableDrive, "XboxGames");
+        WriteGamingRoot(notReadyDrive, "XboxGames");
+        var notReadyRoot = Path.GetFullPath(notReadyDrive);
+        var markerReads = new List<string>();
+        var source = new WindowsXboxInstalledGameFolderSource(
+            () =>
+            [
+                new(removableDrive, DriveType.Removable, true),
+                new(notReadyDrive, DriveType.Removable, false),
+            ],
+            path =>
+            {
+                var root = Path.GetFullPath(Path.GetDirectoryName(path)!);
+                markerReads.Add(root);
+                return ReadGamingRoot(path);
+            },
+            Directory.Exists,
+            Directory.EnumerateDirectories,
+            File.Exists);
+
+        var result = source.Enumerate(CancellationToken.None);
+
+        Assert.Equal(Path.GetFullPath(game), Assert.Single(result.Folders).GameDirectory);
+        Assert.DoesNotContain(notReadyRoot, markerReads);
     }
 
     [Fact]
@@ -180,7 +217,7 @@ public sealed class XboxGameInstallFolderSourceTests : IDisposable
         WriteGamingRoot(drive, "XboxGames");
         using var cancellation = new CancellationTokenSource();
         var source = new WindowsXboxInstalledGameFolderSource(
-            () => [drive],
+            () => [new(drive, DriveType.Fixed, true)],
             _ => { cancellation.Cancel(); return BuildMarker("XboxGames"); },
             Directory.Exists,
             Directory.EnumerateDirectories,
@@ -192,7 +229,7 @@ public sealed class XboxGameInstallFolderSourceTests : IDisposable
     private WindowsXboxInstalledGameFolderSource CreateSource(
         IReadOnlyList<string> driveRoots,
         Func<string, IEnumerable<string>>? enumerateDirectories = null) =>
-        new(() => driveRoots, ReadGamingRoot, Directory.Exists,
+        new(() => driveRoots.Select(root => new XboxGameDriveRoot(root, DriveType.Fixed, true)).ToArray(), ReadGamingRoot, Directory.Exists,
             enumerateDirectories ?? (path => Directory.EnumerateDirectories(path, "*", SearchOption.TopDirectoryOnly)),
             File.Exists);
 

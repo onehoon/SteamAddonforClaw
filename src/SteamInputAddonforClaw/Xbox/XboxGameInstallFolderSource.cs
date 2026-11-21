@@ -5,6 +5,8 @@ namespace SteamInputAddonforClaw.Xbox;
 
 internal sealed record XboxInstalledGameFolder(string GameDirectory, string ConfigPath);
 
+internal sealed record XboxGameDriveRoot(string RootPath, DriveType DriveType, bool IsReady);
+
 internal sealed record XboxInstalledGameFolderEnumeration(
     IReadOnlyList<XboxInstalledGameFolder> Folders,
     bool Succeeded,
@@ -19,25 +21,25 @@ internal interface IXboxInstalledGameFolderSource
 
 internal sealed class WindowsXboxInstalledGameFolderSource : IXboxInstalledGameFolderSource
 {
-    private readonly Func<IReadOnlyList<string>> _driveRoots;
+    private readonly Func<IReadOnlyList<XboxGameDriveRoot>> _gameDrives;
     private readonly Func<string, byte[]?> _readGamingRoot;
     private readonly Func<string, bool> _directoryExists;
     private readonly Func<string, IEnumerable<string>> _enumerateDirectories;
     private readonly Func<string, bool> _fileExists;
 
     internal WindowsXboxInstalledGameFolderSource()
-        : this(GetReadyFixedDriveRoots, ReadGamingRoot, Directory.Exists, Directory.EnumerateDirectories, File.Exists)
+        : this(GetGameDriveRoots, ReadGamingRoot, Directory.Exists, Directory.EnumerateDirectories, File.Exists)
     {
     }
 
     internal WindowsXboxInstalledGameFolderSource(
-        Func<IReadOnlyList<string>> driveRoots,
+        Func<IReadOnlyList<XboxGameDriveRoot>> gameDrives,
         Func<string, byte[]?> readGamingRoot,
         Func<string, bool> directoryExists,
         Func<string, IEnumerable<string>> enumerateDirectories,
         Func<string, bool> fileExists)
     {
-        _driveRoots = driveRoots;
+        _gameDrives = gameDrives;
         _readGamingRoot = readGamingRoot;
         _directoryExists = directoryExists;
         _enumerateDirectories = enumerateDirectories;
@@ -47,10 +49,10 @@ internal sealed class WindowsXboxInstalledGameFolderSource : IXboxInstalledGameF
     public XboxInstalledGameFolderEnumeration Enumerate(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        IReadOnlyList<string> driveRoots;
+        IReadOnlyList<XboxGameDriveRoot> gameDrives;
         try
         {
-            driveRoots = _driveRoots();
+            gameDrives = _gameDrives();
         }
         catch (Exception exception)
         {
@@ -60,10 +62,12 @@ internal sealed class WindowsXboxInstalledGameFolderSource : IXboxInstalledGameF
 
         var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var skippedFolderCount = 0;
-        foreach (var driveRoot in driveRoots)
+        foreach (var drive in gameDrives)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var driveLibraries = ResolveLibraries(driveRoot, cancellationToken, ref skippedFolderCount);
+            if (!drive.IsReady || drive.DriveType is not (DriveType.Fixed or DriveType.Removable)) continue;
+
+            var driveLibraries = ResolveLibraries(drive.RootPath, cancellationToken, ref skippedFolderCount);
             foreach (var library in driveLibraries)
                 libraries.Add(library);
         }
@@ -186,23 +190,22 @@ internal sealed class WindowsXboxInstalledGameFolderSource : IXboxInstalledGameF
         return libraries;
     }
 
-    private static IReadOnlyList<string> GetReadyFixedDriveRoots()
+    private static IReadOnlyList<XboxGameDriveRoot> GetGameDriveRoots()
     {
-        var roots = new List<string>();
+        var drives = new List<XboxGameDriveRoot>();
         foreach (var drive in DriveInfo.GetDrives())
         {
             try
             {
-                if (drive.DriveType == DriveType.Fixed && drive.IsReady)
-                    roots.Add(drive.RootDirectory.FullName);
+                drives.Add(new(drive.Name, drive.DriveType, drive.IsReady));
             }
             catch (Exception exception) when (IsFileSystemFailure(exception))
             {
-                AppLog.Debug("XboxCatalog", "A fixed drive could not be inspected for an Xbox game library.",
+                AppLog.Debug("XboxCatalog", "A game drive could not be inspected for an Xbox game library.",
                     ("Drive", drive.Name), ("Reason", MicrosoftGameConfigReader.Describe(exception)));
             }
         }
-        return roots;
+        return drives;
     }
 
     private static byte[]? ReadGamingRoot(string path)
