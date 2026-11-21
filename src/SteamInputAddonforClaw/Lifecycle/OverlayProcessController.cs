@@ -47,10 +47,12 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private Func<OverlayFrontendSettingsMutationRequest, CancellationToken, Task<OverlayFrontendSettingsMutationResponse>>? _mutateFrontendSettings;
     private Func<CancellationToken, Task<FrontendControllerVibrationStrengthSnapshot>>? _captureControllerVibration;
     private Func<OverlayControllerVibrationMutationRequest, CancellationToken, Task<FrontendControllerVibrationStrengthMutationResult>>? _mutateControllerVibration;
+    private Func<uint>? _captureCurrentSteamAppId;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
     private bool _stopping;
+    private uint? _lastSteamArtworkAppIdSent;
     private int _disposed;
 
     // OQ4 section 10: the process/window/transport owner no longer independently finishes a visible
@@ -140,6 +142,13 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _captureControllerVibration = captureVibration ?? throw new ArgumentNullException(nameof(captureVibration));
         _mutateControllerVibration = mutateVibration ?? throw new ArgumentNullException(nameof(mutateVibration));
     }
+
+    internal void BindSteamArtworkPrewarmAuthority(Func<uint> captureCurrentSteamAppId) =>
+        _captureCurrentSteamAppId = captureCurrentSteamAppId ?? throw new ArgumentNullException(nameof(captureCurrentSteamAppId));
+
+    // Runtime remains the active-game authority. Events schedule a fresh read after the existing
+    // visibility transition completes; callers never wait for artwork IPC or decoding.
+    internal void NotifySteamArtworkTargetChanged() => _ = PublishCurrentSteamArtworkHintAsync();
 
     internal string ExecutablePath => _executablePath;
     internal bool HasTrackedProcess { get { lock (_sync) return _process is { HasExited: false }; } }
@@ -468,6 +477,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
                 AppLog.Debug("Overlay", "OverlayShowCommand",
                     ("ElapsedMs", requested.Elapsed.TotalMilliseconds), ("Process", warmProcess ? "Warm" : "Cold"),
                     ("PID", pid), ("Command", command));
+            else
+                NotifySteamArtworkTargetChanged();
             return true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -527,6 +538,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     {
         if (!File.Exists(_executablePath)) return false;
         var server = _serverFactory(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
+        lock (_sync) _lastSteamArtworkAppIdSent = null;
         server.NoRunningGameProfileRecheckRequested += OnNoRunningGameProfileRecheckRequested;
         var startup = Stopwatch.StartNew();
         await server.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -568,7 +580,88 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             return false;
         }
         AppLog.Info("Overlay", "Overlay Ready confirmed.", ("PID", process.Id), ("ElapsedMs", startup.ElapsedMilliseconds));
+        NotifySteamArtworkTargetChanged();
         return true;
+    }
+
+    private async Task PublishCurrentSteamArtworkHintAsync()
+    {
+        var transitionHeld = false;
+        try
+        {
+            await _transition.WaitAsync().ConfigureAwait(false);
+            transitionHeld = true;
+
+            NamedPipeOverlayServer? server;
+            Func<uint>? captureAppId;
+            bool visible;
+            lock (_sync)
+            {
+                if (_stopping) return;
+                visible = _visible;
+                server = _server;
+                captureAppId = _captureCurrentSteamAppId;
+            }
+
+            var appId = captureAppId?.Invoke() ?? 0;
+            if (visible)
+            {
+                AppLog.Debug("Overlay", "OverlayArtworkPrefetchHint",
+                    ("AppId", appId), ("Ready", server?.IsReady == true),
+                    ("Surface", "Visible"), ("Admission", "SkippedVisible"));
+                return;
+            }
+            if (server is null || captureAppId is null || !server.IsReady)
+            {
+                AppLog.Debug("Overlay", "OverlayArtworkPrefetchHint",
+                    ("AppId", appId), ("Ready", false), ("Surface", "Unknown"),
+                    ("Admission", "SkippedNotReady"));
+                return;
+            }
+            if (server.State != OverlayState.Hidden)
+            {
+                AppLog.Debug("Overlay", "OverlayArtworkPrefetchHint",
+                    ("AppId", appId), ("Ready", true), ("Surface", server.State),
+                    ("Admission", server.State == OverlayState.Visible ? "SkippedVisible" : "SkippedNotReady"));
+                return;
+            }
+
+            lock (_sync)
+            {
+                if (!ReferenceEquals(_server, server) || _visible || _stopping)
+                    return;
+                if (_lastSteamArtworkAppIdSent == appId)
+                {
+                    AppLog.Debug("Overlay", "OverlayArtworkPrefetchHint",
+                        ("AppId", appId), ("Ready", true), ("Surface", "Hidden"), ("Admission", "Unchanged"));
+                    return;
+                }
+            }
+
+            if (!await server.SendSteamArtworkPrewarmAsync(appId).ConfigureAwait(false))
+            {
+                AppLog.Debug("Overlay", "OverlayArtworkPrefetchHint",
+                    ("AppId", appId), ("Ready", server.IsReady), ("Surface", server.State),
+                    ("Admission", "SendFailed"));
+                return;
+            }
+            lock (_sync)
+            {
+                if (ReferenceEquals(_server, server) && !_visible && !_stopping)
+                    _lastSteamArtworkAppIdSent = appId;
+            }
+            AppLog.Debug("Overlay", "OverlayArtworkPrefetchHint",
+                ("AppId", appId), ("Ready", true), ("Surface", "Hidden"), ("Admission", "ReadyHidden"));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AppLog.Debug("Overlay", "Steam artwork prewarm hint could not be published.",
+                ("ExceptionType", exception.GetType().Name));
+        }
+        finally
+        {
+            if (transitionHeld) _transition.Release();
+        }
     }
 
     private void OnNoRunningGameProfileRecheckRequested(

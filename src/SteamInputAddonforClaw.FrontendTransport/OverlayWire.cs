@@ -47,11 +47,12 @@ internal static class OverlayTransportProtocol
     // Version 22 adds the configured Y-button QuickJump action and its correlated settings mutation.
     // Version 23 adds the Runtime-owned Simplified TDP Controls setting mutation.
     // Version 24 adds payload-free Runtime notifications after verified display-scale apply/restore operations.
-    internal const int CurrentVersion = 24;
+    // Version 25 adds a Runtime -> Overlay Steam AppID artwork prewarm hint, accepted only while Ready/Hidden.
+    internal const int CurrentVersion = 25;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerForSteamMutationRequest, ControllerForSteamMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest, YButtonQuickJumpMutationRequest, YButtonQuickJumpMutationResult, SimplifiedTdpControlsMutationRequest, SimplifiedTdpControlsMutationResult, DisplayScaleAppliedTo100, DisplayScaleRestored }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerForSteamMutationRequest, ControllerForSteamMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult, NoRunningGameProfileRecheckRequest, YButtonQuickJumpMutationRequest, YButtonQuickJumpMutationResult, SimplifiedTdpControlsMutationRequest, SimplifiedTdpControlsMutationResult, DisplayScaleAppliedTo100, DisplayScaleRestored, SteamArtworkPrewarm }
 internal enum OverlayDisplayScaleChange { AppliedTo100, Restored }
 internal enum OverlayCommand { Show, Hide, Shutdown, ShowActiveProfile }
 internal enum OverlayNavigationAction
@@ -147,4 +148,5 @@ internal sealed record OverlayWireMessage(
     OverlayFrontendSettingsMutationResponse? FrontendSettingsMutationResponse = null,
     FrontendControllerVibrationStrengthSnapshot? ControllerVibrationState = null,
     OverlayControllerVibrationMutationRequest? ControllerVibrationMutationRequest = null,
-    OverlayControllerVibrationMutationResponse? ControllerVibrationMutationResult = null);
+    OverlayControllerVibrationMutationResponse? ControllerVibrationMutationResult = null,
+    uint? SteamArtworkAppId = null);

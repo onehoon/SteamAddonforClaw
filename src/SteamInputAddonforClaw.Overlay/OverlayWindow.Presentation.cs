@@ -17,6 +17,7 @@ public sealed partial class OverlayWindow
     private const double HiddenOpacity = 0.90;
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(80);
     private uint _lastConfiguredDpi;
+    private int _lastConfiguredOverlayWidthPx;
     private int _lastAppliedClawHudTopInsetPx;
     private XamlRoot? _overlayScaleObservedRoot;
     private DispatcherQueueTimer? _railClockTimer;
@@ -131,6 +132,7 @@ public sealed partial class OverlayWindow
     {
         var topInsetPx = CurrentClawHudTopInsetPx();
         WindowInterop.Configure(this, topInsetPx, out var rect, out _lastConfiguredDpi, out var monitorText, alreadyVisible);
+        _lastConfiguredOverlayWidthPx = rect.Width;
         _lastAppliedClawHudTopInsetPx = topInsetPx;
         ApplyOverlayUiScale(_lastConfiguredDpi / 96.0);
         ObserveOverlayScaleRoot(AnimationViewport.XamlRoot);
@@ -142,6 +144,11 @@ public sealed partial class OverlayWindow
             ("ClawHudTopInsetPx", topInsetPx),
             ("OverlayWidthPx", rect.Width),
             ("OverlayHeightPx", rect.Height));
+        if (!_isVisible)
+        {
+            ProfileContentColumn.UpdateLayout();
+            ReevaluateHiddenProfileArtworkPrewarm();
+        }
     }
 
     private void ObserveOverlayScaleRoot(XamlRoot? xamlRoot)
@@ -165,6 +172,11 @@ public sealed partial class OverlayWindow
         _lastConfiguredDpi = (uint)Math.Round(sender.RasterizationScale * 96.0, MidpointRounding.AwayFromZero);
         if (_isVisible)
             ConfigureWindow(alreadyVisible: true);
+        else
+        {
+            ProfileContentColumn.UpdateLayout();
+            ReevaluateHiddenProfileArtworkPrewarm();
+        }
     }
 
     private bool ApplyOverlayUiScale(double rasterizationScale)

@@ -8,6 +8,7 @@ internal static class OverlayUiScale
 {
     internal const double DesignScale = 1.35;
     internal const double BaseContentWidthDip = 452.0;
+    internal const double TabRailWidthDip = 52.0;
     internal const int LegacyRightAnchorExtensionPx = 48;
     private const uint DefaultDpi = 96;
 

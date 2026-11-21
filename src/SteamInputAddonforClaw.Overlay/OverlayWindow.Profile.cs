@@ -31,7 +31,9 @@ public sealed partial class OverlayWindow
     private uint? _profileArtworkRequestedAppId;
     private int _profileArtworkRequestedDecodePixelWidth;
     private double _profileArtworkRequestedRasterizationScale;
+    private bool _profileArtworkRequestIsPrewarm;
     private CancellationTokenSource? _profileArtworkRequestCancellation;
+    private uint? _profileArtworkPrewarmAppId;
     private uint? _profileArtworkCachedAppId;
     private int _profileArtworkCachedDecodePixelWidth;
     private double _profileArtworkCachedRasterizationScale;
@@ -56,7 +58,10 @@ public sealed partial class OverlayWindow
         ApplyProfileArtworkLayout(e.NewSize.Width, IsXboxProfileTarget(CurrentProfileArtworkPage()));
 
         if (double.IsFinite(e.NewSize.Width) && e.NewSize.Width > 0)
+        {
             ReevaluateProfileArtworkForCurrentPage();
+            ReevaluateHiddenProfileArtworkPrewarm();
+        }
     }
 
     private void ProfileArtworkHost_Loaded(object sender, RoutedEventArgs e)
@@ -88,6 +93,83 @@ public sealed partial class OverlayWindow
             return;
 
         UpdateProfileArtwork(surface.Binding?.AuthoritativePage);
+    }
+
+    internal void PrewarmSteamArtwork(uint appId)
+    {
+        if (_isVisible)
+        {
+            OverlayLog.Debug("ProfileArtwork", "Ignored Steam artwork prewarm while the Overlay is visible.",
+                ("AppId", appId), ("Admission", "SkippedVisible"));
+            return;
+        }
+
+        _profileArtworkPrewarmAppId = appId > 0 ? appId : null;
+        if (appId == 0)
+        {
+            if (_profileArtworkRequestIsPrewarm)
+            {
+                CancelProfileArtworkRequest();
+                _profileArtworkRequestedAppId = null;
+            }
+            if (_profileArtworkCachedAppId is not null)
+                DiscardCachedProfileArtwork();
+            OverlayLog.Debug("ProfileArtwork", "Cleared the pending Steam artwork prewarm target.",
+                ("AppId", 0), ("Admission", "ReadyHidden"));
+            return;
+        }
+
+        OverlayLog.Debug("ProfileArtwork", "Accepted Steam artwork prewarm target.",
+            ("AppId", appId), ("Admission", "ReadyHidden"));
+        ReevaluateHiddenProfileArtworkPrewarm();
+    }
+
+    private void ReevaluateHiddenProfileArtworkPrewarm()
+    {
+        if (_isVisible || _profileArtworkPrewarmAppId is not { } appId)
+            return;
+
+        var (rasterizationScale, requestedDecodePixelWidth) = CurrentProfileArtworkDecodeKey();
+        if (requestedDecodePixelWidth is not { } decodePixelWidth)
+        {
+            OverlayLog.Debug("ProfileArtwork", "Steam artwork prewarm is waiting for valid hidden-window geometry.",
+                ("AppId", appId), ("Admission", "NoDecodeKey"));
+            return;
+        }
+
+        var matchingRequest = _profileArtworkRequestIsPrewarm
+            && _profileArtworkRequestedAppId == appId
+            && _profileArtworkRequestCancellation is { IsCancellationRequested: false }
+            && _profileArtworkRequestedDecodePixelWidth == decodePixelWidth
+            && Math.Abs(_profileArtworkRequestedRasterizationScale - rasterizationScale) < 0.0001;
+        if (!matchingRequest && _profileArtworkRequestCancellation is not null)
+            CancelProfileArtworkRequest();
+
+        if (_profileArtworkCachedBitmap is not null
+            && IsProfileArtworkCacheCompatible(_profileArtworkCachedAppId, _profileArtworkCachedDecodePixelWidth,
+                _profileArtworkCachedRasterizationScale, appId, decodePixelWidth, rasterizationScale))
+        {
+            OverlayLog.Debug("Performance", "OverlayArtwork",
+                ("AppId", appId), ("Cache", "PrefetchReady"), ("DecodePixelWidth", decodePixelWidth),
+                ("RasterizationScale", rasterizationScale), ("Stage", "Ready"));
+            return;
+        }
+
+        if (_profileArtworkCachedBitmap is not null)
+            DiscardCachedProfileArtwork();
+
+        if (matchingRequest)
+            return;
+        _profileArtworkRequestedAppId = appId;
+        _profileArtworkRequestedDecodePixelWidth = decodePixelWidth;
+        _profileArtworkRequestedRasterizationScale = rasterizationScale;
+        _profileArtworkRequestIsPrewarm = true;
+        var requestCancellation = new CancellationTokenSource();
+        _profileArtworkRequestCancellation = requestCancellation;
+        OverlayLog.Debug("Performance", "OverlayArtwork",
+            ("AppId", appId), ("Cache", "Miss"), ("DecodePixelWidth", decodePixelWidth),
+            ("RasterizationScale", rasterizationScale), ("Stage", "PrefetchLookup"));
+        _ = ResolveAndPrewarmProfileArtworkAsync(appId, decodePixelWidth, rasterizationScale, requestCancellation);
     }
 
     internal static (double Width, double Height) CalculateProfileArtworkSize(double rightColumnWidth)
@@ -292,6 +374,23 @@ public sealed partial class OverlayWindow
         if (_profileArtworkCachedBitmap is not null)
             DiscardCachedProfileArtwork();
 
+        var matchingPrewarm = _profileArtworkRequestIsPrewarm
+            && _profileArtworkPrewarmAppId == appId
+            && _profileArtworkRequestedAppId == appId
+            && _profileArtworkRequestCancellation is { IsCancellationRequested: false }
+            && _profileArtworkRequestedDecodePixelWidth == decodePixelWidth
+            && Math.Abs(_profileArtworkRequestedRasterizationScale - rasterizationScale) < 0.0001;
+        if (_profileArtworkRequestIsPrewarm && !matchingPrewarm)
+            CancelProfileArtworkRequest();
+
+        if (matchingPrewarm)
+        {
+            OverlayLog.Debug("Performance", "OverlayArtwork",
+                ("AppId", appId.Value), ("Cache", "PrefetchInFlight"), ("DecodePixelWidth", decodePixelWidth),
+                ("RasterizationScale", rasterizationScale), ("Stage", "AwaitPrewarm"));
+            return;
+        }
+
         if (_profileArtworkRequestedAppId == appId
             && _profileArtworkRequestCancellation is { IsCancellationRequested: false }
             && _profileArtworkRequestedDecodePixelWidth == decodePixelWidth
@@ -302,6 +401,7 @@ public sealed partial class OverlayWindow
         _profileArtworkRequestedAppId = appId;
         _profileArtworkRequestedDecodePixelWidth = decodePixelWidth;
         _profileArtworkRequestedRasterizationScale = rasterizationScale;
+        _profileArtworkRequestIsPrewarm = false;
         var requestCancellation = new CancellationTokenSource();
         _profileArtworkRequestCancellation = requestCancellation;
         OverlayLog.Debug("Performance", "OverlayArtwork",
@@ -675,6 +775,156 @@ public sealed partial class OverlayWindow
         }
     }
 
+    private async Task ResolveAndPrewarmProfileArtworkAsync(
+        uint appId,
+        int decodePixelWidth,
+        double rasterizationScale,
+        CancellationTokenSource requestCancellation)
+    {
+        var elapsed = Stopwatch.StartNew();
+        var lookup = Stopwatch.StartNew();
+        var candidateCount = 0;
+        var prewarmSucceeded = false;
+        var cancellationToken = requestCancellation.Token;
+        try
+        {
+            IReadOnlyList<string> paths = [];
+            try
+            {
+                paths = await Task.Run(() => SteamGameArtworkResolver.ResolveArtworkCandidates(appId), cancellationToken);
+            }
+            catch (Exception exception) when (IsOptionalProfileArtworkFailure(exception))
+            {
+                paths = [];
+                OverlayLog.Debug("ProfileArtwork", "Hidden Steam artwork candidate lookup failed.",
+                    ("AppId", appId), ("CandidateCount", 0), ("Stage", "NoCandidate"),
+                    ("ExceptionType", exception.GetType().Name));
+            }
+            finally
+            {
+                lookup.Stop();
+                OverlayLog.Debug("Performance", "OverlayArtworkLookup",
+                    ("AppId", appId), ("ElapsedMs", lookup.Elapsed.TotalMilliseconds),
+                    ("CandidateCount", paths.Count), ("Prefetch", true));
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            candidateCount = paths.Count;
+            if (!IsCurrentProfileArtworkPrewarmRequest(appId, requestCancellation))
+            {
+                LogStaleSteamArtworkPrewarm(appId, candidateCount, "AfterLookup", elapsed.Elapsed.TotalMilliseconds);
+                return;
+            }
+
+            OverlayLog.Debug("ProfileArtwork", "Resolved hidden Steam artwork candidates.",
+                ("AppId", appId), ("CandidateCount", candidateCount), ("Prefetch", true));
+            if (candidateCount == 0)
+            {
+                OverlayLog.Debug("Performance", "OverlayArtwork",
+                    ("AppId", appId), ("Cache", "Miss"), ("CandidateLookupMs", lookup.Elapsed.TotalMilliseconds),
+                    ("DecodeMs", 0), ("ElapsedMs", elapsed.Elapsed.TotalMilliseconds),
+                    ("CandidateCount", 0), ("Stage", "NoCandidate"), ("Prefetch", true));
+                return;
+            }
+
+            BitmapImage? bitmap;
+            var decode = Stopwatch.StartNew();
+            try
+            {
+                bitmap = await TryLoadProfileArtworkAsync(paths, decodePixelWidth, cancellationToken);
+            }
+            finally
+            {
+                decode.Stop();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentProfileArtworkPrewarmRequest(appId, requestCancellation))
+            {
+                LogStaleSteamArtworkPrewarm(appId, candidateCount, "AfterDecode", elapsed.Elapsed.TotalMilliseconds);
+                return;
+            }
+
+            if (bitmap is null)
+            {
+                OverlayLog.Debug("Performance", "OverlayArtwork",
+                    ("AppId", appId), ("Cache", "Miss"), ("CandidateLookupMs", lookup.Elapsed.TotalMilliseconds),
+                    ("DecodeMs", decode.Elapsed.TotalMilliseconds), ("ElapsedMs", elapsed.Elapsed.TotalMilliseconds),
+                    ("CandidateCount", candidateCount), ("Stage", "OpenOrDecodeFailed"), ("Prefetch", true));
+                OverlayLog.Debug("ProfileArtwork", "Hidden Steam artwork was not ready; visible fallback remains enabled.",
+                    ("AppId", appId), ("CandidateCount", candidateCount), ("Stage", "OpenOrDecodeFailed"));
+                return;
+            }
+
+            _profileArtworkCachedAppId = appId;
+            _profileArtworkCachedDecodePixelWidth = decodePixelWidth;
+            _profileArtworkCachedRasterizationScale = rasterizationScale;
+            _profileArtworkCachedBitmap = bitmap;
+            prewarmSucceeded = true;
+            if (IsCurrentProfileArtworkTarget(appId))
+            {
+                ApplyProfileArtwork(appId, bitmap);
+                OverlayLog.Debug("Performance", "OverlayArtwork",
+                    ("AppId", appId), ("Cache", "Hit"), ("DecodePixelWidth", decodePixelWidth),
+                    ("RasterizationScale", rasterizationScale), ("ElapsedMs", elapsed.Elapsed.TotalMilliseconds),
+                    ("CandidateCount", candidateCount), ("Stage", "PrefetchCompletedWhileVisible"));
+            }
+
+            OverlayLog.Debug("Performance", "OverlayArtwork",
+                ("AppId", appId), ("Cache", "PrefetchReady"), ("DecodePixelWidth", decodePixelWidth),
+                ("RasterizationScale", rasterizationScale), ("CandidateLookupMs", lookup.Elapsed.TotalMilliseconds),
+                ("DecodeMs", decode.Elapsed.TotalMilliseconds), ("ElapsedMs", elapsed.Elapsed.TotalMilliseconds),
+                ("CandidateCount", candidateCount), ("Stage", "Ready"), ("Prefetch", true));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            LogStaleSteamArtworkPrewarm(appId, candidateCount, "Canceled", elapsed.Elapsed.TotalMilliseconds);
+        }
+        catch (Exception exception) when (IsOptionalProfileArtworkFailure(exception))
+        {
+            OverlayLog.Debug("ProfileArtwork", "Hidden Steam artwork prewarm failed; visible fallback remains enabled.",
+                ("AppId", appId), ("CandidateCount", candidateCount), ("ElapsedMs", elapsed.Elapsed.TotalMilliseconds),
+                ("ExceptionType", exception.GetType().Name));
+        }
+        finally
+        {
+            if (ReferenceEquals(_profileArtworkRequestCancellation, requestCancellation))
+            {
+                var wasCanceled = requestCancellation.IsCancellationRequested;
+                requestCancellation.Dispose();
+                _profileArtworkRequestCancellation = null;
+                _profileArtworkRequestIsPrewarm = false;
+
+                if (ShouldStartVisibleArtworkFallbackAfterPrewarmFailure(
+                        candidateCount, prewarmSucceeded, wasCanceled, IsCurrentProfileArtworkTarget(appId)))
+                {
+                    OverlayLog.Debug("ProfileArtwork", "Prewarm did not produce artwork for the visible Profile; starting the existing visible fallback.",
+                        ("AppId", appId), ("CandidateCount", candidateCount),
+                        ("Stage", candidateCount == 0 ? "NoCandidate" : "OpenOrDecodeFailed"));
+                    UpdateProfileArtwork(CurrentProfileArtworkPage());
+                }
+            }
+        }
+    }
+
+    private bool IsCurrentProfileArtworkPrewarmRequest(uint appId, CancellationTokenSource requestCancellation)
+    {
+        var authoritativeAppId = _profilePageReceivedThisShow
+            ? SteamGameArtworkResolver.EligibleSteamAppId(CurrentProfileArtworkPage())
+            : null;
+        return !requestCancellation.IsCancellationRequested
+            && ReferenceEquals(_profileArtworkRequestCancellation, requestCancellation)
+            && _profileArtworkRequestIsPrewarm
+            && _profileArtworkRequestedAppId == appId
+            && IsProfileArtworkPrewarmIdentityCurrent(appId, _profileArtworkPrewarmAppId,
+                _isVisible, _profilePageReceivedThisShow, authoritativeAppId);
+    }
+
+    private void LogStaleSteamArtworkPrewarm(uint appId, int candidateCount, string stage, double elapsedMs) =>
+        OverlayLog.Debug("Performance", "OverlayArtwork",
+            ("AppId", appId), ("Cache", "Miss"), ("CandidateCount", candidateCount),
+            ("ElapsedMs", elapsedMs), ("Stage", "StaleOrHidden"), ("PrefetchStage", stage));
+
     private async Task<BitmapImage?> TryLoadProfileArtworkAsync(
         IReadOnlyList<string> paths,
         int decodePixelWidth,
@@ -750,18 +1000,62 @@ public sealed partial class OverlayWindow
         && cachedDecodePixelWidth == requestedDecodePixelWidth
         && Math.Abs(cachedRasterizationScale - requestedRasterizationScale) < 0.0001;
 
+    internal static double? ProfileArtworkWidthFromConfiguredWindow(int windowWidthPx, double rasterizationScale)
+    {
+        if (windowWidthPx <= 0 || !double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
+            return null;
+
+        var windowWidthDip = windowWidthPx / rasterizationScale;
+        var tabRailWidthDip = OverlayUiScale.TabRailWidthDip
+            * OverlayUiScale.SizeFactorForRasterizationScale(rasterizationScale);
+        var profileWidthDip = windowWidthDip - tabRailWidthDip;
+        return double.IsFinite(profileWidthDip) && profileWidthDip > 0 ? profileWidthDip : null;
+    }
+
+    internal static bool IsProfileArtworkPrewarmIdentityCurrent(
+        uint requestedAppId,
+        uint? currentPrewarmAppId,
+        bool isVisible,
+        bool profilePageReceived,
+        uint? authoritativeProfileAppId) =>
+        currentPrewarmAppId == requestedAppId
+        && (!isVisible || !profilePageReceived || authoritativeProfileAppId == requestedAppId);
+
+    internal static bool ShouldStartVisibleArtworkFallbackAfterPrewarmFailure(
+        int candidateCount,
+        bool prewarmSucceeded,
+        bool requestCanceled,
+        bool isCurrentVisibleTarget) =>
+        (candidateCount == 0 || !prewarmSucceeded) && !requestCanceled && isCurrentVisibleTarget;
+
     private (double RasterizationScale, int? DecodePixelWidth) CurrentProfileArtworkDecodeKey()
     {
-        if (ProfileArtworkHost.XamlRoot is not { } xamlRoot)
+        var scale = ProfileArtworkHost.XamlRoot?.RasterizationScale ?? _lastConfiguredDpi / 96.0;
+        if (!double.IsFinite(scale) || scale <= 0)
             return (0, null);
 
-        var scale = xamlRoot.RasterizationScale;
-        // SizeChanged assigns this explicit width from the current profile column. During that
-        // callback ActualWidth can still describe the preceding layout pass.
-        var explicitWidth = ProfileArtworkHost.Width;
-        var width = double.IsFinite(explicitWidth)
-            ? explicitWidth
-            : ProfileArtworkHost.ActualWidth;
+        double width;
+        if (!_isVisible)
+        {
+            // Hidden layout is not guaranteed to have run. Use its measured width when present,
+            // otherwise derive the same tab-rail/content geometry from the configured HWND size.
+            var measuredWidth = ProfileContentColumn.ActualWidth;
+            width = double.IsFinite(measuredWidth) && measuredWidth > 0
+                ? measuredWidth
+                : ProfileArtworkWidthFromConfiguredWindow(_lastConfiguredOverlayWidthPx, scale) ?? 0;
+        }
+        else
+        {
+            // SizeChanged assigns this explicit width from the current profile column. During that
+            // callback ActualWidth can still describe the preceding layout pass.
+            var explicitWidth = ProfileArtworkHost.Width;
+            width = double.IsFinite(explicitWidth) && explicitWidth > 0
+                ? explicitWidth
+                : ProfileArtworkHost.ActualWidth;
+            if ((!double.IsFinite(width) || width <= 0)
+                && ProfileArtworkWidthFromConfiguredWindow(_lastConfiguredOverlayWidthPx, scale) is { } configuredWidth)
+                width = configuredWidth;
+        }
         return (scale, ProfileArtworkDecodePixelWidth(width, scale));
     }
 
@@ -778,6 +1072,7 @@ public sealed partial class OverlayWindow
         _profileArtworkRequestCancellation?.Cancel();
         _profileArtworkRequestCancellation?.Dispose();
         _profileArtworkRequestCancellation = null;
+        _profileArtworkRequestIsPrewarm = false;
     }
 
     private void CancelXboxProfileArtworkRequest()
@@ -789,9 +1084,15 @@ public sealed partial class OverlayWindow
 
     private void HideProfileArtworkPreservingCache()
     {
-        CancelProfileArtworkRequest();
+        var keepPrewarm = _profileArtworkRequestIsPrewarm
+            && _profileArtworkPrewarmAppId == _profileArtworkRequestedAppId
+            && _profileArtworkRequestCancellation is { IsCancellationRequested: false };
+        if (!keepPrewarm)
+        {
+            CancelProfileArtworkRequest();
+            _profileArtworkRequestedAppId = null;
+        }
         CancelXboxProfileArtworkRequest();
-        _profileArtworkRequestedAppId = null;
         _xboxProfileArtworkRequestedKey = null;
         ProfileArtworkImage.Source = null;
         ProfileArtworkHost.Visibility = Visibility.Collapsed;
@@ -825,6 +1126,8 @@ public sealed partial class OverlayWindow
 
     private void ClearProfileArtwork()
     {
+        _profileArtworkPrewarmAppId = null;
+        CancelProfileArtworkRequest();
         HideProfileArtworkPreservingCache();
         DiscardCachedProfileArtwork();
         DiscardCachedXboxProfileArtwork();
