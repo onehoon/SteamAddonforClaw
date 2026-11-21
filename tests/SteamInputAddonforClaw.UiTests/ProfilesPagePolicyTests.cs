@@ -159,6 +159,16 @@ public sealed class ProfilesPagePolicyTests
         Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "GridView"
             && (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "GameGrid");
         Assert.Equal(3, xaml.Descendants().Count(element => element.Name.LocalName == "SelectorBarItem"));
+        var toolbarControls = xaml.Descendants()
+            .Where(element => (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))
+                is "GameSearchBox" or "RefreshGamesButton")
+            .ToArray();
+        Assert.Equal(2, toolbarControls.Length);
+        Assert.All(toolbarControls, control =>
+        {
+            Assert.Equal("32", (string?)control.Attribute("Height"));
+            Assert.Equal("Center", (string?)control.Attribute("VerticalAlignment"));
+        });
         Assert.Contains("RebuildVisibleItems()", filterHandler, StringComparison.Ordinal);
         Assert.DoesNotContain("RefreshCatalogsAsync", filterHandler, StringComparison.Ordinal);
         Assert.DoesNotContain("GameGrid.ItemsSource =", code.Replace("GameGrid.ItemsSource = _visibleItems;", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
