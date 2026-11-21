@@ -49,9 +49,11 @@
                     <SelectorBarItem x:Uid="Profiles_FilterXbox" Tag="Xbox" Text="XBOX" />
                 </SelectorBar>
                 <TextBox x:Name="GameSearchBox" x:Uid="Profiles_SearchBox" Grid.Column="1" MinWidth="180"
+                         Height="32" VerticalAlignment="Center"
                          PlaceholderText="Search games..." TextChanged="GameSearchBox_TextChanged" />
                 <Button x:Name="RefreshGamesButton" x:Uid="Profiles_RefreshButton" Grid.Column="2"
-                        Content="↻ Refresh" Style="{StaticResource AccentButtonStyle}"
+                        Height="32" VerticalAlignment="Center" Content="↻ Refresh"
+                        Style="{StaticResource AccentButtonStyle}"
                         Click="RefreshGamesButton_Click" />
             </Grid>
 
